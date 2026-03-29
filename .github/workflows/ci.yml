@@ -33,6 +33,11 @@ jobs:
       - name: 🧰 Download modules and tools
         run: make install
 
+      - name: 🔍 Check go mod tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
       - name: 🛠️ Run all checks and build
         run: make all
 
