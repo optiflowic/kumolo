@@ -33,7 +33,7 @@ jobs:
       - name: 🧰 Download modules and tools
         run: make install
 
-      - name: 🧹 Run all checks and build
+      - name: 🛠️ Run all checks and build
         run: make all
 
       - name: 🧼 Clean build artifacts
