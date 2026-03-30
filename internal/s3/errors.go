@@ -28,5 +28,11 @@ func writeError(w http.ResponseWriter, r *http.Request, status int, code, messag
 }
 
 func writeNotImplemented(w http.ResponseWriter, r *http.Request) {
-	writeError(w, r, http.StatusNotImplemented, "NotImplemented", "This operation is not implemented.")
+	writeError(
+		w,
+		r,
+		http.StatusNotImplemented,
+		"NotImplemented",
+		"This operation is not implemented.",
+	)
 }

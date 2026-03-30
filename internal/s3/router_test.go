@@ -8,9 +8,9 @@ import (
 
 func TestParsePath(t *testing.T) {
 	tests := []struct {
-		path        string
-		wantBucket  string
-		wantKey     string
+		path       string
+		wantBucket string
+		wantKey    string
 	}{
 		{"/", "", ""},
 		{"/my-bucket", "my-bucket", ""},
@@ -46,8 +46,10 @@ func TestRouterReturnsXMLOnUnimplemented(t *testing.T) {
 
 func TestParseSigV4(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("Authorization",
-		"AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20230101/us-east-1/s3/aws4_request, SignedHeaders=host, Signature=abc123")
+	req.Header.Set(
+		"Authorization",
+		"AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20230101/us-east-1/s3/aws4_request, SignedHeaders=host, Signature=abc123",
+	)
 
 	ctx := ParseSigV4(req)
 

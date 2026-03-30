@@ -26,6 +26,11 @@ func main() {
 		IdleTimeout:  120 * time.Second,
 	}
 
-	fmt.Printf("kumolo listening on :%s (data-dir: %s, log-level: %s)\n", cfg.Port, cfg.DataDir, cfg.LogLevel)
+	fmt.Printf(
+		"kumolo listening on :%s (data-dir: %s, log-level: %s)\n",
+		cfg.Port,
+		cfg.DataDir,
+		cfg.LogLevel,
+	)
 	log.Fatal(srv.ListenAndServe())
 }
