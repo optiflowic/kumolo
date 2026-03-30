@@ -2,6 +2,7 @@ package s3
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -210,6 +211,27 @@ func TestPutObjectWriteMetaError(t *testing.T) {
 	assert.NoFileExists(t, filepath.Join(rootPath, "my-bucket", "obj.txt"))
 }
 
+func TestPutObjectCleanupRemoveError(t *testing.T) {
+	s, rootPath := newTestStorageWithRoot(t)
+	require.NoError(t, s.CreateBucket("my-bucket"))
+
+	// Make meta path a directory so writeMeta fails.
+	require.NoError(
+		t,
+		os.MkdirAll(filepath.Join(rootPath, "my-bucket", "obj.txt.meta.json"), 0o750),
+	)
+
+	// Make osRemoveFile fail so the cleanup log.Printf branch is exercised.
+	orig := osRemoveFile
+	t.Cleanup(func() { osRemoveFile = orig })
+	osRemoveFile = func(_ *os.Root, _ string) error {
+		return errors.New("simulated remove failure")
+	}
+
+	_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
+	assert.Error(t, err)
+}
+
 func TestGetObjectNotFound(t *testing.T) {
 	s := newTestStorage(t)
 	require.NoError(t, s.CreateBucket("my-bucket"))
@@ -304,6 +326,23 @@ func TestDeleteObjectRemoveError(t *testing.T) {
 	err := s.DeleteObject("my-bucket", "dir-obj")
 	assert.Error(t, err)
 	assert.NotErrorIs(t, err, ErrObjectNotFound)
+}
+
+func TestDeleteObjectMetaRemoveError(t *testing.T) {
+	s, rootPath := newTestStorageWithRoot(t)
+	require.NoError(t, s.CreateBucket("my-bucket"))
+	_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
+	require.NoError(t, err)
+
+	// Replace the sidecar meta file with a non-empty directory so its removal fails.
+	require.NoError(t, os.Remove(filepath.Join(rootPath, "my-bucket", "obj.txt.meta.json")))
+	require.NoError(
+		t,
+		os.MkdirAll(filepath.Join(rootPath, "my-bucket", "obj.txt.meta.json", "child"), 0o750),
+	)
+
+	// DeleteObject should still succeed (object removed), but log a warning for the meta.
+	assert.NoError(t, s.DeleteObject("my-bucket", "obj.txt"))
 }
 
 func TestHeadObject(t *testing.T) {

@@ -31,6 +31,9 @@ type Storage struct {
 // osOpenRoot is a variable so it can be replaced in tests.
 var osOpenRoot = os.OpenRoot
 
+// osRemoveFile is a variable so it can be replaced in tests.
+var osRemoveFile = (*os.Root).Remove
+
 // NewStorage creates a Storage rooted at dataDir/s3.
 func NewStorage(dataDir string) (*Storage, error) {
 	rootPath := filepath.Join(dataDir, "s3")
@@ -142,7 +145,7 @@ func (s *Storage) PutObject(
 		Size:         size,
 	}
 	if err := s.writeMeta(objPath, meta); err != nil {
-		if removeErr := s.root.Remove(objPath); removeErr != nil &&
+		if removeErr := osRemoveFile(s.root, objPath); removeErr != nil &&
 			!errors.Is(removeErr, os.ErrNotExist) {
 			log.Printf("warn: failed to clean up object after meta write error: %v", removeErr)
 		}
