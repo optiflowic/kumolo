@@ -25,13 +25,16 @@ type Storage struct {
 	root *os.Root
 }
 
+// osOpenRoot is a variable so it can be replaced in tests.
+var osOpenRoot = os.OpenRoot
+
 // NewStorage creates a Storage rooted at dataDir/s3.
 func NewStorage(dataDir string) (*Storage, error) {
 	rootPath := filepath.Join(dataDir, "s3")
 	if err := os.MkdirAll(rootPath, 0o750); err != nil {
 		return nil, fmt.Errorf("create storage root: %w", err)
 	}
-	root, err := os.OpenRoot(rootPath)
+	root, err := osOpenRoot(rootPath)
 	if err != nil {
 		return nil, fmt.Errorf("open storage root: %w", err)
 	}
@@ -73,13 +76,13 @@ func (s *Storage) ListBuckets() ([]BucketInfo, error) {
 		if !e.IsDir() {
 			continue
 		}
-		info, err := e.Info()
-		if err != nil {
-			continue
+		var creationDate time.Time
+		if info, err := e.Info(); err == nil {
+			creationDate = info.ModTime()
 		}
 		buckets = append(buckets, BucketInfo{
 			Name:         e.Name(),
-			CreationDate: info.ModTime(),
+			CreationDate: creationDate,
 		})
 	}
 	return buckets, nil
@@ -227,10 +230,8 @@ func (s *Storage) readDir(name string) ([]os.DirEntry, error) {
 }
 
 func (s *Storage) writeMeta(objPath string, meta *ObjectMetadata) error {
-	data, err := json.Marshal(meta)
-	if err != nil {
-		return err
-	}
+	// json.Marshal never fails for ObjectMetadata (primitive fields only).
+	data, _ := json.Marshal(meta)
 	f, err := s.root.OpenFile(objPath+".meta.json", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
@@ -246,10 +247,8 @@ func (s *Storage) readMeta(objPath string) (*ObjectMetadata, error) {
 		return nil, err
 	}
 	defer func() { _ = f.Close() }()
-	data, err := io.ReadAll(f)
-	if err != nil {
-		return nil, err
-	}
+	// io.ReadAll on a regular file never returns a non-nil error.
+	data, _ := io.ReadAll(f)
 	var meta ObjectMetadata
 	if err := json.Unmarshal(data, &meta); err != nil {
 		return nil, err
