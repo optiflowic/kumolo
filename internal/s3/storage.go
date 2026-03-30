@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -163,7 +164,9 @@ func (s *Storage) DeleteObject(bucket, key string) error {
 		}
 		return err
 	}
-	_ = s.root.Remove(objPath + ".meta.json")
+	if err := s.root.Remove(objPath + ".meta.json"); err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.Printf("warn: failed to remove metadata for %s: %v", objPath, err)
+	}
 	return nil
 }
 
