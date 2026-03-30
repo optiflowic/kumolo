@@ -126,6 +126,9 @@ func (s *Storage) PutObject(
 		Size:         size,
 	}
 	if err := s.writeMeta(objPath, meta); err != nil {
+		if removeErr := s.root.Remove(objPath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			log.Printf("warn: failed to clean up object after meta write error: %v", removeErr)
+		}
 		return nil, err
 	}
 	return meta, nil

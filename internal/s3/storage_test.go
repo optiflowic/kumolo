@@ -205,6 +205,9 @@ func TestPutObjectWriteMetaError(t *testing.T) {
 
 	_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
 	assert.Error(t, err)
+
+	// Object file must be cleaned up on meta write failure.
+	assert.NoFileExists(t, filepath.Join(rootPath, "my-bucket", "obj.txt"))
 }
 
 func TestGetObjectNotFound(t *testing.T) {
