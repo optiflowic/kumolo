@@ -27,10 +27,6 @@ func writeError(w http.ResponseWriter, r *http.Request, status int, code, messag
 	_ = xml.NewEncoder(w).Encode(resp)
 }
 
-func writeNotFound(w http.ResponseWriter, r *http.Request, code, message string) {
-	writeError(w, r, http.StatusNotFound, code, message)
-}
-
 func writeNotImplemented(w http.ResponseWriter, r *http.Request) {
 	writeError(w, r, http.StatusNotImplemented, "NotImplemented", "This operation is not implemented.")
 }
