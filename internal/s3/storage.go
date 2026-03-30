@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -23,6 +24,7 @@ type ObjectMetadata struct {
 
 // Storage is a filesystem-backed S3 storage backend using os.Root for safe path scoping.
 type Storage struct {
+	mu   sync.RWMutex
 	root *os.Root
 }
 
@@ -45,10 +47,14 @@ func NewStorage(dataDir string) (*Storage, error) {
 // --- Bucket operations ---
 
 func (s *Storage) CreateBucket(bucket string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.root.Mkdir(bucket, 0o750)
 }
 
 func (s *Storage) DeleteBucket(bucket string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	entries, err := s.readDir(bucket)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -63,11 +69,19 @@ func (s *Storage) DeleteBucket(bucket string) error {
 }
 
 func (s *Storage) BucketExists(bucket string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.bucketExistsLocked(bucket)
+}
+
+func (s *Storage) bucketExistsLocked(bucket string) bool {
 	info, err := s.root.Stat(bucket)
 	return err == nil && info.IsDir()
 }
 
 func (s *Storage) ListBuckets() ([]BucketInfo, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	entries, err := s.readDir(".")
 	if err != nil {
 		return nil, err
@@ -96,7 +110,9 @@ func (s *Storage) PutObject(
 	r io.Reader,
 	contentType string,
 ) (*ObjectMetadata, error) {
-	if !s.BucketExists(bucket) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.bucketExistsLocked(bucket) {
 		return nil, ErrBucketNotFound
 	}
 
@@ -126,7 +142,8 @@ func (s *Storage) PutObject(
 		Size:         size,
 	}
 	if err := s.writeMeta(objPath, meta); err != nil {
-		if removeErr := s.root.Remove(objPath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+		if removeErr := s.root.Remove(objPath); removeErr != nil &&
+			!errors.Is(removeErr, os.ErrNotExist) {
 			log.Printf("warn: failed to clean up object after meta write error: %v", removeErr)
 		}
 		return nil, err
@@ -135,7 +152,9 @@ func (s *Storage) PutObject(
 }
 
 func (s *Storage) GetObject(bucket, key string) (*os.File, *ObjectMetadata, error) {
-	if !s.BucketExists(bucket) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.bucketExistsLocked(bucket) {
 		return nil, nil, ErrBucketNotFound
 	}
 	objPath := bucket + "/" + key
@@ -157,7 +176,9 @@ func (s *Storage) GetObject(bucket, key string) (*os.File, *ObjectMetadata, erro
 }
 
 func (s *Storage) DeleteObject(bucket, key string) error {
-	if !s.BucketExists(bucket) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.bucketExistsLocked(bucket) {
 		return ErrBucketNotFound
 	}
 	objPath := bucket + "/" + key
@@ -174,7 +195,9 @@ func (s *Storage) DeleteObject(bucket, key string) error {
 }
 
 func (s *Storage) HeadObject(bucket, key string) (*ObjectMetadata, error) {
-	if !s.BucketExists(bucket) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.bucketExistsLocked(bucket) {
 		return nil, ErrBucketNotFound
 	}
 	meta, err := s.readMeta(bucket + "/" + key)
@@ -188,7 +211,9 @@ func (s *Storage) HeadObject(bucket, key string) (*ObjectMetadata, error) {
 }
 
 func (s *Storage) ListObjects(bucket string) ([]ObjectInfo, error) {
-	if !s.BucketExists(bucket) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.bucketExistsLocked(bucket) {
 		return nil, ErrBucketNotFound
 	}
 	var objects []ObjectInfo
