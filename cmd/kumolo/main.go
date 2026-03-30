@@ -8,6 +8,7 @@ import (
 
 	"github.com/joho/godotenv"
 	"github.com/optiflowic/kumolo/internal/config"
+	"github.com/optiflowic/kumolo/internal/server"
 )
 
 func main() {
@@ -15,7 +16,7 @@ func main() {
 
 	cfg := config.Load()
 
-	mux := http.NewServeMux()
+	mux := server.NewMux()
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
