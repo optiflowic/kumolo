@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -17,7 +18,9 @@ func main() {
 		log.Printf("warn: failed to load .env: %v", err)
 	}
 
-	cfg := config.Load()
+	buildConfig := config.RegisterFlags(flag.CommandLine)
+	flag.Parse()
+	cfg := buildConfig()
 
 	mux := server.NewMux()
 

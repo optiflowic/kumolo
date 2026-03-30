@@ -11,24 +11,27 @@ type Config struct {
 	LogLevel string
 }
 
-func Load() *Config {
-	port := flag.String("port", getEnv("KUMOLO_PORT", "4566"), "HTTP listen port")
-	dataDir := flag.String(
+// RegisterFlags registers the configuration flags on fs and returns a function
+// that builds a Config from the parsed flag values. Call flag.Parse() before
+// calling the returned function.
+func RegisterFlags(fs *flag.FlagSet) func() *Config {
+	port := fs.String("port", getEnv("KUMOLO_PORT", "4566"), "HTTP listen port")
+	dataDir := fs.String(
 		"data-dir",
 		getEnv("KUMOLO_DATA_DIR", "/tmp/kumolo"),
 		"Root directory for filesystem storage",
 	)
-	logLevel := flag.String(
+	logLevel := fs.String(
 		"log-level",
 		getEnv("KUMOLO_LOG_LEVEL", "info"),
 		"Log verbosity (debug, info, warn, error)",
 	)
-	flag.Parse()
-
-	return &Config{
-		Port:     *port,
-		DataDir:  *dataDir,
-		LogLevel: *logLevel,
+	return func() *Config {
+		return &Config{
+			Port:     *port,
+			DataDir:  *dataDir,
+			LogLevel: *logLevel,
+		}
 	}
 }
 
