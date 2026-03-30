@@ -110,7 +110,7 @@ func (s *Storage) PutObject(
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = f.Close() }()
+	defer f.Close()
 
 	h := md5.New() // #nosec G401 -- MD5 is required by the S3 ETag specification
 	size, err := io.Copy(io.MultiWriter(f, h), r)
@@ -225,7 +225,7 @@ func (s *Storage) readDir(name string) ([]os.DirEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = f.Close() }()
+	defer f.Close()
 	return f.ReadDir(-1)
 }
 
@@ -236,7 +236,7 @@ func (s *Storage) writeMeta(objPath string, meta *ObjectMetadata) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = f.Close() }()
+	defer f.Close()
 	_, err = f.Write(data)
 	return err
 }
@@ -246,7 +246,7 @@ func (s *Storage) readMeta(objPath string) (*ObjectMetadata, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = f.Close() }()
+	defer f.Close()
 	// io.ReadAll on a regular file never returns a non-nil error.
 	data, _ := io.ReadAll(f)
 	var meta ObjectMetadata
