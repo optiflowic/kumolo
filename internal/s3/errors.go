@@ -2,7 +2,14 @@ package s3
 
 import (
 	"encoding/xml"
+	"errors"
 	"net/http"
+)
+
+var (
+	ErrBucketNotFound = errors.New("bucket not found")
+	ErrBucketNotEmpty = errors.New("bucket not empty")
+	ErrObjectNotFound = errors.New("object not found")
 )
 
 type errorResponse struct {
