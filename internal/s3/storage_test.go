@@ -28,6 +28,14 @@ func newTestStorageWithRoot(t *testing.T) (*Storage, string) {
 	return s, s.root.Name()
 }
 
+func newTestStorageWithOpenRoot(
+	t *testing.T,
+	openRoot func(string) (*os.Root, error),
+) (*Storage, error) {
+	t.Helper()
+	return newStorage(t.TempDir(), openRoot)
+}
+
 // errReader is an io.Reader that always returns an error after reading nothing.
 type errReader struct{}
 
@@ -44,12 +52,9 @@ func TestNewStorage(t *testing.T) {
 	})
 
 	t.Run("returns error when OpenRoot fails", func(t *testing.T) {
-		orig := osOpenRoot
-		t.Cleanup(func() { osOpenRoot = orig })
-		osOpenRoot = func(string) (*os.Root, error) {
+		_, err := newTestStorageWithOpenRoot(t, func(string) (*os.Root, error) {
 			return nil, os.ErrPermission
-		}
-		_, err := NewStorage(t.TempDir())
+		})
 		assert.Error(t, err)
 	})
 }
@@ -224,9 +229,7 @@ func TestPutObject(t *testing.T) {
 			os.MkdirAll(filepath.Join(rootPath, "my-bucket", "obj.txt.meta.json"), 0o750),
 		)
 
-		orig := osRemoveFile
-		t.Cleanup(func() { osRemoveFile = orig })
-		osRemoveFile = func(_ *os.Root, _ string) error {
+		s.removeFile = func(_ string) error {
 			return errors.New("simulated remove failure")
 		}
 

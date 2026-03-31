@@ -7,9 +7,6 @@ import (
 	"github.com/joho/godotenv"
 )
 
-// godotenvLoad is a variable so it can be replaced in tests.
-var godotenvLoad func(filenames ...string) error = godotenv.Load
-
 // Env holds values resolved from the .env file and environment variables.
 type Env struct {
 	Port     string
@@ -19,7 +16,11 @@ type Env struct {
 
 // LoadEnv loads .env if present and returns the resolved environment values.
 func LoadEnv() Env {
-	if err := godotenvLoad(); err != nil && !os.IsNotExist(err) {
+	return loadEnv(godotenv.Load)
+}
+
+func loadEnv(dotenvLoader func(...string) error) Env {
+	if err := dotenvLoader(); err != nil && !os.IsNotExist(err) {
 		log.Printf("warn: failed to load .env: %v", err)
 	}
 	return Env{

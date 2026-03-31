@@ -25,27 +25,28 @@ type ObjectMetadata struct {
 // Storage is a filesystem-backed S3 backend. os.Root scopes all access to the
 // storage root, preventing path traversal attacks.
 type Storage struct {
-	mu   sync.RWMutex
-	root *os.Root
+	mu         sync.RWMutex
+	root       *os.Root
+	removeFile func(name string) error
 }
-
-// osOpenRoot is a variable so it can be replaced in tests.
-var osOpenRoot = os.OpenRoot
-
-// osRemoveFile is a variable so it can be replaced in tests.
-var osRemoveFile = (*os.Root).Remove
 
 // NewStorage roots the storage at dataDir/s3, creating the directory if needed.
 func NewStorage(dataDir string) (*Storage, error) {
+	return newStorage(dataDir, os.OpenRoot)
+}
+
+func newStorage(dataDir string, openRoot func(string) (*os.Root, error)) (*Storage, error) {
 	rootPath := filepath.Join(dataDir, "s3")
 	if err := os.MkdirAll(rootPath, 0o750); err != nil {
 		return nil, fmt.Errorf("create storage root: %w", err)
 	}
-	root, err := osOpenRoot(rootPath)
+	root, err := openRoot(rootPath)
 	if err != nil {
 		return nil, fmt.Errorf("open storage root: %w", err)
 	}
-	return &Storage{root: root}, nil
+	s := &Storage{root: root}
+	s.removeFile = s.root.Remove
+	return s, nil
 }
 
 func (s *Storage) CreateBucket(bucket string) error {
@@ -142,7 +143,7 @@ func (s *Storage) PutObject(
 		Size:         size,
 	}
 	if err := s.writeMeta(objPath, meta); err != nil {
-		if removeErr := osRemoveFile(s.root, objPath); removeErr != nil &&
+		if removeErr := s.removeFile(objPath); removeErr != nil &&
 			!errors.Is(removeErr, os.ErrNotExist) {
 			log.Printf("warn: failed to clean up object after meta write error: %v", removeErr)
 		}

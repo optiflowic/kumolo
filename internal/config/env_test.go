@@ -33,11 +33,7 @@ func TestLoadEnv(t *testing.T) {
 	})
 
 	t.Run("logs warning and continues when .env file cannot be parsed", func(t *testing.T) {
-		orig := godotenvLoad
-		t.Cleanup(func() { godotenvLoad = orig })
-		godotenvLoad = func(_ ...string) error { return errors.New("parse error") }
-
-		env := LoadEnv()
+		env := loadEnv(func(_ ...string) error { return errors.New("parse error") })
 		assert.Equal(t, "5566", env.Port)
 	})
 }
