@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-// ObjectMetadata holds S3 object metadata stored as a sidecar JSON file.
+// ObjectMetadata is stored as a sidecar .meta.json file alongside each object.
 type ObjectMetadata struct {
 	ContentType  string    `json:"contentType"`
 	ETag         string    `json:"etag"`
@@ -22,7 +22,8 @@ type ObjectMetadata struct {
 	Size         int64     `json:"size"`
 }
 
-// Storage is a filesystem-backed S3 storage backend using os.Root for safe path scoping.
+// Storage is a filesystem-backed S3 backend. os.Root scopes all access to the
+// storage root, preventing path traversal attacks.
 type Storage struct {
 	mu   sync.RWMutex
 	root *os.Root
@@ -34,7 +35,7 @@ var osOpenRoot = os.OpenRoot
 // osRemoveFile is a variable so it can be replaced in tests.
 var osRemoveFile = (*os.Root).Remove
 
-// NewStorage creates a Storage rooted at dataDir/s3.
+// NewStorage roots the storage at dataDir/s3, creating the directory if needed.
 func NewStorage(dataDir string) (*Storage, error) {
 	rootPath := filepath.Join(dataDir, "s3")
 	if err := os.MkdirAll(rootPath, 0o750); err != nil {
@@ -46,8 +47,6 @@ func NewStorage(dataDir string) (*Storage, error) {
 	}
 	return &Storage{root: root}, nil
 }
-
-// --- Bucket operations ---
 
 func (s *Storage) CreateBucket(bucket string) error {
 	s.mu.Lock()
@@ -105,8 +104,6 @@ func (s *Storage) ListBuckets() ([]BucketInfo, error) {
 	}
 	return buckets, nil
 }
-
-// --- Object operations ---
 
 func (s *Storage) PutObject(
 	bucket, key string,
@@ -252,8 +249,6 @@ func (s *Storage) walkDir(bucket, dir string, objects *[]ObjectInfo) error {
 	return nil
 }
 
-// --- Helpers ---
-
 func (s *Storage) readDir(name string) ([]os.DirEntry, error) {
 	f, err := s.root.Open(name)
 	if err != nil {
@@ -289,8 +284,6 @@ func (s *Storage) readMeta(objPath string) (*ObjectMetadata, error) {
 	}
 	return &meta, nil
 }
-
-// --- Info types ---
 
 type BucketInfo struct {
 	Name         string

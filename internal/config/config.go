@@ -11,9 +11,8 @@ type Config struct {
 	LogLevel string
 }
 
-// RegisterFlags registers the configuration flags on fs and returns a function
-// that builds a Config from the parsed flag values. Call flag.Parse() before
-// calling the returned function.
+// RegisterFlags registers flags on fs and returns a builder.
+// Call flag.Parse() before invoking the returned function.
 func RegisterFlags(fs *flag.FlagSet) func() *Config {
 	port := fs.String("port", getEnv("KUMOLO_PORT", "5566"), "HTTP listen port")
 	dataDir := fs.String(

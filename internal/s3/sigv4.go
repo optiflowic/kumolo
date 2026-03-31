@@ -5,17 +5,16 @@ import (
 	"strings"
 )
 
-// RequestContext holds parsed information from an AWS SigV4 signed request.
 type RequestContext struct {
 	AccessKeyID string
 	Region      string
 	Service     string
 }
 
-// ParseSigV4 extracts metadata from the Authorization header.
+// ParseSigV4 extracts AccessKeyID, Region, and Service from the Authorization header.
 // Signature verification is intentionally skipped in local mode.
 //
-// Authorization header format:
+// Expected format:
 // AWS4-HMAC-SHA256 Credential=<key>/<date>/<region>/<service>/aws4_request, ...
 func ParseSigV4(r *http.Request) RequestContext {
 	auth := r.Header.Get("Authorization")

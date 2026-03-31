@@ -78,8 +78,8 @@ func (ro *Router) routeObject(w http.ResponseWriter, r *http.Request, _, _ strin
 	}
 }
 
-// parsePath splits a path-style S3 URL into bucket and key.
-// e.g. "/my-bucket/path/to/object" → ("my-bucket", "path/to/object")
+// parsePath splits a path-style S3 URL into bucket and key:
+// "/my-bucket/path/to/object" → ("my-bucket", "path/to/object")
 func parsePath(path string) (bucket, key string) {
 	path = strings.TrimPrefix(path, "/")
 	if path == "" {
