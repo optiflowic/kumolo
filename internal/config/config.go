@@ -10,7 +10,7 @@ type Config struct {
 
 // RegisterFlags registers flags on fs and returns a builder.
 // Call flag.Parse() before invoking the returned function.
-func RegisterFlags(fs *flag.FlagSet, env Env) func() *Config {
+func RegisterFlags(fs *flag.FlagSet, env Env) func() Config {
 	port := fs.String("port", env.Port, "HTTP listen port")
 	dataDir := fs.String(
 		"data-dir",
@@ -22,8 +22,8 @@ func RegisterFlags(fs *flag.FlagSet, env Env) func() *Config {
 		env.LogLevel,
 		"Log verbosity (debug, info, warn, error)",
 	)
-	return func() *Config {
-		return &Config{
+	return func() Config {
+		return Config{
 			Port:     *port,
 			DataDir:  *dataDir,
 			LogLevel: *logLevel,
