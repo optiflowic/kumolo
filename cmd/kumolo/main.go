@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/optiflowic/kumolo/internal/config"
+	"github.com/optiflowic/kumolo/internal/logging"
 	"github.com/optiflowic/kumolo/internal/server"
 )
 
@@ -26,7 +27,7 @@ func main() {
 		slog.Warn("unknown log level, defaulting to info", "level", cfg.LogLevel)
 		level = slog.LevelInfo
 	}
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
+	slog.SetDefault(slog.New(logging.NewBracketHandler(os.Stderr, level)))
 
 	mux := server.NewMux()
 
