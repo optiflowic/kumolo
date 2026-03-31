@@ -1,9 +1,6 @@
 package config
 
-import (
-	"flag"
-	"os"
-)
+import "flag"
 
 type Config struct {
 	Port     string
@@ -11,22 +8,25 @@ type Config struct {
 	LogLevel string
 }
 
-func Load() *Config {
-	port := flag.String("port", getEnv("KUMOLO_PORT", "4566"), "HTTP listen port")
-	dataDir := flag.String("data-dir", getEnv("KUMOLO_DATA_DIR", "/tmp/kumolo"), "Root directory for filesystem storage")
-	logLevel := flag.String("log-level", getEnv("KUMOLO_LOG_LEVEL", "info"), "Log verbosity (debug, info, warn, error)")
-	flag.Parse()
-
-	return &Config{
-		Port:     *port,
-		DataDir:  *dataDir,
-		LogLevel: *logLevel,
+// RegisterFlags registers flags on fs and returns a builder.
+// Call flag.Parse() before invoking the returned function.
+func RegisterFlags(fs *flag.FlagSet, env Env) func() Config {
+	port := fs.String("port", env.Port, "HTTP listen port")
+	dataDir := fs.String(
+		"data-dir",
+		env.DataDir,
+		"Root directory for filesystem storage",
+	)
+	logLevel := fs.String(
+		"log-level",
+		env.LogLevel,
+		"Log verbosity (debug, info, warn, error)",
+	)
+	return func() Config {
+		return Config{
+			Port:     *port,
+			DataDir:  *dataDir,
+			LogLevel: *logLevel,
+		}
 	}
-}
-
-func getEnv(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
 }

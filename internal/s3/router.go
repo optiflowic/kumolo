@@ -20,7 +20,13 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeNotImplemented(w, r)
 			return
 		}
-		writeError(w, r, http.StatusMethodNotAllowed, "MethodNotAllowed", "The specified method is not allowed.")
+		writeError(
+			w,
+			r,
+			http.StatusMethodNotAllowed,
+			"MethodNotAllowed",
+			"The specified method is not allowed.",
+		)
 		return
 	}
 
@@ -41,7 +47,13 @@ func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, _ string) 
 	case http.MethodGet, http.MethodHead:
 		writeNotImplemented(w, r)
 	default:
-		writeError(w, r, http.StatusMethodNotAllowed, "MethodNotAllowed", "The specified method is not allowed.")
+		writeError(
+			w,
+			r,
+			http.StatusMethodNotAllowed,
+			"MethodNotAllowed",
+			"The specified method is not allowed.",
+		)
 	}
 }
 
@@ -56,12 +68,18 @@ func (ro *Router) routeObject(w http.ResponseWriter, r *http.Request, _, _ strin
 	case http.MethodHead:
 		writeNotImplemented(w, r)
 	default:
-		writeError(w, r, http.StatusMethodNotAllowed, "MethodNotAllowed", "The specified method is not allowed.")
+		writeError(
+			w,
+			r,
+			http.StatusMethodNotAllowed,
+			"MethodNotAllowed",
+			"The specified method is not allowed.",
+		)
 	}
 }
 
-// parsePath splits a path-style S3 URL into bucket and key.
-// e.g. "/my-bucket/path/to/object" → ("my-bucket", "path/to/object")
+// parsePath splits a path-style S3 URL into bucket and key:
+// "/my-bucket/path/to/object" → ("my-bucket", "path/to/object")
 func parsePath(path string) (bucket, key string) {
 	path = strings.TrimPrefix(path, "/")
 	if path == "" {

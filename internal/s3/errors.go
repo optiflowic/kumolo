@@ -2,7 +2,15 @@ package s3
 
 import (
 	"encoding/xml"
+	"errors"
+	"log"
 	"net/http"
+)
+
+var (
+	ErrBucketNotFound = errors.New("bucket not found")
+	ErrBucketNotEmpty = errors.New("bucket not empty")
+	ErrObjectNotFound = errors.New("object not found")
 )
 
 type errorResponse struct {
@@ -24,9 +32,17 @@ func writeError(w http.ResponseWriter, r *http.Request, status int, code, messag
 		RequestID: "kumolo-local",
 	}
 
-	_ = xml.NewEncoder(w).Encode(resp)
+	if err := xml.NewEncoder(w).Encode(resp); err != nil {
+		log.Printf("warn: failed to encode error response: %v", err)
+	}
 }
 
 func writeNotImplemented(w http.ResponseWriter, r *http.Request) {
-	writeError(w, r, http.StatusNotImplemented, "NotImplemented", "This operation is not implemented.")
+	writeError(
+		w,
+		r,
+		http.StatusNotImplemented,
+		"NotImplemented",
+		"This operation is not implemented.",
+	)
 }
