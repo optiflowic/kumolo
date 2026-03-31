@@ -5,20 +5,15 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"time"
 
-	"github.com/joho/godotenv"
 	"github.com/optiflowic/kumolo/internal/config"
 	"github.com/optiflowic/kumolo/internal/server"
 )
 
 func main() {
-	if err := godotenv.Load(); err != nil && !os.IsNotExist(err) {
-		log.Printf("warn: failed to load .env: %v", err)
-	}
-
-	buildConfig := config.RegisterFlags(flag.CommandLine)
+	env := config.LoadEnv()
+	buildConfig := config.RegisterFlags(flag.CommandLine, env)
 	flag.Parse()
 	cfg := buildConfig()
 
