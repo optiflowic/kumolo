@@ -8,7 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -178,7 +178,7 @@ func (s *Storage) writeObject(
 	if err := s.writeMeta(objPath, meta); err != nil {
 		if removeErr := s.removeFile(objPath); removeErr != nil &&
 			!errors.Is(removeErr, os.ErrNotExist) {
-			log.Printf("warn: failed to clean up object after meta write error: %v", removeErr)
+			slog.Warn("failed to clean up object after meta write error", "err", removeErr)
 		}
 		return ObjectMetadata{}, err
 	}
@@ -223,7 +223,7 @@ func (s *Storage) DeleteObject(bucket, key string) error {
 		return err
 	}
 	if err := s.root.Remove(objPath + ".meta.json"); err != nil && !errors.Is(err, os.ErrNotExist) {
-		log.Printf("warn: failed to remove metadata for %s: %v", objPath, err)
+		slog.Warn("failed to remove metadata", "path", objPath, "err", err)
 	}
 	return nil
 }
