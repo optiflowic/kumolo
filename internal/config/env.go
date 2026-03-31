@@ -2,7 +2,7 @@ package config
 
 import (
 	"errors"
-	"log"
+	"log/slog"
 	"os"
 
 	"github.com/joho/godotenv"
@@ -22,7 +22,7 @@ func LoadEnv() Env {
 
 func loadEnv(dotenvLoader func(...string) error) Env {
 	if err := dotenvLoader(); err != nil && !errors.Is(err, os.ErrNotExist) {
-		log.Printf("warn: failed to load .env: %v", err)
+		slog.Warn("failed to load .env", "err", err)
 	}
 	return Env{
 		Port:     getEnv("KUMOLO_PORT", "5566"),

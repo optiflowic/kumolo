@@ -4,7 +4,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 )
 
@@ -34,11 +34,11 @@ func writeError(w http.ResponseWriter, r *http.Request, status int, code, messag
 	}
 
 	if _, err := fmt.Fprint(w, xml.Header); err != nil {
-		log.Printf("warn: failed to write XML header: %v", err)
+		slog.Warn("failed to write XML header", "err", err)
 		return
 	}
 	if err := xml.NewEncoder(w).Encode(resp); err != nil {
-		log.Printf("warn: failed to encode error response: %v", err)
+		slog.Warn("failed to encode error response", "err", err)
 	}
 }
 
