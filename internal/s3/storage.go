@@ -117,7 +117,7 @@ func (s *Storage) PutObject(
 		return ObjectMetadata{}, ErrBucketNotFound
 	}
 
-	objPath := bucket + "/" + key
+	objPath := filepath.Join(bucket, key)
 	if dir := filepath.Dir(objPath); dir != bucket {
 		if err := s.root.MkdirAll(dir, 0o750); err != nil {
 			return ObjectMetadata{}, err
@@ -174,7 +174,7 @@ func (s *Storage) GetObject(bucket, key string) (*os.File, ObjectMetadata, error
 	if !s.bucketExistsLocked(bucket) {
 		return nil, ObjectMetadata{}, ErrBucketNotFound
 	}
-	objPath := bucket + "/" + key
+	objPath := filepath.Join(bucket, key)
 	meta, err := s.readMeta(objPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -198,7 +198,7 @@ func (s *Storage) DeleteObject(bucket, key string) error {
 	if !s.bucketExistsLocked(bucket) {
 		return ErrBucketNotFound
 	}
-	objPath := bucket + "/" + key
+	objPath := filepath.Join(bucket, key)
 	if err := s.root.Remove(objPath); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return ErrObjectNotFound
@@ -217,7 +217,7 @@ func (s *Storage) HeadObject(bucket, key string) (ObjectMetadata, error) {
 	if !s.bucketExistsLocked(bucket) {
 		return ObjectMetadata{}, ErrBucketNotFound
 	}
-	meta, err := s.readMeta(bucket + "/" + key)
+	meta, err := s.readMeta(filepath.Join(bucket, key))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return ObjectMetadata{}, ErrObjectNotFound
@@ -246,7 +246,7 @@ func (s *Storage) walkDir(bucket, dir string, objects *[]ObjectInfo) error {
 		return err
 	}
 	for _, e := range entries {
-		entryPath := dir + "/" + e.Name()
+		entryPath := filepath.Join(dir, e.Name())
 		if e.IsDir() {
 			if err := s.walkDir(bucket, entryPath, objects); err != nil {
 				return err
