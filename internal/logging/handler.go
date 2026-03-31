@@ -57,8 +57,7 @@ func (h *BracketHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	return &BracketHandler{w: h.w, level: h.level, attrs: merged}
 }
 
-func (h *BracketHandler) WithGroup(name string) slog.Handler {
+func (h *BracketHandler) WithGroup(_ string) slog.Handler {
 	// Group support is not required for this use case; return self unchanged.
-	_ = name
 	return h
 }
