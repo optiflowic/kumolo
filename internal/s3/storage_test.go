@@ -17,6 +17,7 @@ func newTestStorage(t *testing.T) *Storage {
 	t.Helper()
 	s, err := NewStorage(t.TempDir())
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
 	return s
 }
 
@@ -25,6 +26,7 @@ func newTestStorageWithRoot(t *testing.T) (*Storage, string) {
 	dir := t.TempDir()
 	s, err := NewStorage(dir)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
 	return s, s.root.Name()
 }
 
@@ -41,6 +43,24 @@ type errReader struct{}
 
 func (errReader) Read(_ []byte) (int, error) {
 	return 0, io.ErrUnexpectedEOF
+}
+
+// badCloseWriter wraps an io.WriteCloser and returns an error on Close.
+type badCloseWriter struct {
+	io.WriteCloser
+}
+
+func (b badCloseWriter) Close() error {
+	_ = b.WriteCloser.Close()
+	return errors.New("simulated close failure")
+}
+
+func TestClose(t *testing.T) {
+	t.Run("closes storage without error", func(t *testing.T) {
+		s, err := NewStorage(t.TempDir())
+		require.NoError(t, err)
+		assert.NoError(t, s.Close())
+	})
 }
 
 func TestNewStorage(t *testing.T) {
@@ -101,14 +121,18 @@ func TestDeleteBucket(t *testing.T) {
 }
 
 func TestListBuckets(t *testing.T) {
-	t.Run("lists all buckets", func(t *testing.T) {
+	t.Run("lists all buckets in lexicographic order", func(t *testing.T) {
 		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("bucket-c"))
 		require.NoError(t, s.CreateBucket("bucket-a"))
 		require.NoError(t, s.CreateBucket("bucket-b"))
 
 		buckets, err := s.ListBuckets()
 		require.NoError(t, err)
-		assert.Len(t, buckets, 2)
+		require.Len(t, buckets, 3)
+		assert.Equal(t, "bucket-a", buckets[0].Name)
+		assert.Equal(t, "bucket-b", buckets[1].Name)
+		assert.Equal(t, "bucket-c", buckets[2].Name)
 	})
 
 	t.Run("returns error when root is unreadable", func(t *testing.T) {
@@ -236,6 +260,61 @@ func TestPutObject(t *testing.T) {
 		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
 		assert.Error(t, err)
 	})
+
+	t.Run(
+		"returns close error when meta file close fails after successful write",
+		func(t *testing.T) {
+			s := newTestStorage(t)
+			require.NoError(t, s.CreateBucket("my-bucket"))
+
+			// Wrap only the second openFile call (the meta file); the object file must
+			// close successfully so retErr is nil when the deferred meta-file Close fires.
+			callCount := 0
+			realOpenFile := s.openFile
+			s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+				callCount++
+				wc, err := realOpenFile(name, flag, perm)
+				if err != nil {
+					return nil, err
+				}
+				if callCount == 2 {
+					return badCloseWriter{wc}, nil
+				}
+				return wc, nil
+			}
+
+			_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
+			assert.Error(t, err)
+		},
+	)
+
+	t.Run(
+		"returns close error when object file close fails after successful write",
+		func(t *testing.T) {
+			s := newTestStorage(t)
+			require.NoError(t, s.CreateBucket("my-bucket"))
+
+			// Wrap only the first openFile call (the object file); the meta file must
+			// close successfully so writeMeta returns nil, leaving retErr==nil when the
+			// deferred object-file Close fires.
+			callCount := 0
+			realOpenFile := s.openFile
+			s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+				callCount++
+				wc, err := realOpenFile(name, flag, perm)
+				if err != nil {
+					return nil, err
+				}
+				if callCount == 1 {
+					return badCloseWriter{wc}, nil
+				}
+				return wc, nil
+			}
+
+			_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
+			assert.Error(t, err)
+		},
+	)
 }
 
 func TestGetObject(t *testing.T) {
@@ -304,14 +383,15 @@ func TestGetObject(t *testing.T) {
 		require.NoError(t, s.CreateBucket("my-bucket"))
 
 		meta := ObjectMetadata{ContentType: "text/plain", ETag: `"abc"`, Size: 3}
-		data, _ := json.Marshal(meta)
+		data, err := json.Marshal(meta)
+		require.NoError(t, err)
 		require.NoError(t, os.WriteFile(
 			filepath.Join(rootPath, "my-bucket", "obj.txt.meta.json"),
 			data,
 			0o600,
 		))
 
-		_, _, err := s.GetObject("my-bucket", "obj.txt")
+		_, _, err = s.GetObject("my-bucket", "obj.txt")
 		assert.ErrorIs(t, err, ErrObjectNotFound)
 	})
 }
@@ -407,20 +487,39 @@ func TestHeadObject(t *testing.T) {
 		assert.Error(t, err)
 		assert.NotErrorIs(t, err, ErrObjectNotFound)
 	})
+
+	t.Run("returns error when metadata read fails", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("my-bucket"))
+		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
+		require.NoError(t, err)
+
+		s.readAll = func(io.Reader) ([]byte, error) {
+			return nil, errors.New("simulated read failure")
+		}
+
+		_, err = s.HeadObject("my-bucket", "obj.txt")
+		assert.Error(t, err)
+	})
 }
 
 func TestListObjects(t *testing.T) {
-	t.Run("lists all objects in bucket", func(t *testing.T) {
+	t.Run("lists all objects in lexicographic order", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateBucket("my-bucket"))
-		_, err := s.PutObject("my-bucket", "a.txt", strings.NewReader("a"), "text/plain")
+		_, err := s.PutObject("my-bucket", "c.txt", strings.NewReader("c"), "text/plain")
+		require.NoError(t, err)
+		_, err = s.PutObject("my-bucket", "a.txt", strings.NewReader("a"), "text/plain")
 		require.NoError(t, err)
 		_, err = s.PutObject("my-bucket", "b.txt", strings.NewReader("b"), "text/plain")
 		require.NoError(t, err)
 
 		objects, err := s.ListObjects("my-bucket")
 		require.NoError(t, err)
-		assert.Len(t, objects, 2)
+		require.Len(t, objects, 3)
+		assert.Equal(t, "a.txt", objects[0].Key)
+		assert.Equal(t, "b.txt", objects[1].Key)
+		assert.Equal(t, "c.txt", objects[2].Key)
 	})
 
 	t.Run("returns ErrBucketNotFound when bucket does not exist", func(t *testing.T) {

@@ -3,6 +3,7 @@ package s3
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -20,6 +21,23 @@ func (f *failWriter) Write(_ []byte) (int, error) {
 	return 0, http.ErrHandlerTimeout
 }
 
+// bodyFailWriter accepts the first Write (XML declaration) but fails on subsequent writes.
+type bodyFailWriter struct {
+	header    http.Header
+	callCount int
+}
+
+func newBodyFailWriter() *bodyFailWriter      { return &bodyFailWriter{header: make(http.Header)} }
+func (b *bodyFailWriter) Header() http.Header { return b.header }
+func (b *bodyFailWriter) WriteHeader(_ int)   {}
+func (b *bodyFailWriter) Write(p []byte) (int, error) {
+	b.callCount++
+	if b.callCount == 1 {
+		return len(p), nil
+	}
+	return 0, http.ErrHandlerTimeout
+}
+
 func TestWriteError(t *testing.T) {
 	t.Run("sets Content-Type and status code", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/bucket/key", nil)
@@ -29,9 +47,27 @@ func TestWriteError(t *testing.T) {
 		assert.Equal(t, http.StatusNotFound, w.Code)
 	})
 
-	t.Run("logs warning when response write fails", func(t *testing.T) {
+	t.Run("response body starts with XML declaration", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/bucket/key", nil)
+		w := httptest.NewRecorder()
+		writeError(w, req, http.StatusNotFound, "NoSuchBucket", "The bucket does not exist.")
+		assert.True(t, strings.HasPrefix(w.Body.String(), "<?xml version="))
+	})
+
+	t.Run("logs warning when XML header write fails", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/bucket/key", nil)
 		writeError(newFailWriter(), req, http.StatusInternalServerError, "InternalError", "oops")
+	})
+
+	t.Run("logs warning when XML body encode fails", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/bucket/key", nil)
+		writeError(
+			newBodyFailWriter(),
+			req,
+			http.StatusInternalServerError,
+			"InternalError",
+			"oops",
+		)
 	})
 }
 

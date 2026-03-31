@@ -1,6 +1,7 @@
 package s3
 
 import (
+	"cmp"
 	"crypto/md5" // #nosec G501 -- MD5 is required by the S3 ETag specification
 	"encoding/hex"
 	"encoding/json"
@@ -10,6 +11,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -29,11 +31,18 @@ type Storage struct {
 	mu         sync.RWMutex
 	root       *os.Root
 	removeFile func(name string) error
+	openFile   func(name string, flag int, perm os.FileMode) (io.WriteCloser, error)
+	readAll    func(r io.Reader) ([]byte, error)
 }
 
 // NewStorage roots the storage at dataDir/s3, creating the directory if needed.
 func NewStorage(dataDir string) (*Storage, error) {
 	return newStorage(dataDir, os.OpenRoot)
+}
+
+// Close releases the os.Root handle held by the storage.
+func (s *Storage) Close() error {
+	return s.root.Close()
 }
 
 func newStorage(dataDir string, openRoot func(string) (*os.Root, error)) (*Storage, error) {
@@ -47,6 +56,10 @@ func newStorage(dataDir string, openRoot func(string) (*os.Root, error)) (*Stora
 	}
 	s := &Storage{root: root}
 	s.removeFile = s.root.Remove
+	s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+		return s.root.OpenFile(name, flag, perm)
+	}
+	s.readAll = io.ReadAll
 	return s, nil
 }
 
@@ -104,6 +117,9 @@ func (s *Storage) ListBuckets() ([]BucketInfo, error) {
 			CreationDate: creationDate,
 		})
 	}
+	slices.SortFunc(buckets, func(a, b BucketInfo) int {
+		return cmp.Compare(a.Name, b.Name)
+	})
 	return buckets, nil
 }
 
@@ -137,7 +153,7 @@ func (s *Storage) writeObject(
 	r io.Reader,
 	contentType string,
 ) (retMeta ObjectMetadata, retErr error) {
-	f, err := s.root.OpenFile(objPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	f, err := s.openFile(objPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return ObjectMetadata{}, err
 	}
@@ -238,6 +254,9 @@ func (s *Storage) ListObjects(bucket string) ([]ObjectInfo, error) {
 	if err := s.walkDir(bucket, bucket, &objects); err != nil {
 		return nil, err
 	}
+	slices.SortFunc(objects, func(a, b ObjectInfo) int {
+		return cmp.Compare(a.Key, b.Key)
+	})
 	return objects, nil
 }
 
@@ -277,9 +296,10 @@ func (s *Storage) readDir(name string) ([]os.DirEntry, error) {
 }
 
 func (s *Storage) writeMeta(objPath string, meta ObjectMetadata) (retErr error) {
-	// json.Marshal never fails for ObjectMetadata (primitive fields only).
+	// json.Marshal never fails for ObjectMetadata: all fields are JSON-serializable
+	// (string, int64, and time.Time which implements json.Marshaler without error).
 	data, _ := json.Marshal(meta)
-	f, err := s.root.OpenFile(objPath+".meta.json", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	f, err := s.openFile(objPath+".meta.json", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
 	}
@@ -298,8 +318,10 @@ func (s *Storage) readMeta(objPath string) (ObjectMetadata, error) {
 		return ObjectMetadata{}, err
 	}
 	defer func() { _ = f.Close() }()
-	// io.ReadAll on a regular file never returns a non-nil error.
-	data, _ := io.ReadAll(f)
+	data, err := s.readAll(f)
+	if err != nil {
+		return ObjectMetadata{}, err
+	}
 	var meta ObjectMetadata
 	if err := json.Unmarshal(data, &meta); err != nil {
 		return ObjectMetadata{}, err
