@@ -109,33 +109,33 @@ func (s *Storage) PutObject(
 	bucket, key string,
 	r io.Reader,
 	contentType string,
-) (*ObjectMetadata, error) {
+) (ObjectMetadata, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.bucketExistsLocked(bucket) {
-		return nil, ErrBucketNotFound
+		return ObjectMetadata{}, ErrBucketNotFound
 	}
 
 	objPath := bucket + "/" + key
 	if dir := filepath.Dir(objPath); dir != bucket {
 		if err := s.root.MkdirAll(dir, 0o750); err != nil {
-			return nil, err
+			return ObjectMetadata{}, err
 		}
 	}
 
 	f, err := s.root.OpenFile(objPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
-		return nil, err
+		return ObjectMetadata{}, err
 	}
 	defer f.Close()
 
 	h := md5.New() // #nosec G401 -- MD5 is required by the S3 ETag specification
 	size, err := io.Copy(io.MultiWriter(f, h), r)
 	if err != nil {
-		return nil, err
+		return ObjectMetadata{}, err
 	}
 
-	meta := &ObjectMetadata{
+	meta := ObjectMetadata{
 		ContentType:  contentType,
 		ETag:         `"` + hex.EncodeToString(h.Sum(nil)) + `"`,
 		LastModified: time.Now().UTC(),
@@ -146,31 +146,31 @@ func (s *Storage) PutObject(
 			!errors.Is(removeErr, os.ErrNotExist) {
 			log.Printf("warn: failed to clean up object after meta write error: %v", removeErr)
 		}
-		return nil, err
+		return ObjectMetadata{}, err
 	}
 	return meta, nil
 }
 
-func (s *Storage) GetObject(bucket, key string) (*os.File, *ObjectMetadata, error) {
+func (s *Storage) GetObject(bucket, key string) (*os.File, ObjectMetadata, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if !s.bucketExistsLocked(bucket) {
-		return nil, nil, ErrBucketNotFound
+		return nil, ObjectMetadata{}, ErrBucketNotFound
 	}
 	objPath := bucket + "/" + key
 	meta, err := s.readMeta(objPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil, ErrObjectNotFound
+			return nil, ObjectMetadata{}, ErrObjectNotFound
 		}
-		return nil, nil, err
+		return nil, ObjectMetadata{}, err
 	}
 	f, err := s.root.Open(objPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil, ErrObjectNotFound
+			return nil, ObjectMetadata{}, ErrObjectNotFound
 		}
-		return nil, nil, err
+		return nil, ObjectMetadata{}, err
 	}
 	return f, meta, nil
 }
@@ -194,18 +194,18 @@ func (s *Storage) DeleteObject(bucket, key string) error {
 	return nil
 }
 
-func (s *Storage) HeadObject(bucket, key string) (*ObjectMetadata, error) {
+func (s *Storage) HeadObject(bucket, key string) (ObjectMetadata, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if !s.bucketExistsLocked(bucket) {
-		return nil, ErrBucketNotFound
+		return ObjectMetadata{}, ErrBucketNotFound
 	}
 	meta, err := s.readMeta(bucket + "/" + key)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, ErrObjectNotFound
+			return ObjectMetadata{}, ErrObjectNotFound
 		}
-		return nil, err
+		return ObjectMetadata{}, err
 	}
 	return meta, nil
 }
@@ -258,7 +258,7 @@ func (s *Storage) readDir(name string) ([]os.DirEntry, error) {
 	return f.ReadDir(-1)
 }
 
-func (s *Storage) writeMeta(objPath string, meta *ObjectMetadata) error {
+func (s *Storage) writeMeta(objPath string, meta ObjectMetadata) error {
 	// json.Marshal never fails for ObjectMetadata (primitive fields only).
 	data, _ := json.Marshal(meta)
 	f, err := s.root.OpenFile(objPath+".meta.json", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
@@ -270,19 +270,19 @@ func (s *Storage) writeMeta(objPath string, meta *ObjectMetadata) error {
 	return err
 }
 
-func (s *Storage) readMeta(objPath string) (*ObjectMetadata, error) {
+func (s *Storage) readMeta(objPath string) (ObjectMetadata, error) {
 	f, err := s.root.Open(objPath + ".meta.json")
 	if err != nil {
-		return nil, err
+		return ObjectMetadata{}, err
 	}
 	defer f.Close()
 	// io.ReadAll on a regular file never returns a non-nil error.
 	data, _ := io.ReadAll(f)
 	var meta ObjectMetadata
 	if err := json.Unmarshal(data, &meta); err != nil {
-		return nil, err
+		return ObjectMetadata{}, err
 	}
-	return &meta, nil
+	return meta, nil
 }
 
 type BucketInfo struct {
@@ -292,5 +292,5 @@ type BucketInfo struct {
 
 type ObjectInfo struct {
 	Key      string
-	Metadata *ObjectMetadata
+	Metadata ObjectMetadata
 }
