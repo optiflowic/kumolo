@@ -1,9 +1,9 @@
-.PHONY: all install build run fmt vet lint test clean
+.PHONY: all install build run fmt fmt-check vet lint test cover clean
 
 BUILD_DIR = build
 BINARY_NAME = $(BUILD_DIR)/kumolo
 
-all: tidy fmt vet lint test build
+all: tidy fmt-check vet lint test build
 
 install:
 	go mod download
@@ -22,6 +22,10 @@ fmt:
 	go fmt ./...
 	go tool golines --base-formatter=gofmt -w .
 
+fmt-check:
+	@test -z "$$(gofmt -l .)" || (echo "Run 'make fmt' to fix formatting"; exit 1)
+	@test -z "$$(go tool golines --base-formatter=gofmt -l .)" || (echo "Run 'make fmt' to fix formatting"; exit 1)
+
 vet:
 	go vet ./...
 
@@ -30,7 +34,11 @@ lint:
 	go tool gosec -quiet ./...
 
 test:
-	go test ./...
+	go test -race ./...
+
+cover:
+	go test -race -coverprofile=coverage.out ./...
+	go tool cover -func=coverage.out
 
 clean:
 	rm -rf $(BUILD_DIR)

@@ -3,6 +3,7 @@ package s3
 import (
 	"encoding/xml"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 )
@@ -32,6 +33,10 @@ func writeError(w http.ResponseWriter, r *http.Request, status int, code, messag
 		RequestID: "kumolo-local",
 	}
 
+	if _, err := fmt.Fprint(w, xml.Header); err != nil {
+		log.Printf("warn: failed to write XML header: %v", err)
+		return
+	}
 	if err := xml.NewEncoder(w).Encode(resp); err != nil {
 		log.Printf("warn: failed to encode error response: %v", err)
 	}
