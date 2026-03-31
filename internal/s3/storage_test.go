@@ -35,402 +35,429 @@ func (errReader) Read(_ []byte) (int, error) {
 	return 0, io.ErrUnexpectedEOF
 }
 
-// --- NewStorage ---
+func TestNewStorage(t *testing.T) {
+	t.Run("returns error when s3 path exists as a file", func(t *testing.T) {
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "s3"), []byte("x"), 0o600))
+		_, err := NewStorage(dir)
+		assert.Error(t, err)
+	})
 
-func TestNewStorageErrorNotDir(t *testing.T) {
-	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "s3"), []byte("x"), 0o600))
-	_, err := NewStorage(dir)
-	assert.Error(t, err)
+	t.Run("returns error when OpenRoot fails", func(t *testing.T) {
+		orig := osOpenRoot
+		t.Cleanup(func() { osOpenRoot = orig })
+		osOpenRoot = func(string) (*os.Root, error) {
+			return nil, os.ErrPermission
+		}
+		_, err := NewStorage(t.TempDir())
+		assert.Error(t, err)
+	})
 }
 
-func TestNewStorageOpenRootError(t *testing.T) {
-	orig := osOpenRoot
-	t.Cleanup(func() { osOpenRoot = orig })
-	osOpenRoot = func(string) (*os.Root, error) {
-		return nil, os.ErrPermission
-	}
-
-	_, err := NewStorage(t.TempDir())
-	assert.Error(t, err)
+func TestCreateBucket(t *testing.T) {
+	t.Run("creates bucket and reports it as existing", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("my-bucket"))
+		assert.True(t, s.BucketExists("my-bucket"))
+	})
 }
 
-// --- Bucket operations ---
+func TestDeleteBucket(t *testing.T) {
+	t.Run("deletes empty bucket successfully", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("my-bucket"))
+		require.NoError(t, s.DeleteBucket("my-bucket"))
+		assert.False(t, s.BucketExists("my-bucket"))
+	})
 
-func TestCreateAndDeleteBucket(t *testing.T) {
-	s := newTestStorage(t)
+	t.Run("returns ErrBucketNotFound when bucket does not exist", func(t *testing.T) {
+		s := newTestStorage(t)
+		assert.ErrorIs(t, s.DeleteBucket("no-such-bucket"), ErrBucketNotFound)
+	})
 
-	require.NoError(t, s.CreateBucket("my-bucket"))
-	assert.True(t, s.BucketExists("my-bucket"))
+	t.Run("returns ErrBucketNotEmpty when bucket has objects", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("my-bucket"))
+		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("hello"), "text/plain")
+		require.NoError(t, err)
+		assert.ErrorIs(t, s.DeleteBucket("my-bucket"), ErrBucketNotEmpty)
+	})
 
-	require.NoError(t, s.DeleteBucket("my-bucket"))
-	assert.False(t, s.BucketExists("my-bucket"))
-}
+	t.Run("returns error when directory listing fails", func(t *testing.T) {
+		s, rootPath := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("my-bucket"))
+		require.NoError(t, os.Chmod(filepath.Join(rootPath, "my-bucket"), 0o000))
+		t.Cleanup(func() { _ = os.Chmod(filepath.Join(rootPath, "my-bucket"), 0o750) })
 
-func TestDeleteBucketNotFound(t *testing.T) {
-	s := newTestStorage(t)
-	assert.ErrorIs(t, s.DeleteBucket("no-such-bucket"), ErrBucketNotFound)
-}
-
-func TestDeleteBucketNotEmpty(t *testing.T) {
-	s := newTestStorage(t)
-	require.NoError(t, s.CreateBucket("my-bucket"))
-	_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("hello"), "text/plain")
-	require.NoError(t, err)
-
-	assert.ErrorIs(t, s.DeleteBucket("my-bucket"), ErrBucketNotEmpty)
-}
-
-func TestDeleteBucketReadDirError(t *testing.T) {
-	s, rootPath := newTestStorageWithRoot(t)
-	require.NoError(t, s.CreateBucket("my-bucket"))
-
-	require.NoError(t, os.Chmod(filepath.Join(rootPath, "my-bucket"), 0o000))
-	t.Cleanup(func() { _ = os.Chmod(filepath.Join(rootPath, "my-bucket"), 0o750) })
-
-	err := s.DeleteBucket("my-bucket")
-	assert.Error(t, err)
-	assert.NotErrorIs(t, err, ErrBucketNotFound)
+		err := s.DeleteBucket("my-bucket")
+		assert.Error(t, err)
+		assert.NotErrorIs(t, err, ErrBucketNotFound)
+	})
 }
 
 func TestListBuckets(t *testing.T) {
-	s := newTestStorage(t)
-	require.NoError(t, s.CreateBucket("bucket-a"))
-	require.NoError(t, s.CreateBucket("bucket-b"))
+	t.Run("lists all buckets", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("bucket-a"))
+		require.NoError(t, s.CreateBucket("bucket-b"))
 
-	buckets, err := s.ListBuckets()
-	require.NoError(t, err)
-	assert.Len(t, buckets, 2)
+		buckets, err := s.ListBuckets()
+		require.NoError(t, err)
+		assert.Len(t, buckets, 2)
+	})
+
+	t.Run("returns error when root is unreadable", func(t *testing.T) {
+		s, rootPath := newTestStorageWithRoot(t)
+		require.NoError(t, os.Chmod(rootPath, 0o000))
+		t.Cleanup(func() { _ = os.Chmod(rootPath, 0o750) })
+
+		_, err := s.ListBuckets()
+		assert.Error(t, err)
+	})
+
+	t.Run("skips non-directory entries", func(t *testing.T) {
+		s, rootPath := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("bucket-a"))
+		require.NoError(
+			t,
+			os.WriteFile(filepath.Join(rootPath, "not-a-bucket"), []byte("x"), 0o600),
+		)
+
+		buckets, err := s.ListBuckets()
+		require.NoError(t, err)
+		assert.Len(t, buckets, 1)
+	})
 }
 
-func TestListBucketsReadDirError(t *testing.T) {
-	s, rootPath := newTestStorageWithRoot(t)
+func TestPutObject(t *testing.T) {
+	t.Run("stores object and returns metadata", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("my-bucket"))
 
-	require.NoError(t, os.Chmod(rootPath, 0o000))
-	t.Cleanup(func() { _ = os.Chmod(rootPath, 0o750) })
+		meta, err := s.PutObject(
+			"my-bucket",
+			"hello.txt",
+			strings.NewReader("hello world"),
+			"text/plain",
+		)
+		require.NoError(t, err)
+		assert.Equal(t, int64(11), meta.Size)
+		assert.Equal(t, "text/plain", meta.ContentType)
+		assert.NotEmpty(t, meta.ETag)
+	})
 
-	_, err := s.ListBuckets()
-	assert.Error(t, err)
+	t.Run("stores object with nested key", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("my-bucket"))
+
+		_, err := s.PutObject(
+			"my-bucket",
+			"dir/sub/obj.txt",
+			strings.NewReader("data"),
+			"text/plain",
+		)
+		require.NoError(t, err)
+
+		objects, err := s.ListObjects("my-bucket")
+		require.NoError(t, err)
+		require.Len(t, objects, 1)
+		assert.Equal(t, "dir/sub/obj.txt", objects[0].Key)
+	})
+
+	t.Run("returns ErrBucketNotFound when bucket does not exist", func(t *testing.T) {
+		s := newTestStorage(t)
+		_, err := s.PutObject("no-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
+		assert.ErrorIs(t, err, ErrBucketNotFound)
+	})
+
+	t.Run("returns error when file cannot be opened", func(t *testing.T) {
+		s, rootPath := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("my-bucket"))
+		require.NoError(t, os.Chmod(filepath.Join(rootPath, "my-bucket"), 0o000))
+		t.Cleanup(func() { _ = os.Chmod(filepath.Join(rootPath, "my-bucket"), 0o750) })
+
+		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
+		assert.Error(t, err)
+	})
+
+	t.Run("returns error when nested directory cannot be created", func(t *testing.T) {
+		s, rootPath := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("my-bucket"))
+		require.NoError(t, os.Chmod(filepath.Join(rootPath, "my-bucket"), 0o500))
+		t.Cleanup(func() { _ = os.Chmod(filepath.Join(rootPath, "my-bucket"), 0o750) })
+
+		_, err := s.PutObject(
+			"my-bucket",
+			"nested/obj.txt",
+			strings.NewReader("data"),
+			"text/plain",
+		)
+		assert.Error(t, err)
+	})
+
+	t.Run("returns error when reader fails", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("my-bucket"))
+
+		_, err := s.PutObject("my-bucket", "obj.txt", errReader{}, "text/plain")
+		assert.Error(t, err)
+	})
+
+	t.Run("cleans up object file when meta write fails", func(t *testing.T) {
+		s, rootPath := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("my-bucket"))
+		require.NoError(
+			t,
+			os.MkdirAll(filepath.Join(rootPath, "my-bucket", "obj.txt.meta.json"), 0o750),
+		)
+
+		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
+		assert.Error(t, err)
+		assert.NoFileExists(t, filepath.Join(rootPath, "my-bucket", "obj.txt"))
+	})
+
+	t.Run("logs warning when cleanup remove also fails", func(t *testing.T) {
+		s, rootPath := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("my-bucket"))
+		require.NoError(
+			t,
+			os.MkdirAll(filepath.Join(rootPath, "my-bucket", "obj.txt.meta.json"), 0o750),
+		)
+
+		orig := osRemoveFile
+		t.Cleanup(func() { osRemoveFile = orig })
+		osRemoveFile = func(_ *os.Root, _ string) error {
+			return errors.New("simulated remove failure")
+		}
+
+		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
+		assert.Error(t, err)
+	})
 }
 
-func TestListBucketsSkipsNonDir(t *testing.T) {
-	s, rootPath := newTestStorageWithRoot(t)
-	require.NoError(t, s.CreateBucket("bucket-a"))
-	require.NoError(t, os.WriteFile(filepath.Join(rootPath, "not-a-bucket"), []byte("x"), 0o600))
+func TestGetObject(t *testing.T) {
+	t.Run("returns file and metadata for existing object", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("my-bucket"))
+		meta, err := s.PutObject(
+			"my-bucket",
+			"hello.txt",
+			strings.NewReader("hello world"),
+			"text/plain",
+		)
+		require.NoError(t, err)
 
-	buckets, err := s.ListBuckets()
-	require.NoError(t, err)
-	assert.Len(t, buckets, 1)
-}
+		f, gotMeta, err := s.GetObject("my-bucket", "hello.txt")
+		require.NoError(t, err)
+		defer f.Close()
+		assert.Equal(t, meta.Size, gotMeta.Size)
+	})
 
-// --- Object operations ---
+	t.Run("returns ErrObjectNotFound when object does not exist", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("my-bucket"))
 
-func TestPutAndGetObject(t *testing.T) {
-	s := newTestStorage(t)
-	require.NoError(t, s.CreateBucket("my-bucket"))
+		_, _, err := s.GetObject("my-bucket", "missing.txt")
+		assert.ErrorIs(t, err, ErrObjectNotFound)
+	})
 
-	meta, err := s.PutObject(
-		"my-bucket",
-		"hello.txt",
-		strings.NewReader("hello world"),
-		"text/plain",
-	)
-	require.NoError(t, err)
-	assert.Equal(t, int64(11), meta.Size)
-	assert.Equal(t, "text/plain", meta.ContentType)
-	assert.NotEmpty(t, meta.ETag)
+	t.Run("returns ErrBucketNotFound when bucket does not exist", func(t *testing.T) {
+		s := newTestStorage(t)
+		_, _, err := s.GetObject("no-bucket", "obj.txt")
+		assert.ErrorIs(t, err, ErrBucketNotFound)
+	})
 
-	f, gotMeta, err := s.GetObject("my-bucket", "hello.txt")
-	require.NoError(t, err)
-	defer f.Close()
-	assert.Equal(t, meta.Size, gotMeta.Size)
-}
-
-func TestPutObjectNestedKey(t *testing.T) {
-	s := newTestStorage(t)
-	require.NoError(t, s.CreateBucket("my-bucket"))
-
-	_, err := s.PutObject("my-bucket", "dir/sub/obj.txt", strings.NewReader("data"), "text/plain")
-	require.NoError(t, err)
-
-	objects, err := s.ListObjects("my-bucket")
-	require.NoError(t, err)
-	require.Len(t, objects, 1)
-	assert.Equal(t, "dir/sub/obj.txt", objects[0].Key)
-}
-
-func TestPutObjectBucketNotFound(t *testing.T) {
-	s := newTestStorage(t)
-	_, err := s.PutObject("no-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
-	assert.ErrorIs(t, err, ErrBucketNotFound)
-}
-
-func TestPutObjectOpenFileError(t *testing.T) {
-	s, rootPath := newTestStorageWithRoot(t)
-	require.NoError(t, s.CreateBucket("my-bucket"))
-
-	require.NoError(t, os.Chmod(filepath.Join(rootPath, "my-bucket"), 0o000))
-	t.Cleanup(func() { _ = os.Chmod(filepath.Join(rootPath, "my-bucket"), 0o750) })
-
-	_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
-	assert.Error(t, err)
-}
-
-func TestPutObjectMkdirAllError(t *testing.T) {
-	s, rootPath := newTestStorageWithRoot(t)
-	require.NoError(t, s.CreateBucket("my-bucket"))
-
-	require.NoError(t, os.Chmod(filepath.Join(rootPath, "my-bucket"), 0o500))
-	t.Cleanup(func() { _ = os.Chmod(filepath.Join(rootPath, "my-bucket"), 0o750) })
-
-	_, err := s.PutObject("my-bucket", "nested/obj.txt", strings.NewReader("data"), "text/plain")
-	assert.Error(t, err)
-}
-
-func TestPutObjectCopyError(t *testing.T) {
-	s := newTestStorage(t)
-	require.NoError(t, s.CreateBucket("my-bucket"))
-
-	_, err := s.PutObject("my-bucket", "obj.txt", errReader{}, "text/plain")
-	assert.Error(t, err)
-}
-
-func TestPutObjectWriteMetaError(t *testing.T) {
-	s, rootPath := newTestStorageWithRoot(t)
-	require.NoError(t, s.CreateBucket("my-bucket"))
-
-	require.NoError(
-		t,
-		os.MkdirAll(filepath.Join(rootPath, "my-bucket", "obj.txt.meta.json"), 0o750),
-	)
-
-	_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
-	assert.Error(t, err)
-
-	// Object file must be cleaned up on meta write failure.
-	assert.NoFileExists(t, filepath.Join(rootPath, "my-bucket", "obj.txt"))
-}
-
-func TestPutObjectCleanupRemoveError(t *testing.T) {
-	s, rootPath := newTestStorageWithRoot(t)
-	require.NoError(t, s.CreateBucket("my-bucket"))
-
-	// Make meta path a directory so writeMeta fails.
-	require.NoError(
-		t,
-		os.MkdirAll(filepath.Join(rootPath, "my-bucket", "obj.txt.meta.json"), 0o750),
-	)
-
-	// Make osRemoveFile fail so the cleanup log.Printf branch is exercised.
-	orig := osRemoveFile
-	t.Cleanup(func() { osRemoveFile = orig })
-	osRemoveFile = func(_ *os.Root, _ string) error {
-		return errors.New("simulated remove failure")
-	}
-
-	_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
-	assert.Error(t, err)
-}
-
-func TestGetObjectNotFound(t *testing.T) {
-	s := newTestStorage(t)
-	require.NoError(t, s.CreateBucket("my-bucket"))
-
-	_, _, err := s.GetObject("my-bucket", "missing.txt")
-	assert.ErrorIs(t, err, ErrObjectNotFound)
-}
-
-func TestGetObjectBucketNotFound(t *testing.T) {
-	s := newTestStorage(t)
-	_, _, err := s.GetObject("no-bucket", "obj.txt")
-	assert.ErrorIs(t, err, ErrBucketNotFound)
-}
-
-func TestGetObjectCorruptMeta(t *testing.T) {
-	s, rootPath := newTestStorageWithRoot(t)
-	require.NoError(t, s.CreateBucket("my-bucket"))
-	require.NoError(
-		t,
-		os.WriteFile(
+	t.Run("returns error when metadata is corrupt", func(t *testing.T) {
+		s, rootPath := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("my-bucket"))
+		require.NoError(t, os.WriteFile(
 			filepath.Join(rootPath, "my-bucket", "obj.txt.meta.json"),
 			[]byte("not-json"),
 			0o600,
-		),
-	)
+		))
 
-	_, _, err := s.GetObject("my-bucket", "obj.txt")
-	assert.Error(t, err)
-	assert.NotErrorIs(t, err, ErrObjectNotFound)
-}
+		_, _, err := s.GetObject("my-bucket", "obj.txt")
+		assert.Error(t, err)
+		assert.NotErrorIs(t, err, ErrObjectNotFound)
+	})
 
-func TestGetObjectFileUnreadable(t *testing.T) {
-	s, rootPath := newTestStorageWithRoot(t)
-	require.NoError(t, s.CreateBucket("my-bucket"))
-	_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
-	require.NoError(t, err)
+	t.Run("returns error when data file is unreadable", func(t *testing.T) {
+		s, rootPath := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("my-bucket"))
+		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
+		require.NoError(t, err)
 
-	dataPath := filepath.Join(rootPath, "my-bucket", "obj.txt")
-	require.NoError(t, os.Chmod(dataPath, 0o000))
-	t.Cleanup(func() { _ = os.Chmod(dataPath, 0o600) })
+		dataPath := filepath.Join(rootPath, "my-bucket", "obj.txt")
+		require.NoError(t, os.Chmod(dataPath, 0o000))
+		t.Cleanup(func() { _ = os.Chmod(dataPath, 0o600) })
 
-	_, _, err = s.GetObject("my-bucket", "obj.txt")
-	assert.Error(t, err)
-	assert.NotErrorIs(t, err, ErrObjectNotFound)
-}
+		_, _, err = s.GetObject("my-bucket", "obj.txt")
+		assert.Error(t, err)
+		assert.NotErrorIs(t, err, ErrObjectNotFound)
+	})
 
-func TestGetObjectMetaExistsFileGone(t *testing.T) {
-	s, rootPath := newTestStorageWithRoot(t)
-	require.NoError(t, s.CreateBucket("my-bucket"))
+	t.Run("returns ErrObjectNotFound when meta exists but data file is gone", func(t *testing.T) {
+		s, rootPath := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("my-bucket"))
 
-	meta := ObjectMetadata{ContentType: "text/plain", ETag: `"abc"`, Size: 3}
-	data, _ := json.Marshal(meta)
-	require.NoError(
-		t,
-		os.WriteFile(filepath.Join(rootPath, "my-bucket", "obj.txt.meta.json"), data, 0o600),
-	)
+		meta := ObjectMetadata{ContentType: "text/plain", ETag: `"abc"`, Size: 3}
+		data, _ := json.Marshal(meta)
+		require.NoError(t, os.WriteFile(
+			filepath.Join(rootPath, "my-bucket", "obj.txt.meta.json"),
+			data,
+			0o600,
+		))
 
-	_, _, err := s.GetObject("my-bucket", "obj.txt")
-	assert.ErrorIs(t, err, ErrObjectNotFound)
+		_, _, err := s.GetObject("my-bucket", "obj.txt")
+		assert.ErrorIs(t, err, ErrObjectNotFound)
+	})
 }
 
 func TestDeleteObject(t *testing.T) {
-	s := newTestStorage(t)
-	require.NoError(t, s.CreateBucket("my-bucket"))
-	_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
-	require.NoError(t, err)
+	t.Run("deletes object and metadata successfully", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("my-bucket"))
+		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
+		require.NoError(t, err)
 
-	require.NoError(t, s.DeleteObject("my-bucket", "obj.txt"))
+		require.NoError(t, s.DeleteObject("my-bucket", "obj.txt"))
 
-	_, _, err = s.GetObject("my-bucket", "obj.txt")
-	assert.ErrorIs(t, err, ErrObjectNotFound)
-}
+		_, _, err = s.GetObject("my-bucket", "obj.txt")
+		assert.ErrorIs(t, err, ErrObjectNotFound)
+	})
 
-func TestDeleteObjectNotFound(t *testing.T) {
-	s := newTestStorage(t)
-	require.NoError(t, s.CreateBucket("my-bucket"))
-	assert.ErrorIs(t, s.DeleteObject("my-bucket", "missing.txt"), ErrObjectNotFound)
-}
+	t.Run("returns ErrObjectNotFound when object does not exist", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("my-bucket"))
+		assert.ErrorIs(t, s.DeleteObject("my-bucket", "missing.txt"), ErrObjectNotFound)
+	})
 
-func TestDeleteObjectBucketNotFound(t *testing.T) {
-	s := newTestStorage(t)
-	assert.ErrorIs(t, s.DeleteObject("no-bucket", "obj.txt"), ErrBucketNotFound)
-}
+	t.Run("returns ErrBucketNotFound when bucket does not exist", func(t *testing.T) {
+		s := newTestStorage(t)
+		assert.ErrorIs(t, s.DeleteObject("no-bucket", "obj.txt"), ErrBucketNotFound)
+	})
 
-func TestDeleteObjectRemoveError(t *testing.T) {
-	s, rootPath := newTestStorageWithRoot(t)
-	require.NoError(t, s.CreateBucket("my-bucket"))
+	t.Run("returns error when object removal fails", func(t *testing.T) {
+		s, rootPath := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("my-bucket"))
+		require.NoError(
+			t,
+			os.MkdirAll(filepath.Join(rootPath, "my-bucket", "dir-obj", "child"), 0o750),
+		)
 
-	// Create a non-empty directory at the object path to make Remove fail.
-	require.NoError(t, os.MkdirAll(filepath.Join(rootPath, "my-bucket", "dir-obj", "child"), 0o750))
+		err := s.DeleteObject("my-bucket", "dir-obj")
+		assert.Error(t, err)
+		assert.NotErrorIs(t, err, ErrObjectNotFound)
+	})
 
-	err := s.DeleteObject("my-bucket", "dir-obj")
-	assert.Error(t, err)
-	assert.NotErrorIs(t, err, ErrObjectNotFound)
-}
+	t.Run("logs warning when metadata removal fails but still succeeds", func(t *testing.T) {
+		s, rootPath := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("my-bucket"))
+		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
+		require.NoError(t, err)
 
-func TestDeleteObjectMetaRemoveError(t *testing.T) {
-	s, rootPath := newTestStorageWithRoot(t)
-	require.NoError(t, s.CreateBucket("my-bucket"))
-	_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
-	require.NoError(t, err)
+		require.NoError(t, os.Remove(filepath.Join(rootPath, "my-bucket", "obj.txt.meta.json")))
+		require.NoError(t, os.MkdirAll(
+			filepath.Join(rootPath, "my-bucket", "obj.txt.meta.json", "child"),
+			0o750,
+		))
 
-	// Replace the sidecar meta file with a non-empty directory so its removal fails.
-	require.NoError(t, os.Remove(filepath.Join(rootPath, "my-bucket", "obj.txt.meta.json")))
-	require.NoError(
-		t,
-		os.MkdirAll(filepath.Join(rootPath, "my-bucket", "obj.txt.meta.json", "child"), 0o750),
-	)
-
-	// DeleteObject should still succeed (object removed), but log a warning for the meta.
-	assert.NoError(t, s.DeleteObject("my-bucket", "obj.txt"))
+		assert.NoError(t, s.DeleteObject("my-bucket", "obj.txt"))
+	})
 }
 
 func TestHeadObject(t *testing.T) {
-	s := newTestStorage(t)
-	require.NoError(t, s.CreateBucket("my-bucket"))
-	_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
-	require.NoError(t, err)
+	t.Run("returns metadata for existing object", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("my-bucket"))
+		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
+		require.NoError(t, err)
 
-	meta, err := s.HeadObject("my-bucket", "obj.txt")
-	require.NoError(t, err)
-	assert.Equal(t, int64(4), meta.Size)
-}
+		meta, err := s.HeadObject("my-bucket", "obj.txt")
+		require.NoError(t, err)
+		assert.Equal(t, int64(4), meta.Size)
+	})
 
-func TestHeadObjectNotFound(t *testing.T) {
-	s := newTestStorage(t)
-	require.NoError(t, s.CreateBucket("my-bucket"))
-	_, err := s.HeadObject("my-bucket", "missing.txt")
-	assert.ErrorIs(t, err, ErrObjectNotFound)
-}
+	t.Run("returns ErrObjectNotFound when object does not exist", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("my-bucket"))
+		_, err := s.HeadObject("my-bucket", "missing.txt")
+		assert.ErrorIs(t, err, ErrObjectNotFound)
+	})
 
-func TestHeadObjectBucketNotFound(t *testing.T) {
-	s := newTestStorage(t)
-	_, err := s.HeadObject("no-bucket", "obj.txt")
-	assert.ErrorIs(t, err, ErrBucketNotFound)
-}
+	t.Run("returns ErrBucketNotFound when bucket does not exist", func(t *testing.T) {
+		s := newTestStorage(t)
+		_, err := s.HeadObject("no-bucket", "obj.txt")
+		assert.ErrorIs(t, err, ErrBucketNotFound)
+	})
 
-func TestHeadObjectCorruptMeta(t *testing.T) {
-	s, rootPath := newTestStorageWithRoot(t)
-	require.NoError(t, s.CreateBucket("my-bucket"))
-	require.NoError(
-		t,
-		os.WriteFile(
+	t.Run("returns error when metadata is corrupt", func(t *testing.T) {
+		s, rootPath := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("my-bucket"))
+		require.NoError(t, os.WriteFile(
 			filepath.Join(rootPath, "my-bucket", "obj.txt.meta.json"),
 			[]byte("not-json"),
 			0o600,
-		),
-	)
+		))
 
-	_, err := s.HeadObject("my-bucket", "obj.txt")
-	assert.Error(t, err)
-	assert.NotErrorIs(t, err, ErrObjectNotFound)
+		_, err := s.HeadObject("my-bucket", "obj.txt")
+		assert.Error(t, err)
+		assert.NotErrorIs(t, err, ErrObjectNotFound)
+	})
 }
 
 func TestListObjects(t *testing.T) {
-	s := newTestStorage(t)
-	require.NoError(t, s.CreateBucket("my-bucket"))
-	_, err := s.PutObject("my-bucket", "a.txt", strings.NewReader("a"), "text/plain")
-	require.NoError(t, err)
-	_, err = s.PutObject("my-bucket", "b.txt", strings.NewReader("b"), "text/plain")
-	require.NoError(t, err)
+	t.Run("lists all objects in bucket", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("my-bucket"))
+		_, err := s.PutObject("my-bucket", "a.txt", strings.NewReader("a"), "text/plain")
+		require.NoError(t, err)
+		_, err = s.PutObject("my-bucket", "b.txt", strings.NewReader("b"), "text/plain")
+		require.NoError(t, err)
 
-	objects, err := s.ListObjects("my-bucket")
-	require.NoError(t, err)
-	assert.Len(t, objects, 2)
-}
+		objects, err := s.ListObjects("my-bucket")
+		require.NoError(t, err)
+		assert.Len(t, objects, 2)
+	})
 
-func TestListObjectsBucketNotFound(t *testing.T) {
-	s := newTestStorage(t)
-	_, err := s.ListObjects("no-bucket")
-	assert.ErrorIs(t, err, ErrBucketNotFound)
-}
+	t.Run("returns ErrBucketNotFound when bucket does not exist", func(t *testing.T) {
+		s := newTestStorage(t)
+		_, err := s.ListObjects("no-bucket")
+		assert.ErrorIs(t, err, ErrBucketNotFound)
+	})
 
-func TestListObjectsOrphanFile(t *testing.T) {
-	s, rootPath := newTestStorageWithRoot(t)
-	require.NoError(t, s.CreateBucket("my-bucket"))
-	_, err := s.PutObject("my-bucket", "real.txt", strings.NewReader("data"), "text/plain")
-	require.NoError(t, err)
+	t.Run("skips orphan files without metadata", func(t *testing.T) {
+		s, rootPath := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("my-bucket"))
+		_, err := s.PutObject("my-bucket", "real.txt", strings.NewReader("data"), "text/plain")
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(
+			filepath.Join(rootPath, "my-bucket", "orphan.txt"),
+			[]byte("data"),
+			0o600,
+		))
 
-	require.NoError(
-		t,
-		os.WriteFile(filepath.Join(rootPath, "my-bucket", "orphan.txt"), []byte("data"), 0o600),
-	)
+		objects, err := s.ListObjects("my-bucket")
+		require.NoError(t, err)
+		assert.Len(t, objects, 1)
+	})
 
-	objects, err := s.ListObjects("my-bucket")
-	require.NoError(t, err)
-	assert.Len(t, objects, 1)
-}
+	t.Run("returns error when subdirectory listing fails", func(t *testing.T) {
+		s, rootPath := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("my-bucket"))
+		_, err := s.PutObject(
+			"my-bucket",
+			"subdir/obj.txt",
+			strings.NewReader("data"),
+			"text/plain",
+		)
+		require.NoError(t, err)
 
-func TestListObjectsSubdirError(t *testing.T) {
-	s, rootPath := newTestStorageWithRoot(t)
-	require.NoError(t, s.CreateBucket("my-bucket"))
-	_, err := s.PutObject("my-bucket", "subdir/obj.txt", strings.NewReader("data"), "text/plain")
-	require.NoError(t, err)
+		subdir := filepath.Join(rootPath, "my-bucket", "subdir")
+		require.NoError(t, os.Chmod(subdir, 0o000))
+		t.Cleanup(func() { _ = os.Chmod(subdir, 0o750) })
 
-	subdir := filepath.Join(rootPath, "my-bucket", "subdir")
-	require.NoError(t, os.Chmod(subdir, 0o000))
-	t.Cleanup(func() { _ = os.Chmod(subdir, 0o750) })
-
-	_, err = s.ListObjects("my-bucket")
-	assert.Error(t, err)
+		_, err = s.ListObjects("my-bucket")
+		assert.Error(t, err)
+	})
 }
