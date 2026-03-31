@@ -15,7 +15,7 @@ func TestRegisterFlagsDefaults(t *testing.T) {
 	require.NoError(t, fs.Parse([]string{}))
 
 	cfg := build()
-	assert.Equal(t, "4566", cfg.Port)
+	assert.Equal(t, "5566", cfg.Port)
 	assert.Equal(t, "/tmp/kumolo", cfg.DataDir)
 	assert.Equal(t, "info", cfg.LogLevel)
 }

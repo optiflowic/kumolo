@@ -15,7 +15,7 @@ type Config struct {
 // that builds a Config from the parsed flag values. Call flag.Parse() before
 // calling the returned function.
 func RegisterFlags(fs *flag.FlagSet) func() *Config {
-	port := fs.String("port", getEnv("KUMOLO_PORT", "4566"), "HTTP listen port")
+	port := fs.String("port", getEnv("KUMOLO_PORT", "5566"), "HTTP listen port")
 	dataDir := fs.String(
 		"data-dir",
 		getEnv("KUMOLO_DATA_DIR", "/tmp/kumolo"),
