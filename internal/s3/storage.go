@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -253,10 +254,10 @@ func (s *Storage) walkDir(bucket, dir string, objects *[]ObjectInfo) error {
 			}
 			continue
 		}
-		if filepath.Ext(e.Name()) == ".json" {
+		if strings.HasSuffix(e.Name(), ".meta.json") {
 			continue
 		}
-		key := entryPath[len(bucket)+1:]
+		key, _ := filepath.Rel(bucket, entryPath)
 		meta, err := s.readMeta(entryPath)
 		if err != nil {
 			continue

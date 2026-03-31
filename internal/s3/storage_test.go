@@ -463,4 +463,16 @@ func TestListObjects(t *testing.T) {
 		_, err = s.ListObjects("my-bucket")
 		assert.Error(t, err)
 	})
+
+	t.Run("includes .json objects in listing", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("my-bucket"))
+		_, err := s.PutObject("my-bucket", "data.json", strings.NewReader("{}"), "application/json")
+		require.NoError(t, err)
+
+		objects, err := s.ListObjects("my-bucket")
+		require.NoError(t, err)
+		require.Len(t, objects, 1)
+		assert.Equal(t, "data.json", objects[0].Key)
+	})
 }
