@@ -124,11 +124,27 @@ func (s *Storage) PutObject(
 		}
 	}
 
+	meta, err := s.writeObject(objPath, r, contentType)
+	if err != nil {
+		return ObjectMetadata{}, err
+	}
+	return meta, nil
+}
+
+func (s *Storage) writeObject(
+	objPath string,
+	r io.Reader,
+	contentType string,
+) (retMeta ObjectMetadata, retErr error) {
 	f, err := s.root.OpenFile(objPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return ObjectMetadata{}, err
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil && retErr == nil {
+			retErr = err
+		}
+	}()
 
 	h := md5.New() // #nosec G401 -- MD5 is required by the S3 ETag specification
 	size, err := io.Copy(io.MultiWriter(f, h), r)
@@ -255,20 +271,24 @@ func (s *Storage) readDir(name string) ([]os.DirEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	return f.ReadDir(-1)
 }
 
-func (s *Storage) writeMeta(objPath string, meta ObjectMetadata) error {
+func (s *Storage) writeMeta(objPath string, meta ObjectMetadata) (retErr error) {
 	// json.Marshal never fails for ObjectMetadata (primitive fields only).
 	data, _ := json.Marshal(meta)
 	f, err := s.root.OpenFile(objPath+".meta.json", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	_, err = f.Write(data)
-	return err
+	defer func() {
+		if err := f.Close(); err != nil && retErr == nil {
+			retErr = err
+		}
+	}()
+	_, retErr = f.Write(data)
+	return
 }
 
 func (s *Storage) readMeta(objPath string) (ObjectMetadata, error) {
@@ -276,7 +296,7 @@ func (s *Storage) readMeta(objPath string) (ObjectMetadata, error) {
 	if err != nil {
 		return ObjectMetadata{}, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	// io.ReadAll on a regular file never returns a non-nil error.
 	data, _ := io.ReadAll(f)
 	var meta ObjectMetadata

@@ -252,7 +252,7 @@ func TestGetObject(t *testing.T) {
 
 		f, gotMeta, err := s.GetObject("my-bucket", "hello.txt")
 		require.NoError(t, err)
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		assert.Equal(t, meta.Size, gotMeta.Size)
 	})
 
