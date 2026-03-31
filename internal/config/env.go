@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"log"
 	"os"
 
@@ -20,7 +21,7 @@ func LoadEnv() Env {
 }
 
 func loadEnv(dotenvLoader func(...string) error) Env {
-	if err := dotenvLoader(); err != nil && !os.IsNotExist(err) {
+	if err := dotenvLoader(); err != nil && !errors.Is(err, os.ErrNotExist) {
 		log.Printf("warn: failed to load .env: %v", err)
 	}
 	return Env{
