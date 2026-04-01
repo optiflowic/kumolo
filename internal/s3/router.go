@@ -1,15 +1,29 @@
 package s3
 
 import (
+	"encoding/xml"
+	"errors"
 	"net/http"
+	"os"
 	"strings"
+	"time"
 )
 
-// Router handles S3 API requests using path-style URLs: /<bucket>/<key>
-type Router struct{}
+// bucketStore is the subset of Storage used by the Router for bucket operations.
+type bucketStore interface {
+	ListBuckets() ([]BucketInfo, error)
+	CreateBucket(bucket string) error
+	DeleteBucket(bucket string) error
+	BucketExists(bucket string) bool
+}
 
-func NewRouter() *Router {
-	return &Router{}
+// Router handles S3 API requests using path-style URLs: /<bucket>/<key>
+type Router struct {
+	storage bucketStore
+}
+
+func NewRouter(storage *Storage) *Router {
+	return &Router{storage: storage}
 }
 
 func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -17,7 +31,7 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if bucket == "" {
 		if r.Method == http.MethodGet {
-			writeNotImplemented(w, r)
+			ro.handleListBuckets(w, r)
 			return
 		}
 		writeError(
@@ -38,13 +52,15 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ro.routeObject(w, r, bucket, key)
 }
 
-func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, _ string) {
+func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, bucket string) {
 	switch r.Method {
 	case http.MethodPut:
-		writeNotImplemented(w, r)
+		ro.handleCreateBucket(w, r, bucket)
 	case http.MethodDelete:
-		writeNotImplemented(w, r)
-	case http.MethodGet, http.MethodHead:
+		ro.handleDeleteBucket(w, r, bucket)
+	case http.MethodHead:
+		ro.handleHeadBucket(w, r, bucket)
+	case http.MethodGet:
 		writeNotImplemented(w, r)
 	default:
 		writeError(
@@ -78,6 +94,66 @@ func (ro *Router) routeObject(w http.ResponseWriter, r *http.Request, _, _ strin
 	}
 }
 
+func (ro *Router) handleListBuckets(w http.ResponseWriter, r *http.Request) {
+	buckets, err := ro.storage.ListBuckets()
+	if err != nil {
+		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	xmlBuckets := make([]xmlBucket, len(buckets))
+	for i, b := range buckets {
+		xmlBuckets[i] = xmlBucket{Name: b.Name, CreationDate: b.CreationDate.UTC()}
+	}
+	writeXML(w, http.StatusOK, listBucketsResult{
+		Owner:   xmlOwner{ID: "owner", DisplayName: "owner"},
+		Buckets: xmlBuckets,
+	})
+}
+
+func (ro *Router) handleCreateBucket(w http.ResponseWriter, r *http.Request, bucket string) {
+	if err := ro.storage.CreateBucket(bucket); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			writeError(
+				w,
+				r,
+				http.StatusConflict,
+				"BucketAlreadyOwnedByYou",
+				"Your previous request to create the named bucket succeeded and you already own it.",
+			)
+			return
+		}
+		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	w.Header().Set("Location", "/"+bucket)
+	w.WriteHeader(http.StatusOK)
+}
+
+func (ro *Router) handleDeleteBucket(w http.ResponseWriter, r *http.Request, bucket string) {
+	if err := ro.storage.DeleteBucket(bucket); err != nil {
+		switch {
+		case errors.Is(err, ErrBucketNotFound):
+			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+				"The specified bucket does not exist.")
+		case errors.Is(err, ErrBucketNotEmpty):
+			writeError(w, r, http.StatusConflict, "BucketNotEmpty",
+				"The bucket you tried to delete is not empty.")
+		default:
+			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (ro *Router) handleHeadBucket(w http.ResponseWriter, r *http.Request, bucket string) {
+	if !ro.storage.BucketExists(bucket) {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 // parsePath splits a path-style S3 URL into bucket and key:
 // "/my-bucket/path/to/object" → ("my-bucket", "path/to/object")
 func parsePath(path string) (bucket, key string) {
@@ -91,4 +167,22 @@ func parsePath(path string) (bucket, key string) {
 		key = parts[1]
 	}
 	return bucket, key
+}
+
+// XML response types for S3 bucket operations.
+
+type listBucketsResult struct {
+	XMLName xml.Name    `xml:"ListAllMyBucketsResult"`
+	Owner   xmlOwner    `xml:"Owner"`
+	Buckets []xmlBucket `xml:"Buckets>Bucket"`
+}
+
+type xmlOwner struct {
+	ID          string `xml:"ID"`
+	DisplayName string `xml:"DisplayName"`
+}
+
+type xmlBucket struct {
+	Name         string    `xml:"Name"`
+	CreationDate time.Time `xml:"CreationDate"`
 }

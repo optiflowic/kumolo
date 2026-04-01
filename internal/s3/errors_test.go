@@ -71,6 +71,25 @@ func TestWriteError(t *testing.T) {
 	})
 }
 
+func TestWriteXML(t *testing.T) {
+	t.Run("sets Content-Type and status code", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		writeXML(w, http.StatusOK, struct {
+			XMLName struct{} `xml:"Result"`
+		}{})
+		assert.Equal(t, "application/xml", w.Header().Get("Content-Type"))
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("logs warning when XML header write fails", func(t *testing.T) {
+		writeXML(newFailWriter(), http.StatusOK, struct{}{})
+	})
+
+	t.Run("logs warning when XML body encode fails", func(t *testing.T) {
+		writeXML(newBodyFailWriter(), http.StatusOK, struct{}{})
+	})
+}
+
 func TestWriteNotImplemented(t *testing.T) {
 	t.Run("returns 501 Not Implemented", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)

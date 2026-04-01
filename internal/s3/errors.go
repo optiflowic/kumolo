@@ -51,3 +51,15 @@ func writeNotImplemented(w http.ResponseWriter, r *http.Request) {
 		"This operation is not implemented.",
 	)
 }
+
+func writeXML(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/xml")
+	w.WriteHeader(status)
+	if _, err := fmt.Fprint(w, xml.Header); err != nil {
+		slog.Warn("failed to write XML header", "err", err)
+		return
+	}
+	if err := xml.NewEncoder(w).Encode(v); err != nil {
+		slog.Warn("failed to encode XML response", "err", err)
+	}
+}

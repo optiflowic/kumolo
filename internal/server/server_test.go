@@ -10,8 +10,10 @@ import (
 )
 
 func TestNewMux(t *testing.T) {
-	mux := NewMux()
+	mux, cleanup, err := NewMux(t.TempDir())
+	require.NoError(t, err)
 	require.NotNil(t, mux)
+	t.Cleanup(cleanup)
 
 	// Verify that the mux routes S3-style requests.
 	req := httptest.NewRequest(http.MethodGet, "/", nil)

@@ -29,7 +29,12 @@ func main() {
 	}
 	slog.SetDefault(slog.New(logging.NewBracketHandler(os.Stderr, level)))
 
-	mux := server.NewMux()
+	mux, cleanup, err := server.NewMux(cfg.DataDir)
+	if err != nil {
+		slog.Error("failed to initialize storage", "err", err)
+		os.Exit(1)
+	}
+	defer cleanup()
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
