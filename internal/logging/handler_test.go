@@ -28,11 +28,11 @@ func TestBracketHandler_Handle(t *testing.T) {
 		assert.Equal(t, "[2026-04-01T12:00:00Z] [INFO] hello\n", buf.String())
 	})
 
-	t.Run("appends record attributes in brackets", func(t *testing.T) {
+	t.Run("appends record attributes as key=value", func(t *testing.T) {
 		var buf bytes.Buffer
 		h := NewBracketHandler(&buf, slog.LevelInfo)
 		require.NoError(t, h.Handle(context.Background(), record(slog.LevelInfo, "msg", "k", "v")))
-		assert.Contains(t, buf.String(), "[k=v]")
+		assert.Contains(t, buf.String(), " k=v")
 	})
 
 	t.Run("appends pre-set attrs from WithAttrs", func(t *testing.T) {
@@ -40,7 +40,7 @@ func TestBracketHandler_Handle(t *testing.T) {
 		h := NewBracketHandler(&buf, slog.LevelInfo).
 			WithAttrs([]slog.Attr{slog.String("svc", "kumolo")})
 		require.NoError(t, h.Handle(context.Background(), record(slog.LevelInfo, "msg")))
-		assert.Contains(t, buf.String(), "[svc=kumolo]")
+		assert.Contains(t, buf.String(), " svc=kumolo")
 	})
 
 	t.Run("returns write error", func(t *testing.T) {
@@ -66,13 +66,13 @@ func TestBracketHandler_WithAttrs(t *testing.T) {
 		require.NoError(t, orig.Handle(context.Background(), record(slog.LevelInfo, "msg")))
 		assert.False(
 			t,
-			strings.Contains(buf.String(), "[k=v]"),
+			strings.Contains(buf.String(), " k=v"),
 			"original should not have child attr",
 		)
 
 		buf.Reset()
 		require.NoError(t, child.Handle(context.Background(), record(slog.LevelInfo, "msg")))
-		assert.True(t, strings.Contains(buf.String(), "[k=v]"), "child should have attr")
+		assert.True(t, strings.Contains(buf.String(), " k=v"), "child should have attr")
 	})
 }
 

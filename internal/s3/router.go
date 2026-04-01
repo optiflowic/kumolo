@@ -102,7 +102,7 @@ func (ro *Router) handleListBuckets(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
-	slog.Info("ListBuckets", "count", len(buckets))
+	slog.Info("listed buckets", "count", len(buckets))
 	xmlBuckets := make([]xmlBucket, len(buckets))
 	for i, b := range buckets {
 		xmlBuckets[i] = xmlBucket{Name: b.Name, CreationDate: b.CreationDate.UTC()}
@@ -116,7 +116,11 @@ func (ro *Router) handleListBuckets(w http.ResponseWriter, r *http.Request) {
 func (ro *Router) handleCreateBucket(w http.ResponseWriter, r *http.Request, bucket string) {
 	if err := ro.storage.CreateBucket(bucket); err != nil {
 		if errors.Is(err, os.ErrExist) {
-			slog.Warn("CreateBucket: already exists", "bucket", bucket)
+			slog.Warn(
+				"bucket already exists",
+				"bucket",
+				bucket,
+			) // #nosec G706 -- bucket name is validated by S3 naming rules before reaching this point
 			writeError(
 				w,
 				r,
@@ -126,11 +130,21 @@ func (ro *Router) handleCreateBucket(w http.ResponseWriter, r *http.Request, buc
 			)
 			return
 		}
-		slog.Error("CreateBucket failed", "bucket", bucket, "err", err)
+		slog.Error(
+			"failed to create bucket",
+			"bucket",
+			bucket,
+			"err",
+			err,
+		) // #nosec G706 -- bucket name is validated by S3 naming rules before reaching this point
 		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
-	slog.Info("CreateBucket", "bucket", bucket)
+	slog.Info(
+		"bucket created",
+		"bucket",
+		bucket,
+	) // #nosec G706 -- bucket name is validated by S3 naming rules before reaching this point
 	w.Header().Set("Location", "/"+bucket)
 	w.WriteHeader(http.StatusOK)
 }
@@ -139,31 +153,57 @@ func (ro *Router) handleDeleteBucket(w http.ResponseWriter, r *http.Request, buc
 	if err := ro.storage.DeleteBucket(bucket); err != nil {
 		switch {
 		case errors.Is(err, ErrBucketNotFound):
-			slog.Warn("DeleteBucket: not found", "bucket", bucket)
+			slog.Warn(
+				"bucket not found",
+				"bucket",
+				bucket,
+			) // #nosec G706 -- bucket name is validated by S3 naming rules before reaching this point
 			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 				"The specified bucket does not exist.")
 		case errors.Is(err, ErrBucketNotEmpty):
-			slog.Warn("DeleteBucket: not empty", "bucket", bucket)
+			slog.Warn(
+				"bucket not empty",
+				"bucket",
+				bucket,
+			) // #nosec G706 -- bucket name is validated by S3 naming rules before reaching this point
 			writeError(w, r, http.StatusConflict, "BucketNotEmpty",
 				"The bucket you tried to delete is not empty.")
 		default:
-			slog.Error("DeleteBucket failed", "bucket", bucket, "err", err)
+			slog.Error(
+				"failed to delete bucket",
+				"bucket",
+				bucket,
+				"err",
+				err,
+			) // #nosec G706 -- bucket name is validated by S3 naming rules before reaching this point
 			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		}
 		return
 	}
-	slog.Info("DeleteBucket", "bucket", bucket)
+	slog.Info(
+		"bucket deleted",
+		"bucket",
+		bucket,
+	) // #nosec G706 -- bucket name is validated by S3 naming rules before reaching this point
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (ro *Router) handleHeadBucket(w http.ResponseWriter, r *http.Request, bucket string) {
 	w.Header().Set("Content-Length", "0")
 	if !ro.storage.BucketExists(bucket) {
-		slog.Debug("HeadBucket: not found", "bucket", bucket)
+		slog.Debug(
+			"bucket not found",
+			"bucket",
+			bucket,
+		) // #nosec G706 -- bucket name is validated by S3 naming rules before reaching this point
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	slog.Debug("HeadBucket: found", "bucket", bucket)
+	slog.Debug(
+		"bucket found",
+		"bucket",
+		bucket,
+	) // #nosec G706 -- bucket name is validated by S3 naming rules before reaching this point
 	w.WriteHeader(http.StatusOK)
 }
 

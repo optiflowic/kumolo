@@ -35,10 +35,10 @@ func (h *BracketHandler) Handle(_ context.Context, r slog.Record) error {
 	fmt.Fprintf(&buf, "[%s] [%s] %s", r.Time.UTC().Format(time.RFC3339), r.Level, r.Message)
 
 	for _, a := range h.attrs {
-		fmt.Fprintf(&buf, " [%s=%v]", a.Key, a.Value)
+		fmt.Fprintf(&buf, " %s=%v", a.Key, a.Value)
 	}
 	r.Attrs(func(a slog.Attr) bool {
-		fmt.Fprintf(&buf, " [%s=%v]", a.Key, a.Value)
+		fmt.Fprintf(&buf, " %s=%v", a.Key, a.Value)
 		return true
 	})
 
