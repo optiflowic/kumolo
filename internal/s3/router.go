@@ -157,6 +157,7 @@ func (ro *Router) handleDeleteBucket(w http.ResponseWriter, r *http.Request, buc
 }
 
 func (ro *Router) handleHeadBucket(w http.ResponseWriter, r *http.Request, bucket string) {
+	w.Header().Set("Content-Length", "0")
 	if !ro.storage.BucketExists(bucket) {
 		slog.Debug("HeadBucket: not found", "bucket", bucket)
 		w.WriteHeader(http.StatusNotFound)
