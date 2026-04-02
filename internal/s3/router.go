@@ -96,7 +96,7 @@ func (ro *Router) routeObject(w http.ResponseWriter, r *http.Request, bucket, ke
 	case http.MethodGet:
 		ro.handleGetObject(w, r, bucket, key)
 	case http.MethodDelete:
-		writeNotImplemented(w, r)
+		ro.handleDeleteObject(w, r, bucket, key)
 	case http.MethodHead:
 		writeNotImplemented(w, r)
 	default:
@@ -148,6 +148,36 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 	)
 	w.Header().Set("ETag", meta.ETag)
 	w.WriteHeader(http.StatusOK)
+}
+
+func (ro *Router) handleDeleteObject(w http.ResponseWriter, r *http.Request, bucket, key string) {
+	err := ro.storage.DeleteObject(bucket, key)
+	switch {
+	case err == nil, errors.Is(err, ErrObjectNotFound):
+		// S3 returns 204 regardless of whether the object existed.
+		slog.Info( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			"object deleted",
+			"bucket",
+			bucket,
+			"key",
+			key,
+		)
+		w.WriteHeader(http.StatusNoContent)
+	case errors.Is(err, ErrBucketNotFound):
+		writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+			"The specified bucket does not exist.")
+	default:
+		slog.Error( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			"failed to delete object",
+			"bucket",
+			bucket,
+			"key",
+			key,
+			"err",
+			err,
+		)
+		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+	}
 }
 
 func (ro *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket, key string) {

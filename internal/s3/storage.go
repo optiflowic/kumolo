@@ -219,7 +219,13 @@ func (s *Storage) DeleteObject(bucket, key string) error {
 		return err
 	}
 	if err := s.root.Remove(objPath + ".meta.json"); err != nil && !errors.Is(err, os.ErrNotExist) {
-		slog.Warn("failed to remove metadata", "path", objPath, "err", err)
+		slog.Warn(
+			"failed to remove metadata",
+			"path",
+			objPath,
+			"err",
+			err,
+		) // #nosec G706 -- objPath is an internal filesystem path derived from bucket/key, not direct user input
 	}
 	return nil
 }
