@@ -2,8 +2,10 @@ package s3
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -198,28 +200,49 @@ func TestHeadBucket(t *testing.T) {
 	})
 }
 
-// mockBucketStore is a configurable stub for the bucketStore interface.
-type mockBucketStore struct {
+// mockStore is a configurable stub for the full store interface.
+type mockStore struct {
 	listBucketsErr  error
 	createBucketErr error
 	deleteBucketErr error
 	bucketExists    bool
+	putObjectErr    error
+	putObjectMeta   ObjectMetadata
+	getObjectFile   *os.File
+	getObjectMeta   ObjectMetadata
+	getObjectErr    error
+	deleteObjectErr error
+	headObjectMeta  ObjectMetadata
+	headObjectErr   error
+	listObjectsObjs []ObjectInfo
+	listObjectsErr  error
 }
 
-func (m *mockBucketStore) ListBuckets() ([]BucketInfo, error) {
-	return nil, m.listBucketsErr
+func (m *mockStore) ListBuckets() ([]BucketInfo, error) { return nil, m.listBucketsErr }
+func (m *mockStore) CreateBucket(_ string) error        { return m.createBucketErr }
+func (m *mockStore) DeleteBucket(_ string) error        { return m.deleteBucketErr }
+func (m *mockStore) BucketExists(_ string) bool         { return m.bucketExists }
+func (m *mockStore) PutObject(_ string, _ string, _ io.Reader, _ string) (ObjectMetadata, error) {
+	return m.putObjectMeta, m.putObjectErr
 }
-func (m *mockBucketStore) CreateBucket(_ string) error { return m.createBucketErr }
-func (m *mockBucketStore) DeleteBucket(_ string) error { return m.deleteBucketErr }
-func (m *mockBucketStore) BucketExists(_ string) bool  { return m.bucketExists }
+func (m *mockStore) GetObject(_ string, _ string) (*os.File, ObjectMetadata, error) {
+	return m.getObjectFile, m.getObjectMeta, m.getObjectErr
+}
+func (m *mockStore) DeleteObject(_ string, _ string) error { return m.deleteObjectErr }
+func (m *mockStore) HeadObject(_ string, _ string) (ObjectMetadata, error) {
+	return m.headObjectMeta, m.headObjectErr
+}
+func (m *mockStore) ListObjects(_ string) ([]ObjectInfo, error) {
+	return m.listObjectsObjs, m.listObjectsErr
+}
 
-func newRouterWithMock(store *mockBucketStore) *Router {
+func newRouterWithMock(store *mockStore) *Router {
 	return &Router{storage: store}
 }
 
 func TestRouterHandlerErrors(t *testing.T) {
 	t.Run("ListBuckets returns 500 on storage error", func(t *testing.T) {
-		ro := newRouterWithMock(&mockBucketStore{listBucketsErr: errors.New("disk failure")})
+		ro := newRouterWithMock(&mockStore{listBucketsErr: errors.New("disk failure")})
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
@@ -227,7 +250,7 @@ func TestRouterHandlerErrors(t *testing.T) {
 	})
 
 	t.Run("CreateBucket returns 500 on unexpected storage error", func(t *testing.T) {
-		ro := newRouterWithMock(&mockBucketStore{createBucketErr: errors.New("disk full")})
+		ro := newRouterWithMock(&mockStore{createBucketErr: errors.New("disk full")})
 		req := httptest.NewRequest(http.MethodPut, "/my-bucket", nil)
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
@@ -235,7 +258,7 @@ func TestRouterHandlerErrors(t *testing.T) {
 	})
 
 	t.Run("DeleteBucket returns 500 on unexpected storage error", func(t *testing.T) {
-		ro := newRouterWithMock(&mockBucketStore{deleteBucketErr: errors.New("disk full")})
+		ro := newRouterWithMock(&mockStore{deleteBucketErr: errors.New("disk full")})
 		req := httptest.NewRequest(http.MethodDelete, "/my-bucket", nil)
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)

@@ -3,6 +3,7 @@ package s3
 import (
 	"encoding/xml"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -18,9 +19,21 @@ type bucketStore interface {
 	BucketExists(bucket string) bool
 }
 
+// objectStore is the subset of Storage used by the Router for object operations.
+type objectStore interface {
+	PutObject(bucket, key string, r io.Reader, contentType string) (ObjectMetadata, error)
+	GetObject(bucket, key string) (*os.File, ObjectMetadata, error)
+	DeleteObject(bucket, key string) error
+	HeadObject(bucket, key string) (ObjectMetadata, error)
+	ListObjects(bucket string) ([]ObjectInfo, error)
+}
+
 // Router handles S3 API requests using path-style URLs: /<bucket>/<key>
 type Router struct {
-	storage bucketStore
+	storage interface {
+		bucketStore
+		objectStore
+	}
 }
 
 func NewRouter(storage *Storage) *Router {
