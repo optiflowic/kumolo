@@ -23,23 +23,12 @@ type errorResponse struct {
 }
 
 func writeError(w http.ResponseWriter, r *http.Request, status int, code, message string) {
-	w.Header().Set("Content-Type", "application/xml")
-	w.WriteHeader(status)
-
-	resp := errorResponse{
+	writeXML(w, status, errorResponse{
 		Code:      code,
 		Message:   message,
 		Resource:  r.URL.Path,
 		RequestID: "kumolo-local",
-	}
-
-	if _, err := fmt.Fprint(w, xml.Header); err != nil {
-		slog.Warn("failed to write XML header", "err", err)
-		return
-	}
-	if err := xml.NewEncoder(w).Encode(resp); err != nil {
-		slog.Warn("failed to encode error response", "err", err)
-	}
+	})
 }
 
 func writeNotImplemented(w http.ResponseWriter, r *http.Request) {

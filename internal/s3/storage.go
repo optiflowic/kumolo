@@ -141,11 +141,7 @@ func (s *Storage) PutObject(
 		}
 	}
 
-	meta, err := s.writeObject(objPath, r, contentType)
-	if err != nil {
-		return ObjectMetadata{}, err
-	}
-	return meta, nil
+	return s.writeObject(objPath, r, contentType)
 }
 
 func (s *Storage) writeObject(
