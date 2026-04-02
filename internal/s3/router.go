@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -93,7 +94,7 @@ func (ro *Router) routeObject(w http.ResponseWriter, r *http.Request, bucket, ke
 	case http.MethodPut:
 		ro.handlePutObject(w, r, bucket, key)
 	case http.MethodGet:
-		writeNotImplemented(w, r)
+		ro.handleGetObject(w, r, bucket, key)
 	case http.MethodDelete:
 		writeNotImplemented(w, r)
 	case http.MethodHead:
@@ -147,6 +148,49 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 	)
 	w.Header().Set("ETag", meta.ETag)
 	w.WriteHeader(http.StatusOK)
+}
+
+func (ro *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket, key string) {
+	f, meta, err := ro.storage.GetObject(bucket, key)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrBucketNotFound):
+			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+				"The specified bucket does not exist.")
+		case errors.Is(err, ErrObjectNotFound):
+			writeError(w, r, http.StatusNotFound, "NoSuchKey",
+				"The specified key does not exist.")
+		default:
+			slog.Error( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"failed to get object",
+				"bucket",
+				bucket,
+				"key",
+				key,
+				"err",
+				err,
+			)
+			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+	defer func() { _ = f.Close() }()
+	w.Header().Set("Content-Type", meta.ContentType)
+	w.Header().Set("Content-Length", strconv.FormatInt(meta.Size, 10))
+	w.Header().Set("ETag", meta.ETag)
+	w.Header().Set("Last-Modified", meta.LastModified.UTC().Format(http.TimeFormat))
+	w.WriteHeader(http.StatusOK)
+	if _, err := io.Copy(w, f); err != nil {
+		slog.Warn( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			"failed to stream object body",
+			"bucket",
+			bucket,
+			"key",
+			key,
+			"err",
+			err,
+		)
+	}
 }
 
 func (ro *Router) handleListBuckets(w http.ResponseWriter, r *http.Request) {
