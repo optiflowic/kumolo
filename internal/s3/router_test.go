@@ -81,7 +81,7 @@ func TestRouter(t *testing.T) {
 		}{
 			{http.MethodGet, http.StatusNotImplemented},
 			{http.MethodHead, http.StatusNotImplemented},
-			{http.MethodPut, http.StatusNotImplemented},
+			{http.MethodPut, http.StatusNotFound}, // 404: bucket does not exist
 			{http.MethodDelete, http.StatusNotImplemented},
 			{http.MethodPost, http.StatusMethodNotAllowed},
 		}
@@ -260,6 +260,49 @@ func TestRouterHandlerErrors(t *testing.T) {
 	t.Run("DeleteBucket returns 500 on unexpected storage error", func(t *testing.T) {
 		ro := newRouterWithMock(&mockStore{deleteBucketErr: errors.New("disk full")})
 		req := httptest.NewRequest(http.MethodDelete, "/my-bucket", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+}
+
+func TestRouterPutObject(t *testing.T) {
+	t.Run("stores object and returns 200 with ETag", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+
+		body := strings.NewReader("hello world")
+		req := httptest.NewRequest(http.MethodPut, "/my-bucket/hello.txt", body)
+		req.Header.Set("Content-Type", "text/plain")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.NotEmpty(t, w.Header().Get("ETag"))
+	})
+
+	t.Run("defaults Content-Type to application/octet-stream", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+
+		req := httptest.NewRequest(http.MethodPut, "/my-bucket/file.bin", strings.NewReader("data"))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("returns 404 when bucket does not exist", func(t *testing.T) {
+		ro := newTestRouter(t)
+		req := httptest.NewRequest(http.MethodPut, "/no-bucket/obj.txt", strings.NewReader("data"))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchBucket")
+	})
+
+	t.Run("returns 500 on unexpected storage error", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{putObjectErr: errors.New("disk full")})
+		req := httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", strings.NewReader("data"))
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)

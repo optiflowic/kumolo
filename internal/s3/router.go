@@ -88,10 +88,10 @@ func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, bucket str
 	}
 }
 
-func (ro *Router) routeObject(w http.ResponseWriter, r *http.Request, _, _ string) {
+func (ro *Router) routeObject(w http.ResponseWriter, r *http.Request, bucket, key string) {
 	switch r.Method {
 	case http.MethodPut:
-		writeNotImplemented(w, r)
+		ro.handlePutObject(w, r, bucket, key)
 	case http.MethodGet:
 		writeNotImplemented(w, r)
 	case http.MethodDelete:
@@ -107,6 +107,46 @@ func (ro *Router) routeObject(w http.ResponseWriter, r *http.Request, _, _ strin
 			"The specified method is not allowed.",
 		)
 	}
+}
+
+func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket, key string) {
+	contentType := r.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	meta, err := ro.storage.PutObject(bucket, key, r.Body, contentType)
+	if err != nil {
+		if errors.Is(err, ErrBucketNotFound) {
+			slog.Warn( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"bucket not found",
+				"bucket",
+				bucket,
+			)
+			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+				"The specified bucket does not exist.")
+			return
+		}
+		slog.Error( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			"failed to put object",
+			"bucket",
+			bucket,
+			"key",
+			key,
+			"err",
+			err,
+		)
+		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	slog.Info( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+		"object created",
+		"bucket",
+		bucket,
+		"key",
+		key,
+	)
+	w.Header().Set("ETag", meta.ETag)
+	w.WriteHeader(http.StatusOK)
 }
 
 func (ro *Router) handleListBuckets(w http.ResponseWriter, r *http.Request) {
