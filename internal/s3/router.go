@@ -29,12 +29,21 @@ func NewRouter(storage *Storage) *Router {
 
 func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	bucket, key := parsePath(r.URL.Path)
+	switch {
+	case bucket == "":
+		ro.routeRoot(w, r)
+	case key == "":
+		ro.routeBucket(w, r, bucket)
+	default:
+		ro.routeObject(w, r, bucket, key)
+	}
+}
 
-	if bucket == "" {
-		if r.Method == http.MethodGet {
-			ro.handleListBuckets(w, r)
-			return
-		}
+func (ro *Router) routeRoot(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		ro.handleListBuckets(w, r)
+	default:
 		writeError(
 			w,
 			r,
@@ -42,15 +51,7 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"MethodNotAllowed",
 			"The specified method is not allowed.",
 		)
-		return
 	}
-
-	if key == "" {
-		ro.routeBucket(w, r, bucket)
-		return
-	}
-
-	ro.routeObject(w, r, bucket, key)
 }
 
 func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, bucket string) {
