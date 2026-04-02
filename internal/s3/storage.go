@@ -279,6 +279,7 @@ func (s *Storage) walkDir(bucket, dir string, objects *[]ObjectInfo) error {
 		key, _ := filepath.Rel(bucket, entryPath)
 		meta, err := s.readMeta(entryPath)
 		if err != nil {
+			slog.Warn("skipping object with unreadable metadata", "path", entryPath, "err", err)
 			continue
 		}
 		*objects = append(*objects, ObjectInfo{Key: key, Metadata: meta})

@@ -10,10 +10,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func setLogger(t *testing.T, buf *testBuffer) {
+	t.Helper()
+	orig := slog.Default()
+	slog.SetDefault(slog.New(NewBracketHandler(buf, slog.LevelInfo)))
+	t.Cleanup(func() { slog.SetDefault(orig) })
+}
+
 func TestMiddleware(t *testing.T) {
 	t.Run("logs method, path, status, and duration", func(t *testing.T) {
 		var buf testBuffer
-		slog.SetDefault(slog.New(NewBracketHandler(&buf, slog.LevelInfo)))
+		setLogger(t, &buf)
 
 		handler := Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusCreated)
@@ -32,7 +39,7 @@ func TestMiddleware(t *testing.T) {
 
 	t.Run("defaults to 200 when handler does not call WriteHeader", func(t *testing.T) {
 		var buf testBuffer
-		slog.SetDefault(slog.New(NewBracketHandler(&buf, slog.LevelInfo)))
+		setLogger(t, &buf)
 
 		handler := Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, err := w.Write([]byte("ok"))
