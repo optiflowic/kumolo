@@ -520,6 +520,47 @@ func TestRouterListObjectsV2(t *testing.T) {
 	})
 }
 
+func TestRouterGetBucketLocation(t *testing.T) {
+	t.Run("returns 200 with empty LocationConstraint when no SigV4 region", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket?location", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "application/xml", w.Header().Get("Content-Type"))
+		assert.Contains(t, w.Body.String(), "<LocationConstraint></LocationConstraint>")
+	})
+
+	t.Run("returns region from SigV4 Authorization header", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket?location", nil)
+		req.Header.Set(
+			"Authorization",
+			"AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20230101/us-west-2/s3/aws4_request, SignedHeaders=host, Signature=abc123",
+		)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), "<LocationConstraint>us-west-2</LocationConstraint>")
+	})
+
+	t.Run("returns 404 when bucket does not exist", func(t *testing.T) {
+		ro := newTestRouter(t)
+		req := httptest.NewRequest(http.MethodGet, "/no-bucket?location", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchBucket")
+	})
+}
+
 func TestParseSigV4(t *testing.T) {
 	t.Run("extracts credentials from valid header", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)

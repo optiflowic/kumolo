@@ -77,9 +77,12 @@ func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, bucket str
 	case http.MethodHead:
 		ro.handleHeadBucket(w, r, bucket)
 	case http.MethodGet:
-		if r.URL.Query().Get("list-type") == "2" {
+		switch {
+		case r.URL.Query().Has("location"):
+			ro.handleGetBucketLocation(w, r, bucket)
+		case r.URL.Query().Get("list-type") == "2":
 			ro.handleListObjectsV2(w, r, bucket)
-		} else {
+		default:
 			writeNotImplemented(w, r)
 		}
 	default:
@@ -343,6 +346,27 @@ func (ro *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 	}
 }
 
+func (ro *Router) handleGetBucketLocation(w http.ResponseWriter, r *http.Request, bucket string) {
+	if !ro.storage.BucketExists(bucket) {
+		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			"bucket not found",
+			"bucket",
+			bucket,
+		)
+		writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+			"The specified bucket does not exist.")
+		return
+	}
+	slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+		"get bucket location",
+		"bucket",
+		bucket,
+	)
+	// Return the region from the request. Empty string represents us-east-1 per S3 spec.
+	region := ParseSigV4(r).Region
+	writeXML(w, http.StatusOK, locationConstraint{Location: region})
+}
+
 func (ro *Router) handleListBuckets(w http.ResponseWriter, r *http.Request) {
 	buckets, err := ro.storage.ListBuckets()
 	if err != nil {
@@ -504,4 +528,11 @@ type xmlObjectContent struct {
 	ETag         string    `xml:"ETag"`
 	Size         int64     `xml:"Size"`
 	StorageClass string    `xml:"StorageClass"`
+}
+
+// locationConstraint represents the GetBucketLocation response.
+// An empty Location means us-east-1 per the S3 specification.
+type locationConstraint struct {
+	XMLName  xml.Name `xml:"LocationConstraint"`
+	Location string   `xml:",chardata"`
 }
