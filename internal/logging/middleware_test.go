@@ -46,7 +46,7 @@ func TestMiddleware(t *testing.T) {
 	})
 }
 
-// testBuffer is a thread-safe bytes.Buffer for capturing log output in tests.
+// testBuffer captures log output in tests.
 type testBuffer struct {
 	buf []byte
 }

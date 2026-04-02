@@ -161,28 +161,18 @@ func TestRouterDeleteBucket(t *testing.T) {
 	})
 
 	t.Run("returns 409 when bucket is not empty", func(t *testing.T) {
-		ro := newTestRouter(t)
-		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
-
-		// Put an object to make the bucket non-empty
-		body := strings.NewReader("hello")
-		req := httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", body)
-		req.Header.Set("Content-Type", "text/plain")
-		ro.ServeHTTP(httptest.NewRecorder(), req)
-
-		// Manually add an object via storage to make bucket non-empty
-		// (object PUT is not yet implemented in the router, so we use storage directly)
+		// Object PUT is not yet implemented in the router, so use storage directly.
 		storage, err := NewStorage(t.TempDir())
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = storage.Close() })
 		require.NoError(t, storage.CreateBucket("my-bucket"))
 		_, err = storage.PutObject("my-bucket", "obj.txt", strings.NewReader("hello"), "text/plain")
 		require.NoError(t, err)
-		roWithObject := NewRouter(storage)
+		ro := NewRouter(storage)
 
-		req = httptest.NewRequest(http.MethodDelete, "/my-bucket", nil)
+		req := httptest.NewRequest(http.MethodDelete, "/my-bucket", nil)
 		w := httptest.NewRecorder()
-		roWithObject.ServeHTTP(w, req)
+		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusConflict, w.Code)
 		assert.Contains(t, w.Body.String(), "BucketNotEmpty")
 	})
