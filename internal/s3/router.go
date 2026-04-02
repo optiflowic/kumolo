@@ -3,9 +3,11 @@ package s3
 import (
 	"encoding/xml"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -18,9 +20,21 @@ type bucketStore interface {
 	BucketExists(bucket string) bool
 }
 
+// objectStore is the subset of Storage used by the Router for object operations.
+type objectStore interface {
+	PutObject(bucket, key string, r io.Reader, contentType string) (ObjectMetadata, error)
+	GetObject(bucket, key string) (*os.File, ObjectMetadata, error)
+	DeleteObject(bucket, key string) error
+	HeadObject(bucket, key string) (ObjectMetadata, error)
+	ListObjects(bucket string) ([]ObjectInfo, error)
+}
+
 // Router handles S3 API requests using path-style URLs: /<bucket>/<key>
 type Router struct {
-	storage bucketStore
+	storage interface {
+		bucketStore
+		objectStore
+	}
 }
 
 func NewRouter(storage *Storage) *Router {
@@ -63,7 +77,11 @@ func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, bucket str
 	case http.MethodHead:
 		ro.handleHeadBucket(w, r, bucket)
 	case http.MethodGet:
-		writeNotImplemented(w, r)
+		if r.URL.Query().Get("list-type") == "2" {
+			ro.handleListObjectsV2(w, r, bucket)
+		} else {
+			writeNotImplemented(w, r)
+		}
 	default:
 		writeError(
 			w,
@@ -75,16 +93,65 @@ func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, bucket str
 	}
 }
 
-func (ro *Router) routeObject(w http.ResponseWriter, r *http.Request, _, _ string) {
+func (ro *Router) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bucket string) {
+	objects, err := ro.storage.ListObjects(bucket)
+	if err != nil {
+		if errors.Is(err, ErrBucketNotFound) {
+			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"bucket not found",
+				"bucket",
+				bucket,
+			)
+			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+				"The specified bucket does not exist.")
+			return
+		}
+		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			"failed to list objects",
+			"bucket",
+			bucket,
+			"err",
+			err,
+		)
+		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+		"listed objects",
+		"bucket",
+		bucket,
+		"count",
+		len(objects),
+	)
+	contents := make([]xmlObjectContent, len(objects))
+	for i, obj := range objects {
+		contents[i] = xmlObjectContent{
+			Key:          obj.Key,
+			LastModified: obj.Metadata.LastModified.UTC(),
+			ETag:         obj.Metadata.ETag,
+			Size:         obj.Metadata.Size,
+			StorageClass: "STANDARD",
+		}
+	}
+	writeXML(w, http.StatusOK, listObjectsV2Result{
+		Name:        bucket,
+		KeyCount:    len(objects),
+		MaxKeys:     1000,
+		IsTruncated: false,
+		Contents:    contents,
+	})
+}
+
+func (ro *Router) routeObject(w http.ResponseWriter, r *http.Request, bucket, key string) {
 	switch r.Method {
 	case http.MethodPut:
-		writeNotImplemented(w, r)
+		ro.handlePutObject(w, r, bucket, key)
 	case http.MethodGet:
-		writeNotImplemented(w, r)
+		ro.handleGetObject(w, r, bucket, key)
 	case http.MethodDelete:
-		writeNotImplemented(w, r)
+		ro.handleDeleteObject(w, r, bucket, key)
 	case http.MethodHead:
-		writeNotImplemented(w, r)
+		ro.handleHeadObject(w, r, bucket, key)
 	default:
 		writeError(
 			w,
@@ -92,6 +159,186 @@ func (ro *Router) routeObject(w http.ResponseWriter, r *http.Request, _, _ strin
 			http.StatusMethodNotAllowed,
 			"MethodNotAllowed",
 			"The specified method is not allowed.",
+		)
+	}
+}
+
+func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket, key string) {
+	contentType := r.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	meta, err := ro.storage.PutObject(bucket, key, r.Body, contentType)
+	if err != nil {
+		if errors.Is(err, ErrBucketNotFound) {
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"bucket not found",
+				"bucket",
+				bucket,
+			)
+			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+				"The specified bucket does not exist.")
+			return
+		}
+		slog.Error( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			"failed to put object",
+			"bucket",
+			bucket,
+			"key",
+			key,
+			"err",
+			err,
+		)
+		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	slog.Info( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+		"object created",
+		"bucket",
+		bucket,
+		"key",
+		key,
+	)
+	w.Header().Set("ETag", meta.ETag)
+	w.WriteHeader(http.StatusOK)
+}
+
+func (ro *Router) handleHeadObject(w http.ResponseWriter, r *http.Request, bucket, key string) {
+	meta, err := ro.storage.HeadObject(bucket, key)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrBucketNotFound), errors.Is(err, ErrObjectNotFound):
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"object not found",
+				"bucket",
+				bucket,
+				"key",
+				key,
+			)
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			slog.Error( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"failed to head object",
+				"bucket",
+				bucket,
+				"key",
+				key,
+				"err",
+				err,
+			)
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+		return
+	}
+	w.Header().Set("Content-Type", meta.ContentType)
+	w.Header().Set("Content-Length", strconv.FormatInt(meta.Size, 10))
+	w.Header().Set("ETag", meta.ETag)
+	w.Header().Set("Last-Modified", meta.LastModified.UTC().Format(http.TimeFormat))
+	w.WriteHeader(http.StatusOK)
+}
+
+func (ro *Router) handleDeleteObject(w http.ResponseWriter, r *http.Request, bucket, key string) {
+	err := ro.storage.DeleteObject(bucket, key)
+	switch {
+	case err == nil:
+		slog.Info( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			"object deleted",
+			"bucket",
+			bucket,
+			"key",
+			key,
+		)
+		w.WriteHeader(http.StatusNoContent)
+	case errors.Is(err, ErrObjectNotFound):
+		// S3 returns 204 regardless of whether the object existed.
+		slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			"delete skipped: object not found",
+			"bucket",
+			bucket,
+			"key",
+			key,
+		)
+		w.WriteHeader(http.StatusNoContent)
+	case errors.Is(err, ErrBucketNotFound):
+		slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			"bucket not found",
+			"bucket",
+			bucket,
+		)
+		writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+			"The specified bucket does not exist.")
+	default:
+		slog.Error( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			"failed to delete object",
+			"bucket",
+			bucket,
+			"key",
+			key,
+			"err",
+			err,
+		)
+		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+	}
+}
+
+func (ro *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket, key string) {
+	f, meta, err := ro.storage.GetObject(bucket, key)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrBucketNotFound):
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"bucket not found",
+				"bucket",
+				bucket,
+			)
+			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+				"The specified bucket does not exist.")
+		case errors.Is(err, ErrObjectNotFound):
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"object not found",
+				"bucket",
+				bucket,
+				"key",
+				key,
+			)
+			writeError(w, r, http.StatusNotFound, "NoSuchKey",
+				"The specified key does not exist.")
+		default:
+			slog.Error( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"failed to get object",
+				"bucket",
+				bucket,
+				"key",
+				key,
+				"err",
+				err,
+			)
+			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+	defer func() { _ = f.Close() }()
+	slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+		"serving object",
+		"bucket",
+		bucket,
+		"key",
+		key,
+	)
+	w.Header().Set("Content-Type", meta.ContentType)
+	w.Header().Set("Content-Length", strconv.FormatInt(meta.Size, 10))
+	w.Header().Set("ETag", meta.ETag)
+	w.Header().Set("Last-Modified", meta.LastModified.UTC().Format(http.TimeFormat))
+	w.WriteHeader(http.StatusOK)
+	if _, err := io.Copy(w, f); err != nil {
+		slog.Warn( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			"failed to stream object body",
+			"bucket",
+			bucket,
+			"key",
+			key,
+			"err",
+			err,
 		)
 	}
 }
@@ -103,7 +350,7 @@ func (ro *Router) handleListBuckets(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
-	slog.Info("listed buckets", "count", len(buckets))
+	slog.Debug("listed buckets", "count", len(buckets))
 	xmlBuckets := make([]xmlBucket, len(buckets))
 	for i, b := range buckets {
 		xmlBuckets[i] = xmlBucket{Name: b.Name, CreationDate: b.CreationDate.UTC()}
@@ -117,7 +364,7 @@ func (ro *Router) handleListBuckets(w http.ResponseWriter, r *http.Request) {
 func (ro *Router) handleCreateBucket(w http.ResponseWriter, r *http.Request, bucket string) {
 	if err := ro.storage.CreateBucket(bucket); err != nil {
 		if errors.Is(err, os.ErrExist) {
-			slog.Warn( // #nosec G706 -- bucket name is validated by S3 naming rules before reaching this point
+			slog.Debug( // #nosec G706 -- bucket name is validated by S3 naming rules before reaching this point
 				"bucket already exists",
 				"bucket",
 				bucket,
@@ -154,7 +401,7 @@ func (ro *Router) handleDeleteBucket(w http.ResponseWriter, r *http.Request, buc
 	if err := ro.storage.DeleteBucket(bucket); err != nil {
 		switch {
 		case errors.Is(err, ErrBucketNotFound):
-			slog.Warn( // #nosec G706 -- bucket name is validated by S3 naming rules before reaching this point
+			slog.Debug( // #nosec G706 -- bucket name is validated by S3 naming rules before reaching this point
 				"bucket not found",
 				"bucket",
 				bucket,
@@ -162,7 +409,7 @@ func (ro *Router) handleDeleteBucket(w http.ResponseWriter, r *http.Request, buc
 			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 				"The specified bucket does not exist.")
 		case errors.Is(err, ErrBucketNotEmpty):
-			slog.Warn( // #nosec G706 -- bucket name is validated by S3 naming rules before reaching this point
+			slog.Debug( // #nosec G706 -- bucket name is validated by S3 naming rules before reaching this point
 				"bucket not empty",
 				"bucket",
 				bucket,
@@ -223,7 +470,7 @@ func parsePath(path string) (bucket, key string) {
 	return bucket, key
 }
 
-// XML response types for S3 bucket operations.
+// XML response types for S3 operations.
 
 type listBucketsResult struct {
 	XMLName xml.Name    `xml:"ListAllMyBucketsResult"`
@@ -239,4 +486,22 @@ type xmlOwner struct {
 type xmlBucket struct {
 	Name         string    `xml:"Name"`
 	CreationDate time.Time `xml:"CreationDate"`
+}
+
+type listObjectsV2Result struct {
+	XMLName     xml.Name           `xml:"ListBucketResult"`
+	Name        string             `xml:"Name"`
+	Prefix      string             `xml:"Prefix"`
+	KeyCount    int                `xml:"KeyCount"`
+	MaxKeys     int                `xml:"MaxKeys"`
+	IsTruncated bool               `xml:"IsTruncated"`
+	Contents    []xmlObjectContent `xml:"Contents"`
+}
+
+type xmlObjectContent struct {
+	Key          string    `xml:"Key"`
+	LastModified time.Time `xml:"LastModified"`
+	ETag         string    `xml:"ETag"`
+	Size         int64     `xml:"Size"`
+	StorageClass string    `xml:"StorageClass"`
 }
