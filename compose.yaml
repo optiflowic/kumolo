@@ -7,3 +7,6 @@ services:
       KUMOLO_PORT: "5566"
       KUMOLO_DATA_DIR: "/data"
       KUMOLO_LOG_LEVEL: "debug"
+    # Uncomment to persist data across container restarts:
+    # volumes:
+    #   - ./data:/data
