@@ -98,7 +98,7 @@ func (ro *Router) routeObject(w http.ResponseWriter, r *http.Request, bucket, ke
 	case http.MethodDelete:
 		ro.handleDeleteObject(w, r, bucket, key)
 	case http.MethodHead:
-		writeNotImplemented(w, r)
+		ro.handleHeadObject(w, r, bucket, key)
 	default:
 		writeError(
 			w,
@@ -147,6 +147,35 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 		key,
 	)
 	w.Header().Set("ETag", meta.ETag)
+	w.WriteHeader(http.StatusOK)
+}
+
+func (ro *Router) handleHeadObject(w http.ResponseWriter, r *http.Request, bucket, key string) {
+	meta, err := ro.storage.HeadObject(bucket, key)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrBucketNotFound):
+			w.WriteHeader(http.StatusNotFound)
+		case errors.Is(err, ErrObjectNotFound):
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			slog.Error( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"failed to head object",
+				"bucket",
+				bucket,
+				"key",
+				key,
+				"err",
+				err,
+			)
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+		return
+	}
+	w.Header().Set("Content-Type", meta.ContentType)
+	w.Header().Set("Content-Length", strconv.FormatInt(meta.Size, 10))
+	w.Header().Set("ETag", meta.ETag)
+	w.Header().Set("Last-Modified", meta.LastModified.UTC().Format(http.TimeFormat))
 	w.WriteHeader(http.StatusOK)
 }
 
