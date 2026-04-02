@@ -456,6 +456,69 @@ func TestRouterHeadObject(t *testing.T) {
 	})
 }
 
+func TestRouterListObjectsV2(t *testing.T) {
+	t.Run("returns 200 with object list", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		for _, key := range []string{"a.txt", "b.txt", "c.txt"} {
+			req := httptest.NewRequest(http.MethodPut, "/my-bucket/"+key, strings.NewReader("data"))
+			req.Header.Set("Content-Type", "text/plain")
+			ro.ServeHTTP(httptest.NewRecorder(), req)
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket?list-type=2", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "application/xml", w.Header().Get("Content-Type"))
+		body := w.Body.String()
+		assert.Contains(t, body, "ListBucketResult")
+		assert.Contains(t, body, "a.txt")
+		assert.Contains(t, body, "b.txt")
+		assert.Contains(t, body, "c.txt")
+	})
+
+	t.Run("returns 200 with empty list when bucket is empty", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket?list-type=2", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), "ListBucketResult")
+	})
+
+	t.Run("returns 501 when list-type is not 2", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotImplemented, w.Code)
+	})
+
+	t.Run("returns 404 when bucket does not exist", func(t *testing.T) {
+		ro := newTestRouter(t)
+		req := httptest.NewRequest(http.MethodGet, "/no-bucket?list-type=2", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchBucket")
+	})
+
+	t.Run("returns 500 on unexpected storage error", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{listObjectsErr: errors.New("disk failure")})
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket?list-type=2", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+}
+
 func TestParseSigV4(t *testing.T) {
 	t.Run("extracts credentials from valid header", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)

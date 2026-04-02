@@ -77,7 +77,11 @@ func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, bucket str
 	case http.MethodHead:
 		ro.handleHeadBucket(w, r, bucket)
 	case http.MethodGet:
-		writeNotImplemented(w, r)
+		if r.URL.Query().Get("list-type") == "2" {
+			ro.handleListObjectsV2(w, r, bucket)
+		} else {
+			writeNotImplemented(w, r)
+		}
 	default:
 		writeError(
 			w,
@@ -87,6 +91,50 @@ func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, bucket str
 			"The specified method is not allowed.",
 		)
 	}
+}
+
+func (ro *Router) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bucket string) {
+	objects, err := ro.storage.ListObjects(bucket)
+	if err != nil {
+		if errors.Is(err, ErrBucketNotFound) {
+			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+				"The specified bucket does not exist.")
+			return
+		}
+		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			"failed to list objects",
+			"bucket",
+			bucket,
+			"err",
+			err,
+		)
+		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	slog.Info( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+		"listed objects",
+		"bucket",
+		bucket,
+		"count",
+		len(objects),
+	)
+	contents := make([]xmlObjectContent, len(objects))
+	for i, obj := range objects {
+		contents[i] = xmlObjectContent{
+			Key:          obj.Key,
+			LastModified: obj.Metadata.LastModified.UTC(),
+			ETag:         obj.Metadata.ETag,
+			Size:         obj.Metadata.Size,
+			StorageClass: "STANDARD",
+		}
+	}
+	writeXML(w, http.StatusOK, listObjectsV2Result{
+		Name:        bucket,
+		KeyCount:    len(objects),
+		MaxKeys:     1000,
+		IsTruncated: false,
+		Contents:    contents,
+	})
 }
 
 func (ro *Router) routeObject(w http.ResponseWriter, r *http.Request, bucket, key string) {
@@ -379,7 +427,7 @@ func parsePath(path string) (bucket, key string) {
 	return bucket, key
 }
 
-// XML response types for S3 bucket operations.
+// XML response types for S3 operations.
 
 type listBucketsResult struct {
 	XMLName xml.Name    `xml:"ListAllMyBucketsResult"`
@@ -395,4 +443,22 @@ type xmlOwner struct {
 type xmlBucket struct {
 	Name         string    `xml:"Name"`
 	CreationDate time.Time `xml:"CreationDate"`
+}
+
+type listObjectsV2Result struct {
+	XMLName     xml.Name           `xml:"ListBucketResult"`
+	Name        string             `xml:"Name"`
+	Prefix      string             `xml:"Prefix"`
+	KeyCount    int                `xml:"KeyCount"`
+	MaxKeys     int                `xml:"MaxKeys"`
+	IsTruncated bool               `xml:"IsTruncated"`
+	Contents    []xmlObjectContent `xml:"Contents"`
+}
+
+type xmlObjectContent struct {
+	Key          string    `xml:"Key"`
+	LastModified time.Time `xml:"LastModified"`
+	ETag         string    `xml:"ETag"`
+	Size         int64     `xml:"Size"`
+	StorageClass string    `xml:"StorageClass"`
 }
