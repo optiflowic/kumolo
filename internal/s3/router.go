@@ -97,6 +97,11 @@ func (ro *Router) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 	objects, err := ro.storage.ListObjects(bucket)
 	if err != nil {
 		if errors.Is(err, ErrBucketNotFound) {
+			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"bucket not found",
+				"bucket",
+				bucket,
+			)
 			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 				"The specified bucket does not exist.")
 			return
@@ -111,7 +116,7 @@ func (ro *Router) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
-	slog.Info( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+	slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
 		"listed objects",
 		"bucket",
 		bucket,
@@ -166,7 +171,7 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 	meta, err := ro.storage.PutObject(bucket, key, r.Body, contentType)
 	if err != nil {
 		if errors.Is(err, ErrBucketNotFound) {
-			slog.Warn( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
 				"bucket not found",
 				"bucket",
 				bucket,
@@ -202,9 +207,14 @@ func (ro *Router) handleHeadObject(w http.ResponseWriter, r *http.Request, bucke
 	meta, err := ro.storage.HeadObject(bucket, key)
 	if err != nil {
 		switch {
-		case errors.Is(err, ErrBucketNotFound):
-			w.WriteHeader(http.StatusNotFound)
-		case errors.Is(err, ErrObjectNotFound):
+		case errors.Is(err, ErrBucketNotFound), errors.Is(err, ErrObjectNotFound):
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"object not found",
+				"bucket",
+				bucket,
+				"key",
+				key,
+			)
 			w.WriteHeader(http.StatusNotFound)
 		default:
 			slog.Error( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
@@ -230,8 +240,7 @@ func (ro *Router) handleHeadObject(w http.ResponseWriter, r *http.Request, bucke
 func (ro *Router) handleDeleteObject(w http.ResponseWriter, r *http.Request, bucket, key string) {
 	err := ro.storage.DeleteObject(bucket, key)
 	switch {
-	case err == nil, errors.Is(err, ErrObjectNotFound):
-		// S3 returns 204 regardless of whether the object existed.
+	case err == nil:
 		slog.Info( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
 			"object deleted",
 			"bucket",
@@ -240,7 +249,22 @@ func (ro *Router) handleDeleteObject(w http.ResponseWriter, r *http.Request, buc
 			key,
 		)
 		w.WriteHeader(http.StatusNoContent)
+	case errors.Is(err, ErrObjectNotFound):
+		// S3 returns 204 regardless of whether the object existed.
+		slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			"delete skipped: object not found",
+			"bucket",
+			bucket,
+			"key",
+			key,
+		)
+		w.WriteHeader(http.StatusNoContent)
 	case errors.Is(err, ErrBucketNotFound):
+		slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			"bucket not found",
+			"bucket",
+			bucket,
+		)
 		writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 			"The specified bucket does not exist.")
 	default:
@@ -262,9 +286,21 @@ func (ro *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrBucketNotFound):
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"bucket not found",
+				"bucket",
+				bucket,
+			)
 			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 				"The specified bucket does not exist.")
 		case errors.Is(err, ErrObjectNotFound):
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"object not found",
+				"bucket",
+				bucket,
+				"key",
+				key,
+			)
 			writeError(w, r, http.StatusNotFound, "NoSuchKey",
 				"The specified key does not exist.")
 		default:
@@ -282,6 +318,13 @@ func (ro *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 		return
 	}
 	defer func() { _ = f.Close() }()
+	slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+		"serving object",
+		"bucket",
+		bucket,
+		"key",
+		key,
+	)
 	w.Header().Set("Content-Type", meta.ContentType)
 	w.Header().Set("Content-Length", strconv.FormatInt(meta.Size, 10))
 	w.Header().Set("ETag", meta.ETag)
@@ -307,7 +350,7 @@ func (ro *Router) handleListBuckets(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
-	slog.Info("listed buckets", "count", len(buckets))
+	slog.Debug("listed buckets", "count", len(buckets))
 	xmlBuckets := make([]xmlBucket, len(buckets))
 	for i, b := range buckets {
 		xmlBuckets[i] = xmlBucket{Name: b.Name, CreationDate: b.CreationDate.UTC()}
@@ -321,7 +364,7 @@ func (ro *Router) handleListBuckets(w http.ResponseWriter, r *http.Request) {
 func (ro *Router) handleCreateBucket(w http.ResponseWriter, r *http.Request, bucket string) {
 	if err := ro.storage.CreateBucket(bucket); err != nil {
 		if errors.Is(err, os.ErrExist) {
-			slog.Warn( // #nosec G706 -- bucket name is validated by S3 naming rules before reaching this point
+			slog.Debug( // #nosec G706 -- bucket name is validated by S3 naming rules before reaching this point
 				"bucket already exists",
 				"bucket",
 				bucket,
@@ -358,7 +401,7 @@ func (ro *Router) handleDeleteBucket(w http.ResponseWriter, r *http.Request, buc
 	if err := ro.storage.DeleteBucket(bucket); err != nil {
 		switch {
 		case errors.Is(err, ErrBucketNotFound):
-			slog.Warn( // #nosec G706 -- bucket name is validated by S3 naming rules before reaching this point
+			slog.Debug( // #nosec G706 -- bucket name is validated by S3 naming rules before reaching this point
 				"bucket not found",
 				"bucket",
 				bucket,
@@ -366,7 +409,7 @@ func (ro *Router) handleDeleteBucket(w http.ResponseWriter, r *http.Request, buc
 			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 				"The specified bucket does not exist.")
 		case errors.Is(err, ErrBucketNotEmpty):
-			slog.Warn( // #nosec G706 -- bucket name is validated by S3 naming rules before reaching this point
+			slog.Debug( // #nosec G706 -- bucket name is validated by S3 naming rules before reaching this point
 				"bucket not empty",
 				"bucket",
 				bucket,

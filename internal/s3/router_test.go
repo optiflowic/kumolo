@@ -163,14 +163,15 @@ func TestRouterDeleteBucket(t *testing.T) {
 	})
 
 	t.Run("returns 409 when bucket is not empty", func(t *testing.T) {
-		// Object PUT is not yet implemented in the router, so use storage directly.
-		storage, err := NewStorage(t.TempDir())
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = storage.Close() })
-		require.NoError(t, storage.CreateBucket("my-bucket"))
-		_, err = storage.PutObject("my-bucket", "obj.txt", strings.NewReader("hello"), "text/plain")
-		require.NoError(t, err)
-		ro := NewRouter(storage)
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		putReq := httptest.NewRequest(
+			http.MethodPut,
+			"/my-bucket/obj.txt",
+			strings.NewReader("hello"),
+		)
+		putReq.Header.Set("Content-Type", "text/plain")
+		ro.ServeHTTP(httptest.NewRecorder(), putReq)
 
 		req := httptest.NewRequest(http.MethodDelete, "/my-bucket", nil)
 		w := httptest.NewRecorder()

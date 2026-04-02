@@ -219,13 +219,13 @@ func (s *Storage) DeleteObject(bucket, key string) error {
 		return err
 	}
 	if err := s.root.Remove(objPath + ".meta.json"); err != nil && !errors.Is(err, os.ErrNotExist) {
-		slog.Warn(
+		slog.Warn( // #nosec G706 -- objPath is an internal filesystem path derived from bucket/key, not direct user input
 			"failed to remove metadata",
 			"path",
 			objPath,
 			"err",
 			err,
-		) // #nosec G706 -- objPath is an internal filesystem path derived from bucket/key, not direct user input
+		)
 	}
 	return nil
 }
@@ -281,13 +281,13 @@ func (s *Storage) walkDir(bucket, dir string, objects *[]ObjectInfo) error {
 		key, _ := filepath.Rel(bucket, entryPath)
 		meta, err := s.readMeta(entryPath)
 		if err != nil {
-			slog.Warn(
+			slog.Warn( // #nosec G706 -- entryPath is an internal filesystem path, not direct user input
 				"skipping object with unreadable metadata",
 				"path",
 				entryPath,
 				"err",
 				err,
-			) // #nosec G706 -- entryPath is an internal filesystem path, not direct user input
+			)
 			continue
 		}
 		*objects = append(*objects, ObjectInfo{Key: key, Metadata: meta})
