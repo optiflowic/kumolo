@@ -15,9 +15,10 @@ import (
 // bucketStore is the subset of Storage used by the Router for bucket operations.
 type bucketStore interface {
 	ListBuckets() ([]BucketInfo, error)
-	CreateBucket(bucket string) error
+	CreateBucket(bucket, region string) error
 	DeleteBucket(bucket string) error
 	BucketExists(bucket string) bool
+	GetBucketRegion(bucket string) (string, error)
 }
 
 // objectStore is the subset of Storage used by the Router for object operations.
@@ -77,9 +78,12 @@ func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, bucket str
 	case http.MethodHead:
 		ro.handleHeadBucket(w, r, bucket)
 	case http.MethodGet:
-		if r.URL.Query().Get("list-type") == "2" {
+		switch {
+		case r.URL.Query().Has("location"):
+			ro.handleGetBucketLocation(w, r, bucket)
+		case r.URL.Query().Get("list-type") == "2":
 			ro.handleListObjectsV2(w, r, bucket)
-		} else {
+		default:
 			writeNotImplemented(w, r)
 		}
 	default:
@@ -343,6 +347,37 @@ func (ro *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 	}
 }
 
+func (ro *Router) handleGetBucketLocation(w http.ResponseWriter, r *http.Request, bucket string) {
+	region, err := ro.storage.GetBucketRegion(bucket)
+	if err != nil {
+		if errors.Is(err, ErrBucketNotFound) {
+			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"bucket not found",
+				"bucket",
+				bucket,
+			)
+			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+				"The specified bucket does not exist.")
+			return
+		}
+		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			"failed to get bucket region",
+			"bucket",
+			bucket,
+			"err",
+			err,
+		)
+		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+		"get bucket location",
+		"bucket",
+		bucket,
+	)
+	writeXML(w, http.StatusOK, locationConstraint{Location: region})
+}
+
 func (ro *Router) handleListBuckets(w http.ResponseWriter, r *http.Request) {
 	buckets, err := ro.storage.ListBuckets()
 	if err != nil {
@@ -362,7 +397,8 @@ func (ro *Router) handleListBuckets(w http.ResponseWriter, r *http.Request) {
 }
 
 func (ro *Router) handleCreateBucket(w http.ResponseWriter, r *http.Request, bucket string) {
-	if err := ro.storage.CreateBucket(bucket); err != nil {
+	region := ParseSigV4(r).Region
+	if err := ro.storage.CreateBucket(bucket, region); err != nil {
 		if errors.Is(err, os.ErrExist) {
 			slog.Debug( // #nosec G706 -- bucket name is validated by S3 naming rules before reaching this point
 				"bucket already exists",
@@ -504,4 +540,11 @@ type xmlObjectContent struct {
 	ETag         string    `xml:"ETag"`
 	Size         int64     `xml:"Size"`
 	StorageClass string    `xml:"StorageClass"`
+}
+
+// locationConstraint represents the GetBucketLocation response.
+// An empty Location means us-east-1 per the S3 specification.
+type locationConstraint struct {
+	XMLName  xml.Name `xml:"LocationConstraint"`
+	Location string   `xml:",chardata"`
 }
