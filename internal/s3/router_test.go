@@ -203,26 +203,31 @@ func TestHeadBucket(t *testing.T) {
 
 // mockStore is a configurable stub for the full store interface.
 type mockStore struct {
-	listBucketsErr  error
-	createBucketErr error
-	deleteBucketErr error
-	bucketExists    bool
-	putObjectErr    error
-	putObjectMeta   ObjectMetadata
-	getObjectFile   *os.File
-	getObjectMeta   ObjectMetadata
-	getObjectErr    error
-	deleteObjectErr error
-	headObjectMeta  ObjectMetadata
-	headObjectErr   error
-	listObjectsObjs []ObjectInfo
-	listObjectsErr  error
+	listBucketsErr     error
+	createBucketErr    error
+	deleteBucketErr    error
+	bucketExists       bool
+	getBucketRegionStr string
+	getBucketRegionErr error
+	putObjectErr       error
+	putObjectMeta      ObjectMetadata
+	getObjectFile      *os.File
+	getObjectMeta      ObjectMetadata
+	getObjectErr       error
+	deleteObjectErr    error
+	headObjectMeta     ObjectMetadata
+	headObjectErr      error
+	listObjectsObjs    []ObjectInfo
+	listObjectsErr     error
 }
 
-func (m *mockStore) ListBuckets() ([]BucketInfo, error) { return nil, m.listBucketsErr }
-func (m *mockStore) CreateBucket(_ string) error        { return m.createBucketErr }
-func (m *mockStore) DeleteBucket(_ string) error        { return m.deleteBucketErr }
-func (m *mockStore) BucketExists(_ string) bool         { return m.bucketExists }
+func (m *mockStore) ListBuckets() ([]BucketInfo, error)    { return nil, m.listBucketsErr }
+func (m *mockStore) CreateBucket(_ string, _ string) error { return m.createBucketErr }
+func (m *mockStore) DeleteBucket(_ string) error           { return m.deleteBucketErr }
+func (m *mockStore) BucketExists(_ string) bool            { return m.bucketExists }
+func (m *mockStore) GetBucketRegion(_ string) (string, error) {
+	return m.getBucketRegionStr, m.getBucketRegionErr
+}
 func (m *mockStore) PutObject(_ string, _ string, _ io.Reader, _ string) (ObjectMetadata, error) {
 	return m.putObjectMeta, m.putObjectErr
 }
@@ -358,6 +363,41 @@ func TestRouterGetObject(t *testing.T) {
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
+
+	t.Run("logs warning when response body write fails", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		putReq := httptest.NewRequest(
+			http.MethodPut,
+			"/my-bucket/obj.txt",
+			strings.NewReader("data"),
+		)
+		putReq.Header.Set("Content-Type", "text/plain")
+		ro.ServeHTTP(httptest.NewRecorder(), putReq)
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket/obj.txt", nil)
+		w := &failBodyWriter{ResponseRecorder: httptest.NewRecorder()}
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+}
+
+// failBodyWriter wraps ResponseRecorder and returns an error on Write after headers are sent.
+type failBodyWriter struct {
+	*httptest.ResponseRecorder
+	headerWritten bool
+}
+
+func (f *failBodyWriter) WriteHeader(code int) {
+	f.headerWritten = true
+	f.ResponseRecorder.WriteHeader(code)
+}
+
+func (f *failBodyWriter) Write(b []byte) (int, error) {
+	if f.headerWritten {
+		return 0, errors.New("simulated write failure")
+	}
+	return f.ResponseRecorder.Write(b)
 }
 
 func TestRouterDeleteObject(t *testing.T) {
@@ -521,28 +561,38 @@ func TestRouterListObjectsV2(t *testing.T) {
 }
 
 func TestRouterGetBucketLocation(t *testing.T) {
-	t.Run("returns 200 with empty LocationConstraint when no SigV4 region", func(t *testing.T) {
+	t.Run(
+		"returns 200 with empty LocationConstraint for bucket created without region",
+		func(t *testing.T) {
+			ro := newTestRouter(t)
+			// Create bucket without Authorization header → region stored as ""
+			ro.ServeHTTP(
+				httptest.NewRecorder(),
+				httptest.NewRequest(http.MethodPut, "/my-bucket", nil),
+			)
+
+			req := httptest.NewRequest(http.MethodGet, "/my-bucket?location", nil)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Equal(t, "application/xml", w.Header().Get("Content-Type"))
+			assert.Contains(t, w.Body.String(), "<LocationConstraint></LocationConstraint>")
+		},
+	)
+
+	t.Run("returns region the bucket was created in", func(t *testing.T) {
 		ro := newTestRouter(t)
-		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
-
-		req := httptest.NewRequest(http.MethodGet, "/my-bucket?location", nil)
-		w := httptest.NewRecorder()
-		ro.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Equal(t, "application/xml", w.Header().Get("Content-Type"))
-		assert.Contains(t, w.Body.String(), "<LocationConstraint></LocationConstraint>")
-	})
-
-	t.Run("returns region from SigV4 Authorization header", func(t *testing.T) {
-		ro := newTestRouter(t)
-		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
-
-		req := httptest.NewRequest(http.MethodGet, "/my-bucket?location", nil)
-		req.Header.Set(
+		// Create bucket with Authorization header → region "us-west-2" is stored
+		createReq := httptest.NewRequest(http.MethodPut, "/my-bucket", nil)
+		createReq.Header.Set(
 			"Authorization",
 			"AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20230101/us-west-2/s3/aws4_request, SignedHeaders=host, Signature=abc123",
 		)
+		ro.ServeHTTP(httptest.NewRecorder(), createReq)
+
+		// GetBucketLocation reads from storage, not the request header
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket?location", nil)
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 
@@ -558,6 +608,15 @@ func TestRouterGetBucketLocation(t *testing.T) {
 
 		assert.Equal(t, http.StatusNotFound, w.Code)
 		assert.Contains(t, w.Body.String(), "NoSuchBucket")
+	})
+
+	t.Run("returns 500 on storage error", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{getBucketRegionErr: errors.New("disk failure")})
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket?location", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
 }
 

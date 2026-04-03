@@ -82,15 +82,123 @@ func TestNewStorage(t *testing.T) {
 func TestCreateBucket(t *testing.T) {
 	t.Run("creates bucket and reports it as existing", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("my-bucket"))
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
 		assert.True(t, s.BucketExists("my-bucket"))
+	})
+
+	t.Run("persists region", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("my-bucket", "ap-northeast-1"))
+		region, err := s.GetBucketRegion("my-bucket")
+		require.NoError(t, err)
+		assert.Equal(t, "ap-northeast-1", region)
+	})
+
+	t.Run("returns error and does not create bucket when meta write fails", func(t *testing.T) {
+		s, rootPath := newTestStorageWithRoot(t)
+		// Place a directory where the metadata file should be written to force a failure.
+		require.NoError(t, os.MkdirAll(filepath.Join(rootPath, "my-bucket.bucket.json"), 0o750))
+
+		err := s.CreateBucket("my-bucket", "us-west-2")
+		assert.Error(t, err)
+		assert.False(t, s.BucketExists("my-bucket"))
+	})
+
+	t.Run(
+		"logs warning when rollback remove also fails after meta write failure",
+		func(t *testing.T) {
+			s, rootPath := newTestStorageWithRoot(t)
+			// Make openFile create a child inside the bucket dir before returning an error, so
+			// that the rollback Remove also fails (non-empty directory).
+			s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+				_ = os.MkdirAll(filepath.Join(rootPath, "my-bucket", "child"), 0o750)
+				return nil, errors.New("simulated write failure")
+			}
+
+			err := s.CreateBucket("my-bucket", "us-west-2")
+			assert.Error(t, err)
+		},
+	)
+
+	t.Run("returns close error when bucket meta file close fails", func(t *testing.T) {
+		s := newTestStorage(t)
+		realOpenFile := s.openFile
+		s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+			wc, err := realOpenFile(name, flag, perm)
+			if err != nil {
+				return nil, err
+			}
+			return badCloseWriter{wc}, nil
+		}
+
+		err := s.CreateBucket("my-bucket", "ap-northeast-1")
+		assert.Error(t, err)
+	})
+}
+
+func TestGetBucketRegion(t *testing.T) {
+	t.Run("returns region the bucket was created with", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("my-bucket", "eu-west-1"))
+		region, err := s.GetBucketRegion("my-bucket")
+		require.NoError(t, err)
+		assert.Equal(t, "eu-west-1", region)
+	})
+
+	t.Run("returns empty string for bucket created without region", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		region, err := s.GetBucketRegion("my-bucket")
+		require.NoError(t, err)
+		assert.Equal(t, "", region)
+	})
+
+	t.Run("returns ErrBucketNotFound for nonexistent bucket", func(t *testing.T) {
+		s := newTestStorage(t)
+		_, err := s.GetBucketRegion("no-such-bucket")
+		assert.ErrorIs(t, err, ErrBucketNotFound)
+	})
+
+	t.Run("returns empty string when meta file does not exist", func(t *testing.T) {
+		s, rootPath := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, os.Remove(filepath.Join(rootPath, "my-bucket.bucket.json")))
+
+		region, err := s.GetBucketRegion("my-bucket")
+		require.NoError(t, err)
+		assert.Equal(t, "", region)
+	})
+
+	t.Run("returns error when metadata is corrupt", func(t *testing.T) {
+		s, rootPath := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(rootPath, "my-bucket.bucket.json"),
+			[]byte("not-json"),
+			0o600,
+		))
+
+		_, err := s.GetBucketRegion("my-bucket")
+		assert.Error(t, err)
+	})
+
+	t.Run("returns error when metadata read fails", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("my-bucket", "us-east-2"))
+
+		s.readAll = func(io.Reader) ([]byte, error) {
+			return nil, errors.New("simulated read failure")
+		}
+
+		_, err := s.GetBucketRegion("my-bucket")
+		assert.Error(t, err)
 	})
 }
 
 func TestDeleteBucket(t *testing.T) {
 	t.Run("deletes empty bucket successfully", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("my-bucket"))
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
 		require.NoError(t, s.DeleteBucket("my-bucket"))
 		assert.False(t, s.BucketExists("my-bucket"))
 	})
@@ -102,15 +210,34 @@ func TestDeleteBucket(t *testing.T) {
 
 	t.Run("returns ErrBucketNotEmpty when bucket has objects", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("my-bucket"))
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
 		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("hello"), "text/plain")
 		require.NoError(t, err)
 		assert.ErrorIs(t, s.DeleteBucket("my-bucket"), ErrBucketNotEmpty)
 	})
 
+	t.Run("removes bucket metadata on delete", func(t *testing.T) {
+		s, rootPath := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("my-bucket", "ap-northeast-1"))
+		require.NoError(t, s.DeleteBucket("my-bucket"))
+		assert.NoFileExists(t, filepath.Join(rootPath, "my-bucket.bucket.json"))
+	})
+
+	t.Run("logs warning when metadata removal fails but still deletes bucket", func(t *testing.T) {
+		s, rootPath := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		// Replace the .bucket.json file with a non-empty directory so Remove fails.
+		metaPath := filepath.Join(rootPath, "my-bucket.bucket.json")
+		require.NoError(t, os.Remove(metaPath))
+		require.NoError(t, os.MkdirAll(filepath.Join(metaPath, "child"), 0o750))
+
+		require.NoError(t, s.DeleteBucket("my-bucket"))
+		assert.False(t, s.BucketExists("my-bucket"))
+	})
+
 	t.Run("returns error when directory listing fails", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket"))
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
 		require.NoError(t, os.Chmod(filepath.Join(rootPath, "my-bucket"), 0o000))
 		t.Cleanup(func() { _ = os.Chmod(filepath.Join(rootPath, "my-bucket"), 0o750) })
 
@@ -123,9 +250,9 @@ func TestDeleteBucket(t *testing.T) {
 func TestListBuckets(t *testing.T) {
 	t.Run("lists all buckets in lexicographic order", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("bucket-c"))
-		require.NoError(t, s.CreateBucket("bucket-a"))
-		require.NoError(t, s.CreateBucket("bucket-b"))
+		require.NoError(t, s.CreateBucket("bucket-c", ""))
+		require.NoError(t, s.CreateBucket("bucket-a", ""))
+		require.NoError(t, s.CreateBucket("bucket-b", ""))
 
 		buckets, err := s.ListBuckets()
 		require.NoError(t, err)
@@ -146,7 +273,7 @@ func TestListBuckets(t *testing.T) {
 
 	t.Run("skips non-directory entries", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("bucket-a"))
+		require.NoError(t, s.CreateBucket("bucket-a", ""))
 		require.NoError(
 			t,
 			os.WriteFile(filepath.Join(rootPath, "not-a-bucket"), []byte("x"), 0o600),
@@ -161,7 +288,7 @@ func TestListBuckets(t *testing.T) {
 func TestPutObject(t *testing.T) {
 	t.Run("stores object and returns metadata", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("my-bucket"))
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
 
 		meta, err := s.PutObject(
 			"my-bucket",
@@ -177,7 +304,7 @@ func TestPutObject(t *testing.T) {
 
 	t.Run("stores object with nested key", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("my-bucket"))
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
 
 		_, err := s.PutObject(
 			"my-bucket",
@@ -201,7 +328,7 @@ func TestPutObject(t *testing.T) {
 
 	t.Run("returns error when file cannot be opened", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket"))
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
 		require.NoError(t, os.Chmod(filepath.Join(rootPath, "my-bucket"), 0o000))
 		t.Cleanup(func() { _ = os.Chmod(filepath.Join(rootPath, "my-bucket"), 0o750) })
 
@@ -211,7 +338,7 @@ func TestPutObject(t *testing.T) {
 
 	t.Run("returns error when nested directory cannot be created", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket"))
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
 		require.NoError(t, os.Chmod(filepath.Join(rootPath, "my-bucket"), 0o500))
 		t.Cleanup(func() { _ = os.Chmod(filepath.Join(rootPath, "my-bucket"), 0o750) })
 
@@ -226,7 +353,7 @@ func TestPutObject(t *testing.T) {
 
 	t.Run("returns error when reader fails", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("my-bucket"))
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
 
 		_, err := s.PutObject("my-bucket", "obj.txt", errReader{}, "text/plain")
 		assert.Error(t, err)
@@ -234,7 +361,7 @@ func TestPutObject(t *testing.T) {
 
 	t.Run("cleans up object file when meta write fails", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket"))
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
 		require.NoError(
 			t,
 			os.MkdirAll(filepath.Join(rootPath, "my-bucket", "obj.txt.meta.json"), 0o750),
@@ -247,7 +374,7 @@ func TestPutObject(t *testing.T) {
 
 	t.Run("logs warning when cleanup remove also fails", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket"))
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
 		require.NoError(
 			t,
 			os.MkdirAll(filepath.Join(rootPath, "my-bucket", "obj.txt.meta.json"), 0o750),
@@ -265,7 +392,7 @@ func TestPutObject(t *testing.T) {
 		"returns close error when meta file close fails after successful write",
 		func(t *testing.T) {
 			s := newTestStorage(t)
-			require.NoError(t, s.CreateBucket("my-bucket"))
+			require.NoError(t, s.CreateBucket("my-bucket", ""))
 
 			// Wrap only the second openFile call (the meta file); the object file must
 			// close successfully so retErr is nil when the deferred meta-file Close fires.
@@ -292,7 +419,7 @@ func TestPutObject(t *testing.T) {
 		"returns close error when object file close fails after successful write",
 		func(t *testing.T) {
 			s := newTestStorage(t)
-			require.NoError(t, s.CreateBucket("my-bucket"))
+			require.NoError(t, s.CreateBucket("my-bucket", ""))
 
 			// Wrap only the first openFile call (the object file); the meta file must
 			// close successfully so writeMeta returns nil, leaving retErr==nil when the
@@ -320,7 +447,7 @@ func TestPutObject(t *testing.T) {
 func TestGetObject(t *testing.T) {
 	t.Run("returns file and metadata for existing object", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("my-bucket"))
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
 		meta, err := s.PutObject(
 			"my-bucket",
 			"hello.txt",
@@ -337,7 +464,7 @@ func TestGetObject(t *testing.T) {
 
 	t.Run("returns ErrObjectNotFound when object does not exist", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("my-bucket"))
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
 
 		_, _, err := s.GetObject("my-bucket", "missing.txt")
 		assert.ErrorIs(t, err, ErrObjectNotFound)
@@ -351,7 +478,7 @@ func TestGetObject(t *testing.T) {
 
 	t.Run("returns error when metadata is corrupt", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket"))
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
 		require.NoError(t, os.WriteFile(
 			filepath.Join(rootPath, "my-bucket", "obj.txt.meta.json"),
 			[]byte("not-json"),
@@ -365,7 +492,7 @@ func TestGetObject(t *testing.T) {
 
 	t.Run("returns error when data file is unreadable", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket"))
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
 		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
 		require.NoError(t, err)
 
@@ -380,7 +507,7 @@ func TestGetObject(t *testing.T) {
 
 	t.Run("returns ErrObjectNotFound when meta exists but data file is gone", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket"))
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
 
 		meta := ObjectMetadata{ContentType: "text/plain", ETag: `"abc"`, Size: 3}
 		data, err := json.Marshal(meta)
@@ -399,7 +526,7 @@ func TestGetObject(t *testing.T) {
 func TestDeleteObject(t *testing.T) {
 	t.Run("deletes object and metadata successfully", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("my-bucket"))
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
 		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
 		require.NoError(t, err)
 
@@ -411,7 +538,7 @@ func TestDeleteObject(t *testing.T) {
 
 	t.Run("returns ErrObjectNotFound when object does not exist", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("my-bucket"))
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
 		assert.ErrorIs(t, s.DeleteObject("my-bucket", "missing.txt"), ErrObjectNotFound)
 	})
 
@@ -422,7 +549,7 @@ func TestDeleteObject(t *testing.T) {
 
 	t.Run("returns error when object removal fails", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket"))
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
 		require.NoError(
 			t,
 			os.MkdirAll(filepath.Join(rootPath, "my-bucket", "dir-obj", "child"), 0o750),
@@ -435,7 +562,7 @@ func TestDeleteObject(t *testing.T) {
 
 	t.Run("logs warning when metadata removal fails but still succeeds", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket"))
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
 		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
 		require.NoError(t, err)
 
@@ -452,7 +579,7 @@ func TestDeleteObject(t *testing.T) {
 func TestHeadObject(t *testing.T) {
 	t.Run("returns metadata for existing object", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("my-bucket"))
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
 		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
 		require.NoError(t, err)
 
@@ -463,7 +590,7 @@ func TestHeadObject(t *testing.T) {
 
 	t.Run("returns ErrObjectNotFound when object does not exist", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("my-bucket"))
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
 		_, err := s.HeadObject("my-bucket", "missing.txt")
 		assert.ErrorIs(t, err, ErrObjectNotFound)
 	})
@@ -476,7 +603,7 @@ func TestHeadObject(t *testing.T) {
 
 	t.Run("returns error when metadata is corrupt", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket"))
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
 		require.NoError(t, os.WriteFile(
 			filepath.Join(rootPath, "my-bucket", "obj.txt.meta.json"),
 			[]byte("not-json"),
@@ -490,7 +617,7 @@ func TestHeadObject(t *testing.T) {
 
 	t.Run("returns error when metadata read fails", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("my-bucket"))
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
 		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
 		require.NoError(t, err)
 
@@ -506,7 +633,7 @@ func TestHeadObject(t *testing.T) {
 func TestListObjects(t *testing.T) {
 	t.Run("lists all objects in lexicographic order", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("my-bucket"))
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
 		_, err := s.PutObject("my-bucket", "c.txt", strings.NewReader("c"), "text/plain")
 		require.NoError(t, err)
 		_, err = s.PutObject("my-bucket", "a.txt", strings.NewReader("a"), "text/plain")
@@ -530,7 +657,7 @@ func TestListObjects(t *testing.T) {
 
 	t.Run("skips orphan files without metadata", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket"))
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
 		_, err := s.PutObject("my-bucket", "real.txt", strings.NewReader("data"), "text/plain")
 		require.NoError(t, err)
 		require.NoError(t, os.WriteFile(
@@ -546,7 +673,7 @@ func TestListObjects(t *testing.T) {
 
 	t.Run("returns error when subdirectory listing fails", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket"))
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
 		_, err := s.PutObject(
 			"my-bucket",
 			"subdir/obj.txt",
@@ -565,7 +692,7 @@ func TestListObjects(t *testing.T) {
 
 	t.Run("includes .json objects in listing", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("my-bucket"))
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
 		_, err := s.PutObject("my-bucket", "data.json", strings.NewReader("{}"), "application/json")
 		require.NoError(t, err)
 

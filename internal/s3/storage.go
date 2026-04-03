@@ -17,6 +17,11 @@ import (
 	"time"
 )
 
+// bucketMeta is stored as a <bucket>.bucket.json file at the storage root.
+type bucketMeta struct {
+	Region string `json:"region"`
+}
+
 // ObjectMetadata is stored as a sidecar .meta.json file alongside each object.
 type ObjectMetadata struct {
 	ContentType  string    `json:"contentType"`
@@ -63,10 +68,25 @@ func newStorage(dataDir string, openRoot func(string) (*os.Root, error)) (*Stora
 	return s, nil
 }
 
-func (s *Storage) CreateBucket(bucket string) error {
+func (s *Storage) CreateBucket(bucket, region string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.root.Mkdir(bucket, 0o750)
+	if err := s.root.Mkdir(bucket, 0o750); err != nil {
+		return err
+	}
+	if err := s.writeBucketMeta(bucket, bucketMeta{Region: region}); err != nil {
+		if removeErr := s.root.Remove(bucket); removeErr != nil {
+			slog.Warn(
+				"failed to clean up bucket after meta write failure",
+				"bucket",
+				bucket,
+				"err",
+				removeErr,
+			)
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *Storage) DeleteBucket(bucket string) error {
@@ -81,6 +101,10 @@ func (s *Storage) DeleteBucket(bucket string) error {
 	}
 	if len(entries) > 0 {
 		return ErrBucketNotEmpty
+	}
+	if err := s.root.Remove(bucket + ".bucket.json"); err != nil &&
+		!errors.Is(err, os.ErrNotExist) {
+		slog.Warn("failed to remove bucket metadata", "bucket", bucket, "err", err)
 	}
 	return s.root.Remove(bucket)
 }
@@ -302,6 +326,55 @@ func (s *Storage) readDir(name string) ([]os.DirEntry, error) {
 	}
 	defer func() { _ = f.Close() }()
 	return f.ReadDir(-1)
+}
+
+func (s *Storage) GetBucketRegion(bucket string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.bucketExistsLocked(bucket) {
+		return "", ErrBucketNotFound
+	}
+	meta, err := s.readBucketMeta(bucket)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", nil
+		}
+		return "", err
+	}
+	return meta.Region, nil
+}
+
+func (s *Storage) writeBucketMeta(bucket string, meta bucketMeta) (retErr error) {
+	// json.Marshal never fails for bucketMeta: Region is a plain string.
+	data, _ := json.Marshal(meta)
+	f, err := s.openFile(bucket+".bucket.json", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := f.Close(); err != nil && retErr == nil {
+			retErr = err
+		}
+	}()
+	_, retErr = f.Write(data)
+	return
+}
+
+func (s *Storage) readBucketMeta(bucket string) (bucketMeta, error) {
+	f, err := s.root.Open(bucket + ".bucket.json")
+	if err != nil {
+		return bucketMeta{}, err
+	}
+	defer func() { _ = f.Close() }()
+	data, err := s.readAll(f)
+	if err != nil {
+		return bucketMeta{}, err
+	}
+	var meta bucketMeta
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return bucketMeta{}, err
+	}
+	return meta, nil
 }
 
 func (s *Storage) writeMeta(objPath string, meta ObjectMetadata) (retErr error) {
