@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -25,6 +26,7 @@ type bucketStore interface {
 type objectStore interface {
 	PutObject(bucket, key string, r io.Reader, contentType string) (ObjectMetadata, error)
 	GetObject(bucket, key string) (*os.File, ObjectMetadata, error)
+	CopyObject(srcBucket, srcKey, dstBucket, dstKey string) (ObjectMetadata, error)
 	DeleteObject(bucket, key string) error
 	HeadObject(bucket, key string) (ObjectMetadata, error)
 	ListObjects(bucket string) ([]ObjectInfo, error)
@@ -149,7 +151,11 @@ func (ro *Router) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 func (ro *Router) routeObject(w http.ResponseWriter, r *http.Request, bucket, key string) {
 	switch r.Method {
 	case http.MethodPut:
-		ro.handlePutObject(w, r, bucket, key)
+		if r.Header.Get("x-amz-copy-source") != "" {
+			ro.handleCopyObject(w, r, bucket, key)
+		} else {
+			ro.handlePutObject(w, r, bucket, key)
+		}
 	case http.MethodGet:
 		ro.handleGetObject(w, r, bucket, key)
 	case http.MethodDelete:
@@ -165,6 +171,80 @@ func (ro *Router) routeObject(w http.ResponseWriter, r *http.Request, bucket, ke
 			"The specified method is not allowed.",
 		)
 	}
+}
+
+func (ro *Router) handleCopyObject(
+	w http.ResponseWriter,
+	r *http.Request,
+	dstBucket, dstKey string,
+) {
+	copySource, err := url.PathUnescape(r.Header.Get("x-amz-copy-source"))
+	if err != nil {
+		writeError(w, r, http.StatusBadRequest, "InvalidArgument", "x-amz-copy-source is invalid.")
+		return
+	}
+	srcBucket, srcKey := parsePath(copySource)
+	if srcBucket == "" || srcKey == "" {
+		writeError(w, r, http.StatusBadRequest, "InvalidArgument",
+			"x-amz-copy-source must be in the form /<bucket>/<key>.")
+		return
+	}
+	meta, err := ro.storage.CopyObject(srcBucket, srcKey, dstBucket, dstKey)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrBucketNotFound):
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"bucket not found",
+				"srcBucket",
+				srcBucket,
+				"dstBucket",
+				dstBucket,
+			)
+			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+				"The specified bucket does not exist.")
+		case errors.Is(err, ErrObjectNotFound):
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"source object not found",
+				"srcBucket",
+				srcBucket,
+				"srcKey",
+				srcKey,
+			)
+			writeError(w, r, http.StatusNotFound, "NoSuchKey",
+				"The specified key does not exist.")
+		default:
+			slog.Error( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"failed to copy object",
+				"srcBucket",
+				srcBucket,
+				"srcKey",
+				srcKey,
+				"dstBucket",
+				dstBucket,
+				"dstKey",
+				dstKey,
+				"err",
+				err,
+			)
+			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+	slog.Info( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+		"object copied",
+		"srcBucket",
+		srcBucket,
+		"srcKey",
+		srcKey,
+		"dstBucket",
+		dstBucket,
+		"dstKey",
+		dstKey,
+	)
+	writeXML(w, http.StatusOK, copyObjectResult{
+		ETag:         meta.ETag,
+		LastModified: meta.LastModified,
+	})
 }
 
 func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket, key string) {
@@ -547,4 +627,10 @@ type xmlObjectContent struct {
 type locationConstraint struct {
 	XMLName  xml.Name `xml:"LocationConstraint"`
 	Location string   `xml:",chardata"`
+}
+
+type copyObjectResult struct {
+	XMLName      xml.Name  `xml:"CopyObjectResult"`
+	ETag         string    `xml:"ETag"`
+	LastModified time.Time `xml:"LastModified"`
 }
