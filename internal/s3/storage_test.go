@@ -444,6 +444,125 @@ func TestPutObject(t *testing.T) {
 	)
 }
 
+func TestCopyObject(t *testing.T) {
+	setup := func(t *testing.T) (*Storage, string) {
+		t.Helper()
+		s, rootPath := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("src-bucket", ""))
+		require.NoError(t, s.CreateBucket("dst-bucket", ""))
+		_, err := s.PutObject("src-bucket", "orig.txt", strings.NewReader("hello"), "text/plain")
+		require.NoError(t, err)
+		return s, rootPath
+	}
+
+	t.Run("copies object to different key in same bucket", func(t *testing.T) {
+		s, _ := setup(t)
+		_, err := s.CopyObject("src-bucket", "orig.txt", "src-bucket", "copy.txt")
+		require.NoError(t, err)
+		f, _, err := s.GetObject("src-bucket", "copy.txt")
+		require.NoError(t, err)
+		defer func() { _ = f.Close() }()
+		data, err := io.ReadAll(f)
+		require.NoError(t, err)
+		assert.Equal(t, "hello", string(data))
+	})
+
+	t.Run("copies object to different bucket", func(t *testing.T) {
+		s, _ := setup(t)
+		_, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "copy.txt")
+		require.NoError(t, err)
+		f, _, err := s.GetObject("dst-bucket", "copy.txt")
+		require.NoError(t, err)
+		defer func() { _ = f.Close() }()
+		data, err := io.ReadAll(f)
+		require.NoError(t, err)
+		assert.Equal(t, "hello", string(data))
+	})
+
+	t.Run("copy to same key overwrites object", func(t *testing.T) {
+		s, _ := setup(t)
+		meta, err := s.CopyObject("src-bucket", "orig.txt", "src-bucket", "orig.txt")
+		require.NoError(t, err)
+		assert.NotEmpty(t, meta.ETag)
+	})
+
+	t.Run("copied object gets new LastModified", func(t *testing.T) {
+		s, _ := setup(t)
+		srcMeta, err := s.HeadObject("src-bucket", "orig.txt")
+		require.NoError(t, err)
+		dstMeta, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "copy.txt")
+		require.NoError(t, err)
+		assert.True(t, !dstMeta.LastModified.Before(srcMeta.LastModified))
+	})
+
+	t.Run("copies object with nested destination key", func(t *testing.T) {
+		s, _ := setup(t)
+		_, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "path/to/copy.txt")
+		require.NoError(t, err)
+		_, _, err = s.GetObject("dst-bucket", "path/to/copy.txt")
+		assert.NoError(t, err)
+	})
+
+	t.Run("returns error when source metadata is corrupt", func(t *testing.T) {
+		s, rootPath := setup(t)
+		require.NoError(t, os.WriteFile(
+			filepath.Join(rootPath, "src-bucket", "orig.txt.meta.json"),
+			[]byte("not-json"),
+			0o600,
+		))
+
+		_, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "copy.txt")
+		assert.Error(t, err)
+		assert.NotErrorIs(t, err, ErrObjectNotFound)
+	})
+
+	t.Run("returns ErrBucketNotFound when source bucket does not exist", func(t *testing.T) {
+		s, _ := setup(t)
+		_, err := s.CopyObject("no-bucket", "orig.txt", "dst-bucket", "copy.txt")
+		assert.ErrorIs(t, err, ErrBucketNotFound)
+	})
+
+	t.Run("returns ErrObjectNotFound when source key does not exist", func(t *testing.T) {
+		s, _ := setup(t)
+		_, err := s.CopyObject("src-bucket", "missing.txt", "dst-bucket", "copy.txt")
+		assert.ErrorIs(t, err, ErrObjectNotFound)
+	})
+
+	t.Run("returns ErrBucketNotFound when destination bucket does not exist", func(t *testing.T) {
+		s, _ := setup(t)
+		_, err := s.CopyObject("src-bucket", "orig.txt", "no-bucket", "copy.txt")
+		assert.ErrorIs(t, err, ErrBucketNotFound)
+	})
+
+	t.Run("returns error when destination directory cannot be created", func(t *testing.T) {
+		s, rootPath := setup(t)
+		require.NoError(t, os.Chmod(filepath.Join(rootPath, "dst-bucket"), 0o500))
+		t.Cleanup(func() { _ = os.Chmod(filepath.Join(rootPath, "dst-bucket"), 0o750) })
+
+		_, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "nested/copy.txt")
+		assert.Error(t, err)
+	})
+
+	t.Run("returns ErrObjectNotFound when source data file is missing", func(t *testing.T) {
+		s, rootPath := setup(t)
+		require.NoError(t, os.Remove(filepath.Join(rootPath, "src-bucket", "orig.txt")))
+
+		_, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "copy.txt")
+		assert.ErrorIs(t, err, ErrObjectNotFound)
+	})
+
+	t.Run("returns error when source data file is unreadable", func(t *testing.T) {
+		s, rootPath := setup(t)
+		dataPath := filepath.Join(rootPath, "src-bucket", "orig.txt")
+		require.NoError(t, os.Chmod(dataPath, 0o000))
+		t.Cleanup(func() { _ = os.Chmod(dataPath, 0o600) })
+
+		_, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "copy.txt")
+		assert.Error(t, err)
+		assert.NotErrorIs(t, err, ErrObjectNotFound)
+	})
+}
+
 func TestGetObject(t *testing.T) {
 	t.Run("returns file and metadata for existing object", func(t *testing.T) {
 		s := newTestStorage(t)

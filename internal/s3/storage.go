@@ -229,6 +229,40 @@ func (s *Storage) GetObject(bucket, key string) (*os.File, ObjectMetadata, error
 	return f, meta, nil
 }
 
+func (s *Storage) CopyObject(srcBucket, srcKey, dstBucket, dstKey string) (ObjectMetadata, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.bucketExistsLocked(srcBucket) {
+		return ObjectMetadata{}, ErrBucketNotFound
+	}
+	srcPath := filepath.Join(srcBucket, srcKey)
+	srcMeta, err := s.readMeta(srcPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return ObjectMetadata{}, ErrObjectNotFound
+		}
+		return ObjectMetadata{}, err
+	}
+	if !s.bucketExistsLocked(dstBucket) {
+		return ObjectMetadata{}, ErrBucketNotFound
+	}
+	srcFile, err := s.root.Open(srcPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return ObjectMetadata{}, ErrObjectNotFound
+		}
+		return ObjectMetadata{}, err
+	}
+	defer func() { _ = srcFile.Close() }()
+	dstPath := filepath.Join(dstBucket, dstKey)
+	if dir := filepath.Dir(dstPath); dir != dstBucket {
+		if err := s.root.MkdirAll(dir, 0o750); err != nil {
+			return ObjectMetadata{}, err
+		}
+	}
+	return s.writeObject(dstPath, srcFile, srcMeta.ContentType)
+}
+
 func (s *Storage) DeleteObject(bucket, key string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

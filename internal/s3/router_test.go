@@ -214,6 +214,8 @@ type mockStore struct {
 	getObjectFile      *os.File
 	getObjectMeta      ObjectMetadata
 	getObjectErr       error
+	copyObjectMeta     ObjectMetadata
+	copyObjectErr      error
 	deleteObjectErr    error
 	headObjectMeta     ObjectMetadata
 	headObjectErr      error
@@ -233,6 +235,9 @@ func (m *mockStore) PutObject(_ string, _ string, _ io.Reader, _ string) (Object
 }
 func (m *mockStore) GetObject(_ string, _ string) (*os.File, ObjectMetadata, error) {
 	return m.getObjectFile, m.getObjectMeta, m.getObjectErr
+}
+func (m *mockStore) CopyObject(_, _, _, _ string) (ObjectMetadata, error) {
+	return m.copyObjectMeta, m.copyObjectErr
 }
 func (m *mockStore) DeleteObject(_ string, _ string) error { return m.deleteObjectErr }
 func (m *mockStore) HeadObject(_ string, _ string) (ObjectMetadata, error) {
@@ -557,6 +562,155 @@ func TestRouterListObjectsV2(t *testing.T) {
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+}
+
+func TestRouterCopyObject(t *testing.T) {
+	setup := func(t *testing.T) *Router {
+		t.Helper()
+		ro := newTestRouter(t)
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/src-bucket", nil),
+		)
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/dst-bucket", nil),
+		)
+		putReq := httptest.NewRequest(
+			http.MethodPut,
+			"/src-bucket/orig.txt",
+			strings.NewReader("hello"),
+		)
+		putReq.Header.Set("Content-Type", "text/plain")
+		ro.ServeHTTP(httptest.NewRecorder(), putReq)
+		return ro
+	}
+
+	t.Run("copies object and returns 200 with CopyObjectResult XML", func(t *testing.T) {
+		ro := setup(t)
+		req := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
+		req.Header.Set("x-amz-copy-source", "/src-bucket/orig.txt")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "application/xml", w.Header().Get("Content-Type"))
+		assert.Contains(t, w.Body.String(), "CopyObjectResult")
+		assert.Contains(t, w.Body.String(), "ETag")
+	})
+
+	t.Run("copied object is retrievable with correct content", func(t *testing.T) {
+		ro := setup(t)
+		copyReq := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
+		copyReq.Header.Set("x-amz-copy-source", "/src-bucket/orig.txt")
+		ro.ServeHTTP(httptest.NewRecorder(), copyReq)
+
+		req := httptest.NewRequest(http.MethodGet, "/dst-bucket/copy.txt", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "hello", w.Body.String())
+	})
+
+	t.Run("handles URL-encoded copy source", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		putReq := httptest.NewRequest(
+			http.MethodPut,
+			"/my-bucket/path/to/obj.txt",
+			strings.NewReader("data"),
+		)
+		putReq.Header.Set("Content-Type", "text/plain")
+		ro.ServeHTTP(httptest.NewRecorder(), putReq)
+
+		req := httptest.NewRequest(http.MethodPut, "/my-bucket/copy.txt", nil)
+		req.Header.Set("x-amz-copy-source", "/my-bucket/path%2Fto%2Fobj.txt")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("returns 404 when source bucket does not exist", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/dst-bucket", nil),
+		)
+		req := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
+		req.Header.Set("x-amz-copy-source", "/missing-bucket/obj.txt")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchBucket")
+	})
+
+	t.Run("returns 404 when source key does not exist", func(t *testing.T) {
+		ro := setup(t)
+		req := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
+		req.Header.Set("x-amz-copy-source", "/src-bucket/missing.txt")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchKey")
+	})
+
+	t.Run("returns 404 when destination bucket does not exist", func(t *testing.T) {
+		ro := setup(t)
+		req := httptest.NewRequest(http.MethodPut, "/no-bucket/copy.txt", nil)
+		req.Header.Set("x-amz-copy-source", "/src-bucket/orig.txt")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchBucket")
+	})
+
+	t.Run("returns 400 when copy source is invalid percent-encoding", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/dst-bucket", nil),
+		)
+		req := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
+		req.Header.Set("x-amz-copy-source", "%ZZ")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidArgument")
+	})
+
+	t.Run("returns 400 when copy source has no key", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/dst-bucket", nil),
+		)
+		req := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
+		req.Header.Set("x-amz-copy-source", "/only-bucket")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidArgument")
+	})
+
+	t.Run("returns 500 on unexpected storage error", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{copyObjectErr: errors.New("disk failure")})
+		req := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
+		req.Header.Set("x-amz-copy-source", "/src-bucket/orig.txt")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+
+	t.Run("PUT without x-amz-copy-source still routes to handlePutObject", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		req := httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", strings.NewReader("data"))
+		req.Header.Set("Content-Type", "text/plain")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.NotEmpty(t, w.Header().Get("ETag"))
 	})
 }
 
