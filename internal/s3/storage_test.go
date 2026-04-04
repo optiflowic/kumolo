@@ -479,11 +479,30 @@ func TestCopyObject(t *testing.T) {
 		assert.Equal(t, "hello", string(data))
 	})
 
-	t.Run("copy to same key overwrites object", func(t *testing.T) {
+	t.Run("copy to same key preserves content and ETag", func(t *testing.T) {
 		s, _ := setup(t)
+		origMeta, err := s.HeadObject("src-bucket", "orig.txt")
+		require.NoError(t, err)
 		meta, err := s.CopyObject("src-bucket", "orig.txt", "src-bucket", "orig.txt")
 		require.NoError(t, err)
-		assert.NotEmpty(t, meta.ETag)
+		assert.Equal(t, origMeta.ETag, meta.ETag)
+		f, _, err := s.GetObject("src-bucket", "orig.txt")
+		require.NoError(t, err)
+		defer func() { _ = f.Close() }()
+		data, err := io.ReadAll(f)
+		require.NoError(t, err)
+		assert.Equal(t, "hello", string(data))
+	})
+
+	t.Run("returns error when same-key copy meta write fails", func(t *testing.T) {
+		s, rootPath := setup(t)
+		metaPath := filepath.Join(rootPath, "src-bucket", "orig.txt.meta.json")
+		// 0o444: readable (so readMeta succeeds) but not writable (so writeMeta fails).
+		require.NoError(t, os.Chmod(metaPath, 0o444))
+		t.Cleanup(func() { _ = os.Chmod(metaPath, 0o600) })
+
+		_, err := s.CopyObject("src-bucket", "orig.txt", "src-bucket", "orig.txt")
+		assert.Error(t, err)
 	})
 
 	t.Run("copied object gets new LastModified", func(t *testing.T) {

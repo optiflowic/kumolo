@@ -246,6 +246,17 @@ func (s *Storage) CopyObject(srcBucket, srcKey, dstBucket, dstKey string) (Objec
 	if !s.bucketExistsLocked(dstBucket) {
 		return ObjectMetadata{}, ErrBucketNotFound
 	}
+	dstPath := filepath.Join(dstBucket, dstKey)
+	// Same-source-and-destination copy: opening the destination with O_TRUNC would
+	// truncate the source file before reading it. Just refresh LastModified instead.
+	if srcPath == dstPath {
+		meta := srcMeta
+		meta.LastModified = time.Now().UTC()
+		if err := s.writeMeta(dstPath, meta); err != nil {
+			return ObjectMetadata{}, err
+		}
+		return meta, nil
+	}
 	srcFile, err := s.root.Open(srcPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -254,7 +265,6 @@ func (s *Storage) CopyObject(srcBucket, srcKey, dstBucket, dstKey string) (Objec
 		return ObjectMetadata{}, err
 	}
 	defer func() { _ = srcFile.Close() }()
-	dstPath := filepath.Join(dstBucket, dstKey)
 	if dir := filepath.Dir(dstPath); dir != dstBucket {
 		if err := s.root.MkdirAll(dir, 0o750); err != nil {
 			return ObjectMetadata{}, err
