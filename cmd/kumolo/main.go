@@ -43,7 +43,12 @@ func run() error {
 		if err != nil {
 			return fmt.Errorf("create ephemeral data dir: %w", err)
 		}
-		defer func() { _ = os.RemoveAll(tmpDir) }()
+		defer func() {
+			if err := os.RemoveAll(tmpDir); err != nil {
+				slog.Warn("failed to remove ephemeral data dir", "dir", tmpDir, "err", err)
+			}
+		}()
+		slog.Info("using ephemeral storage", "dir", tmpDir)
 		dataDir = tmpDir
 	}
 
