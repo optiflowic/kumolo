@@ -37,7 +37,17 @@ func run() error {
 	}
 	slog.SetDefault(slog.New(logging.NewBracketHandler(os.Stderr, level)))
 
-	mux, cleanup, err := server.NewMux(cfg.DataDir)
+	dataDir := cfg.DataDir
+	if dataDir == "" {
+		tmpDir, err := os.MkdirTemp("", "kumolo-*")
+		if err != nil {
+			return fmt.Errorf("create ephemeral data dir: %w", err)
+		}
+		defer func() { _ = os.RemoveAll(tmpDir) }()
+		dataDir = tmpDir
+	}
+
+	mux, cleanup, err := server.NewMux(dataDir)
 	if err != nil {
 		return fmt.Errorf("initialize storage: %w", err)
 	}
@@ -61,7 +71,7 @@ func run() error {
 			"port",
 			cfg.Port,
 			"data-dir",
-			cfg.DataDir,
+			dataDir,
 			"log-level",
 			cfg.LogLevel,
 		)
