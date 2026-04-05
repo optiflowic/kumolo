@@ -108,7 +108,7 @@ func checkPresigned(r *http.Request, now time.Time) (int, string, string) {
 		return 0, "", ""
 	}
 
-	if now.After(t.Add(time.Duration(expires) * time.Second)) {
+	if !now.Before(t.Add(time.Duration(expires) * time.Second)) {
 		return http.StatusForbidden, "AccessDenied", "Request has expired."
 	}
 

@@ -1382,10 +1382,11 @@ func TestCheckPresigned(t *testing.T) {
 			wantStatus: 0,
 		},
 		{
-			name:       "valid: exactly at expiry boundary",
+			name:       "expired: exactly at expiry boundary",
 			req:        makeReq("AWS4-HMAC-SHA256", amzDate, "3600"),
 			now:        baseTime.Add(3600 * time.Second),
-			wantStatus: 0,
+			wantStatus: http.StatusForbidden,
+			wantCode:   "AccessDenied",
 		},
 		{
 			name:       "valid: missing algorithm is allowed",
