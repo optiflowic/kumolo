@@ -26,7 +26,7 @@ func loadEnv(dotenvLoader func(...string) error) Env {
 	}
 	return Env{
 		Port:     getEnv("KUMOLO_PORT", "5566"),
-		DataDir:  getEnv("KUMOLO_DATA_DIR", "/tmp/kumolo"),
+		DataDir:  getEnv("KUMOLO_DATA_DIR", ""),
 		LogLevel: getEnv("KUMOLO_LOG_LEVEL", "info"),
 	}
 }

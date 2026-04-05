@@ -5,12 +5,12 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /kumolo ./cmd/kumolo
-RUN mkdir -p /data && chown 65532:65532 /data
+RUN mkdir -p /tmp && chown 65532:65532 /tmp
 
 FROM scratch
 
 COPY --from=builder /kumolo /kumolo
-COPY --from=builder --chown=65532:65532 /data /data
+COPY --from=builder --chown=65532:65532 /tmp /tmp
 
 EXPOSE 5566
 

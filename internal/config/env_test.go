@@ -17,7 +17,7 @@ func TestLoadEnv(t *testing.T) {
 
 		env := LoadEnv()
 		assert.Equal(t, "5566", env.Port)
-		assert.Equal(t, "/tmp/kumolo", env.DataDir)
+		assert.Equal(t, "", env.DataDir)
 		assert.Equal(t, "info", env.LogLevel)
 	})
 
