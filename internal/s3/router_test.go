@@ -1316,16 +1316,48 @@ func TestRouterPresignedURL(t *testing.T) {
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
+
+	t.Run("unsupported algorithm returns 400", func(t *testing.T) {
+		ro, path := setup(t, baseTime.Add(30*time.Minute))
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		q := req.URL.Query()
+		q.Set("X-Amz-Signature", "fakesignature")
+		q.Set("X-Amz-Algorithm", "UNSUPPORTED-ALGO")
+		q.Set("X-Amz-Date", amzDate)
+		q.Set("X-Amz-Expires", "3600")
+		req.URL.RawQuery = q.Encode()
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "AuthorizationQueryParametersError")
+	})
+
+	t.Run("X-Amz-Expires exceeds maximum returns 400", func(t *testing.T) {
+		ro, path := setup(t, baseTime.Add(30*time.Minute))
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		q := req.URL.Query()
+		q.Set("X-Amz-Signature", "fakesignature")
+		q.Set("X-Amz-Date", amzDate)
+		q.Set("X-Amz-Expires", "604801")
+		req.URL.RawQuery = q.Encode()
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "AuthorizationQueryParametersError")
+	})
 }
 
-func TestIsPresignedExpired(t *testing.T) {
+func TestCheckPresigned(t *testing.T) {
 	const amzDate = "20240101T120000Z"
 	baseTime, err := time.Parse("20060102T150405Z", amzDate)
 	require.NoError(t, err)
 
-	makeReq := func(date, expires string) *http.Request {
+	makeReq := func(algo, date, expires string) *http.Request {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		q := req.URL.Query()
+		if algo != "" {
+			q.Set("X-Amz-Algorithm", algo)
+		}
 		if date != "" {
 			q.Set("X-Amz-Date", date)
 		}
@@ -1337,58 +1369,99 @@ func TestIsPresignedExpired(t *testing.T) {
 	}
 
 	tests := []struct {
-		name    string
-		req     *http.Request
-		now     time.Time
-		expired bool
+		name       string
+		req        *http.Request
+		now        time.Time
+		wantStatus int
+		wantCode   string
 	}{
 		{
-			name:    "not yet expired",
-			req:     makeReq(amzDate, "3600"),
-			now:     baseTime.Add(30 * time.Minute),
-			expired: false,
+			name:       "valid: not yet expired",
+			req:        makeReq("AWS4-HMAC-SHA256", amzDate, "3600"),
+			now:        baseTime.Add(30 * time.Minute),
+			wantStatus: 0,
 		},
 		{
-			name:    "exactly at expiry boundary is not expired",
-			req:     makeReq(amzDate, "3600"),
-			now:     baseTime.Add(3600 * time.Second),
-			expired: false,
+			name:       "valid: exactly at expiry boundary",
+			req:        makeReq("AWS4-HMAC-SHA256", amzDate, "3600"),
+			now:        baseTime.Add(3600 * time.Second),
+			wantStatus: 0,
 		},
 		{
-			name:    "one second past expiry",
-			req:     makeReq(amzDate, "3600"),
-			now:     baseTime.Add(3601 * time.Second),
-			expired: true,
+			name:       "valid: missing algorithm is allowed",
+			req:        makeReq("", amzDate, "3600"),
+			now:        baseTime.Add(30 * time.Minute),
+			wantStatus: 0,
 		},
 		{
-			name:    "missing X-Amz-Date is not expired",
-			req:     makeReq("", "3600"),
-			now:     baseTime.Add(2 * time.Hour),
-			expired: false,
+			name:       "valid: X-Amz-Expires=604800 (max)",
+			req:        makeReq("AWS4-HMAC-SHA256", amzDate, "604800"),
+			now:        baseTime.Add(30 * time.Minute),
+			wantStatus: 0,
 		},
 		{
-			name:    "missing X-Amz-Expires is not expired",
-			req:     makeReq(amzDate, ""),
-			now:     baseTime.Add(2 * time.Hour),
-			expired: false,
+			name:       "valid: missing date/expires passes through",
+			req:        makeReq("AWS4-HMAC-SHA256", "", ""),
+			now:        baseTime.Add(2 * time.Hour),
+			wantStatus: 0,
 		},
 		{
-			name:    "invalid X-Amz-Date is not expired",
-			req:     makeReq("notadate", "3600"),
-			now:     baseTime.Add(2 * time.Hour),
-			expired: false,
+			name:       "expired: one second past expiry",
+			req:        makeReq("AWS4-HMAC-SHA256", amzDate, "3600"),
+			now:        baseTime.Add(3601 * time.Second),
+			wantStatus: http.StatusForbidden,
+			wantCode:   "AccessDenied",
 		},
 		{
-			name:    "invalid X-Amz-Expires is not expired",
-			req:     makeReq(amzDate, "notanumber"),
-			now:     baseTime.Add(2 * time.Hour),
-			expired: false,
+			name:       "invalid algorithm",
+			req:        makeReq("UNSUPPORTED-ALGO", amzDate, "3600"),
+			now:        baseTime.Add(30 * time.Minute),
+			wantStatus: http.StatusBadRequest,
+			wantCode:   "AuthorizationQueryParametersError",
+		},
+		{
+			name:       "X-Amz-Expires=0 is invalid",
+			req:        makeReq("AWS4-HMAC-SHA256", amzDate, "0"),
+			now:        baseTime.Add(30 * time.Minute),
+			wantStatus: http.StatusBadRequest,
+			wantCode:   "AuthorizationQueryParametersError",
+		},
+		{
+			name:       "X-Amz-Expires exceeds 604800",
+			req:        makeReq("AWS4-HMAC-SHA256", amzDate, "604801"),
+			now:        baseTime.Add(30 * time.Minute),
+			wantStatus: http.StatusBadRequest,
+			wantCode:   "AuthorizationQueryParametersError",
+		},
+		{
+			name:       "X-Amz-Expires negative is invalid",
+			req:        makeReq("AWS4-HMAC-SHA256", amzDate, "-1"),
+			now:        baseTime.Add(30 * time.Minute),
+			wantStatus: http.StatusBadRequest,
+			wantCode:   "AuthorizationQueryParametersError",
+		},
+		{
+			name:       "non-numeric X-Amz-Expires is invalid",
+			req:        makeReq("AWS4-HMAC-SHA256", amzDate, "notanumber"),
+			now:        baseTime.Add(2 * time.Hour),
+			wantStatus: http.StatusBadRequest,
+			wantCode:   "AuthorizationQueryParametersError",
+		},
+		{
+			name:       "invalid X-Amz-Date passes through",
+			req:        makeReq("AWS4-HMAC-SHA256", "notadate", "3600"),
+			now:        baseTime.Add(2 * time.Hour),
+			wantStatus: 0,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expired, isPresignedExpired(tt.req, tt.now))
+			status, code, _ := checkPresigned(tt.req, tt.now)
+			assert.Equal(t, tt.wantStatus, status)
+			if tt.wantCode != "" {
+				assert.Equal(t, tt.wantCode, code)
+			}
 		})
 	}
 }
