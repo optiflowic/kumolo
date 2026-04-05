@@ -32,11 +32,20 @@ type objectStore interface {
 	ListObjects(bucket string) ([]ObjectInfo, error)
 }
 
+// multipartStore is the subset of Storage used by the Router for multipart upload operations.
+type multipartStore interface {
+	CreateMultipartUpload(bucket, key, contentType string) (uploadID string, err error)
+	UploadPart(uploadID string, partNumber int, r io.Reader) (etag string, err error)
+	CompleteMultipartUpload(uploadID string, parts []CompletePart) (ObjectMetadata, error)
+	AbortMultipartUpload(uploadID string) error
+}
+
 // Router handles S3 API requests using path-style URLs: /<bucket>/<key>
 type Router struct {
 	storage interface {
 		bucketStore
 		objectStore
+		multipartStore
 	}
 }
 
@@ -100,6 +109,7 @@ func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, bucket str
 }
 
 func (ro *Router) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bucket string) {
+	prefix := r.URL.Query().Get("prefix")
 	objects, err := ro.storage.ListObjects(bucket)
 	if err != nil {
 		if errors.Is(err, ErrBucketNotFound) {
@@ -122,26 +132,30 @@ func (ro *Router) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
-	slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-		"listed objects",
-		"bucket",
-		bucket,
-		"count",
-		len(objects),
-	)
-	contents := make([]xmlObjectContent, len(objects))
-	for i, obj := range objects {
-		contents[i] = xmlObjectContent{
+	contents := make([]xmlObjectContent, 0, len(objects))
+	for _, obj := range objects {
+		if !strings.HasPrefix(obj.Key, prefix) {
+			continue
+		}
+		contents = append(contents, xmlObjectContent{
 			Key:          obj.Key,
 			LastModified: obj.Metadata.LastModified.UTC(),
 			ETag:         obj.Metadata.ETag,
 			Size:         obj.Metadata.Size,
 			StorageClass: "STANDARD",
-		}
+		})
 	}
+	slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+		"listed objects",
+		"bucket",
+		bucket,
+		"count",
+		len(contents),
+	)
 	writeXML(w, http.StatusOK, listObjectsV2Result{
 		Name:        bucket,
-		KeyCount:    len(objects),
+		Prefix:      prefix,
+		KeyCount:    len(contents),
 		MaxKeys:     1000,
 		IsTruncated: false,
 		Contents:    contents,
@@ -149,17 +163,34 @@ func (ro *Router) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 }
 
 func (ro *Router) routeObject(w http.ResponseWriter, r *http.Request, bucket, key string) {
+	q := r.URL.Query()
 	switch r.Method {
+	case http.MethodPost:
+		switch {
+		case q.Has("uploads"):
+			ro.handleCreateMultipartUpload(w, r, bucket, key)
+		case q.Has("uploadId"):
+			ro.handleCompleteMultipartUpload(w, r, bucket, key)
+		default:
+			writeNotImplemented(w, r)
+		}
 	case http.MethodPut:
-		if r.Header.Get("x-amz-copy-source") != "" {
+		switch {
+		case q.Has("partNumber") && q.Has("uploadId"):
+			ro.handleUploadPart(w, r, bucket, key)
+		case r.Header.Get("x-amz-copy-source") != "":
 			ro.handleCopyObject(w, r, bucket, key)
-		} else {
+		default:
 			ro.handlePutObject(w, r, bucket, key)
 		}
 	case http.MethodGet:
 		ro.handleGetObject(w, r, bucket, key)
 	case http.MethodDelete:
-		ro.handleDeleteObject(w, r, bucket, key)
+		if q.Has("uploadId") {
+			ro.handleAbortMultipartUpload(w, r, bucket, key)
+		} else {
+			ro.handleDeleteObject(w, r, bucket, key)
+		}
 	case http.MethodHead:
 		ro.handleHeadObject(w, r, bucket, key)
 	default:
@@ -171,6 +202,295 @@ func (ro *Router) routeObject(w http.ResponseWriter, r *http.Request, bucket, ke
 			"The specified method is not allowed.",
 		)
 	}
+}
+
+func (ro *Router) handleCreateMultipartUpload(
+	w http.ResponseWriter,
+	r *http.Request,
+	bucket, key string,
+) {
+	contentType := r.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	uploadID, err := ro.storage.CreateMultipartUpload(bucket, key, contentType)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrBucketNotFound):
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"bucket not found",
+				"bucket",
+				bucket,
+			)
+			writeError(
+				w,
+				r,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
+		default:
+			slog.Error( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"failed to create multipart upload",
+				"bucket",
+				bucket,
+				"key",
+				key,
+				"err",
+				err,
+			)
+			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+	slog.Info( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+		"multipart upload initiated",
+		"bucket",
+		bucket,
+		"key",
+		key,
+		"uploadId",
+		uploadID,
+	)
+	writeXML(w, http.StatusOK, initiateMultipartUploadResult{
+		Bucket:   bucket,
+		Key:      key,
+		UploadID: uploadID,
+	})
+}
+
+func (ro *Router) handleUploadPart(w http.ResponseWriter, r *http.Request, bucket, key string) {
+	q := r.URL.Query()
+	uploadID := q.Get("uploadId")
+	if uploadID == "" {
+		writeError(w, r, http.StatusBadRequest, "InvalidArgument", "uploadId is required.")
+		return
+	}
+	partNumberStr := q.Get("partNumber")
+	partNumber, err := strconv.Atoi(partNumberStr)
+	if err != nil || partNumber < 1 || partNumber > 10000 {
+		writeError(
+			w,
+			r,
+			http.StatusBadRequest,
+			"InvalidArgument",
+			"partNumber must be an integer between 1 and 10000.",
+		)
+		return
+	}
+	etag, err := ro.storage.UploadPart(uploadID, partNumber, r.Body)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrUploadNotFound):
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"upload not found",
+				"uploadId",
+				uploadID,
+			)
+			writeError(
+				w,
+				r,
+				http.StatusNotFound,
+				"NoSuchUpload",
+				"The specified upload does not exist.",
+			)
+		default:
+			slog.Error( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"failed to upload part",
+				"bucket",
+				bucket,
+				"key",
+				key,
+				"uploadId",
+				uploadID,
+				"partNumber",
+				partNumber,
+				"err",
+				err,
+			)
+			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+	slog.Info( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+		"part uploaded",
+		"bucket",
+		bucket,
+		"key",
+		key,
+		"uploadId",
+		uploadID,
+		"partNumber",
+		partNumber,
+	)
+	w.Header().Set("ETag", etag)
+	w.WriteHeader(http.StatusOK)
+}
+
+func (ro *Router) handleCompleteMultipartUpload(
+	w http.ResponseWriter,
+	r *http.Request,
+	bucket, key string,
+) {
+	uploadID := r.URL.Query().Get("uploadId")
+	if uploadID == "" {
+		writeError(w, r, http.StatusBadRequest, "InvalidArgument", "uploadId is required.")
+		return
+	}
+	var req completeMultipartUploadRequest
+	if err := xml.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(
+			w,
+			r,
+			http.StatusBadRequest,
+			"MalformedXML",
+			"The XML you provided was not well-formed.",
+		)
+		return
+	}
+	parts := make([]CompletePart, len(req.Parts))
+	for i, p := range req.Parts {
+		parts[i] = CompletePart(p)
+	}
+	meta, err := ro.storage.CompleteMultipartUpload(uploadID, parts)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrUploadNotFound):
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"upload not found",
+				"uploadId",
+				uploadID,
+			)
+			writeError(
+				w,
+				r,
+				http.StatusNotFound,
+				"NoSuchUpload",
+				"The specified upload does not exist.",
+			)
+		case errors.Is(err, ErrInvalidPart):
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"invalid part",
+				"uploadId",
+				uploadID,
+			)
+			writeError(
+				w,
+				r,
+				http.StatusBadRequest,
+				"InvalidPart",
+				"One or more of the specified parts could not be found.",
+			)
+		case errors.Is(err, ErrInvalidPartOrder):
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"parts not in order",
+				"uploadId",
+				uploadID,
+			)
+			writeError(
+				w,
+				r,
+				http.StatusBadRequest,
+				"InvalidPartOrder",
+				"The list of parts was not in ascending order.",
+			)
+		case errors.Is(err, ErrBucketNotFound):
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"bucket not found",
+				"bucket",
+				bucket,
+			)
+			writeError(
+				w,
+				r,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
+		default:
+			slog.Error( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"failed to complete multipart upload",
+				"bucket",
+				bucket,
+				"key",
+				key,
+				"uploadId",
+				uploadID,
+				"err",
+				err,
+			)
+			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+	slog.Info( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+		"multipart upload completed",
+		"bucket",
+		bucket,
+		"key",
+		key,
+		"uploadId",
+		uploadID,
+	)
+	writeXML(w, http.StatusOK, completeMultipartUploadResult{
+		Location: "/" + bucket + "/" + key,
+		Bucket:   bucket,
+		Key:      key,
+		ETag:     meta.ETag,
+	})
+}
+
+func (ro *Router) handleAbortMultipartUpload(
+	w http.ResponseWriter,
+	r *http.Request,
+	bucket, key string,
+) {
+	uploadID := r.URL.Query().Get("uploadId")
+	if uploadID == "" {
+		writeError(w, r, http.StatusBadRequest, "InvalidArgument", "uploadId is required.")
+		return
+	}
+	if err := ro.storage.AbortMultipartUpload(uploadID); err != nil {
+		switch {
+		case errors.Is(err, ErrUploadNotFound):
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"upload not found",
+				"uploadId",
+				uploadID,
+			)
+			writeError(
+				w,
+				r,
+				http.StatusNotFound,
+				"NoSuchUpload",
+				"The specified upload does not exist.",
+			)
+		default:
+			slog.Error( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"failed to abort multipart upload",
+				"bucket",
+				bucket,
+				"key",
+				key,
+				"uploadId",
+				uploadID,
+				"err",
+				err,
+			)
+			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+	slog.Info( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+		"multipart upload aborted",
+		"bucket",
+		bucket,
+		"key",
+		key,
+		"uploadId",
+		uploadID,
+	)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (ro *Router) handleCopyObject(
@@ -633,4 +953,29 @@ type copyObjectResult struct {
 	XMLName      xml.Name  `xml:"CopyObjectResult"`
 	ETag         string    `xml:"ETag"`
 	LastModified time.Time `xml:"LastModified"`
+}
+
+type initiateMultipartUploadResult struct {
+	XMLName  xml.Name `xml:"InitiateMultipartUploadResult"`
+	Bucket   string   `xml:"Bucket"`
+	Key      string   `xml:"Key"`
+	UploadID string   `xml:"UploadId"`
+}
+
+type completeMultipartUploadRequest struct {
+	XMLName xml.Name          `xml:"CompleteMultipartUpload"`
+	Parts   []xmlCompletePart `xml:"Part"`
+}
+
+type xmlCompletePart struct {
+	PartNumber int    `xml:"PartNumber"`
+	ETag       string `xml:"ETag"`
+}
+
+type completeMultipartUploadResult struct {
+	XMLName  xml.Name `xml:"CompleteMultipartUploadResult"`
+	Location string   `xml:"Location"`
+	Bucket   string   `xml:"Bucket"`
+	Key      string   `xml:"Key"`
+	ETag     string   `xml:"ETag"`
 }

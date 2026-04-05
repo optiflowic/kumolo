@@ -3,10 +3,12 @@ package s3
 import (
 	"cmp"
 	"crypto/md5" // #nosec G501 -- MD5 is required by the S3 ETag specification
+	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"log/slog"
 	"os"
@@ -38,6 +40,8 @@ type Storage struct {
 	removeFile func(name string) error
 	openFile   func(name string, flag int, perm os.FileMode) (io.WriteCloser, error)
 	readAll    func(r io.Reader) ([]byte, error)
+	randRead   func(b []byte) (int, error)
+	listDirFn  func(name string) ([]os.DirEntry, error)
 }
 
 // NewStorage roots the storage at dataDir/s3, creating the directory if needed.
@@ -65,6 +69,15 @@ func newStorage(dataDir string, openRoot func(string) (*os.Root, error)) (*Stora
 		return s.root.OpenFile(name, flag, perm)
 	}
 	s.readAll = io.ReadAll
+	s.randRead = rand.Read
+	s.listDirFn = func(name string) ([]os.DirEntry, error) {
+		f, err := s.root.Open(name)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = f.Close() }()
+		return f.ReadDir(-1)
+	}
 	return s, nil
 }
 
@@ -132,6 +145,9 @@ func (s *Storage) ListBuckets() ([]BucketInfo, error) {
 		if !e.IsDir() {
 			continue
 		}
+		if strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
 		var creationDate time.Time
 		if info, err := e.Info(); err == nil {
 			creationDate = info.ModTime()
@@ -165,13 +181,16 @@ func (s *Storage) PutObject(
 		}
 	}
 
-	return s.writeObject(objPath, r, contentType)
+	return s.writeObject(objPath, r, contentType, "")
 }
 
+// writeObject writes r to objPath and records metadata. If etag is non-empty
+// it is used as-is (multipart ETag); otherwise the MD5 of the content is used.
 func (s *Storage) writeObject(
 	objPath string,
 	r io.Reader,
 	contentType string,
+	etag string,
 ) (retMeta ObjectMetadata, retErr error) {
 	f, err := s.openFile(objPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
@@ -183,15 +202,23 @@ func (s *Storage) writeObject(
 		}
 	}()
 
-	h := md5.New() // #nosec G401 -- MD5 is required by the S3 ETag specification
-	size, err := io.Copy(io.MultiWriter(f, h), r)
+	var w io.Writer = f
+	var h hash.Hash
+	if etag == "" {
+		h = md5.New() // #nosec G401 -- MD5 is required by the S3 ETag specification
+		w = io.MultiWriter(f, h)
+	}
+	size, err := io.Copy(w, r)
 	if err != nil {
 		return ObjectMetadata{}, err
 	}
 
+	if etag == "" {
+		etag = `"` + hex.EncodeToString(h.Sum(nil)) + `"`
+	}
 	meta := ObjectMetadata{
 		ContentType:  contentType,
-		ETag:         `"` + hex.EncodeToString(h.Sum(nil)) + `"`,
+		ETag:         etag,
 		LastModified: time.Now().UTC(),
 		Size:         size,
 	}
@@ -270,7 +297,7 @@ func (s *Storage) CopyObject(srcBucket, srcKey, dstBucket, dstKey string) (Objec
 			return ObjectMetadata{}, err
 		}
 	}
-	return s.writeObject(dstPath, srcFile, srcMeta.ContentType)
+	return s.writeObject(dstPath, srcFile, srcMeta.ContentType, srcMeta.ETag)
 }
 
 func (s *Storage) DeleteObject(bucket, key string) error {
@@ -338,6 +365,9 @@ func (s *Storage) walkDir(bucket, dir string, objects *[]ObjectInfo) error {
 	for _, e := range entries {
 		entryPath := filepath.Join(dir, e.Name())
 		if e.IsDir() {
+			if e.Name() == ".mpu" {
+				continue
+			}
 			if err := s.walkDir(bucket, entryPath, objects); err != nil {
 				return err
 			}
@@ -364,12 +394,7 @@ func (s *Storage) walkDir(bucket, dir string, objects *[]ObjectInfo) error {
 }
 
 func (s *Storage) readDir(name string) ([]os.DirEntry, error) {
-	f, err := s.root.Open(name)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = f.Close() }()
-	return f.ReadDir(-1)
+	return s.listDirFn(name)
 }
 
 func (s *Storage) GetBucketRegion(bucket string) (string, error) {
@@ -388,10 +413,10 @@ func (s *Storage) GetBucketRegion(bucket string) (string, error) {
 	return meta.Region, nil
 }
 
-func (s *Storage) writeBucketMeta(bucket string, meta bucketMeta) (retErr error) {
-	// json.Marshal never fails for bucketMeta: Region is a plain string.
-	data, _ := json.Marshal(meta)
-	f, err := s.openFile(bucket+".bucket.json", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+// writeJSON marshals v as JSON and writes it to path, creating or truncating the file.
+func (s *Storage) writeJSON(path string, v any) (retErr error) {
+	data, _ := json.Marshal(v) // json.Marshal only fails for unmarshalable types (channels, funcs)
+	f, err := s.openFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
 	}
@@ -402,57 +427,41 @@ func (s *Storage) writeBucketMeta(bucket string, meta bucketMeta) (retErr error)
 	}()
 	_, retErr = f.Write(data)
 	return
+}
+
+// readJSON reads path from the storage root and unmarshals its JSON content into T.
+func readJSON[T any](s *Storage, path string) (T, error) {
+	var zero T
+	f, err := s.root.Open(path)
+	if err != nil {
+		return zero, err
+	}
+	defer func() { _ = f.Close() }()
+	data, err := s.readAll(f)
+	if err != nil {
+		return zero, err
+	}
+	var v T
+	if err := json.Unmarshal(data, &v); err != nil {
+		return zero, err
+	}
+	return v, nil
+}
+
+func (s *Storage) writeBucketMeta(bucket string, meta bucketMeta) error {
+	return s.writeJSON(bucket+".bucket.json", meta)
 }
 
 func (s *Storage) readBucketMeta(bucket string) (bucketMeta, error) {
-	f, err := s.root.Open(bucket + ".bucket.json")
-	if err != nil {
-		return bucketMeta{}, err
-	}
-	defer func() { _ = f.Close() }()
-	data, err := s.readAll(f)
-	if err != nil {
-		return bucketMeta{}, err
-	}
-	var meta bucketMeta
-	if err := json.Unmarshal(data, &meta); err != nil {
-		return bucketMeta{}, err
-	}
-	return meta, nil
+	return readJSON[bucketMeta](s, bucket+".bucket.json")
 }
 
-func (s *Storage) writeMeta(objPath string, meta ObjectMetadata) (retErr error) {
-	// json.Marshal never fails for ObjectMetadata: all fields are JSON-serializable
-	// (string, int64, and time.Time which implements json.Marshaler without error).
-	data, _ := json.Marshal(meta)
-	f, err := s.openFile(objPath+".meta.json", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := f.Close(); err != nil && retErr == nil {
-			retErr = err
-		}
-	}()
-	_, retErr = f.Write(data)
-	return
+func (s *Storage) writeMeta(objPath string, meta ObjectMetadata) error {
+	return s.writeJSON(objPath+".meta.json", meta)
 }
 
 func (s *Storage) readMeta(objPath string) (ObjectMetadata, error) {
-	f, err := s.root.Open(objPath + ".meta.json")
-	if err != nil {
-		return ObjectMetadata{}, err
-	}
-	defer func() { _ = f.Close() }()
-	data, err := s.readAll(f)
-	if err != nil {
-		return ObjectMetadata{}, err
-	}
-	var meta ObjectMetadata
-	if err := json.Unmarshal(data, &meta); err != nil {
-		return ObjectMetadata{}, err
-	}
-	return meta, nil
+	return readJSON[ObjectMetadata](s, objPath+".meta.json")
 }
 
 type BucketInfo struct {
@@ -463,4 +472,248 @@ type BucketInfo struct {
 type ObjectInfo struct {
 	Key      string
 	Metadata ObjectMetadata
+}
+
+// CompletePart identifies a part by number and ETag for CompleteMultipartUpload.
+type CompletePart struct {
+	PartNumber int
+	ETag       string
+}
+
+// uploadMeta is stored as .mpu/<uploadID>/upload.json.
+type uploadMeta struct {
+	Bucket      string    `json:"bucket"`
+	Key         string    `json:"key"`
+	ContentType string    `json:"contentType"`
+	Initiated   time.Time `json:"initiated"`
+}
+
+// partMeta is stored as .mpu/<uploadID>/<partNumber>.part.meta.json.
+type partMeta struct {
+	ETag string `json:"etag"`
+	Size int64  `json:"size"`
+}
+
+const mpuDir = ".mpu"
+
+func (s *Storage) CreateMultipartUpload(bucket, key, contentType string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.bucketExistsLocked(bucket) {
+		return "", ErrBucketNotFound
+	}
+	var b [16]byte
+	if _, err := s.randRead(b[:]); err != nil {
+		return "", fmt.Errorf("generate upload ID: %w", err)
+	}
+	uploadID := hex.EncodeToString(b[:])
+	uploadDir := filepath.Join(mpuDir, uploadID)
+	if err := s.root.MkdirAll(uploadDir, 0o750); err != nil {
+		return "", err
+	}
+	meta := uploadMeta{
+		Bucket:      bucket,
+		Key:         key,
+		ContentType: contentType,
+		Initiated:   time.Now().UTC(),
+	}
+	data, _ := json.Marshal(meta) // json.Marshal never fails for uploadMeta
+	var uploadJSONWritten bool
+	defer func() {
+		if !uploadJSONWritten {
+			if err := s.removeUploadDir(uploadDir); err != nil {
+				slog.Warn( // #nosec G706 -- uploadDir is an internal path derived from the upload ID
+					"failed to clean up upload dir after write failure",
+					"uploadDir",
+					uploadDir,
+					"err",
+					err,
+				)
+			}
+		}
+	}()
+	f, err := s.openFile(
+		filepath.Join(uploadDir, "upload.json"),
+		os.O_WRONLY|os.O_CREATE|os.O_TRUNC,
+		0o600,
+	)
+	if err != nil {
+		return "", err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return "", err
+	}
+	if err := f.Close(); err != nil {
+		return "", err
+	}
+	uploadJSONWritten = true
+	return uploadID, nil
+}
+
+func (s *Storage) UploadPart(uploadID string, partNumber int, r io.Reader) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, err := s.root.Stat(filepath.Join(mpuDir, uploadID, "upload.json")); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", ErrUploadNotFound
+		}
+		return "", err
+	}
+	partPath := filepath.Join(mpuDir, uploadID, fmt.Sprintf("%d.part", partNumber))
+	f, err := s.openFile(partPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		if err := f.Close(); err != nil {
+			slog.Warn("failed to close part file", "err", err)
+		}
+	}()
+	h := md5.New() // #nosec G401 -- MD5 is required by the S3 ETag specification
+	size, err := io.Copy(io.MultiWriter(f, h), r)
+	if err != nil {
+		return "", err
+	}
+	etag := `"` + hex.EncodeToString(h.Sum(nil)) + `"`
+	meta := partMeta{ETag: etag, Size: size}
+	data, _ := json.Marshal(meta) // json.Marshal never fails for partMeta
+	mf, err := s.openFile(partPath+".meta.json", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return "", err
+	}
+	if _, err := mf.Write(data); err != nil {
+		_ = mf.Close()
+		return "", err
+	}
+	return etag, mf.Close()
+}
+
+func (s *Storage) CompleteMultipartUpload(
+	uploadID string,
+	parts []CompletePart,
+) (ObjectMetadata, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	uploadDir := filepath.Join(mpuDir, uploadID)
+	umeta, err := s.readUploadMeta(uploadID)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return ObjectMetadata{}, ErrUploadNotFound
+		}
+		return ObjectMetadata{}, err
+	}
+	if !s.bucketExistsLocked(umeta.Bucket) {
+		return ObjectMetadata{}, ErrBucketNotFound
+	}
+	if len(parts) == 0 {
+		return ObjectMetadata{}, ErrInvalidPart
+	}
+	for i, p := range parts {
+		if i > 0 && p.PartNumber <= parts[i-1].PartNumber {
+			return ObjectMetadata{}, ErrInvalidPartOrder
+		}
+		pm, err := s.readPartMeta(uploadID, p.PartNumber)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return ObjectMetadata{}, ErrInvalidPart
+			}
+			return ObjectMetadata{}, err
+		}
+		if pm.ETag != p.ETag {
+			return ObjectMetadata{}, ErrInvalidPart
+		}
+	}
+	// Open all part files and assemble via io.MultiReader.
+	files := make([]*os.File, 0, len(parts))
+	readers := make([]io.Reader, 0, len(parts))
+	// Compute multipart ETag: MD5 of the concatenated raw MD5 digests.
+	h := md5.New() // #nosec G401 -- MD5 is required by the S3 ETag specification
+	for _, p := range parts {
+		partPath := filepath.Join(uploadDir, fmt.Sprintf("%d.part", p.PartNumber))
+		f, err := s.root.Open(partPath)
+		if err != nil {
+			for _, of := range files {
+				_ = of.Close()
+			}
+			return ObjectMetadata{}, err
+		}
+		files = append(files, f)
+		readers = append(readers, f)
+		raw, _ := hex.DecodeString(strings.Trim(p.ETag, `"`))
+		_, _ = h.Write(raw)
+	}
+	multipartETag := fmt.Sprintf(`"%s-%d"`, hex.EncodeToString(h.Sum(nil)), len(parts))
+	objPath := filepath.Join(umeta.Bucket, umeta.Key)
+	if dir := filepath.Dir(objPath); dir != umeta.Bucket {
+		if err := s.root.MkdirAll(dir, 0o750); err != nil {
+			for _, f := range files {
+				_ = f.Close()
+			}
+			return ObjectMetadata{}, err
+		}
+	}
+	meta, err := s.writeObject(
+		objPath,
+		io.MultiReader(readers...),
+		umeta.ContentType,
+		multipartETag,
+	)
+	// Close part files before removing the upload directory.
+	for _, f := range files {
+		_ = f.Close()
+	}
+	if err != nil {
+		return ObjectMetadata{}, err
+	}
+	if err := s.removeUploadDir(uploadDir); err != nil {
+		slog.Warn( // #nosec G706 -- uploadDir is an internal path derived from the upload ID
+			"failed to clean up multipart upload temp files",
+			"uploadDir",
+			uploadDir,
+			"err",
+			err,
+		)
+	}
+	return meta, nil
+}
+
+func (s *Storage) AbortMultipartUpload(uploadID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	uploadDir := filepath.Join(mpuDir, uploadID)
+	if _, err := s.root.Stat(filepath.Join(uploadDir, "upload.json")); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return ErrUploadNotFound
+		}
+		return err
+	}
+	return s.removeUploadDir(uploadDir)
+}
+
+func (s *Storage) readUploadMeta(uploadID string) (uploadMeta, error) {
+	return readJSON[uploadMeta](s, filepath.Join(mpuDir, uploadID, "upload.json"))
+}
+
+func (s *Storage) readPartMeta(uploadID string, partNumber int) (partMeta, error) {
+	return readJSON[partMeta](
+		s,
+		filepath.Join(mpuDir, uploadID, fmt.Sprintf("%d.part.meta.json", partNumber)),
+	)
+}
+
+// removeUploadDir removes all files in uploadDir and then the directory itself.
+// os.Root does not expose RemoveAll, so we must walk and remove manually.
+func (s *Storage) removeUploadDir(uploadDir string) error {
+	entries, err := s.readDir(uploadDir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if err := s.root.Remove(filepath.Join(uploadDir, e.Name())); err != nil &&
+			!errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return s.root.Remove(uploadDir)
 }

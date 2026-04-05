@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -17,6 +18,13 @@ import (
 )
 
 func main() {
+	if err := run(); err != nil {
+		slog.Error("fatal", "err", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	env := config.LoadEnv()
 	buildConfig := config.RegisterFlags(flag.CommandLine, env)
 	flag.Parse()
@@ -31,8 +39,7 @@ func main() {
 
 	mux, cleanup, err := server.NewMux(cfg.DataDir)
 	if err != nil {
-		slog.Error("failed to initialize storage", "err", err)
-		os.Exit(1)
+		return fmt.Errorf("initialize storage: %w", err)
 	}
 	defer cleanup()
 
@@ -47,6 +54,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	listenErr := make(chan error, 1)
 	go func() {
 		slog.Info(
 			"kumolo listening",
@@ -58,15 +66,20 @@ func main() {
 			cfg.LogLevel,
 		)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			slog.Error("server error", "err", err)
-			os.Exit(1)
+			listenErr <- err
 		}
 	}()
 
-	<-ctx.Done()
+	select {
+	case err := <-listenErr:
+		return fmt.Errorf("server: %w", err)
+	case <-ctx.Done():
+	}
+
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Warn("server shutdown", "err", err)
 	}
+	return nil
 }
