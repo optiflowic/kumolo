@@ -9,9 +9,12 @@ import (
 )
 
 var (
-	ErrBucketNotFound = errors.New("bucket not found")
-	ErrBucketNotEmpty = errors.New("bucket not empty")
-	ErrObjectNotFound = errors.New("object not found")
+	ErrBucketNotFound   = errors.New("bucket not found")
+	ErrBucketNotEmpty   = errors.New("bucket not empty")
+	ErrObjectNotFound   = errors.New("object not found")
+	ErrUploadNotFound   = errors.New("multipart upload not found")
+	ErrInvalidPart      = errors.New("invalid part")
+	ErrInvalidPartOrder = errors.New("parts not in ascending order")
 )
 
 type errorResponse struct {

@@ -55,6 +55,15 @@ func (b badCloseWriter) Close() error {
 	return errors.New("simulated close failure")
 }
 
+// badWriteWriter wraps an io.WriteCloser and returns an error on Write.
+type badWriteWriter struct {
+	io.WriteCloser
+}
+
+func (b badWriteWriter) Write(_ []byte) (int, error) {
+	return 0, errors.New("simulated write failure")
+}
+
 func TestClose(t *testing.T) {
 	t.Run("closes storage without error", func(t *testing.T) {
 		s, err := NewStorage(t.TempDir())
@@ -839,4 +848,609 @@ func TestListObjects(t *testing.T) {
 		require.Len(t, objects, 1)
 		assert.Equal(t, "data.json", objects[0].Key)
 	})
+}
+
+func TestMultipartUpload(t *testing.T) {
+	setup := func(t *testing.T) (*Storage, string) {
+		t.Helper()
+		s, rootPath := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		return s, rootPath
+	}
+
+	t.Run("full lifecycle: create, upload parts, complete", func(t *testing.T) {
+		s, _ := setup(t)
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "big.txt", "text/plain")
+		require.NoError(t, err)
+		assert.NotEmpty(t, uploadID)
+
+		etag1, err := s.UploadPart(uploadID, 1, strings.NewReader("hello "))
+		require.NoError(t, err)
+		assert.NotEmpty(t, etag1)
+
+		etag2, err := s.UploadPart(uploadID, 2, strings.NewReader("world"))
+		require.NoError(t, err)
+		assert.NotEmpty(t, etag2)
+
+		meta, err := s.CompleteMultipartUpload(uploadID, []CompletePart{
+			{PartNumber: 1, ETag: etag1},
+			{PartNumber: 2, ETag: etag2},
+		})
+		require.NoError(t, err)
+		assert.Contains(t, meta.ETag, "-2")
+
+		f, _, err := s.GetObject("my-bucket", "big.txt")
+		require.NoError(t, err)
+		defer func() { _ = f.Close() }()
+		data, err := io.ReadAll(f)
+		require.NoError(t, err)
+		assert.Equal(t, "hello world", string(data))
+	})
+
+	t.Run("abort cleans up temp files", func(t *testing.T) {
+		s, rootPath := setup(t)
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "big.txt", "text/plain")
+		require.NoError(t, err)
+		_, err = s.UploadPart(uploadID, 1, strings.NewReader("data"))
+		require.NoError(t, err)
+
+		require.NoError(t, s.AbortMultipartUpload(uploadID))
+
+		_, err = os.Stat(filepath.Join(rootPath, mpuDir, uploadID))
+		assert.True(t, os.IsNotExist(err))
+	})
+
+	t.Run("complete removes temp files", func(t *testing.T) {
+		s, rootPath := setup(t)
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "big.txt", "text/plain")
+		require.NoError(t, err)
+		etag, err := s.UploadPart(uploadID, 1, strings.NewReader("data"))
+		require.NoError(t, err)
+		_, err = s.CompleteMultipartUpload(uploadID, []CompletePart{{PartNumber: 1, ETag: etag}})
+		require.NoError(t, err)
+
+		_, err = os.Stat(filepath.Join(rootPath, mpuDir, uploadID))
+		assert.True(t, os.IsNotExist(err))
+	})
+
+	t.Run("create returns ErrBucketNotFound for missing bucket", func(t *testing.T) {
+		s, _ := setup(t)
+		_, err := s.CreateMultipartUpload("no-bucket", "key", "text/plain")
+		assert.ErrorIs(t, err, ErrBucketNotFound)
+	})
+
+	t.Run("upload part returns ErrUploadNotFound for unknown uploadId", func(t *testing.T) {
+		s, _ := setup(t)
+		_, err := s.UploadPart("nonexistent-id", 1, strings.NewReader("data"))
+		assert.ErrorIs(t, err, ErrUploadNotFound)
+	})
+
+	t.Run("complete returns ErrUploadNotFound for unknown uploadId", func(t *testing.T) {
+		s, _ := setup(t)
+		_, err := s.CompleteMultipartUpload(
+			"nonexistent-id",
+			[]CompletePart{{PartNumber: 1, ETag: `"abc"`}},
+		)
+		assert.ErrorIs(t, err, ErrUploadNotFound)
+	})
+
+	t.Run("complete returns ErrInvalidPart for empty parts list", func(t *testing.T) {
+		s, _ := setup(t)
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "big.txt", "text/plain")
+		require.NoError(t, err)
+		_, err = s.CompleteMultipartUpload(uploadID, []CompletePart{})
+		assert.ErrorIs(t, err, ErrInvalidPart)
+	})
+
+	t.Run("complete returns ErrInvalidPartOrder for non-ascending parts", func(t *testing.T) {
+		s, _ := setup(t)
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "big.txt", "text/plain")
+		require.NoError(t, err)
+		etag1, err := s.UploadPart(uploadID, 1, strings.NewReader("a"))
+		require.NoError(t, err)
+		etag2, err := s.UploadPart(uploadID, 2, strings.NewReader("b"))
+		require.NoError(t, err)
+		_, err = s.CompleteMultipartUpload(uploadID, []CompletePart{
+			{PartNumber: 2, ETag: etag2},
+			{PartNumber: 1, ETag: etag1},
+		})
+		assert.ErrorIs(t, err, ErrInvalidPartOrder)
+	})
+
+	t.Run("complete returns ErrInvalidPart for wrong ETag", func(t *testing.T) {
+		s, _ := setup(t)
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "big.txt", "text/plain")
+		require.NoError(t, err)
+		_, err = s.UploadPart(uploadID, 1, strings.NewReader("data"))
+		require.NoError(t, err)
+		_, err = s.CompleteMultipartUpload(uploadID, []CompletePart{
+			{PartNumber: 1, ETag: `"wrongetag"`},
+		})
+		assert.ErrorIs(t, err, ErrInvalidPart)
+	})
+
+	t.Run("complete returns ErrInvalidPart for missing part on disk", func(t *testing.T) {
+		s, _ := setup(t)
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "big.txt", "text/plain")
+		require.NoError(t, err)
+		_, err = s.CompleteMultipartUpload(uploadID, []CompletePart{
+			{PartNumber: 1, ETag: `"abc"`},
+		})
+		assert.ErrorIs(t, err, ErrInvalidPart)
+	})
+
+	t.Run("abort returns ErrUploadNotFound for unknown uploadId", func(t *testing.T) {
+		s, _ := setup(t)
+		err := s.AbortMultipartUpload("nonexistent-id")
+		assert.ErrorIs(t, err, ErrUploadNotFound)
+	})
+
+	t.Run("ListBuckets does not expose .mpu directory", func(t *testing.T) {
+		s, _ := setup(t)
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain")
+		require.NoError(t, err)
+		_, err = s.UploadPart(uploadID, 1, strings.NewReader("data"))
+		require.NoError(t, err)
+
+		buckets, err := s.ListBuckets()
+		require.NoError(t, err)
+		for _, b := range buckets {
+			assert.NotEqual(t, ".mpu", b.Name)
+		}
+	})
+
+	t.Run("ListObjects does not expose part files", func(t *testing.T) {
+		s, _ := setup(t)
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain")
+		require.NoError(t, err)
+		_, err = s.UploadPart(uploadID, 1, strings.NewReader("data"))
+		require.NoError(t, err)
+
+		objects, err := s.ListObjects("my-bucket")
+		require.NoError(t, err)
+		assert.Empty(t, objects)
+	})
+
+	t.Run(
+		"complete returns ErrBucketNotFound when bucket deleted before completion",
+		func(t *testing.T) {
+			s, _ := setup(t)
+			uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain")
+			require.NoError(t, err)
+			etag, err := s.UploadPart(uploadID, 1, strings.NewReader("data"))
+			require.NoError(t, err)
+
+			// Delete bucket between upload and completion.
+			require.NoError(t, s.DeleteBucket("my-bucket"))
+
+			_, err = s.CompleteMultipartUpload(
+				uploadID,
+				[]CompletePart{{PartNumber: 1, ETag: etag}},
+			)
+			assert.ErrorIs(t, err, ErrBucketNotFound)
+		},
+	)
+
+	t.Run("complete with nested key creates intermediate directories", func(t *testing.T) {
+		s, _ := setup(t)
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "path/to/big.txt", "text/plain")
+		require.NoError(t, err)
+		etag, err := s.UploadPart(uploadID, 1, strings.NewReader("data"))
+		require.NoError(t, err)
+		_, err = s.CompleteMultipartUpload(uploadID, []CompletePart{{PartNumber: 1, ETag: etag}})
+		require.NoError(t, err)
+		_, _, err = s.GetObject("my-bucket", "path/to/big.txt")
+		assert.NoError(t, err)
+	})
+
+	t.Run("upload part returns error when part file cannot be written", func(t *testing.T) {
+		s, _ := setup(t)
+		origOpenFile := s.openFile
+		s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+			if strings.HasSuffix(name, ".part") && !strings.HasSuffix(name, ".meta.json") {
+				return nil, errors.New("disk full")
+			}
+			return origOpenFile(name, flag, perm)
+		}
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain")
+		require.NoError(t, err)
+		_, err = s.UploadPart(uploadID, 1, strings.NewReader("data"))
+		assert.Error(t, err)
+	})
+
+	t.Run("upload part returns error when meta file cannot be written", func(t *testing.T) {
+		s, _ := setup(t)
+		origOpenFile := s.openFile
+		s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+			if strings.HasSuffix(name, ".part.meta.json") {
+				return nil, errors.New("disk full")
+			}
+			return origOpenFile(name, flag, perm)
+		}
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain")
+		require.NoError(t, err)
+		_, err = s.UploadPart(uploadID, 1, strings.NewReader("data"))
+		assert.Error(t, err)
+	})
+
+	t.Run("create returns error when mpu directory cannot be created", func(t *testing.T) {
+		s, rootPath := setup(t)
+		// Place a regular file at .mpu to block MkdirAll.
+		require.NoError(t, os.WriteFile(filepath.Join(rootPath, mpuDir), []byte{}, 0o600))
+		_, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain")
+		assert.Error(t, err)
+	})
+
+	t.Run("create returns error when upload.json cannot be opened", func(t *testing.T) {
+		s, rootPath := setup(t)
+		var capturedUploadDir string
+		origOpenFile := s.openFile
+		s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+			if strings.HasSuffix(name, "upload.json") {
+				capturedUploadDir = filepath.Join(rootPath, filepath.Dir(name))
+				return nil, errors.New("disk full")
+			}
+			return origOpenFile(name, flag, perm)
+		}
+		_, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain")
+		assert.Error(t, err)
+		assert.NoDirExists(t, capturedUploadDir)
+	})
+
+	t.Run("create returns error when upload.json write fails", func(t *testing.T) {
+		s, rootPath := setup(t)
+		var capturedUploadDir string
+		origOpenFile := s.openFile
+		s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+			if strings.HasSuffix(name, "upload.json") {
+				capturedUploadDir = filepath.Join(rootPath, filepath.Dir(name))
+				wc, err := origOpenFile(name, flag, perm)
+				if err != nil {
+					return nil, err
+				}
+				return badWriteWriter{wc}, nil
+			}
+			return origOpenFile(name, flag, perm)
+		}
+		_, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain")
+		assert.Error(t, err)
+		assert.NoDirExists(t, capturedUploadDir)
+	})
+
+	t.Run("create returns error when upload.json close fails", func(t *testing.T) {
+		s, rootPath := setup(t)
+		var capturedUploadDir string
+		origOpenFile := s.openFile
+		s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+			if strings.HasSuffix(name, "upload.json") {
+				capturedUploadDir = filepath.Join(rootPath, filepath.Dir(name))
+				wc, err := origOpenFile(name, flag, perm)
+				if err != nil {
+					return nil, err
+				}
+				return badCloseWriter{wc}, nil
+			}
+			return origOpenFile(name, flag, perm)
+		}
+		_, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain")
+		assert.Error(t, err)
+		assert.NoDirExists(t, capturedUploadDir)
+	})
+
+	t.Run("upload part returns error when io.Copy fails", func(t *testing.T) {
+		s, _ := setup(t)
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain")
+		require.NoError(t, err)
+		_, err = s.UploadPart(uploadID, 1, errReader{})
+		assert.Error(t, err)
+	})
+
+	t.Run("upload part logs warning when part file close fails", func(t *testing.T) {
+		s, _ := setup(t)
+		origOpenFile := s.openFile
+		s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+			wc, err := origOpenFile(name, flag, perm)
+			if err != nil {
+				return nil, err
+			}
+			if strings.HasSuffix(name, ".part") && !strings.HasSuffix(name, ".meta.json") {
+				return badCloseWriter{wc}, nil
+			}
+			return wc, nil
+		}
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain")
+		require.NoError(t, err)
+		// The close failure is logged as a warning; UploadPart still returns the ETag.
+		etag, err := s.UploadPart(uploadID, 1, strings.NewReader("data"))
+		assert.NoError(t, err)
+		assert.NotEmpty(t, etag)
+	})
+
+	t.Run("upload part returns error when meta write fails", func(t *testing.T) {
+		s, _ := setup(t)
+		origOpenFile := s.openFile
+		s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+			wc, err := origOpenFile(name, flag, perm)
+			if err != nil {
+				return nil, err
+			}
+			if strings.HasSuffix(name, ".part.meta.json") {
+				return badWriteWriter{wc}, nil
+			}
+			return wc, nil
+		}
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain")
+		require.NoError(t, err)
+		_, err = s.UploadPart(uploadID, 1, strings.NewReader("data"))
+		assert.Error(t, err)
+	})
+
+	t.Run("complete returns error when readUploadMeta readAll fails", func(t *testing.T) {
+		s, _ := setup(t)
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain")
+		require.NoError(t, err)
+		s.readAll = func(_ io.Reader) ([]byte, error) { return nil, errors.New("read error") }
+		_, err = s.CompleteMultipartUpload(uploadID, []CompletePart{{PartNumber: 1, ETag: `"abc"`}})
+		assert.Error(t, err)
+		assert.NotErrorIs(t, err, ErrUploadNotFound)
+	})
+
+	t.Run("complete returns error when part meta is corrupt JSON", func(t *testing.T) {
+		s, rootPath := setup(t)
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain")
+		require.NoError(t, err)
+		_, err = s.UploadPart(uploadID, 1, strings.NewReader("data"))
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(
+			filepath.Join(rootPath, mpuDir, uploadID, "1.part.meta.json"),
+			[]byte("not-json"),
+			0o600,
+		))
+		_, err = s.CompleteMultipartUpload(uploadID, []CompletePart{{PartNumber: 1, ETag: `"abc"`}})
+		assert.Error(t, err)
+		assert.NotErrorIs(t, err, ErrInvalidPart)
+	})
+
+	t.Run("complete returns error when part file is unreadable", func(t *testing.T) {
+		s, rootPath := setup(t)
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain")
+		require.NoError(t, err)
+		etag, err := s.UploadPart(uploadID, 1, strings.NewReader("data"))
+		require.NoError(t, err)
+		partPath := filepath.Join(rootPath, mpuDir, uploadID, "1.part")
+		require.NoError(t, os.Chmod(partPath, 0o000))
+		t.Cleanup(func() { _ = os.Chmod(partPath, 0o600) })
+		_, err = s.CompleteMultipartUpload(uploadID, []CompletePart{{PartNumber: 1, ETag: etag}})
+		assert.Error(t, err)
+	})
+
+	t.Run("complete returns error when meta write fails", func(t *testing.T) {
+		s, _ := setup(t)
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain")
+		require.NoError(t, err)
+		etag, err := s.UploadPart(uploadID, 1, strings.NewReader("data"))
+		require.NoError(t, err)
+		origOpenFile := s.openFile
+		s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+			if strings.HasSuffix(name, ".meta.json") && !strings.Contains(name, mpuDir) {
+				return nil, errors.New("disk full")
+			}
+			return origOpenFile(name, flag, perm)
+		}
+		_, err = s.CompleteMultipartUpload(uploadID, []CompletePart{{PartNumber: 1, ETag: etag}})
+		assert.Error(t, err)
+	})
+
+	t.Run("abort returns error for non-ErrNotExist stat failure", func(t *testing.T) {
+		s, rootPath := setup(t)
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain")
+		require.NoError(t, err)
+		// Replace upload dir with a file to make Stat of upload.json fail with "not a directory".
+		uploadDir := filepath.Join(rootPath, mpuDir, uploadID)
+		require.NoError(t, os.RemoveAll(uploadDir))
+		require.NoError(t, os.WriteFile(uploadDir, []byte{}, 0o600))
+		err = s.AbortMultipartUpload(uploadID)
+		assert.Error(t, err)
+		assert.NotErrorIs(t, err, ErrUploadNotFound)
+	})
+
+	t.Run("removeUploadDir returns error when entry removal fails", func(t *testing.T) {
+		s, rootPath := setup(t)
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain")
+		require.NoError(t, err)
+		// Create a subdirectory inside the upload dir; Remove on a non-empty dir fails.
+		subDir := filepath.Join(rootPath, mpuDir, uploadID, "subdir")
+		require.NoError(t, os.Mkdir(subDir, 0o750))
+		require.NoError(t, os.WriteFile(filepath.Join(subDir, "file"), []byte{}, 0o600))
+		err = s.AbortMultipartUpload(uploadID)
+		assert.Error(t, err)
+	})
+
+	t.Run(
+		"readUploadMeta returns error when upload.json contains invalid JSON",
+		func(t *testing.T) {
+			s, rootPath := setup(t)
+			uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain")
+			require.NoError(t, err)
+			require.NoError(t, os.WriteFile(
+				filepath.Join(rootPath, mpuDir, uploadID, "upload.json"),
+				[]byte("not-json"),
+				0o600,
+			))
+			_, err = s.CompleteMultipartUpload(
+				uploadID,
+				[]CompletePart{{PartNumber: 1, ETag: `"abc"`}},
+			)
+			assert.Error(t, err)
+			assert.NotErrorIs(t, err, ErrUploadNotFound)
+		},
+	)
+
+	t.Run("readPartMeta returns error when readAll fails", func(t *testing.T) {
+		s, _ := setup(t)
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain")
+		require.NoError(t, err)
+		_, err = s.UploadPart(uploadID, 1, strings.NewReader("data"))
+		require.NoError(t, err)
+		// Fail on the 2nd readAll call: 1st is upload.json, 2nd is the part meta.
+		call := 0
+		s.readAll = func(r io.Reader) ([]byte, error) {
+			call++
+			if call == 2 {
+				return nil, errors.New("read error")
+			}
+			return io.ReadAll(r)
+		}
+		_, err = s.CompleteMultipartUpload(uploadID, []CompletePart{{PartNumber: 1, ETag: `"abc"`}})
+		assert.Error(t, err)
+		assert.NotErrorIs(t, err, ErrInvalidPart)
+	})
+
+	t.Run("removeUploadDir returns error when readDir fails", func(t *testing.T) {
+		s, _ := setup(t)
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain")
+		require.NoError(t, err)
+		origListDir := s.listDirFn
+		s.listDirFn = func(name string) ([]os.DirEntry, error) {
+			if strings.Contains(name, uploadID) {
+				return nil, errors.New("simulated readDir failure")
+			}
+			return origListDir(name)
+		}
+		err = s.AbortMultipartUpload(uploadID)
+		assert.Error(t, err)
+		assert.NotErrorIs(t, err, ErrUploadNotFound)
+	})
+
+	t.Run("ListObjects skips .mpu directory inside bucket", func(t *testing.T) {
+		s, rootPath := setup(t)
+		// Create a .mpu directory inside the bucket to simulate a key collision.
+		mpuInBucket := filepath.Join(rootPath, "my-bucket", ".mpu")
+		require.NoError(t, os.Mkdir(mpuInBucket, 0o750))
+		require.NoError(
+			t,
+			os.WriteFile(filepath.Join(mpuInBucket, "fakefile"), []byte("data"), 0o600),
+		)
+		objects, err := s.ListObjects("my-bucket")
+		require.NoError(t, err)
+		assert.Empty(t, objects)
+	})
+
+	t.Run("create returns error when randRead fails", func(t *testing.T) {
+		s, _ := setup(t)
+		s.randRead = func(_ []byte) (int, error) {
+			return 0, errors.New("entropy exhausted")
+		}
+		_, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain")
+		assert.Error(t, err)
+	})
+
+	t.Run("upload part returns error on non-ErrNotExist stat failure", func(t *testing.T) {
+		s, rootPath := setup(t)
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain")
+		require.NoError(t, err)
+		// Replace upload dir with a file so Stat of upload.json fails with ENOTDIR.
+		uploadDir := filepath.Join(rootPath, mpuDir, uploadID)
+		require.NoError(t, os.RemoveAll(uploadDir))
+		require.NoError(t, os.WriteFile(uploadDir, []byte{}, 0o600))
+		_, err = s.UploadPart(uploadID, 1, strings.NewReader("data"))
+		assert.Error(t, err)
+		assert.NotErrorIs(t, err, ErrUploadNotFound)
+	})
+
+	t.Run("complete returns error when MkdirAll fails for nested key", func(t *testing.T) {
+		s, rootPath := setup(t)
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "a/b/big.txt", "text/plain")
+		require.NoError(t, err)
+		etag, err := s.UploadPart(uploadID, 1, strings.NewReader("data"))
+		require.NoError(t, err)
+		// Block MkdirAll("my-bucket/a/b") by placing a file at "my-bucket/a".
+		require.NoError(t, os.WriteFile(filepath.Join(rootPath, "my-bucket", "a"), []byte{}, 0o600))
+		_, err = s.CompleteMultipartUpload(uploadID, []CompletePart{{PartNumber: 1, ETag: etag}})
+		assert.Error(t, err)
+	})
+
+	t.Run("complete returns error when writeObject fails", func(t *testing.T) {
+		s, _ := setup(t)
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key.txt", "text/plain")
+		require.NoError(t, err)
+		etag, err := s.UploadPart(uploadID, 1, strings.NewReader("data"))
+		require.NoError(t, err)
+		origOpenFile := s.openFile
+		s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+			// Fail for the final assembled object file: not .json, not inside mpuDir.
+			if !strings.HasSuffix(name, ".json") && !strings.Contains(name, mpuDir) {
+				return nil, errors.New("disk full")
+			}
+			return origOpenFile(name, flag, perm)
+		}
+		_, err = s.CompleteMultipartUpload(uploadID, []CompletePart{{PartNumber: 1, ETag: etag}})
+		assert.Error(t, err)
+	})
+
+	t.Run("complete logs warning when cleanup fails", func(t *testing.T) {
+		s, _ := setup(t)
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain")
+		require.NoError(t, err)
+		etag, err := s.UploadPart(uploadID, 1, strings.NewReader("data"))
+		require.NoError(t, err)
+		s.listDirFn = func(_ string) ([]os.DirEntry, error) {
+			return nil, errors.New("simulated cleanup failure")
+		}
+		// CompleteMultipartUpload must still succeed despite cleanup failure.
+		meta, err := s.CompleteMultipartUpload(
+			uploadID,
+			[]CompletePart{{PartNumber: 1, ETag: etag}},
+		)
+		require.NoError(t, err)
+		assert.NotEmpty(t, meta.ETag)
+	})
+
+	t.Run(
+		"complete closes already-opened files when a later part file cannot be opened",
+		func(t *testing.T) {
+			s, rootPath := setup(t)
+			uploadID, err := s.CreateMultipartUpload("my-bucket", "big.txt", "text/plain")
+			require.NoError(t, err)
+			etag1, err := s.UploadPart(uploadID, 1, strings.NewReader("hello"))
+			require.NoError(t, err)
+			etag2, err := s.UploadPart(uploadID, 2, strings.NewReader("world"))
+			require.NoError(t, err)
+
+			// Make part 2's file unreadable; part 1 will be opened successfully first.
+			part2Path := filepath.Join(rootPath, mpuDir, uploadID, "2.part")
+			require.NoError(t, os.Chmod(part2Path, 0o000))
+			t.Cleanup(func() { _ = os.Chmod(part2Path, 0o600) })
+
+			_, err = s.CompleteMultipartUpload(uploadID, []CompletePart{
+				{PartNumber: 1, ETag: etag1},
+				{PartNumber: 2, ETag: etag2},
+			})
+			assert.Error(t, err)
+		},
+	)
+
+	t.Run(
+		"create logs warning when cleanup removeUploadDir fails after write failure",
+		func(t *testing.T) {
+			s, _ := setup(t)
+			origOpenFile := s.openFile
+			s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+				if strings.HasSuffix(name, "upload.json") {
+					wc, err := origOpenFile(name, flag, perm)
+					if err != nil {
+						return nil, err
+					}
+					// Inject a listDirFn failure so removeUploadDir fails during cleanup.
+					s.listDirFn = func(_ string) ([]os.DirEntry, error) {
+						return nil, errors.New("simulated readDir failure")
+					}
+					return badWriteWriter{wc}, nil
+				}
+				return origOpenFile(name, flag, perm)
+			}
+			_, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain")
+			assert.Error(t, err)
+		},
+	)
 }
