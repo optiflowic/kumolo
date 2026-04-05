@@ -53,6 +53,54 @@ func TestMiddleware(t *testing.T) {
 	})
 }
 
+func TestLogLevelForStatus(t *testing.T) {
+	tests := []struct {
+		status    int
+		wantLevel slog.Level
+	}{
+		{http.StatusOK, slog.LevelInfo},
+		{http.StatusCreated, slog.LevelInfo},
+		{http.StatusNoContent, slog.LevelInfo},
+		{http.StatusBadRequest, slog.LevelWarn},
+		{http.StatusNotFound, slog.LevelWarn},
+		{http.StatusForbidden, slog.LevelWarn},
+		{http.StatusInternalServerError, slog.LevelError},
+		{http.StatusNotImplemented, slog.LevelError},
+	}
+
+	for _, tt := range tests {
+		t.Run(http.StatusText(tt.status), func(t *testing.T) {
+			assert.Equal(t, tt.wantLevel, logLevelForStatus(tt.status))
+		})
+	}
+}
+
+func TestMiddlewareLogLevel(t *testing.T) {
+	tests := []struct {
+		name      string
+		status    int
+		wantLevel string
+	}{
+		{"2xx logs at Info", http.StatusOK, "[INFO]"},
+		{"4xx logs at Warn", http.StatusNotFound, "[WARN]"},
+		{"5xx logs at Error", http.StatusInternalServerError, "[ERROR]"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf testBuffer
+			setLogger(t, &buf)
+
+			handler := Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tt.status)
+			}))
+			handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+
+			assert.Contains(t, buf.String(), tt.wantLevel)
+		})
+	}
+}
+
 // testBuffer captures log output in tests.
 type testBuffer struct {
 	buf []byte

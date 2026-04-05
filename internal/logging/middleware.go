@@ -18,12 +18,15 @@ func (r *responseRecorder) WriteHeader(status int) {
 }
 
 // Middleware logs each incoming request and its response status and duration.
+// Log level is chosen by status class: 2xx → Info, 4xx → Warn, 5xx → Error.
 func Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		rec := &responseRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rec, r)
-		slog.Info( // #nosec G706 -- method and path are from the HTTP request; log injection risk is accepted for a local development emulator
+		slog.Log( // #nosec G706 -- method and path are from the HTTP request; log injection risk is accepted for a local development emulator
+			r.Context(),
+			logLevelForStatus(rec.status),
 			"incoming request",
 			"method",
 			r.Method,
@@ -35,4 +38,15 @@ func Middleware(next http.Handler) http.Handler {
 			time.Since(start),
 		)
 	})
+}
+
+func logLevelForStatus(status int) slog.Level {
+	switch {
+	case status >= 500:
+		return slog.LevelError
+	case status >= 400:
+		return slog.LevelWarn
+	default:
+		return slog.LevelInfo
+	}
 }
