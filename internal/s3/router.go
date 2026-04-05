@@ -47,13 +47,20 @@ type Router struct {
 		objectStore
 		multipartStore
 	}
+	now func() time.Time // injectable for testing; defaults to time.Now
 }
 
 func NewRouter(storage *Storage) *Router {
-	return &Router{storage: storage}
+	return &Router{storage: storage, now: time.Now}
 }
 
 func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Has("X-Amz-Signature") {
+		if isPresignedExpired(r, ro.now()) {
+			writeError(w, r, http.StatusForbidden, "AccessDenied", "Request has expired.")
+			return
+		}
+	}
 	bucket, key := parsePath(r.URL.Path)
 	switch {
 	case bucket == "":
@@ -63,6 +70,26 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		ro.routeObject(w, r, bucket, key)
 	}
+}
+
+// isPresignedExpired reports whether the presigned request has passed its expiry.
+// Returns false if required query parameters are absent or unparseable.
+func isPresignedExpired(r *http.Request, now time.Time) bool {
+	q := r.URL.Query()
+	amzDate := q.Get("X-Amz-Date")
+	amzExpires := q.Get("X-Amz-Expires")
+	if amzDate == "" || amzExpires == "" {
+		return false
+	}
+	t, err := time.Parse("20060102T150405Z", amzDate)
+	if err != nil {
+		return false
+	}
+	expires, err := strconv.ParseInt(amzExpires, 10, 64)
+	if err != nil {
+		return false
+	}
+	return now.After(t.Add(time.Duration(expires) * time.Second))
 }
 
 func (ro *Router) routeRoot(w http.ResponseWriter, r *http.Request) {

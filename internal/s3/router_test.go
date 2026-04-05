@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -271,7 +272,7 @@ func (m *mockStore) CompleteMultipartUpload(_ string, _ []CompletePart) (ObjectM
 func (m *mockStore) AbortMultipartUpload(_ string) error { return m.abortMultipartUploadErr }
 
 func newRouterWithMock(store *mockStore) *Router {
-	return &Router{storage: store}
+	return &Router{storage: store, now: time.Now}
 }
 
 func TestRouterHandlerErrors(t *testing.T) {
@@ -885,6 +886,41 @@ func TestParseSigV4(t *testing.T) {
 		assert.Empty(t, ctx.AccessKeyID)
 		assert.Empty(t, ctx.Region)
 	})
+
+	t.Run("parses presigned URL credential from query param", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		q := req.URL.Query()
+		q.Set("X-Amz-Credential", "AKIAIOSFODNN7EXAMPLE/20231001/ap-northeast-1/s3/aws4_request")
+		req.URL.RawQuery = q.Encode()
+		ctx := ParseSigV4(req)
+		assert.Equal(t, "AKIAIOSFODNN7EXAMPLE", ctx.AccessKeyID)
+		assert.Equal(t, "ap-northeast-1", ctx.Region)
+		assert.Equal(t, "s3", ctx.Service)
+	})
+
+	t.Run("query param credential takes precedence over Authorization header", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set(
+			"Authorization",
+			"AWS4-HMAC-SHA256 Credential=HEADERKEY/20231001/us-east-1/s3/aws4_request, SignedHeaders=host, Signature=abc",
+		)
+		q := req.URL.Query()
+		q.Set("X-Amz-Credential", "QUERYKEY/20231001/eu-west-1/s3/aws4_request")
+		req.URL.RawQuery = q.Encode()
+		ctx := ParseSigV4(req)
+		assert.Equal(t, "QUERYKEY", ctx.AccessKeyID)
+		assert.Equal(t, "eu-west-1", ctx.Region)
+	})
+
+	t.Run("presigned credential with too few fields returns empty context", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		q := req.URL.Query()
+		q.Set("X-Amz-Credential", "KEY/20231001")
+		req.URL.RawQuery = q.Encode()
+		ctx := ParseSigV4(req)
+		assert.Empty(t, ctx.AccessKeyID)
+		assert.Empty(t, ctx.Region)
+	})
 }
 
 func TestRouterMultipartUpload(t *testing.T) {
@@ -1197,4 +1233,162 @@ func TestRouterMultipartUpload(t *testing.T) {
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNoContent, w.Code)
 	})
+}
+
+func TestRouterPresignedURL(t *testing.T) {
+	const amzDate = "20240101T000000Z"
+	baseTime, err := time.Parse("20060102T150405Z", amzDate)
+	require.NoError(t, err)
+
+	presignedReq := func(method, path string) *http.Request {
+		req := httptest.NewRequest(method, path, nil)
+		q := req.URL.Query()
+		q.Set("X-Amz-Signature", "fakesignature")
+		q.Set("X-Amz-Date", amzDate)
+		q.Set("X-Amz-Expires", "3600")
+		req.URL.RawQuery = q.Encode()
+		return req
+	}
+
+	setup := func(t *testing.T, now time.Time) (*Router, string) {
+		t.Helper()
+		ro := newTestRouter(t)
+		ro.now = func() time.Time { return now }
+		bucket := "presign-bucket"
+		putBucket := httptest.NewRequest(http.MethodPut, "/"+bucket, nil)
+		ro.ServeHTTP(httptest.NewRecorder(), putBucket)
+		return ro, "/" + bucket + "/file.txt"
+	}
+
+	t.Run("expired presigned GET returns 403", func(t *testing.T) {
+		ro, path := setup(t, baseTime.Add(2*time.Hour))
+		req := presignedReq(http.MethodGet, path)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusForbidden, w.Code)
+		assert.Contains(t, w.Body.String(), "AccessDenied")
+	})
+
+	t.Run("expired presigned PUT returns 403", func(t *testing.T) {
+		ro, path := setup(t, baseTime.Add(2*time.Hour))
+		req := presignedReq(http.MethodPut, path)
+		req.Body = io.NopCloser(strings.NewReader("hello"))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusForbidden, w.Code)
+	})
+
+	t.Run("valid presigned PUT uploads object", func(t *testing.T) {
+		ro, path := setup(t, baseTime.Add(30*time.Minute))
+		req := presignedReq(http.MethodPut, path)
+		req.Body = io.NopCloser(strings.NewReader("hello presigned"))
+		req.Header.Set("Content-Type", "text/plain")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("valid presigned GET serves object", func(t *testing.T) {
+		ro, path := setup(t, baseTime.Add(30*time.Minute))
+		putReq := httptest.NewRequest(http.MethodPut, path, strings.NewReader("hello presigned"))
+		putReq.Header.Set("Content-Type", "text/plain")
+		ro.ServeHTTP(httptest.NewRecorder(), putReq)
+
+		req := presignedReq(http.MethodGet, path)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "hello presigned", w.Body.String())
+	})
+
+	t.Run("missing X-Amz-Date is treated as not expired", func(t *testing.T) {
+		ro, path := setup(t, baseTime.Add(30*time.Minute))
+		putReq := httptest.NewRequest(http.MethodPut, path, strings.NewReader("data"))
+		putReq.Header.Set("Content-Type", "text/plain")
+		ro.ServeHTTP(httptest.NewRecorder(), putReq)
+
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		q := req.URL.Query()
+		q.Set("X-Amz-Signature", "fakesignature")
+		// No X-Amz-Date or X-Amz-Expires
+		req.URL.RawQuery = q.Encode()
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+}
+
+func TestIsPresignedExpired(t *testing.T) {
+	const amzDate = "20240101T120000Z"
+	baseTime, err := time.Parse("20060102T150405Z", amzDate)
+	require.NoError(t, err)
+
+	makeReq := func(date, expires string) *http.Request {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		q := req.URL.Query()
+		if date != "" {
+			q.Set("X-Amz-Date", date)
+		}
+		if expires != "" {
+			q.Set("X-Amz-Expires", expires)
+		}
+		req.URL.RawQuery = q.Encode()
+		return req
+	}
+
+	tests := []struct {
+		name    string
+		req     *http.Request
+		now     time.Time
+		expired bool
+	}{
+		{
+			name:    "not yet expired",
+			req:     makeReq(amzDate, "3600"),
+			now:     baseTime.Add(30 * time.Minute),
+			expired: false,
+		},
+		{
+			name:    "exactly at expiry boundary is not expired",
+			req:     makeReq(amzDate, "3600"),
+			now:     baseTime.Add(3600 * time.Second),
+			expired: false,
+		},
+		{
+			name:    "one second past expiry",
+			req:     makeReq(amzDate, "3600"),
+			now:     baseTime.Add(3601 * time.Second),
+			expired: true,
+		},
+		{
+			name:    "missing X-Amz-Date is not expired",
+			req:     makeReq("", "3600"),
+			now:     baseTime.Add(2 * time.Hour),
+			expired: false,
+		},
+		{
+			name:    "missing X-Amz-Expires is not expired",
+			req:     makeReq(amzDate, ""),
+			now:     baseTime.Add(2 * time.Hour),
+			expired: false,
+		},
+		{
+			name:    "invalid X-Amz-Date is not expired",
+			req:     makeReq("notadate", "3600"),
+			now:     baseTime.Add(2 * time.Hour),
+			expired: false,
+		},
+		{
+			name:    "invalid X-Amz-Expires is not expired",
+			req:     makeReq(amzDate, "notanumber"),
+			now:     baseTime.Add(2 * time.Hour),
+			expired: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expired, isPresignedExpired(tt.req, tt.now))
+		})
+	}
 }
