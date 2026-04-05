@@ -47,13 +47,27 @@ type Router struct {
 		objectStore
 		multipartStore
 	}
+	now func() time.Time // injectable for testing; defaults to time.Now
 }
 
 func NewRouter(storage *Storage) *Router {
-	return &Router{storage: storage}
+	return &Router{storage: storage, now: time.Now}
 }
 
 func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Has("X-Amz-Signature") {
+		if status, code, msg := checkPresigned(r, ro.now()); status != 0 {
+			slog.Debug( // #nosec G706 -- path comes from URL; log injection risk accepted for a local dev emulator
+				"presigned request rejected",
+				"path",
+				r.URL.Path,
+				"code",
+				code,
+			)
+			writeError(w, r, status, code, msg)
+			return
+		}
+	}
 	bucket, key := parsePath(r.URL.Path)
 	switch {
 	case bucket == "":
@@ -63,6 +77,42 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		ro.routeObject(w, r, bucket, key)
 	}
+}
+
+// checkPresigned validates a presigned request.
+// Returns (0, "", "") if valid. Returns (status, code, message) if invalid.
+func checkPresigned(r *http.Request, now time.Time) (int, string, string) {
+	q := r.URL.Query()
+
+	if algo := q.Get("X-Amz-Algorithm"); algo != "" && algo != "AWS4-HMAC-SHA256" {
+		return http.StatusBadRequest,
+			"AuthorizationQueryParametersError",
+			`X-Amz-Algorithm only supports "AWS4-HMAC-SHA256".`
+	}
+
+	amzDate := q.Get("X-Amz-Date")
+	amzExpires := q.Get("X-Amz-Expires")
+	if amzDate == "" || amzExpires == "" {
+		return 0, "", ""
+	}
+
+	expires, err := strconv.ParseInt(amzExpires, 10, 64)
+	if err != nil || expires < 1 || expires > 604800 {
+		return http.StatusBadRequest,
+			"AuthorizationQueryParametersError",
+			"X-Amz-Expires must be between 1 and 604800 seconds."
+	}
+
+	t, err := time.Parse("20060102T150405Z", amzDate)
+	if err != nil {
+		return 0, "", ""
+	}
+
+	if !now.Before(t.Add(time.Duration(expires) * time.Second)) {
+		return http.StatusForbidden, "AccessDenied", "Request has expired."
+	}
+
+	return 0, "", ""
 }
 
 func (ro *Router) routeRoot(w http.ResponseWriter, r *http.Request) {
