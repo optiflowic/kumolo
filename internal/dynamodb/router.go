@@ -11,7 +11,6 @@ import (
 )
 
 // resolveAttrName resolves an expression attribute name reference.
-// If ref starts with "#", it is looked up in attrNames; otherwise it is returned as-is.
 func resolveAttrName(ref string, attrNames map[string]string) (string, error) {
 	if !strings.HasPrefix(ref, "#") {
 		return ref, nil
@@ -144,7 +143,6 @@ func parseSortKeyCondition(
 		return v, nil
 	}
 
-	// begins_with(attr, :placeholder)
 	if strings.HasPrefix(expr, "begins_with(") {
 		inner := strings.TrimSuffix(strings.TrimPrefix(expr, "begins_with("), ")")
 		argParts := strings.SplitN(inner, ",", 2)
@@ -164,7 +162,6 @@ func parseSortKeyCondition(
 
 	tokens := strings.Fields(expr)
 
-	// attr BETWEEN :lo AND :hi
 	if len(tokens) == 5 &&
 		strings.ToUpper(tokens[1]) == "BETWEEN" &&
 		strings.ToUpper(tokens[3]) == "AND" {
@@ -183,7 +180,6 @@ func parseSortKeyCondition(
 		return &SortKeyCondition{Name: skName, Operator: "BETWEEN", Value: lo, Value2: hi}, nil
 	}
 
-	// attr OP :val
 	if len(tokens) == 3 {
 		skName, err := resolveAttrName(tokens[0], attrNames)
 		if err != nil {

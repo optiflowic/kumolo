@@ -40,7 +40,7 @@ type TableMetadata struct {
 
 // SortKeyCondition describes an optional sort key filter applied during Query.
 type SortKeyCondition struct {
-	Name     string // attribute name
+	Name     string
 	Operator string // =, <, <=, >, >=, BETWEEN, begins_with
 	Value    any    // comparison value (DynamoDB typed)
 	Value2   any    // upper bound for BETWEEN
