@@ -157,13 +157,13 @@ func parseSortKeyCondition(
 		if err != nil {
 			return nil, err
 		}
-		return &SortKeyCondition{Name: skName, Operator: "begins_with", Value: skVal}, nil
+		return &SortKeyCondition{Name: skName, Operator: OpBeginsWith, Value: skVal}, nil
 	}
 
 	tokens := strings.Fields(expr)
 
 	if len(tokens) == 5 &&
-		strings.ToUpper(tokens[1]) == "BETWEEN" &&
+		strings.ToUpper(tokens[1]) == OpBETWEEN &&
 		strings.ToUpper(tokens[3]) == "AND" {
 		skName, err := resolveAttrName(tokens[0], attrNames)
 		if err != nil {
@@ -177,7 +177,7 @@ func parseSortKeyCondition(
 		if err != nil {
 			return nil, err
 		}
-		return &SortKeyCondition{Name: skName, Operator: "BETWEEN", Value: lo, Value2: hi}, nil
+		return &SortKeyCondition{Name: skName, Operator: OpBETWEEN, Value: lo, Value2: hi}, nil
 	}
 
 	if len(tokens) == 3 {
@@ -187,7 +187,7 @@ func parseSortKeyCondition(
 		}
 		op := tokens[1]
 		switch op {
-		case "=", "<", "<=", ">", ">=":
+		case OpEQ, OpLT, OpLTE, OpGT, OpGTE:
 		default:
 			return nil, fmt.Errorf("unsupported sort key operator: %q", op)
 		}

@@ -698,7 +698,7 @@ func TestQuerySortKeyCondition(t *testing.T) {
 		require.NoError(t, s.PutItem("sk-table", mkItem("p", "a")))
 		require.NoError(t, s.PutItem("sk-table", mkItem("p", "b")))
 		items, err := s.Query("sk-table", "pk", map[string]any{"S": "p"},
-			&SortKeyCondition{Name: "sk", Operator: "=", Value: map[string]any{"S": "a"}})
+			&SortKeyCondition{Name: "sk", Operator: OpEQ, Value: map[string]any{"S": "a"}})
 		require.NoError(t, err)
 		assert.Len(t, items, 1)
 	})
@@ -710,7 +710,7 @@ func TestQuerySortKeyCondition(t *testing.T) {
 			require.NoError(t, s.PutItem("sk-table", mkItem("p", v)))
 		}
 		items, err := s.Query("sk-table", "pk", map[string]any{"S": "p"},
-			&SortKeyCondition{Name: "sk", Operator: "<", Value: map[string]any{"S": "b"}})
+			&SortKeyCondition{Name: "sk", Operator: OpLT, Value: map[string]any{"S": "b"}})
 		require.NoError(t, err)
 		assert.Len(t, items, 1)
 	})
@@ -722,7 +722,7 @@ func TestQuerySortKeyCondition(t *testing.T) {
 			require.NoError(t, s.PutItem("sk-table", mkItem("p", v)))
 		}
 		items, err := s.Query("sk-table", "pk", map[string]any{"S": "p"},
-			&SortKeyCondition{Name: "sk", Operator: "<=", Value: map[string]any{"S": "b"}})
+			&SortKeyCondition{Name: "sk", Operator: OpLTE, Value: map[string]any{"S": "b"}})
 		require.NoError(t, err)
 		assert.Len(t, items, 2)
 	})
@@ -734,7 +734,7 @@ func TestQuerySortKeyCondition(t *testing.T) {
 			require.NoError(t, s.PutItem("sk-table", mkItem("p", v)))
 		}
 		items, err := s.Query("sk-table", "pk", map[string]any{"S": "p"},
-			&SortKeyCondition{Name: "sk", Operator: ">", Value: map[string]any{"S": "b"}})
+			&SortKeyCondition{Name: "sk", Operator: OpGT, Value: map[string]any{"S": "b"}})
 		require.NoError(t, err)
 		assert.Len(t, items, 1)
 	})
@@ -746,7 +746,7 @@ func TestQuerySortKeyCondition(t *testing.T) {
 			require.NoError(t, s.PutItem("sk-table", mkItem("p", v)))
 		}
 		items, err := s.Query("sk-table", "pk", map[string]any{"S": "p"},
-			&SortKeyCondition{Name: "sk", Operator: ">=", Value: map[string]any{"S": "b"}})
+			&SortKeyCondition{Name: "sk", Operator: OpGTE, Value: map[string]any{"S": "b"}})
 		require.NoError(t, err)
 		assert.Len(t, items, 2)
 	})
@@ -760,7 +760,7 @@ func TestQuerySortKeyCondition(t *testing.T) {
 		items, err := s.Query("sk-table", "pk", map[string]any{"S": "p"},
 			&SortKeyCondition{
 				Name:     "sk",
-				Operator: "BETWEEN",
+				Operator: OpBETWEEN,
 				Value:    map[string]any{"S": "b"},
 				Value2:   map[string]any{"S": "c"},
 			})
@@ -780,7 +780,7 @@ func TestQuerySortKeyCondition(t *testing.T) {
 			map[string]any{"S": "p"},
 			&SortKeyCondition{
 				Name:     "sk",
-				Operator: "begins_with",
+				Operator: OpBeginsWith,
 				Value:    map[string]any{"S": "foo"},
 			},
 		)
@@ -794,7 +794,7 @@ func TestQuerySortKeyCondition(t *testing.T) {
 		require.NoError(t, s.PutItem("sk-table",
 			map[string]any{"pk": map[string]any{"S": "p"}, "sk": map[string]any{"N": "1"}}))
 		items, err := s.Query("sk-table", "pk", map[string]any{"S": "p"},
-			&SortKeyCondition{Name: "sk", Operator: "begins_with", Value: map[string]any{"N": "1"}})
+			&SortKeyCondition{Name: "sk", Operator: OpBeginsWith, Value: map[string]any{"N": "1"}})
 		require.NoError(t, err)
 		assert.Empty(t, items)
 	})
@@ -806,7 +806,7 @@ func TestQuerySortKeyCondition(t *testing.T) {
 			require.NoError(t, s.PutItem("sk-table", mkNumItem("p", v)))
 		}
 		items, err := s.Query("sk-table", "pk", map[string]any{"S": "p"},
-			&SortKeyCondition{Name: "sk", Operator: ">=", Value: map[string]any{"N": "3"}})
+			&SortKeyCondition{Name: "sk", Operator: OpGTE, Value: map[string]any{"N": "3"}})
 		require.NoError(t, err)
 		assert.Len(t, items, 3)
 	})
@@ -817,7 +817,7 @@ func TestQuerySortKeyCondition(t *testing.T) {
 		require.NoError(t, s.PutItem("sk-table",
 			map[string]any{"pk": map[string]any{"S": "p"}, "sk": map[string]any{"S": "x"}}))
 		items, err := s.Query("sk-table", "pk", map[string]any{"S": "p"},
-			&SortKeyCondition{Name: "other", Operator: "=", Value: map[string]any{"S": "x"}})
+			&SortKeyCondition{Name: "other", Operator: OpEQ, Value: map[string]any{"S": "x"}})
 		require.NoError(t, err)
 		assert.Empty(t, items)
 	})
@@ -837,7 +837,7 @@ func TestMatchesSortKey(t *testing.T) {
 	t.Run("begins_with returns false when itemVal is not a map", func(t *testing.T) {
 		cond := SortKeyCondition{
 			Name:     "sk",
-			Operator: "begins_with",
+			Operator: OpBeginsWith,
 			Value:    map[string]any{"S": "foo"},
 		}
 		assert.False(t, matchesSortKey("not-a-map", cond))

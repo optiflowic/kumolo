@@ -38,10 +38,21 @@ type TableMetadata struct {
 	CreatedAt            time.Time             `json:"createdAt"`
 }
 
+// Sort key condition operators used in SortKeyCondition.Operator.
+const (
+	OpEQ         = "="
+	OpLT         = "<"
+	OpLTE        = "<="
+	OpGT         = ">"
+	OpGTE        = ">="
+	OpBETWEEN    = "BETWEEN"
+	OpBeginsWith = "begins_with"
+)
+
 // SortKeyCondition describes an optional sort key filter applied during Query.
 type SortKeyCondition struct {
 	Name     string
-	Operator string // =, <, <=, >, >=, BETWEEN, begins_with
+	Operator string // one of the Op* constants
 	Value    any    // comparison value (DynamoDB typed)
 	Value2   any    // upper bound for BETWEEN
 }
@@ -86,7 +97,7 @@ func dynamoValueCmp(a, b any) (int, error) {
 // matchesSortKey reports whether itemVal satisfies cond.
 func matchesSortKey(itemVal any, cond SortKeyCondition) bool {
 	switch cond.Operator {
-	case "=":
+	case OpEQ:
 		a, _ := json.Marshal(
 			itemVal,
 		) // json.Marshal only fails for unmarshalable types (channels, funcs)
@@ -94,23 +105,23 @@ func matchesSortKey(itemVal any, cond SortKeyCondition) bool {
 			cond.Value,
 		) // json.Marshal only fails for unmarshalable types (channels, funcs)
 		return string(a) == string(b)
-	case "<":
+	case OpLT:
 		c, err := dynamoValueCmp(itemVal, cond.Value)
 		return err == nil && c < 0
-	case "<=":
+	case OpLTE:
 		c, err := dynamoValueCmp(itemVal, cond.Value)
 		return err == nil && c <= 0
-	case ">":
+	case OpGT:
 		c, err := dynamoValueCmp(itemVal, cond.Value)
 		return err == nil && c > 0
-	case ">=":
+	case OpGTE:
 		c, err := dynamoValueCmp(itemVal, cond.Value)
 		return err == nil && c >= 0
-	case "BETWEEN":
+	case OpBETWEEN:
 		c1, err1 := dynamoValueCmp(itemVal, cond.Value)
 		c2, err2 := dynamoValueCmp(itemVal, cond.Value2)
 		return err1 == nil && err2 == nil && c1 >= 0 && c2 <= 0
-	case "begins_with":
+	case OpBeginsWith:
 		am, aok := itemVal.(map[string]any)
 		bm, bok := cond.Value.(map[string]any)
 		if !aok || !bok {
