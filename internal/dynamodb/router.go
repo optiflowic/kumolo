@@ -33,17 +33,18 @@ func parseUpdateExpression(
 	upper := strings.ToUpper(expr)
 	updates := map[string]any{}
 
+	updateExprKeywords := []string{"SET", "REMOVE", "ADD", "DELETE"}
 	type section struct{ keyword, content string }
 	var sections []section
-	for _, kw := range []string{"SET", "REMOVE", "ADD", "DELETE"} {
+	for _, kw := range updateExprKeywords {
 		idx := strings.Index(upper, kw+" ")
 		if idx < 0 {
 			continue
 		}
 		// find where this section ends (at the next keyword)
 		end := len(expr)
-		for _, kw2 := range []string{"SET ", "REMOVE ", "ADD ", "DELETE "} {
-			if j := strings.Index(upper[idx+len(kw)+1:], kw2); j >= 0 {
+		for _, kw2 := range updateExprKeywords {
+			if j := strings.Index(upper[idx+len(kw)+1:], kw2+" "); j >= 0 {
 				if candidate := idx + len(kw) + 1 + j; candidate < end {
 					end = candidate
 				}
