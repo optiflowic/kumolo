@@ -10,6 +10,19 @@ import (
 	"strings"
 )
 
+// resolveAttrName resolves an expression attribute name reference.
+// If ref starts with "#", it is looked up in attrNames; otherwise it is returned as-is.
+func resolveAttrName(ref string, attrNames map[string]string) (string, error) {
+	if !strings.HasPrefix(ref, "#") {
+		return ref, nil
+	}
+	actual, ok := attrNames[ref]
+	if !ok {
+		return "", fmt.Errorf("ExpressionAttributeNames missing %q", ref)
+	}
+	return actual, nil
+}
+
 // parseUpdateExpression converts an UpdateExpression + attribute maps into a
 // flat updates map (attribute name → new value; nil means remove).
 // Only SET and REMOVE clauses are supported.
@@ -43,17 +56,6 @@ func parseUpdateExpression(
 		return nil, fmt.Errorf("unsupported UpdateExpression: %q", expr)
 	}
 
-	resolveName := func(ref string) (string, error) {
-		if strings.HasPrefix(ref, "#") {
-			actual, ok := attrNames[ref]
-			if !ok {
-				return "", fmt.Errorf("ExpressionAttributeNames missing %q", ref)
-			}
-			return actual, nil
-		}
-		return ref, nil
-	}
-
 	for _, sec := range sections {
 		switch sec.keyword {
 		case "SET":
@@ -62,7 +64,7 @@ func parseUpdateExpression(
 				if len(parts) != 2 {
 					return nil, fmt.Errorf("invalid SET clause: %q", assignment)
 				}
-				name, err := resolveName(strings.TrimSpace(parts[0]))
+				name, err := resolveAttrName(strings.TrimSpace(parts[0]), attrNames)
 				if err != nil {
 					return nil, err
 				}
@@ -75,7 +77,7 @@ func parseUpdateExpression(
 			}
 		case "REMOVE":
 			for _, token := range strings.Split(sec.content, ",") {
-				name, err := resolveName(strings.TrimSpace(token))
+				name, err := resolveAttrName(strings.TrimSpace(token), attrNames)
 				if err != nil {
 					return nil, err
 				}
@@ -104,13 +106,9 @@ func parseKeyConditionExpression(
 	if len(tokens) != 3 || tokens[1] != "=" {
 		return "", nil, nil, fmt.Errorf("unsupported KeyConditionExpression: %q", expr)
 	}
-	name := tokens[0]
-	if strings.HasPrefix(name, "#") {
-		actual, ok := attrNames[name]
-		if !ok {
-			return "", nil, nil, fmt.Errorf("ExpressionAttributeNames missing %q", name)
-		}
-		name = actual
+	name, err := resolveAttrName(tokens[0], attrNames)
+	if err != nil {
+		return "", nil, nil, err
 	}
 	val, ok := attrValues[tokens[2]]
 	if !ok {
@@ -138,16 +136,6 @@ func parseSortKeyCondition(
 	attrNames map[string]string,
 	attrValues map[string]any,
 ) (*SortKeyCondition, error) {
-	resolveName := func(ref string) (string, error) {
-		if strings.HasPrefix(ref, "#") {
-			actual, ok := attrNames[ref]
-			if !ok {
-				return "", fmt.Errorf("ExpressionAttributeNames missing %q", ref)
-			}
-			return actual, nil
-		}
-		return ref, nil
-	}
 	resolveValue := func(ref string) (any, error) {
 		v, ok := attrValues[ref]
 		if !ok {
@@ -163,7 +151,7 @@ func parseSortKeyCondition(
 		if len(argParts) != 2 {
 			return nil, fmt.Errorf("invalid begins_with: %q", expr)
 		}
-		skName, err := resolveName(strings.TrimSpace(argParts[0]))
+		skName, err := resolveAttrName(strings.TrimSpace(argParts[0]), attrNames)
 		if err != nil {
 			return nil, err
 		}
@@ -180,7 +168,7 @@ func parseSortKeyCondition(
 	if len(tokens) == 5 &&
 		strings.ToUpper(tokens[1]) == "BETWEEN" &&
 		strings.ToUpper(tokens[3]) == "AND" {
-		skName, err := resolveName(tokens[0])
+		skName, err := resolveAttrName(tokens[0], attrNames)
 		if err != nil {
 			return nil, err
 		}
@@ -197,7 +185,7 @@ func parseSortKeyCondition(
 
 	// attr OP :val
 	if len(tokens) == 3 {
-		skName, err := resolveName(tokens[0])
+		skName, err := resolveAttrName(tokens[0], attrNames)
 		if err != nil {
 			return nil, err
 		}
