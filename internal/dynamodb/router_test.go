@@ -367,7 +367,7 @@ const createTableWithSKBody = `{
 }`
 
 func TestHandleUpdateItem(t *testing.T) {
-	t.Run("updates existing item with UpdateExpression SET", func(t *testing.T) {
+	t.Run("returns empty response by default (ReturnValues NONE)", func(t *testing.T) {
 		ro := newTestRouter(t)
 		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
 		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
@@ -382,11 +382,10 @@ func TestHandleUpdateItem(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 		var resp map[string]any
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-		attrs := resp["Attributes"].(map[string]any)
-		assert.Equal(t, map[string]any{"S": "Alice"}, attrs["name"])
+		assert.Nil(t, resp["Attributes"])
 	})
 
-	t.Run("updates item with REMOVE clause", func(t *testing.T) {
+	t.Run("returns updated item when ReturnValues is ALL_NEW", func(t *testing.T) {
 		ro := newTestRouter(t)
 		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
 		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
@@ -394,14 +393,38 @@ func TestHandleUpdateItem(t *testing.T) {
 		w := dynamo(t, ro, "UpdateItem", `{
             "TableName": "test-table",
             "Key": {"pk": {"S": "k1"}},
-            "UpdateExpression": "REMOVE old"
+            "UpdateExpression": "SET #n = :v",
+            "ExpressionAttributeNames": {"#n": "name"},
+            "ExpressionAttributeValues": {":v": {"S": "Alice"}},
+            "ReturnValues": "ALL_NEW"
         }`)
 		assert.Equal(t, http.StatusOK, w.Code)
 		var resp map[string]any
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		attrs := resp["Attributes"].(map[string]any)
-		assert.Nil(t, attrs["old"])
+		assert.Equal(t, map[string]any{"S": "Alice"}, attrs["name"])
 	})
+
+	t.Run(
+		"updates item with REMOVE clause and ALL_NEW returns removed attr absent",
+		func(t *testing.T) {
+			ro := newTestRouter(t)
+			require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+			require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
+				`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"old":{"S":"x"}}}`).Code)
+			w := dynamo(t, ro, "UpdateItem", `{
+            "TableName": "test-table",
+            "Key": {"pk": {"S": "k1"}},
+            "UpdateExpression": "REMOVE old",
+            "ReturnValues": "ALL_NEW"
+        }`)
+			assert.Equal(t, http.StatusOK, w.Code)
+			var resp map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+			attrs := resp["Attributes"].(map[string]any)
+			assert.Nil(t, attrs["old"])
+		},
+	)
 
 	t.Run("creates item if not exists", func(t *testing.T) {
 		ro := newTestRouter(t)
@@ -571,7 +594,7 @@ func TestHandleQuery(t *testing.T) {
 		assert.Equal(t, float64(1), resp["Count"])
 	})
 
-	t.Run("ignores sort key condition and returns by hash key", func(t *testing.T) {
+	t.Run("filters by sort key equality", func(t *testing.T) {
 		ro := newTestRouter(t)
 		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableWithSKBody).Code)
 		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
@@ -586,8 +609,221 @@ func TestHandleQuery(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 		var resp map[string]any
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-		// Both items share pk=p1 so both match (sort key filtering not implemented)
+		assert.Equal(t, float64(1), resp["Count"])
+		assert.Equal(t, float64(1), resp["ScannedCount"])
+	})
+
+	t.Run("filters by sort key BETWEEN", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableWithSKBody).Code)
+		for _, sk := range []string{"a", "b", "c", "d"} {
+			require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem", `{
+                "TableName":"test-table",
+                "Item":{"pk":{"S":"p1"},"sk":{"S":"`+sk+`"}}
+            }`).Code)
+		}
+		w := dynamo(t, ro, "Query", `{
+            "TableName": "test-table",
+            "KeyConditionExpression": "pk = :pk AND sk BETWEEN :lo AND :hi",
+            "ExpressionAttributeValues": {":pk":{"S":"p1"},":lo":{"S":"b"},":hi":{"S":"c"}}
+        }`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		assert.Equal(t, float64(2), resp["Count"])
+	})
+
+	t.Run("filters by sort key begins_with", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableWithSKBody).Code)
+		for _, sk := range []string{"foo1", "foo2", "bar1"} {
+			require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem", `{
+                "TableName":"test-table",
+                "Item":{"pk":{"S":"p1"},"sk":{"S":"`+sk+`"}}
+            }`).Code)
+		}
+		w := dynamo(t, ro, "Query", `{
+            "TableName": "test-table",
+            "KeyConditionExpression": "pk = :pk AND begins_with(sk, :pfx)",
+            "ExpressionAttributeValues": {":pk":{"S":"p1"},":pfx":{"S":"foo"}}
+        }`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, float64(2), resp["Count"])
+	})
+
+	t.Run("filters by sort key comparison operators", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableWithSKBody).Code)
+		for _, sk := range []string{"1", "2", "3", "4", "5"} {
+			require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem", `{
+                "TableName":"test-table",
+                "Item":{"pk":{"S":"p1"},"sk":{"N":"`+sk+`"}}
+            }`).Code)
+		}
+		cases := []struct {
+			op    string
+			skVal string
+			want  float64
+		}{
+			{"<", "3", 2},
+			{"<=", "3", 3},
+			{">", "3", 2},
+			{">=", "3", 3},
+		}
+		for _, tc := range cases {
+			t.Run("sk "+tc.op+" val", func(t *testing.T) {
+				w := dynamo(t, ro, "Query", `{
+                    "TableName": "test-table",
+                    "KeyConditionExpression": "pk = :pk AND sk `+tc.op+` :sk",
+                    "ExpressionAttributeValues": {":pk":{"S":"p1"},":sk":{"N":"`+tc.skVal+`"}}
+                }`)
+				assert.Equal(t, http.StatusOK, w.Code)
+				var resp map[string]any
+				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+				assert.Equal(t, tc.want, resp["Count"])
+			})
+		}
+	})
+
+	t.Run("400 for invalid sort key condition", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableWithSKBody).Code)
+		w := dynamo(t, ro, "Query", `{
+            "TableName": "test-table",
+            "KeyConditionExpression": "pk = :pk AND contains(sk, :v)",
+            "ExpressionAttributeValues": {":pk":{"S":"p1"},":v":{"S":"x"}}
+        }`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ValidationException")
+	})
+
+	t.Run("400 for begins_with with no comma (malformed)", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableWithSKBody).Code)
+		w := dynamo(t, ro, "Query", `{
+            "TableName": "test-table",
+            "KeyConditionExpression": "pk = :pk AND begins_with(sk)",
+            "ExpressionAttributeValues": {":pk":{"S":"p1"}}
+        }`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ValidationException")
+	})
+
+	t.Run("400 for begins_with with missing ExpressionAttributeNames", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableWithSKBody).Code)
+		w := dynamo(t, ro, "Query", `{
+            "TableName": "test-table",
+            "KeyConditionExpression": "pk = :pk AND begins_with(#sk, :pfx)",
+            "ExpressionAttributeValues": {":pk":{"S":"p1"},":pfx":{"S":"x"}}
+        }`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ValidationException")
+	})
+
+	t.Run("400 for begins_with with missing ExpressionAttributeValues", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableWithSKBody).Code)
+		w := dynamo(t, ro, "Query", `{
+            "TableName": "test-table",
+            "KeyConditionExpression": "pk = :pk AND begins_with(sk, :missing)",
+            "ExpressionAttributeValues": {":pk":{"S":"p1"}}
+        }`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ValidationException")
+	})
+
+	t.Run("400 for BETWEEN with missing lower bound", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableWithSKBody).Code)
+		w := dynamo(t, ro, "Query", `{
+            "TableName": "test-table",
+            "KeyConditionExpression": "pk = :pk AND sk BETWEEN :lo AND :hi",
+            "ExpressionAttributeValues": {":pk":{"S":"p1"},":hi":{"S":"z"}}
+        }`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ValidationException")
+	})
+
+	t.Run("400 for BETWEEN with missing upper bound", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableWithSKBody).Code)
+		w := dynamo(t, ro, "Query", `{
+            "TableName": "test-table",
+            "KeyConditionExpression": "pk = :pk AND sk BETWEEN :lo AND :hi",
+            "ExpressionAttributeValues": {":pk":{"S":"p1"},":lo":{"S":"a"}}
+        }`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ValidationException")
+	})
+
+	t.Run("400 for BETWEEN with missing ExpressionAttributeNames", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableWithSKBody).Code)
+		w := dynamo(t, ro, "Query", `{
+            "TableName": "test-table",
+            "KeyConditionExpression": "pk = :pk AND #sk BETWEEN :lo AND :hi",
+            "ExpressionAttributeValues": {":pk":{"S":"p1"},":lo":{"S":"a"},":hi":{"S":"z"}}
+        }`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ValidationException")
+	})
+
+	t.Run("400 for comparison with missing ExpressionAttributeNames", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableWithSKBody).Code)
+		w := dynamo(t, ro, "Query", `{
+            "TableName": "test-table",
+            "KeyConditionExpression": "pk = :pk AND #sk = :sk",
+            "ExpressionAttributeValues": {":pk":{"S":"p1"},":sk":{"S":"s1"}}
+        }`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ValidationException")
+	})
+
+	t.Run("400 for comparison with unsupported operator", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableWithSKBody).Code)
+		w := dynamo(t, ro, "Query", `{
+            "TableName": "test-table",
+            "KeyConditionExpression": "pk = :pk AND sk <> :sk",
+            "ExpressionAttributeValues": {":pk":{"S":"p1"},":sk":{"S":"s1"}}
+        }`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ValidationException")
+	})
+
+	t.Run("400 for comparison with missing ExpressionAttributeValues", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableWithSKBody).Code)
+		w := dynamo(t, ro, "Query", `{
+            "TableName": "test-table",
+            "KeyConditionExpression": "pk = :pk AND sk = :missing",
+            "ExpressionAttributeValues": {":pk":{"S":"p1"}}
+        }`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ValidationException")
+	})
+
+	t.Run("filters by sort key using ExpressionAttributeNames alias", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableWithSKBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem", `{
+            "TableName": "test-table",
+            "Item": {"pk": {"S": "p1"}, "sk": {"S": "s1"}}
+        }`).Code)
+		w := dynamo(t, ro, "Query", `{
+            "TableName": "test-table",
+            "KeyConditionExpression": "pk = :pk AND #s = :sk",
+            "ExpressionAttributeNames": {"#s": "sk"},
+            "ExpressionAttributeValues": {":pk": {"S": "p1"}, ":sk": {"S": "s1"}}
+        }`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, float64(1), resp["Count"])
 	})
 
 	t.Run("returns empty Items when no match", func(t *testing.T) {
@@ -878,6 +1114,7 @@ func (m *mockStore) UpdateItem(
 func (m *mockStore) Query(
 	tableName, hashKeyName string,
 	hashKeyValue any,
+	_ *SortKeyCondition,
 ) ([]map[string]any, error) {
 	return m.queryFn(tableName, hashKeyName, hashKeyValue)
 }

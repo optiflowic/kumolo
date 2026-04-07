@@ -88,34 +88,133 @@ func parseUpdateExpression(
 	return updates, nil
 }
 
-// parseKeyConditionExpression extracts the hash key name and equality value
-// from a KeyConditionExpression. Sort key conditions (after AND) are accepted
-// but ignored; only hash key equality is required for this implementation.
+// parseKeyConditionExpression extracts the hash key name, its equality value,
+// and an optional sort key condition from a KeyConditionExpression.
+// The hash key condition must be an equality; the sort key condition supports
+// =, <, <=, >, >=, BETWEEN, and begins_with.
 func parseKeyConditionExpression(
 	expr string,
 	attrNames map[string]string,
 	attrValues map[string]any,
-) (string, any, error) {
-	// Take only the first condition (before the first AND)
-	first := strings.TrimSpace(strings.SplitN(expr, " AND ", 2)[0])
-	tokens := strings.Fields(first)
+) (string, any, *SortKeyCondition, error) {
+	parts := strings.SplitN(strings.TrimSpace(expr), " AND ", 2)
+
+	// Parse hash key equality condition
+	tokens := strings.Fields(strings.TrimSpace(parts[0]))
 	if len(tokens) != 3 || tokens[1] != "=" {
-		return "", nil, fmt.Errorf("unsupported KeyConditionExpression: %q", expr)
+		return "", nil, nil, fmt.Errorf("unsupported KeyConditionExpression: %q", expr)
 	}
 	name := tokens[0]
 	if strings.HasPrefix(name, "#") {
 		actual, ok := attrNames[name]
 		if !ok {
-			return "", nil, fmt.Errorf("ExpressionAttributeNames missing %q", name)
+			return "", nil, nil, fmt.Errorf("ExpressionAttributeNames missing %q", name)
 		}
 		name = actual
 	}
-	placeholder := tokens[2]
-	val, ok := attrValues[placeholder]
+	val, ok := attrValues[tokens[2]]
 	if !ok {
-		return "", nil, fmt.Errorf("ExpressionAttributeValues missing %q", placeholder)
+		return "", nil, nil, fmt.Errorf("ExpressionAttributeValues missing %q", tokens[2])
 	}
-	return name, val, nil
+
+	// Parse optional sort key condition
+	var skCond *SortKeyCondition
+	if len(parts) == 2 {
+		var err error
+		skCond, err = parseSortKeyCondition(strings.TrimSpace(parts[1]), attrNames, attrValues)
+		if err != nil {
+			return "", nil, nil, err
+		}
+	}
+
+	return name, val, skCond, nil
+}
+
+// parseSortKeyCondition parses a single sort key condition expression.
+// Supported forms: attr OP :val (OP = =/</<=/>/>=),
+// attr BETWEEN :lo AND :hi, begins_with(attr, :prefix).
+func parseSortKeyCondition(
+	expr string,
+	attrNames map[string]string,
+	attrValues map[string]any,
+) (*SortKeyCondition, error) {
+	resolveName := func(ref string) (string, error) {
+		if strings.HasPrefix(ref, "#") {
+			actual, ok := attrNames[ref]
+			if !ok {
+				return "", fmt.Errorf("ExpressionAttributeNames missing %q", ref)
+			}
+			return actual, nil
+		}
+		return ref, nil
+	}
+	resolveValue := func(ref string) (any, error) {
+		v, ok := attrValues[ref]
+		if !ok {
+			return nil, fmt.Errorf("ExpressionAttributeValues missing %q", ref)
+		}
+		return v, nil
+	}
+
+	// begins_with(attr, :placeholder)
+	if strings.HasPrefix(expr, "begins_with(") {
+		inner := strings.TrimSuffix(strings.TrimPrefix(expr, "begins_with("), ")")
+		argParts := strings.SplitN(inner, ",", 2)
+		if len(argParts) != 2 {
+			return nil, fmt.Errorf("invalid begins_with: %q", expr)
+		}
+		skName, err := resolveName(strings.TrimSpace(argParts[0]))
+		if err != nil {
+			return nil, err
+		}
+		skVal, err := resolveValue(strings.TrimSpace(argParts[1]))
+		if err != nil {
+			return nil, err
+		}
+		return &SortKeyCondition{Name: skName, Operator: "begins_with", Value: skVal}, nil
+	}
+
+	tokens := strings.Fields(expr)
+
+	// attr BETWEEN :lo AND :hi
+	if len(tokens) == 5 &&
+		strings.ToUpper(tokens[1]) == "BETWEEN" &&
+		strings.ToUpper(tokens[3]) == "AND" {
+		skName, err := resolveName(tokens[0])
+		if err != nil {
+			return nil, err
+		}
+		lo, err := resolveValue(tokens[2])
+		if err != nil {
+			return nil, err
+		}
+		hi, err := resolveValue(tokens[4])
+		if err != nil {
+			return nil, err
+		}
+		return &SortKeyCondition{Name: skName, Operator: "BETWEEN", Value: lo, Value2: hi}, nil
+	}
+
+	// attr OP :val
+	if len(tokens) == 3 {
+		skName, err := resolveName(tokens[0])
+		if err != nil {
+			return nil, err
+		}
+		op := tokens[1]
+		switch op {
+		case "=", "<", "<=", ">", ">=":
+		default:
+			return nil, fmt.Errorf("unsupported sort key operator: %q", op)
+		}
+		skVal, err := resolveValue(tokens[2])
+		if err != nil {
+			return nil, err
+		}
+		return &SortKeyCondition{Name: skName, Operator: op, Value: skVal}, nil
+	}
+
+	return nil, fmt.Errorf("unsupported sort key condition: %q", expr)
 }
 
 type store interface {
@@ -128,7 +227,11 @@ type store interface {
 	DeleteItem(tableName string, key map[string]any) error
 	Scan(tableName string) ([]map[string]any, error)
 	UpdateItem(tableName string, key map[string]any, updates map[string]any) (map[string]any, error)
-	Query(tableName, hashKeyName string, hashKeyValue any) ([]map[string]any, error)
+	Query(
+		tableName, hashKeyName string,
+		hashKeyValue any,
+		skCond *SortKeyCondition,
+	) ([]map[string]any, error)
 }
 
 // tableDescription is the DynamoDB API representation of a table.
@@ -530,6 +633,7 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 		UpdateExpression          string            `json:"UpdateExpression"`
 		ExpressionAttributeNames  map[string]string `json:"ExpressionAttributeNames"`
 		ExpressionAttributeValues map[string]any    `json:"ExpressionAttributeValues"`
+		ReturnValues              string            `json:"ReturnValues"`
 		AttributeUpdates          map[string]struct {
 			Action string `json:"Action"`
 			Value  any    `json:"Value"`
@@ -599,7 +703,11 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 		return
 	}
 	slog.Info("updated DynamoDB item", "table", req.TableName)
-	writeJSON(w, http.StatusOK, map[string]any{"Attributes": item})
+	resp := map[string]any{}
+	if req.ReturnValues == "ALL_NEW" {
+		resp["Attributes"] = item
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
@@ -623,7 +731,7 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	hashKeyName, hashKeyValue, err := parseKeyConditionExpression(
+	hashKeyName, hashKeyValue, skCond, err := parseKeyConditionExpression(
 		req.KeyConditionExpression,
 		req.ExpressionAttributeNames,
 		req.ExpressionAttributeValues,
@@ -634,7 +742,7 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	items, err := ro.storage.Query(req.TableName, hashKeyName, hashKeyValue)
+	items, err := ro.storage.Query(req.TableName, hashKeyName, hashKeyValue, skCond)
 	if err != nil {
 		if errors.Is(err, ErrTableNotFound) {
 			slog.Debug("Query: table not found", "table", req.TableName)
@@ -656,7 +764,8 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 	}
 	slog.Debug("queried DynamoDB table", "table", req.TableName, "count", len(items))
 	writeJSON(w, http.StatusOK, map[string]any{
-		"Items": items,
-		"Count": len(items),
+		"Items":        items,
+		"Count":        len(items),
+		"ScannedCount": len(items),
 	})
 }

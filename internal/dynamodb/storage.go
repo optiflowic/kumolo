@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -35,6 +36,91 @@ type TableMetadata struct {
 	BillingMode          string                `json:"billingMode,omitempty"`
 	Status               string                `json:"status"`
 	CreatedAt            time.Time             `json:"createdAt"`
+}
+
+// SortKeyCondition describes an optional sort key filter applied during Query.
+type SortKeyCondition struct {
+	Name     string // attribute name
+	Operator string // =, <, <=, >, >=, BETWEEN, begins_with
+	Value    any    // comparison value (DynamoDB typed)
+	Value2   any    // upper bound for BETWEEN
+}
+
+// dynamoValueCmp compares two DynamoDB typed attribute values.
+// Returns negative, zero, or positive like strings.Compare.
+func dynamoValueCmp(a, b any) (int, error) {
+	am, aok := a.(map[string]any)
+	bm, bok := b.(map[string]any)
+	if !aok || !bok {
+		return 0, fmt.Errorf("invalid DynamoDB typed value")
+	}
+	if as, ok := am["S"].(string); ok {
+		bs, ok := bm["S"].(string)
+		if !ok {
+			return 0, fmt.Errorf("type mismatch: expected S")
+		}
+		return strings.Compare(as, bs), nil
+	}
+	if an, ok := am["N"].(string); ok {
+		bn, ok := bm["N"].(string)
+		if !ok {
+			return 0, fmt.Errorf("type mismatch: expected N")
+		}
+		af, _ := strconv.ParseFloat(an, 64) // N values are always valid numerics per DynamoDB spec
+		bf, _ := strconv.ParseFloat(bn, 64)
+		switch {
+		case af < bf:
+			return -1, nil
+		case af > bf:
+			return 1, nil
+		default:
+			return 0, nil
+		}
+	}
+	// Fallback: lexicographic JSON comparison (for B, BOOL, NULL, etc.)
+	aj, _ := json.Marshal(a) // json.Marshal only fails for unmarshalable types (channels, funcs)
+	bj, _ := json.Marshal(b) // json.Marshal only fails for unmarshalable types (channels, funcs)
+	return strings.Compare(string(aj), string(bj)), nil
+}
+
+// matchesSortKey reports whether itemVal satisfies cond.
+func matchesSortKey(itemVal any, cond SortKeyCondition) bool {
+	switch cond.Operator {
+	case "=":
+		a, _ := json.Marshal(
+			itemVal,
+		) // json.Marshal only fails for unmarshalable types (channels, funcs)
+		b, _ := json.Marshal(
+			cond.Value,
+		) // json.Marshal only fails for unmarshalable types (channels, funcs)
+		return string(a) == string(b)
+	case "<":
+		c, err := dynamoValueCmp(itemVal, cond.Value)
+		return err == nil && c < 0
+	case "<=":
+		c, err := dynamoValueCmp(itemVal, cond.Value)
+		return err == nil && c <= 0
+	case ">":
+		c, err := dynamoValueCmp(itemVal, cond.Value)
+		return err == nil && c > 0
+	case ">=":
+		c, err := dynamoValueCmp(itemVal, cond.Value)
+		return err == nil && c >= 0
+	case "BETWEEN":
+		c1, err1 := dynamoValueCmp(itemVal, cond.Value)
+		c2, err2 := dynamoValueCmp(itemVal, cond.Value2)
+		return err1 == nil && err2 == nil && c1 >= 0 && c2 <= 0
+	case "begins_with":
+		am, aok := itemVal.(map[string]any)
+		bm, bok := cond.Value.(map[string]any)
+		if !aok || !bok {
+			return false
+		}
+		as, aok := am["S"].(string)
+		bs, bok := bm["S"].(string)
+		return aok && bok && strings.HasPrefix(as, bs)
+	}
+	return false
 }
 
 // Storage is a filesystem-backed DynamoDB backend. os.Root scopes all access to
@@ -278,9 +364,14 @@ func (s *Storage) UpdateItem(
 	return item, nil
 }
 
-// Query returns all items in tableName whose hashKeyName attribute equals hashKeyValue.
-// The comparison is done by JSON encoding, matching how the AWS SDK sends typed values.
-func (s *Storage) Query(tableName, hashKeyName string, hashKeyValue any) ([]map[string]any, error) {
+// Query returns items in tableName matching the hash key equality and the optional
+// sort key condition. Hash key comparison uses JSON encoding; sort key comparison
+// is type-aware (S: lexicographic, N: numeric).
+func (s *Storage) Query(
+	tableName, hashKeyName string,
+	hashKeyValue any,
+	skCond *SortKeyCondition,
+) ([]map[string]any, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if !s.tableExistsLocked(tableName) {
@@ -302,9 +393,16 @@ func (s *Storage) Query(tableName, hashKeyName string, hashKeyValue any) ([]map[
 		gotJSON, _ := json.Marshal(
 			val,
 		) // json.Marshal only fails for unmarshalable types (channels, funcs)
-		if string(gotJSON) == string(wantJSON) {
-			items = append(items, item)
+		if string(gotJSON) != string(wantJSON) {
+			continue
 		}
+		if skCond != nil {
+			skVal, ok := item[skCond.Name]
+			if !ok || !matchesSortKey(skVal, *skCond) {
+				continue
+			}
+		}
+		items = append(items, item)
 	}
 	return items, nil
 }
