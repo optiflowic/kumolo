@@ -526,3 +526,141 @@ func TestWriteJSON_ReadJSON(t *testing.T) {
 		assert.Error(t, err)
 	})
 }
+
+func TestUpdateItem(t *testing.T) {
+	item1 := map[string]any{"pk": map[string]any{"S": "k1"}, "val": map[string]any{"S": "old"}}
+
+	t.Run("updates attribute on existing item", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		require.NoError(t, s.PutItem("test-table", item1))
+		got, err := s.UpdateItem("test-table", map[string]any{"pk": map[string]any{"S": "k1"}},
+			map[string]any{"val": map[string]any{"S": "new"}})
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{"S": "new"}, got["val"])
+	})
+
+	t.Run("removes attribute when value is nil", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		require.NoError(t, s.PutItem("test-table", item1))
+		got, err := s.UpdateItem("test-table", map[string]any{"pk": map[string]any{"S": "k1"}},
+			map[string]any{"val": nil})
+		require.NoError(t, err)
+		_, present := got["val"]
+		assert.False(t, present)
+	})
+
+	t.Run("creates item if not exists", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		got, err := s.UpdateItem("test-table", map[string]any{"pk": map[string]any{"S": "new"}},
+			map[string]any{"x": map[string]any{"N": "1"}})
+		require.NoError(t, err)
+		assert.NotNil(t, got["pk"])
+		assert.NotNil(t, got["x"])
+	})
+
+	t.Run("error when table not found", func(t *testing.T) {
+		s := newTestStorage(t)
+		_, err := s.UpdateItem("no-table", map[string]any{"pk": map[string]any{"S": "k"}}, nil)
+		assert.ErrorIs(t, err, ErrTableNotFound)
+	})
+
+	t.Run("error when key attribute missing", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		_, err := s.UpdateItem("test-table", map[string]any{}, nil)
+		assert.ErrorIs(t, err, ErrValidationException)
+	})
+
+	t.Run("error when writeJSON fails", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		require.NoError(t, s.PutItem("test-table", item1))
+		s.openFile = func(string, int, os.FileMode) (io.WriteCloser, error) {
+			return nil, errors.New("open failed")
+		}
+		_, err := s.UpdateItem("test-table", map[string]any{"pk": map[string]any{"S": "k1"}},
+			map[string]any{"val": map[string]any{"S": "x"}})
+		assert.Error(t, err)
+	})
+
+	t.Run("error when readAll fails for existing item", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		require.NoError(t, s.PutItem("test-table", item1))
+		callCount := 0
+		s.readAll = func(r io.Reader) ([]byte, error) {
+			callCount++
+			if callCount > 1 { // first call reads table meta, second reads the item
+				return nil, errors.New("read failed")
+			}
+			return io.ReadAll(r)
+		}
+		_, err := s.UpdateItem("test-table", map[string]any{"pk": map[string]any{"S": "k1"}},
+			map[string]any{"val": map[string]any{"S": "x"}})
+		assert.Error(t, err)
+	})
+
+	t.Run("error when readTableMeta fails with non-ErrNotExist", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		s.readAll = func(io.Reader) ([]byte, error) {
+			return nil, errors.New("io failed")
+		}
+		_, err := s.UpdateItem("test-table", map[string]any{"pk": map[string]any{"S": "k1"}}, nil)
+		assert.Error(t, err)
+	})
+}
+
+func TestQuery(t *testing.T) {
+	t.Run("returns matching items by hash key", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		require.NoError(t, s.PutItem("test-table",
+			map[string]any{"pk": map[string]any{"S": "a"}, "v": map[string]any{"N": "1"}}))
+		require.NoError(t, s.PutItem("test-table",
+			map[string]any{"pk": map[string]any{"S": "b"}, "v": map[string]any{"N": "2"}}))
+		items, err := s.Query("test-table", "pk", map[string]any{"S": "a"})
+		require.NoError(t, err)
+		require.Len(t, items, 1)
+		assert.Equal(t, map[string]any{"S": "a"}, items[0]["pk"])
+	})
+
+	t.Run("returns empty slice when no match", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		require.NoError(t, s.PutItem("test-table",
+			map[string]any{"pk": map[string]any{"S": "x"}}))
+		items, err := s.Query("test-table", "pk", map[string]any{"S": "notfound"})
+		require.NoError(t, err)
+		assert.Empty(t, items)
+	})
+
+	t.Run("returns nil when hash key attribute absent in item", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		require.NoError(t, s.PutItem("test-table",
+			map[string]any{"pk": map[string]any{"S": "k1"}}))
+		items, err := s.Query("test-table", "other", map[string]any{"S": "k1"})
+		require.NoError(t, err)
+		assert.Empty(t, items)
+	})
+
+	t.Run("error when table not found", func(t *testing.T) {
+		s := newTestStorage(t)
+		_, err := s.Query("no-table", "pk", map[string]any{"S": "x"})
+		assert.ErrorIs(t, err, ErrTableNotFound)
+	})
+
+	t.Run("error when readDir fails", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		s.listDirFn = func(string) ([]os.DirEntry, error) {
+			return nil, errors.New("list failed")
+		}
+		_, err := s.Query("test-table", "pk", map[string]any{"S": "x"})
+		assert.Error(t, err)
+	})
+}

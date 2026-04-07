@@ -230,6 +230,84 @@ func (s *Storage) Scan(tableName string) ([]map[string]any, error) {
 	if !s.tableExistsLocked(tableName) {
 		return nil, ErrTableNotFound
 	}
+	return s.readAllItemsLocked(tableName)
+}
+
+// UpdateItem reads an existing item (or seeds one from the key), applies the
+// provided attribute updates, and writes the result back.
+// A nil value in updates means remove the attribute.
+func (s *Storage) UpdateItem(
+	tableName string,
+	key map[string]any,
+	updates map[string]any,
+) (map[string]any, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	meta, err := s.readTableMeta(tableName)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, ErrTableNotFound
+		}
+		return nil, err
+	}
+	k, err := itemKey(key, meta.KeySchema)
+	if err != nil {
+		return nil, err
+	}
+	itemPath := filepath.Join(tableName, k+".json")
+	item, err := readJSON[map[string]any](s, itemPath)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+		item = make(map[string]any, len(key))
+		for kk, v := range key {
+			item[kk] = v
+		}
+	}
+	for attr, val := range updates {
+		if val == nil {
+			delete(item, attr)
+		} else {
+			item[attr] = val
+		}
+	}
+	if err := s.writeJSON(itemPath, item); err != nil {
+		return nil, err
+	}
+	return item, nil
+}
+
+// Query returns all items in tableName whose hashKeyName attribute equals hashKeyValue.
+// The comparison is done by JSON encoding, matching how the AWS SDK sends typed values.
+func (s *Storage) Query(tableName, hashKeyName string, hashKeyValue any) ([]map[string]any, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.tableExistsLocked(tableName) {
+		return nil, ErrTableNotFound
+	}
+	all, err := s.readAllItemsLocked(tableName)
+	if err != nil {
+		return nil, err
+	}
+	wantJSON, _ := json.Marshal(hashKeyValue)
+	var items []map[string]any
+	for _, item := range all {
+		val, ok := item[hashKeyName]
+		if !ok {
+			continue
+		}
+		gotJSON, _ := json.Marshal(val)
+		if string(gotJSON) == string(wantJSON) {
+			items = append(items, item)
+		}
+	}
+	return items, nil
+}
+
+// readAllItemsLocked reads every *.json item file in tableName.
+// Must be called with at least a read lock held.
+func (s *Storage) readAllItemsLocked(tableName string) ([]map[string]any, error) {
 	entries, err := s.readDir(tableName)
 	if err != nil {
 		return nil, err
