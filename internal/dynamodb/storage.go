@@ -290,14 +290,18 @@ func (s *Storage) Query(tableName, hashKeyName string, hashKeyValue any) ([]map[
 	if err != nil {
 		return nil, err
 	}
-	wantJSON, _ := json.Marshal(hashKeyValue)
+	wantJSON, _ := json.Marshal(
+		hashKeyValue,
+	) // json.Marshal only fails for unmarshalable types (channels, funcs)
 	var items []map[string]any
 	for _, item := range all {
 		val, ok := item[hashKeyName]
 		if !ok {
 			continue
 		}
-		gotJSON, _ := json.Marshal(val)
+		gotJSON, _ := json.Marshal(
+			val,
+		) // json.Marshal only fails for unmarshalable types (channels, funcs)
 		if string(gotJSON) == string(wantJSON) {
 			items = append(items, item)
 		}
