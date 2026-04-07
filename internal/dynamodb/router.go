@@ -10,6 +10,198 @@ import (
 	"strings"
 )
 
+// resolveAttrName resolves an expression attribute name reference.
+func resolveAttrName(ref string, attrNames map[string]string) (string, error) {
+	if !strings.HasPrefix(ref, "#") {
+		return ref, nil
+	}
+	actual, ok := attrNames[ref]
+	if !ok {
+		return "", fmt.Errorf("ExpressionAttributeNames missing %q", ref)
+	}
+	return actual, nil
+}
+
+// parseUpdateExpression converts an UpdateExpression + attribute maps into a
+// flat updates map (attribute name → new value; nil means remove).
+// Only SET and REMOVE clauses are supported.
+func parseUpdateExpression(
+	expr string,
+	attrNames map[string]string,
+	attrValues map[string]any,
+) (map[string]any, error) {
+	upper := strings.ToUpper(expr)
+	updates := map[string]any{}
+
+	updateExprKeywords := []string{"SET", "REMOVE", "ADD", "DELETE"}
+	type section struct{ keyword, content string }
+	var sections []section
+	for _, kw := range updateExprKeywords {
+		idx := strings.Index(upper, kw+" ")
+		if idx < 0 {
+			continue
+		}
+		// find where this section ends (at the next keyword)
+		end := len(expr)
+		for _, kw2 := range updateExprKeywords {
+			if j := strings.Index(upper[idx+len(kw)+1:], kw2+" "); j >= 0 {
+				if candidate := idx + len(kw) + 1 + j; candidate < end {
+					end = candidate
+				}
+			}
+		}
+		sections = append(sections, section{kw, strings.TrimSpace(expr[idx+len(kw)+1 : end])})
+	}
+	if len(sections) == 0 {
+		return nil, fmt.Errorf("unsupported UpdateExpression: %q", expr)
+	}
+
+	for _, sec := range sections {
+		switch sec.keyword {
+		case "SET":
+			for _, assignment := range strings.Split(sec.content, ",") {
+				parts := strings.SplitN(strings.TrimSpace(assignment), "=", 2)
+				if len(parts) != 2 {
+					return nil, fmt.Errorf("invalid SET clause: %q", assignment)
+				}
+				name, err := resolveAttrName(strings.TrimSpace(parts[0]), attrNames)
+				if err != nil {
+					return nil, err
+				}
+				placeholder := strings.TrimSpace(parts[1])
+				val, ok := attrValues[placeholder]
+				if !ok {
+					return nil, fmt.Errorf("ExpressionAttributeValues missing %q", placeholder)
+				}
+				updates[name] = val
+			}
+		case "REMOVE":
+			for _, token := range strings.Split(sec.content, ",") {
+				name, err := resolveAttrName(strings.TrimSpace(token), attrNames)
+				if err != nil {
+					return nil, err
+				}
+				updates[name] = nil
+			}
+		default:
+			return nil, fmt.Errorf("unsupported UpdateExpression clause: %s", sec.keyword)
+		}
+	}
+	return updates, nil
+}
+
+// parseKeyConditionExpression extracts the hash key name, its equality value,
+// and an optional sort key condition from a KeyConditionExpression.
+// The hash key condition must be an equality; the sort key condition supports
+// =, <, <=, >, >=, BETWEEN, and begins_with.
+func parseKeyConditionExpression(
+	expr string,
+	attrNames map[string]string,
+	attrValues map[string]any,
+) (string, any, *SortKeyCondition, error) {
+	parts := strings.SplitN(strings.TrimSpace(expr), " AND ", 2)
+
+	// Parse hash key equality condition
+	tokens := strings.Fields(strings.TrimSpace(parts[0]))
+	if len(tokens) != 3 || tokens[1] != "=" {
+		return "", nil, nil, fmt.Errorf("unsupported KeyConditionExpression: %q", expr)
+	}
+	name, err := resolveAttrName(tokens[0], attrNames)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	val, ok := attrValues[tokens[2]]
+	if !ok {
+		return "", nil, nil, fmt.Errorf("ExpressionAttributeValues missing %q", tokens[2])
+	}
+
+	// Parse optional sort key condition
+	var skCond *SortKeyCondition
+	if len(parts) == 2 {
+		var err error
+		skCond, err = parseSortKeyCondition(strings.TrimSpace(parts[1]), attrNames, attrValues)
+		if err != nil {
+			return "", nil, nil, err
+		}
+	}
+
+	return name, val, skCond, nil
+}
+
+// parseSortKeyCondition parses a single sort key condition expression.
+// Supported forms: attr OP :val (OP = =/</<=/>/>=),
+// attr BETWEEN :lo AND :hi, begins_with(attr, :prefix).
+func parseSortKeyCondition(
+	expr string,
+	attrNames map[string]string,
+	attrValues map[string]any,
+) (*SortKeyCondition, error) {
+	resolveValue := func(ref string) (any, error) {
+		v, ok := attrValues[ref]
+		if !ok {
+			return nil, fmt.Errorf("ExpressionAttributeValues missing %q", ref)
+		}
+		return v, nil
+	}
+
+	if strings.HasPrefix(expr, "begins_with(") {
+		inner := strings.TrimSuffix(strings.TrimPrefix(expr, "begins_with("), ")")
+		argParts := strings.SplitN(inner, ",", 2)
+		if len(argParts) != 2 {
+			return nil, fmt.Errorf("invalid begins_with: %q", expr)
+		}
+		skName, err := resolveAttrName(strings.TrimSpace(argParts[0]), attrNames)
+		if err != nil {
+			return nil, err
+		}
+		skVal, err := resolveValue(strings.TrimSpace(argParts[1]))
+		if err != nil {
+			return nil, err
+		}
+		return &SortKeyCondition{Name: skName, Operator: OpBeginsWith, Value: skVal}, nil
+	}
+
+	tokens := strings.Fields(expr)
+
+	if len(tokens) == 5 &&
+		strings.ToUpper(tokens[1]) == OpBETWEEN &&
+		strings.ToUpper(tokens[3]) == "AND" {
+		skName, err := resolveAttrName(tokens[0], attrNames)
+		if err != nil {
+			return nil, err
+		}
+		lo, err := resolveValue(tokens[2])
+		if err != nil {
+			return nil, err
+		}
+		hi, err := resolveValue(tokens[4])
+		if err != nil {
+			return nil, err
+		}
+		return &SortKeyCondition{Name: skName, Operator: OpBETWEEN, Value: lo, Value2: hi}, nil
+	}
+
+	if len(tokens) == 3 {
+		skName, err := resolveAttrName(tokens[0], attrNames)
+		if err != nil {
+			return nil, err
+		}
+		op := tokens[1]
+		switch op {
+		case OpEQ, OpLT, OpLTE, OpGT, OpGTE:
+		default:
+			return nil, fmt.Errorf("unsupported sort key operator: %q", op)
+		}
+		skVal, err := resolveValue(tokens[2])
+		if err != nil {
+			return nil, err
+		}
+		return &SortKeyCondition{Name: skName, Operator: op, Value: skVal}, nil
+	}
+
+	return nil, fmt.Errorf("unsupported sort key condition: %q", expr)
+}
+
 type store interface {
 	CreateTable(meta TableMetadata) error
 	DeleteTable(name string) error
@@ -19,6 +211,12 @@ type store interface {
 	GetItem(tableName string, key map[string]any) (map[string]any, error)
 	DeleteItem(tableName string, key map[string]any) error
 	Scan(tableName string) ([]map[string]any, error)
+	UpdateItem(tableName string, key map[string]any, updates map[string]any) (map[string]any, error)
+	Query(
+		tableName, hashKeyName string,
+		hashKeyValue any,
+		skCond *SortKeyCondition,
+	) ([]map[string]any, error)
 }
 
 // tableDescription is the DynamoDB API representation of a table.
@@ -83,6 +281,10 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ro.handleDeleteItem(w, body)
 	case "Scan":
 		ro.handleScan(w, body)
+	case "UpdateItem":
+		ro.handleUpdateItem(w, body)
+	case "Query":
+		ro.handleQuery(w, body)
 	default:
 		slog.Debug( // #nosec G706 -- target comes from the X-Amz-Target header; log injection risk accepted for a local dev emulator
 			"DynamoDB operation not implemented",
@@ -402,6 +604,150 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 		items = []map[string]any{}
 	}
 	slog.Debug("scanned DynamoDB table", "table", req.TableName, "count", len(items))
+	writeJSON(w, http.StatusOK, map[string]any{
+		"Items":        items,
+		"Count":        len(items),
+		"ScannedCount": len(items),
+	})
+}
+
+func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
+	var req struct {
+		TableName                 string            `json:"TableName"`
+		Key                       map[string]any    `json:"Key"`
+		UpdateExpression          string            `json:"UpdateExpression"`
+		ExpressionAttributeNames  map[string]string `json:"ExpressionAttributeNames"`
+		ExpressionAttributeValues map[string]any    `json:"ExpressionAttributeValues"`
+		ReturnValues              string            `json:"ReturnValues"`
+		AttributeUpdates          map[string]struct {
+			Action string `json:"Action"`
+			Value  any    `json:"Value"`
+		} `json:"AttributeUpdates"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
+		return
+	}
+	if req.TableName == "" {
+		writeError(w, http.StatusBadRequest, "ValidationException", "TableName is required")
+		return
+	}
+
+	var updates map[string]any
+	switch {
+	case req.UpdateExpression != "":
+		var err error
+		updates, err = parseUpdateExpression(
+			req.UpdateExpression,
+			req.ExpressionAttributeNames,
+			req.ExpressionAttributeValues,
+		)
+		if err != nil {
+			slog.Debug("UpdateItem: invalid UpdateExpression", "table", req.TableName, "err", err)
+			writeError(w, http.StatusBadRequest, "ValidationException", err.Error())
+			return
+		}
+	case len(req.AttributeUpdates) > 0:
+		updates = make(map[string]any, len(req.AttributeUpdates))
+		for name, au := range req.AttributeUpdates {
+			switch au.Action {
+			case "PUT", "":
+				updates[name] = au.Value
+			case "DELETE":
+				updates[name] = nil
+			default:
+				writeError(w, http.StatusBadRequest, "ValidationException",
+					"unsupported AttributeUpdates Action: "+au.Action)
+				return
+			}
+		}
+	default:
+		updates = map[string]any{}
+	}
+
+	item, err := ro.storage.UpdateItem(req.TableName, req.Key, updates)
+	if err != nil {
+		if errors.Is(err, ErrTableNotFound) {
+			slog.Debug("UpdateItem: table not found", "table", req.TableName)
+			writeError(w, http.StatusBadRequest, "ResourceNotFoundException",
+				"Requested resource not found: Table: "+req.TableName+" not found")
+			return
+		}
+		if errors.Is(err, ErrValidationException) {
+			slog.Debug("UpdateItem: validation error", "table", req.TableName, "err", err)
+			writeError(w, http.StatusBadRequest, "ValidationException", err.Error())
+			return
+		}
+		slog.Error("UpdateItem failed", "table", req.TableName, "err", err)
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			"InternalServerError",
+			"internal server error",
+		)
+		return
+	}
+	slog.Info("updated DynamoDB item", "table", req.TableName)
+	resp := map[string]any{}
+	if req.ReturnValues == "ALL_NEW" {
+		resp["Attributes"] = item
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
+	var req struct {
+		TableName                 string            `json:"TableName"`
+		KeyConditionExpression    string            `json:"KeyConditionExpression"`
+		ExpressionAttributeNames  map[string]string `json:"ExpressionAttributeNames"`
+		ExpressionAttributeValues map[string]any    `json:"ExpressionAttributeValues"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
+		return
+	}
+	if req.TableName == "" {
+		writeError(w, http.StatusBadRequest, "ValidationException", "TableName is required")
+		return
+	}
+	if req.KeyConditionExpression == "" {
+		writeError(w, http.StatusBadRequest, "ValidationException",
+			"KeyConditionExpression is required")
+		return
+	}
+
+	hashKeyName, hashKeyValue, skCond, err := parseKeyConditionExpression(
+		req.KeyConditionExpression,
+		req.ExpressionAttributeNames,
+		req.ExpressionAttributeValues,
+	)
+	if err != nil {
+		slog.Debug("Query: invalid KeyConditionExpression", "table", req.TableName, "err", err)
+		writeError(w, http.StatusBadRequest, "ValidationException", err.Error())
+		return
+	}
+
+	items, err := ro.storage.Query(req.TableName, hashKeyName, hashKeyValue, skCond)
+	if err != nil {
+		if errors.Is(err, ErrTableNotFound) {
+			slog.Debug("Query: table not found", "table", req.TableName)
+			writeError(w, http.StatusBadRequest, "ResourceNotFoundException",
+				"Requested resource not found: Table: "+req.TableName+" not found")
+			return
+		}
+		slog.Error("Query failed", "table", req.TableName, "err", err)
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			"InternalServerError",
+			"internal server error",
+		)
+		return
+	}
+	if items == nil {
+		items = []map[string]any{}
+	}
+	slog.Debug("queried DynamoDB table", "table", req.TableName, "count", len(items))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"Items":        items,
 		"Count":        len(items),
