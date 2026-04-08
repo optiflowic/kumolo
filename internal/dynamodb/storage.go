@@ -449,7 +449,11 @@ func (s *Storage) BatchGetItems(tableName string, keys []map[string]any) ([]map[
 }
 
 // BatchWriteItems applies puts and deletes to tableName under a single lock.
-func (s *Storage) BatchWriteItems(tableName string, puts []map[string]any, deletes []map[string]any) error {
+func (s *Storage) BatchWriteItems(
+	tableName string,
+	puts []map[string]any,
+	deletes []map[string]any,
+) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	meta, err := s.readTableMeta(tableName)

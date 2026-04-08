@@ -1009,7 +1009,10 @@ func TestBatchWriteItems(t *testing.T) {
 	t.Run("applies mixed puts and deletes", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		require.NoError(t, s.PutItem("test-table", map[string]any{"pk": map[string]any{"S": "old"}}))
+		require.NoError(
+			t,
+			s.PutItem("test-table", map[string]any{"pk": map[string]any{"S": "old"}}),
+		)
 		puts := []map[string]any{{"pk": map[string]any{"S": "new"}}}
 		deletes := []map[string]any{{"pk": map[string]any{"S": "old"}}}
 		require.NoError(t, s.BatchWriteItems("test-table", puts, deletes))
@@ -1032,13 +1035,16 @@ func TestBatchWriteItems(t *testing.T) {
 		assert.ErrorIs(t, err, ErrValidationException)
 	})
 
-	t.Run("returns ErrValidationException for delete with missing key attribute", func(t *testing.T) {
-		s := newTestStorage(t)
-		require.NoError(t, s.CreateTable(testMeta))
-		deletes := []map[string]any{{}}
-		err := s.BatchWriteItems("test-table", nil, deletes)
-		assert.ErrorIs(t, err, ErrValidationException)
-	})
+	t.Run(
+		"returns ErrValidationException for delete with missing key attribute",
+		func(t *testing.T) {
+			s := newTestStorage(t)
+			require.NoError(t, s.CreateTable(testMeta))
+			deletes := []map[string]any{{}}
+			err := s.BatchWriteItems("test-table", nil, deletes)
+			assert.ErrorIs(t, err, ErrValidationException)
+		},
+	)
 
 	t.Run("returns error when readTableMeta fails", func(t *testing.T) {
 		s := newTestStorage(t)
