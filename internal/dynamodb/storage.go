@@ -418,6 +418,71 @@ func (s *Storage) Query(
 	return items, nil
 }
 
+// BatchGetItems retrieves items by their primary keys from tableName.
+// Items not found are omitted from the result (matching DynamoDB behavior).
+func (s *Storage) BatchGetItems(tableName string, keys []map[string]any) ([]map[string]any, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	meta, err := s.readTableMeta(tableName)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, ErrTableNotFound
+		}
+		return nil, err
+	}
+	var items []map[string]any
+	for _, key := range keys {
+		k, err := itemKey(key, meta.KeySchema)
+		if err != nil {
+			return nil, err
+		}
+		item, err := readJSON[map[string]any](s, filepath.Join(tableName, k+".json"))
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
+// BatchWriteItems applies puts and deletes to tableName under a single lock.
+func (s *Storage) BatchWriteItems(tableName string, puts []map[string]any, deletes []map[string]any) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	meta, err := s.readTableMeta(tableName)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return ErrTableNotFound
+		}
+		return err
+	}
+	for _, item := range puts {
+		key, err := itemKey(item, meta.KeySchema)
+		if err != nil {
+			return err
+		}
+		if err := s.writeJSON(filepath.Join(tableName, key+".json"), item); err != nil {
+			return err
+		}
+	}
+	for _, key := range deletes {
+		k, err := itemKey(key, meta.KeySchema)
+		if err != nil {
+			return err
+		}
+		if err := s.removeFile(filepath.Join(tableName, k+".json")); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return err
+		}
+	}
+	return nil
+}
+
 // readAllItemsLocked reads every *.json item file in tableName.
 // Must be called with at least a read lock held.
 func (s *Storage) readAllItemsLocked(tableName string) ([]map[string]any, error) {

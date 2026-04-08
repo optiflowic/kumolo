@@ -347,7 +347,7 @@ func TestHandleScan(t *testing.T) {
 func TestUnknownOperation(t *testing.T) {
 	t.Run("501 for unknown target", func(t *testing.T) {
 		ro := newTestRouter(t)
-		w := dynamo(t, ro, "BatchWriteItem", `{}`)
+		w := dynamo(t, ro, "UnknownOperation", `{}`)
 		assert.Equal(t, http.StatusNotImplemented, w.Code)
 		assertErrorType(t, w, "NotImplemented")
 	})
@@ -1059,16 +1059,18 @@ func (e *errorReader) Read(_ []byte) (int, error) {
 
 // mockStore is a configurable in-memory store for router tests.
 type mockStore struct {
-	createTableFn   func(meta TableMetadata) error
-	deleteTableFn   func(name string) error
-	describeTableFn func(name string) (TableMetadata, error)
-	listTablesFn    func() ([]string, error)
-	putItemFn       func(tableName string, item map[string]any) error
-	getItemFn       func(tableName string, key map[string]any) (map[string]any, error)
-	deleteItemFn    func(tableName string, key map[string]any) error
-	scanFn          func(tableName string) ([]map[string]any, error)
-	updateItemFn    func(tableName string, key map[string]any, updates map[string]any) (map[string]any, error)
-	queryFn         func(tableName, hashKeyName string, hashKeyValue any) ([]map[string]any, error)
+	createTableFn    func(meta TableMetadata) error
+	deleteTableFn    func(name string) error
+	describeTableFn  func(name string) (TableMetadata, error)
+	listTablesFn     func() ([]string, error)
+	putItemFn        func(tableName string, item map[string]any) error
+	getItemFn        func(tableName string, key map[string]any) (map[string]any, error)
+	deleteItemFn     func(tableName string, key map[string]any) error
+	scanFn           func(tableName string) ([]map[string]any, error)
+	updateItemFn     func(tableName string, key map[string]any, updates map[string]any) (map[string]any, error)
+	queryFn          func(tableName, hashKeyName string, hashKeyValue any) ([]map[string]any, error)
+	batchGetItemsFn  func(tableName string, keys []map[string]any) ([]map[string]any, error)
+	batchWriteItemsFn func(tableName string, puts []map[string]any, deletes []map[string]any) error
 }
 
 func (m *mockStore) CreateTable(meta TableMetadata) error {
@@ -1117,6 +1119,14 @@ func (m *mockStore) Query(
 	_ *SortKeyCondition,
 ) ([]map[string]any, error) {
 	return m.queryFn(tableName, hashKeyName, hashKeyValue)
+}
+
+func (m *mockStore) BatchGetItems(tableName string, keys []map[string]any) ([]map[string]any, error) {
+	return m.batchGetItemsFn(tableName, keys)
+}
+
+func (m *mockStore) BatchWriteItems(tableName string, puts []map[string]any, deletes []map[string]any) error {
+	return m.batchWriteItemsFn(tableName, puts, deletes)
 }
 
 var errInternal = errors.New("internal error")
@@ -1259,5 +1269,199 @@ func TestWriteErrorEncoderFail(t *testing.T) {
 		w := &failResponseWriter{}
 		writeJSON(w, http.StatusOK, map[string]any{"k": "v"})
 		assert.Equal(t, http.StatusOK, w.code)
+	})
+}
+
+func TestHandleBatchGetItem(t *testing.T) {
+	const createBody = `{
+		"TableName": "tbl",
+		"KeySchema": [{"AttributeName": "pk", "KeyType": "HASH"}],
+		"AttributeDefinitions": [{"AttributeName": "pk", "AttributeType": "S"}],
+		"BillingMode": "PAY_PER_REQUEST"
+	}`
+
+	t.Run("returns found items", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem", `{
+			"TableName": "tbl", "Item": {"pk": {"S": "k1"}}
+		}`).Code)
+		w := dynamo(t, ro, "BatchGetItem", `{
+			"RequestItems": {"tbl": {"Keys": [{"pk": {"S": "k1"}}, {"pk": {"S": "missing"}}]}}
+		}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		responses := resp["Responses"].(map[string]any)
+		items := responses["tbl"].([]any)
+		assert.Len(t, items, 1)
+		assert.NotNil(t, resp["UnprocessedKeys"])
+	})
+
+	t.Run("returns empty list when no items match", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createBody).Code)
+		w := dynamo(t, ro, "BatchGetItem", `{
+			"RequestItems": {"tbl": {"Keys": [{"pk": {"S": "missing"}}]}}
+		}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		responses := resp["Responses"].(map[string]any)
+		items := responses["tbl"].([]any)
+		assert.Empty(t, items)
+	})
+
+	t.Run("400 for empty RequestItems", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "BatchGetItem", `{"RequestItems": {}}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ValidationException")
+	})
+
+	t.Run("400 for invalid JSON", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "BatchGetItem", `{bad}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("400 for table not found", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "BatchGetItem", `{
+			"RequestItems": {"no-such-table": {"Keys": [{"pk": {"S": "k"}}]}}
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ResourceNotFoundException")
+	})
+
+	t.Run("400 for missing key attribute", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createBody).Code)
+		w := dynamo(t, ro, "BatchGetItem", `{
+			"RequestItems": {"tbl": {"Keys": [{}]}}
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ValidationException")
+	})
+
+	t.Run("500 when BatchGetItems fails with unexpected error", func(t *testing.T) {
+		ro := &Router{storage: &mockStore{
+			batchGetItemsFn: func(string, []map[string]any) ([]map[string]any, error) {
+				return nil, errInternal
+			},
+		}}
+		w := dynamo(t, ro, "BatchGetItem", `{
+			"RequestItems": {"tbl": {"Keys": [{"pk": {"S": "k"}}]}}
+		}`)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+}
+
+func TestHandleBatchWriteItem(t *testing.T) {
+	const createBody = `{
+		"TableName": "tbl",
+		"KeySchema": [{"AttributeName": "pk", "KeyType": "HASH"}],
+		"AttributeDefinitions": [{"AttributeName": "pk", "AttributeType": "S"}],
+		"BillingMode": "PAY_PER_REQUEST"
+	}`
+
+	t.Run("puts items", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createBody).Code)
+		w := dynamo(t, ro, "BatchWriteItem", `{
+			"RequestItems": {"tbl": [
+				{"PutRequest": {"Item": {"pk": {"S": "k1"}}}},
+				{"PutRequest": {"Item": {"pk": {"S": "k2"}}}}
+			]}
+		}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.NotNil(t, resp["UnprocessedItems"])
+		scan := dynamo(t, ro, "Scan", `{"TableName": "tbl"}`)
+		var scanResp map[string]any
+		require.NoError(t, json.Unmarshal(scan.Body.Bytes(), &scanResp))
+		assert.Equal(t, float64(2), scanResp["Count"])
+	})
+
+	t.Run("deletes items", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem", `{
+			"TableName": "tbl", "Item": {"pk": {"S": "k1"}}
+		}`).Code)
+		w := dynamo(t, ro, "BatchWriteItem", `{
+			"RequestItems": {"tbl": [
+				{"DeleteRequest": {"Key": {"pk": {"S": "k1"}}}}
+			]}
+		}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		scan := dynamo(t, ro, "Scan", `{"TableName": "tbl"}`)
+		var scanResp map[string]any
+		require.NoError(t, json.Unmarshal(scan.Body.Bytes(), &scanResp))
+		assert.Equal(t, float64(0), scanResp["Count"])
+	})
+
+	t.Run("handles mixed puts and deletes", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem", `{
+			"TableName": "tbl", "Item": {"pk": {"S": "old"}}
+		}`).Code)
+		w := dynamo(t, ro, "BatchWriteItem", `{
+			"RequestItems": {"tbl": [
+				{"PutRequest": {"Item": {"pk": {"S": "new"}}}},
+				{"DeleteRequest": {"Key": {"pk": {"S": "old"}}}}
+			]}
+		}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		scan := dynamo(t, ro, "Scan", `{"TableName": "tbl"}`)
+		var scanResp map[string]any
+		require.NoError(t, json.Unmarshal(scan.Body.Bytes(), &scanResp))
+		assert.Equal(t, float64(1), scanResp["Count"])
+	})
+
+	t.Run("400 for empty RequestItems", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "BatchWriteItem", `{"RequestItems": {}}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ValidationException")
+	})
+
+	t.Run("400 for invalid JSON", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "BatchWriteItem", `{bad}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("400 for table not found", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "BatchWriteItem", `{
+			"RequestItems": {"no-such-table": [{"PutRequest": {"Item": {"pk": {"S": "k"}}}}]}
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ResourceNotFoundException")
+	})
+
+	t.Run("400 for missing key attribute in put", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createBody).Code)
+		w := dynamo(t, ro, "BatchWriteItem", `{
+			"RequestItems": {"tbl": [{"PutRequest": {"Item": {}}}]}
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ValidationException")
+	})
+
+	t.Run("500 when BatchWriteItems fails with unexpected error", func(t *testing.T) {
+		ro := &Router{storage: &mockStore{
+			batchWriteItemsFn: func(string, []map[string]any, []map[string]any) error {
+				return errInternal
+			},
+		}}
+		w := dynamo(t, ro, "BatchWriteItem", `{
+			"RequestItems": {"tbl": [{"PutRequest": {"Item": {"pk": {"S": "k"}}}}]}
+		}`)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
 }

@@ -888,3 +888,184 @@ func TestDynamoValueCmp(t *testing.T) {
 		})
 	}
 }
+
+func TestBatchGetItems(t *testing.T) {
+	item1 := map[string]any{"pk": map[string]any{"S": "k1"}, "val": map[string]any{"S": "v1"}}
+	item2 := map[string]any{"pk": map[string]any{"S": "k2"}, "val": map[string]any{"S": "v2"}}
+
+	t.Run("returns all requested items when all exist", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		require.NoError(t, s.PutItem("test-table", item1))
+		require.NoError(t, s.PutItem("test-table", item2))
+		keys := []map[string]any{
+			{"pk": map[string]any{"S": "k1"}},
+			{"pk": map[string]any{"S": "k2"}},
+		}
+		items, err := s.BatchGetItems("test-table", keys)
+		require.NoError(t, err)
+		assert.Len(t, items, 2)
+	})
+
+	t.Run("omits items that do not exist", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		require.NoError(t, s.PutItem("test-table", item1))
+		keys := []map[string]any{
+			{"pk": map[string]any{"S": "k1"}},
+			{"pk": map[string]any{"S": "missing"}},
+		}
+		items, err := s.BatchGetItems("test-table", keys)
+		require.NoError(t, err)
+		assert.Len(t, items, 1)
+	})
+
+	t.Run("returns empty when no keys match", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		keys := []map[string]any{{"pk": map[string]any{"S": "missing"}}}
+		items, err := s.BatchGetItems("test-table", keys)
+		require.NoError(t, err)
+		assert.Nil(t, items)
+	})
+
+	t.Run("returns ErrTableNotFound for missing table", func(t *testing.T) {
+		s := newTestStorage(t)
+		_, err := s.BatchGetItems("no-such-table", nil)
+		assert.ErrorIs(t, err, ErrTableNotFound)
+	})
+
+	t.Run("returns ErrValidationException for missing key attribute", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		keys := []map[string]any{{}}
+		_, err := s.BatchGetItems("test-table", keys)
+		assert.ErrorIs(t, err, ErrValidationException)
+	})
+
+	t.Run("returns error when readTableMeta fails", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		s.readAll = func(io.Reader) ([]byte, error) { return nil, errors.New("unexpected") }
+		_, err := s.BatchGetItems("test-table", nil)
+		assert.Error(t, err)
+	})
+
+	t.Run("returns error when item read fails with unexpected error", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		require.NoError(t, s.PutItem("test-table", item1))
+		callCount := 0
+		origReadAll := s.readAll
+		s.readAll = func(r io.Reader) ([]byte, error) {
+			callCount++
+			if callCount > 1 {
+				return nil, errors.New("read failed")
+			}
+			return origReadAll(r)
+		}
+		keys := []map[string]any{{"pk": map[string]any{"S": "k1"}}}
+		_, err := s.BatchGetItems("test-table", keys)
+		assert.Error(t, err)
+	})
+}
+
+func TestBatchWriteItems(t *testing.T) {
+	t.Run("puts multiple items", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		puts := []map[string]any{
+			{"pk": map[string]any{"S": "k1"}},
+			{"pk": map[string]any{"S": "k2"}},
+		}
+		require.NoError(t, s.BatchWriteItems("test-table", puts, nil))
+		items, err := s.Scan("test-table")
+		require.NoError(t, err)
+		assert.Len(t, items, 2)
+	})
+
+	t.Run("deletes multiple items", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		require.NoError(t, s.PutItem("test-table", map[string]any{"pk": map[string]any{"S": "k1"}}))
+		require.NoError(t, s.PutItem("test-table", map[string]any{"pk": map[string]any{"S": "k2"}}))
+		deletes := []map[string]any{
+			{"pk": map[string]any{"S": "k1"}},
+			{"pk": map[string]any{"S": "k2"}},
+		}
+		require.NoError(t, s.BatchWriteItems("test-table", nil, deletes))
+		items, err := s.Scan("test-table")
+		require.NoError(t, err)
+		assert.Empty(t, items)
+	})
+
+	t.Run("no error when deleting non-existent item", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		deletes := []map[string]any{{"pk": map[string]any{"S": "missing"}}}
+		assert.NoError(t, s.BatchWriteItems("test-table", nil, deletes))
+	})
+
+	t.Run("applies mixed puts and deletes", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		require.NoError(t, s.PutItem("test-table", map[string]any{"pk": map[string]any{"S": "old"}}))
+		puts := []map[string]any{{"pk": map[string]any{"S": "new"}}}
+		deletes := []map[string]any{{"pk": map[string]any{"S": "old"}}}
+		require.NoError(t, s.BatchWriteItems("test-table", puts, deletes))
+		items, err := s.Scan("test-table")
+		require.NoError(t, err)
+		assert.Len(t, items, 1)
+	})
+
+	t.Run("returns ErrTableNotFound for missing table", func(t *testing.T) {
+		s := newTestStorage(t)
+		err := s.BatchWriteItems("no-such-table", nil, nil)
+		assert.ErrorIs(t, err, ErrTableNotFound)
+	})
+
+	t.Run("returns ErrValidationException for put with missing key attribute", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		puts := []map[string]any{{}}
+		err := s.BatchWriteItems("test-table", puts, nil)
+		assert.ErrorIs(t, err, ErrValidationException)
+	})
+
+	t.Run("returns ErrValidationException for delete with missing key attribute", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		deletes := []map[string]any{{}}
+		err := s.BatchWriteItems("test-table", nil, deletes)
+		assert.ErrorIs(t, err, ErrValidationException)
+	})
+
+	t.Run("returns error when readTableMeta fails", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		s.readAll = func(io.Reader) ([]byte, error) { return nil, errors.New("unexpected") }
+		err := s.BatchWriteItems("test-table", nil, nil)
+		assert.Error(t, err)
+	})
+
+	t.Run("returns error when put writeJSON fails", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		s.openFile = func(string, int, os.FileMode) (io.WriteCloser, error) {
+			return nil, errors.New("open failed")
+		}
+		puts := []map[string]any{{"pk": map[string]any{"S": "k1"}}}
+		err := s.BatchWriteItems("test-table", puts, nil)
+		assert.Error(t, err)
+	})
+
+	t.Run("returns error when delete removeFile fails with non-ErrNotExist", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		require.NoError(t, s.PutItem("test-table", map[string]any{"pk": map[string]any{"S": "k1"}}))
+		s.removeFile = func(string) error { return errors.New("remove failed") }
+		deletes := []map[string]any{{"pk": map[string]any{"S": "k1"}}}
+		err := s.BatchWriteItems("test-table", nil, deletes)
+		assert.Error(t, err)
+	})
+}
