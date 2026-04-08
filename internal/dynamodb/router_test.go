@@ -36,6 +36,13 @@ const createTableBody = `{
     "BillingMode": "PAY_PER_REQUEST"
 }`
 
+const createTblBody = `{
+	"TableName": "tbl",
+	"KeySchema": [{"AttributeName": "pk", "KeyType": "HASH"}],
+	"AttributeDefinitions": [{"AttributeName": "pk", "AttributeType": "S"}],
+	"BillingMode": "PAY_PER_REQUEST"
+}`
+
 func TestHandleCreateTable(t *testing.T) {
 	t.Run("creates table and returns description", func(t *testing.T) {
 		ro := newTestRouter(t)
@@ -1280,16 +1287,9 @@ func TestWriteErrorEncoderFail(t *testing.T) {
 }
 
 func TestHandleBatchGetItem(t *testing.T) {
-	const createBody = `{
-		"TableName": "tbl",
-		"KeySchema": [{"AttributeName": "pk", "KeyType": "HASH"}],
-		"AttributeDefinitions": [{"AttributeName": "pk", "AttributeType": "S"}],
-		"BillingMode": "PAY_PER_REQUEST"
-	}`
-
 	t.Run("returns found items", func(t *testing.T) {
 		ro := newTestRouter(t)
-		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTblBody).Code)
 		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem", `{
 			"TableName": "tbl", "Item": {"pk": {"S": "k1"}}
 		}`).Code)
@@ -1307,7 +1307,7 @@ func TestHandleBatchGetItem(t *testing.T) {
 
 	t.Run("returns empty list when no items match", func(t *testing.T) {
 		ro := newTestRouter(t)
-		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTblBody).Code)
 		w := dynamo(t, ro, "BatchGetItem", `{
 			"RequestItems": {"tbl": {"Keys": [{"pk": {"S": "missing"}}]}}
 		}`)
@@ -1343,7 +1343,7 @@ func TestHandleBatchGetItem(t *testing.T) {
 
 	t.Run("400 for missing key attribute", func(t *testing.T) {
 		ro := newTestRouter(t)
-		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTblBody).Code)
 		w := dynamo(t, ro, "BatchGetItem", `{
 			"RequestItems": {"tbl": {"Keys": [{}]}}
 		}`)
@@ -1365,16 +1365,9 @@ func TestHandleBatchGetItem(t *testing.T) {
 }
 
 func TestHandleBatchWriteItem(t *testing.T) {
-	const createBody = `{
-		"TableName": "tbl",
-		"KeySchema": [{"AttributeName": "pk", "KeyType": "HASH"}],
-		"AttributeDefinitions": [{"AttributeName": "pk", "AttributeType": "S"}],
-		"BillingMode": "PAY_PER_REQUEST"
-	}`
-
 	t.Run("puts items", func(t *testing.T) {
 		ro := newTestRouter(t)
-		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTblBody).Code)
 		w := dynamo(t, ro, "BatchWriteItem", `{
 			"RequestItems": {"tbl": [
 				{"PutRequest": {"Item": {"pk": {"S": "k1"}}}},
@@ -1393,7 +1386,7 @@ func TestHandleBatchWriteItem(t *testing.T) {
 
 	t.Run("deletes items", func(t *testing.T) {
 		ro := newTestRouter(t)
-		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTblBody).Code)
 		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem", `{
 			"TableName": "tbl", "Item": {"pk": {"S": "k1"}}
 		}`).Code)
@@ -1411,7 +1404,7 @@ func TestHandleBatchWriteItem(t *testing.T) {
 
 	t.Run("handles mixed puts and deletes", func(t *testing.T) {
 		ro := newTestRouter(t)
-		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTblBody).Code)
 		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem", `{
 			"TableName": "tbl", "Item": {"pk": {"S": "old"}}
 		}`).Code)
@@ -1452,7 +1445,7 @@ func TestHandleBatchWriteItem(t *testing.T) {
 
 	t.Run("400 for missing key attribute in put", func(t *testing.T) {
 		ro := newTestRouter(t)
-		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTblBody).Code)
 		w := dynamo(t, ro, "BatchWriteItem", `{
 			"RequestItems": {"tbl": [{"PutRequest": {"Item": {}}}]}
 		}`)
