@@ -217,6 +217,8 @@ type store interface {
 		hashKeyValue any,
 		skCond *SortKeyCondition,
 	) ([]map[string]any, error)
+	BatchGetItems(tableName string, keys []map[string]any) ([]map[string]any, error)
+	BatchWriteItems(tableName string, puts []map[string]any, deletes []map[string]any) error
 }
 
 // tableDescription is the DynamoDB API representation of a table.
@@ -285,6 +287,10 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ro.handleUpdateItem(w, body)
 	case "Query":
 		ro.handleQuery(w, body)
+	case "BatchGetItem":
+		ro.handleBatchGetItem(w, body)
+	case "BatchWriteItem":
+		ro.handleBatchWriteItem(w, body)
 	default:
 		slog.Debug( // #nosec G706 -- target comes from the X-Amz-Target header; log injection risk accepted for a local dev emulator
 			"DynamoDB operation not implemented",
@@ -752,5 +758,112 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 		"Items":        items,
 		"Count":        len(items),
 		"ScannedCount": len(items),
+	})
+}
+
+func (ro *Router) handleBatchGetItem(w http.ResponseWriter, body []byte) {
+	var req struct {
+		RequestItems map[string]struct {
+			Keys []map[string]any `json:"Keys"`
+		} `json:"RequestItems"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
+		return
+	}
+	if len(req.RequestItems) == 0 {
+		writeError(w, http.StatusBadRequest, "ValidationException", "RequestItems is required")
+		return
+	}
+	responses := make(map[string][]map[string]any, len(req.RequestItems))
+	for tableName, tableReq := range req.RequestItems {
+		items, err := ro.storage.BatchGetItems(tableName, tableReq.Keys)
+		if err != nil {
+			if errors.Is(err, ErrTableNotFound) {
+				slog.Debug("BatchGetItem: table not found", "table", tableName)
+				writeError(w, http.StatusBadRequest, "ResourceNotFoundException",
+					"Requested resource not found: Table: "+tableName+" not found")
+				return
+			}
+			if errors.Is(err, ErrValidationException) {
+				slog.Debug("BatchGetItem: validation error", "table", tableName, "err", err)
+				writeError(w, http.StatusBadRequest, "ValidationException", err.Error())
+				return
+			}
+			slog.Error("BatchGetItem failed", "table", tableName, "err", err)
+			writeError(
+				w,
+				http.StatusInternalServerError,
+				"InternalServerError",
+				"internal server error",
+			)
+			return
+		}
+		if items == nil {
+			items = []map[string]any{}
+		}
+		responses[tableName] = items
+	}
+	slog.Debug("batch got DynamoDB items", "tables", len(req.RequestItems))
+	writeJSON(w, http.StatusOK, map[string]any{
+		"Responses":       responses,
+		"UnprocessedKeys": map[string]any{},
+	})
+}
+
+func (ro *Router) handleBatchWriteItem(w http.ResponseWriter, body []byte) {
+	var req struct {
+		RequestItems map[string][]struct {
+			PutRequest *struct {
+				Item map[string]any `json:"Item"`
+			} `json:"PutRequest"`
+			DeleteRequest *struct {
+				Key map[string]any `json:"Key"`
+			} `json:"DeleteRequest"`
+		} `json:"RequestItems"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
+		return
+	}
+	if len(req.RequestItems) == 0 {
+		writeError(w, http.StatusBadRequest, "ValidationException", "RequestItems is required")
+		return
+	}
+	for tableName, writeReqs := range req.RequestItems {
+		var puts []map[string]any
+		var deletes []map[string]any
+		for _, wr := range writeReqs {
+			if wr.PutRequest != nil {
+				puts = append(puts, wr.PutRequest.Item)
+			} else if wr.DeleteRequest != nil {
+				deletes = append(deletes, wr.DeleteRequest.Key)
+			}
+		}
+		if err := ro.storage.BatchWriteItems(tableName, puts, deletes); err != nil {
+			if errors.Is(err, ErrTableNotFound) {
+				slog.Debug("BatchWriteItem: table not found", "table", tableName)
+				writeError(w, http.StatusBadRequest, "ResourceNotFoundException",
+					"Requested resource not found: Table: "+tableName+" not found")
+				return
+			}
+			if errors.Is(err, ErrValidationException) {
+				slog.Debug("BatchWriteItem: validation error", "table", tableName, "err", err)
+				writeError(w, http.StatusBadRequest, "ValidationException", err.Error())
+				return
+			}
+			slog.Error("BatchWriteItem failed", "table", tableName, "err", err)
+			writeError(
+				w,
+				http.StatusInternalServerError,
+				"InternalServerError",
+				"internal server error",
+			)
+			return
+		}
+	}
+	slog.Info("batch wrote DynamoDB items", "tables", len(req.RequestItems))
+	writeJSON(w, http.StatusOK, map[string]any{
+		"UnprocessedItems": map[string]any{},
 	})
 }
