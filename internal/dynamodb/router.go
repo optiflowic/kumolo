@@ -791,7 +791,12 @@ func (ro *Router) handleBatchGetItem(w http.ResponseWriter, body []byte) {
 				return
 			}
 			slog.Error("BatchGetItem failed", "table", tableName, "err", err)
-			writeError(w, http.StatusInternalServerError, "InternalServerError", "internal server error")
+			writeError(
+				w,
+				http.StatusInternalServerError,
+				"InternalServerError",
+				"internal server error",
+			)
 			return
 		}
 		if items == nil {
@@ -809,7 +814,7 @@ func (ro *Router) handleBatchGetItem(w http.ResponseWriter, body []byte) {
 func (ro *Router) handleBatchWriteItem(w http.ResponseWriter, body []byte) {
 	var req struct {
 		RequestItems map[string][]struct {
-			PutRequest    *struct {
+			PutRequest *struct {
 				Item map[string]any `json:"Item"`
 			} `json:"PutRequest"`
 			DeleteRequest *struct {
@@ -848,11 +853,16 @@ func (ro *Router) handleBatchWriteItem(w http.ResponseWriter, body []byte) {
 				return
 			}
 			slog.Error("BatchWriteItem failed", "table", tableName, "err", err)
-			writeError(w, http.StatusInternalServerError, "InternalServerError", "internal server error")
+			writeError(
+				w,
+				http.StatusInternalServerError,
+				"InternalServerError",
+				"internal server error",
+			)
 			return
 		}
 	}
-	slog.Info("batch wrote DynamoDB items")
+	slog.Info("batch wrote DynamoDB items", "tables", len(req.RequestItems))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"UnprocessedItems": map[string]any{},
 	})

@@ -1059,17 +1059,17 @@ func (e *errorReader) Read(_ []byte) (int, error) {
 
 // mockStore is a configurable in-memory store for router tests.
 type mockStore struct {
-	createTableFn    func(meta TableMetadata) error
-	deleteTableFn    func(name string) error
-	describeTableFn  func(name string) (TableMetadata, error)
-	listTablesFn     func() ([]string, error)
-	putItemFn        func(tableName string, item map[string]any) error
-	getItemFn        func(tableName string, key map[string]any) (map[string]any, error)
-	deleteItemFn     func(tableName string, key map[string]any) error
-	scanFn           func(tableName string) ([]map[string]any, error)
-	updateItemFn     func(tableName string, key map[string]any, updates map[string]any) (map[string]any, error)
-	queryFn          func(tableName, hashKeyName string, hashKeyValue any) ([]map[string]any, error)
-	batchGetItemsFn  func(tableName string, keys []map[string]any) ([]map[string]any, error)
+	createTableFn     func(meta TableMetadata) error
+	deleteTableFn     func(name string) error
+	describeTableFn   func(name string) (TableMetadata, error)
+	listTablesFn      func() ([]string, error)
+	putItemFn         func(tableName string, item map[string]any) error
+	getItemFn         func(tableName string, key map[string]any) (map[string]any, error)
+	deleteItemFn      func(tableName string, key map[string]any) error
+	scanFn            func(tableName string) ([]map[string]any, error)
+	updateItemFn      func(tableName string, key map[string]any, updates map[string]any) (map[string]any, error)
+	queryFn           func(tableName, hashKeyName string, hashKeyValue any) ([]map[string]any, error)
+	batchGetItemsFn   func(tableName string, keys []map[string]any) ([]map[string]any, error)
 	batchWriteItemsFn func(tableName string, puts []map[string]any, deletes []map[string]any) error
 }
 
@@ -1121,11 +1121,18 @@ func (m *mockStore) Query(
 	return m.queryFn(tableName, hashKeyName, hashKeyValue)
 }
 
-func (m *mockStore) BatchGetItems(tableName string, keys []map[string]any) ([]map[string]any, error) {
+func (m *mockStore) BatchGetItems(
+	tableName string,
+	keys []map[string]any,
+) ([]map[string]any, error) {
 	return m.batchGetItemsFn(tableName, keys)
 }
 
-func (m *mockStore) BatchWriteItems(tableName string, puts []map[string]any, deletes []map[string]any) error {
+func (m *mockStore) BatchWriteItems(
+	tableName string,
+	puts []map[string]any,
+	deletes []map[string]any,
+) error {
 	return m.batchWriteItemsFn(tableName, puts, deletes)
 }
 
