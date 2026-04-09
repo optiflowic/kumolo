@@ -702,6 +702,116 @@ func (s *Storage) readPartMeta(uploadID string, partNumber int) (partMeta, error
 	)
 }
 
+// MultipartUploadInfo describes an in-progress multipart upload.
+type MultipartUploadInfo struct {
+	UploadID  string
+	Key       string
+	Initiated time.Time
+}
+
+// PartInfo describes an uploaded part.
+type PartInfo struct {
+	PartNumber   int
+	ETag         string
+	Size         int64
+	LastModified time.Time
+}
+
+func (s *Storage) ListMultipartUploads(bucket string) ([]MultipartUploadInfo, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.bucketExistsLocked(bucket) {
+		return nil, ErrBucketNotFound
+	}
+	entries, err := s.readDir(mpuDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var uploads []MultipartUploadInfo
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		uploadID := e.Name()
+		umeta, err := s.readUploadMeta(uploadID)
+		if err != nil {
+			slog.Warn( // #nosec G706 -- uploadID is an internal identifier, not direct user input
+				"skipping upload with unreadable metadata",
+				"uploadID",
+				uploadID,
+				"err",
+				err,
+			)
+			continue
+		}
+		if umeta.Bucket != bucket {
+			continue
+		}
+		uploads = append(uploads, MultipartUploadInfo{
+			UploadID:  uploadID,
+			Key:       umeta.Key,
+			Initiated: umeta.Initiated,
+		})
+	}
+	return uploads, nil
+}
+
+func (s *Storage) ListParts(uploadID string) (uploadMeta, []PartInfo, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	umeta, err := s.readUploadMeta(uploadID)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return uploadMeta{}, nil, ErrUploadNotFound
+		}
+		return uploadMeta{}, nil, err
+	}
+	entries, err := s.readDir(filepath.Join(mpuDir, uploadID))
+	if err != nil {
+		return uploadMeta{}, nil, err
+	}
+	var parts []PartInfo
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".part.meta.json") {
+			continue
+		}
+		var partNumber int
+		if _, err := fmt.Sscanf(e.Name(), "%d.part.meta.json", &partNumber); err != nil {
+			continue
+		}
+		pm, err := s.readPartMeta(uploadID, partNumber)
+		if err != nil {
+			slog.Warn( // #nosec G706 -- uploadID/partNumber are internal identifiers
+				"skipping part with unreadable metadata",
+				"uploadID",
+				uploadID,
+				"partNumber",
+				partNumber,
+				"err",
+				err,
+			)
+			continue
+		}
+		var lastModified time.Time
+		if info, err := e.Info(); err == nil {
+			lastModified = info.ModTime()
+		}
+		parts = append(parts, PartInfo{
+			PartNumber:   partNumber,
+			ETag:         pm.ETag,
+			Size:         pm.Size,
+			LastModified: lastModified,
+		})
+	}
+	slices.SortFunc(parts, func(a, b PartInfo) int {
+		return cmp.Compare(a.PartNumber, b.PartNumber)
+	})
+	return umeta, parts, nil
+}
+
 // removeUploadDir removes all files in uploadDir and then the directory itself.
 // os.Root does not expose RemoveAll, so we must walk and remove manually.
 func (s *Storage) removeUploadDir(uploadDir string) error {
