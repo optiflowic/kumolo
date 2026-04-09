@@ -203,7 +203,7 @@ func (ro *Router) handleListObjects(w http.ResponseWriter, r *http.Request, buck
 	var contents []xmlObjectContent
 	commonPrefixes := make(map[string]struct{})
 	var nextMarker string
-	isTruncated := false
+	var isTruncated bool
 
 	for _, obj := range objects {
 		if !strings.HasPrefix(obj.Key, prefix) {
