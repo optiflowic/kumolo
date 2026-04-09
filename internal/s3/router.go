@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -145,7 +146,7 @@ func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, bucket str
 		case r.URL.Query().Get("list-type") == "2":
 			ro.handleListObjectsV2(w, r, bucket)
 		default:
-			writeNotImplemented(w, r)
+			ro.handleListObjects(w, r, bucket)
 		}
 	case http.MethodPost:
 		if r.URL.Query().Has("delete") {
@@ -162,6 +163,108 @@ func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, bucket str
 			"The specified method is not allowed.",
 		)
 	}
+}
+
+func (ro *Router) handleListObjects(w http.ResponseWriter, r *http.Request, bucket string) {
+	q := r.URL.Query()
+	prefix := q.Get("prefix")
+	delimiter := q.Get("delimiter")
+	marker := q.Get("marker")
+	maxKeys := 1000
+	if s := q.Get("max-keys"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n >= 0 {
+			maxKeys = n
+		}
+	}
+
+	objects, err := ro.storage.ListObjects(bucket)
+	if err != nil {
+		if errors.Is(err, ErrBucketNotFound) {
+			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"bucket not found",
+				"bucket",
+				bucket,
+			)
+			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+				"The specified bucket does not exist.")
+			return
+		}
+		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			"failed to list objects",
+			"bucket",
+			bucket,
+			"err",
+			err,
+		)
+		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+
+	var contents []xmlObjectContent
+	commonPrefixes := make(map[string]struct{})
+	var nextMarker string
+	var isTruncated bool
+
+	for _, obj := range objects {
+		if !strings.HasPrefix(obj.Key, prefix) {
+			continue
+		}
+		if obj.Key <= marker {
+			continue
+		}
+		// Apply delimiter: group keys that share a common prefix up to the delimiter.
+		if delimiter != "" {
+			rest := strings.TrimPrefix(obj.Key, prefix)
+			if idx := strings.Index(rest, delimiter); idx >= 0 {
+				cp := prefix + rest[:idx+len(delimiter)]
+				commonPrefixes[cp] = struct{}{}
+				continue
+			}
+		}
+		if len(contents) >= maxKeys {
+			isTruncated = true
+			break
+		}
+		contents = append(contents, xmlObjectContent{
+			Key:          obj.Key,
+			LastModified: obj.Metadata.LastModified.UTC(),
+			ETag:         obj.Metadata.ETag,
+			Size:         obj.Metadata.Size,
+			StorageClass: "STANDARD",
+		})
+		nextMarker = obj.Key
+	}
+
+	cps := make([]xmlCommonPrefix, 0, len(commonPrefixes))
+	for cp := range commonPrefixes {
+		cps = append(cps, xmlCommonPrefix{Prefix: cp})
+	}
+	slices.SortFunc(cps, func(a, b xmlCommonPrefix) int {
+		return strings.Compare(a.Prefix, b.Prefix)
+	})
+
+	slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+		"listed objects",
+		"bucket",
+		bucket,
+		"count",
+		len(contents),
+	)
+
+	result := listObjectsResult{
+		Name:           bucket,
+		Prefix:         prefix,
+		Marker:         marker,
+		Delimiter:      delimiter,
+		MaxKeys:        maxKeys,
+		IsTruncated:    isTruncated,
+		Contents:       contents,
+		CommonPrefixes: cps,
+	}
+	if isTruncated {
+		result.NextMarker = nextMarker
+	}
+	writeXML(w, http.StatusOK, result)
 }
 
 func (ro *Router) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bucket string) {
@@ -1031,6 +1134,23 @@ type xmlOwner struct {
 type xmlBucket struct {
 	Name         string    `xml:"Name"`
 	CreationDate time.Time `xml:"CreationDate"`
+}
+
+type listObjectsResult struct {
+	XMLName        xml.Name           `xml:"ListBucketResult"`
+	Name           string             `xml:"Name"`
+	Prefix         string             `xml:"Prefix"`
+	Marker         string             `xml:"Marker"`
+	NextMarker     string             `xml:"NextMarker,omitempty"`
+	Delimiter      string             `xml:"Delimiter,omitempty"`
+	MaxKeys        int                `xml:"MaxKeys"`
+	IsTruncated    bool               `xml:"IsTruncated"`
+	Contents       []xmlObjectContent `xml:"Contents"`
+	CommonPrefixes []xmlCommonPrefix  `xml:"CommonPrefixes"`
+}
+
+type xmlCommonPrefix struct {
+	Prefix string `xml:"Prefix"`
 }
 
 type listObjectsV2Result struct {
