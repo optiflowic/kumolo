@@ -248,7 +248,9 @@ func TestDeleteBucket(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
 		require.NoError(t, s.CreateBucket("my-bucket", ""))
 		require.NoError(t, os.Chmod(filepath.Join(rootPath, "my-bucket"), 0o000))
-		t.Cleanup(func() { _ = os.Chmod(filepath.Join(rootPath, "my-bucket"), 0o750) })
+		t.Cleanup(
+			func() { _ = os.Chmod(filepath.Join(rootPath, "my-bucket"), 0o750) },
+		)
 
 		err := s.DeleteBucket("my-bucket")
 		assert.Error(t, err)
@@ -274,7 +276,9 @@ func TestListBuckets(t *testing.T) {
 	t.Run("returns error when root is unreadable", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
 		require.NoError(t, os.Chmod(rootPath, 0o000))
-		t.Cleanup(func() { _ = os.Chmod(rootPath, 0o750) })
+		t.Cleanup(
+			func() { _ = os.Chmod(rootPath, 0o750) },
+		)
 
 		_, err := s.ListBuckets()
 		assert.Error(t, err)
@@ -339,7 +343,9 @@ func TestPutObject(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
 		require.NoError(t, s.CreateBucket("my-bucket", ""))
 		require.NoError(t, os.Chmod(filepath.Join(rootPath, "my-bucket"), 0o000))
-		t.Cleanup(func() { _ = os.Chmod(filepath.Join(rootPath, "my-bucket"), 0o750) })
+		t.Cleanup(
+			func() { _ = os.Chmod(filepath.Join(rootPath, "my-bucket"), 0o750) },
+		)
 
 		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
 		assert.Error(t, err)
@@ -348,8 +354,13 @@ func TestPutObject(t *testing.T) {
 	t.Run("returns error when nested directory cannot be created", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
 		require.NoError(t, s.CreateBucket("my-bucket", ""))
-		require.NoError(t, os.Chmod(filepath.Join(rootPath, "my-bucket"), 0o500))
-		t.Cleanup(func() { _ = os.Chmod(filepath.Join(rootPath, "my-bucket"), 0o750) })
+		require.NoError(
+			t,
+			os.Chmod(filepath.Join(rootPath, "my-bucket"), 0o500),
+		)
+		t.Cleanup(
+			func() { _ = os.Chmod(filepath.Join(rootPath, "my-bucket"), 0o750) },
+		)
 
 		_, err := s.PutObject(
 			"my-bucket",
@@ -507,7 +518,10 @@ func TestCopyObject(t *testing.T) {
 		s, rootPath := setup(t)
 		metaPath := filepath.Join(rootPath, "src-bucket", "orig.txt.meta.json")
 		// 0o444: readable (so readMeta succeeds) but not writable (so writeMeta fails).
-		require.NoError(t, os.Chmod(metaPath, 0o444))
+		require.NoError(
+			t,
+			os.Chmod(metaPath, 0o444),
+		)
 		t.Cleanup(func() { _ = os.Chmod(metaPath, 0o600) })
 
 		_, err := s.CopyObject("src-bucket", "orig.txt", "src-bucket", "orig.txt")
@@ -564,7 +578,10 @@ func TestCopyObject(t *testing.T) {
 
 	t.Run("returns error when destination directory cannot be created", func(t *testing.T) {
 		s, rootPath := setup(t)
-		require.NoError(t, os.Chmod(filepath.Join(rootPath, "dst-bucket"), 0o500))
+		require.NoError(
+			t,
+			os.Chmod(filepath.Join(rootPath, "dst-bucket"), 0o500),
+		)
 		t.Cleanup(func() { _ = os.Chmod(filepath.Join(rootPath, "dst-bucket"), 0o750) })
 
 		_, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "nested/copy.txt")

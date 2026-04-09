@@ -4,7 +4,6 @@ go 1.26.1
 
 tool (
 	github.com/golangci/golangci-lint/v2/cmd/golangci-lint
-	github.com/securego/gosec/v2/cmd/gosec
 	github.com/segmentio/golines
 	golang.org/x/tools/cmd/goimports
 )
