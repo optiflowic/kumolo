@@ -973,8 +973,10 @@ func (ro *Router) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 		"objects deleted",
 		"bucket",
 		bucket,
-		"count",
-		len(req.Objects),
+		"deleted",
+		len(result.Deleted),
+		"errors",
+		len(result.Errors),
 	)
 	writeXML(w, http.StatusOK, result)
 }
