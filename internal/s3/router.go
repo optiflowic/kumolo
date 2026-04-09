@@ -255,6 +255,7 @@ func (ro *Router) handleListObjects(w http.ResponseWriter, r *http.Request, buck
 		Name:           bucket,
 		Prefix:         prefix,
 		Marker:         marker,
+		Delimiter:      delimiter,
 		MaxKeys:        maxKeys,
 		IsTruncated:    isTruncated,
 		Contents:       contents,
@@ -1141,6 +1142,7 @@ type listObjectsResult struct {
 	Prefix         string             `xml:"Prefix"`
 	Marker         string             `xml:"Marker"`
 	NextMarker     string             `xml:"NextMarker,omitempty"`
+	Delimiter      string             `xml:"Delimiter,omitempty"`
 	MaxKeys        int                `xml:"MaxKeys"`
 	IsTruncated    bool               `xml:"IsTruncated"`
 	Contents       []xmlObjectContent `xml:"Contents"`

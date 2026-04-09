@@ -1686,6 +1686,7 @@ func TestRouterListObjects(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Code)
 		body := w.Body.String()
+		assert.Contains(t, body, "<Delimiter>/</Delimiter>")
 		// CommonPrefixes must appear in alphabetical order.
 		dataIdx := strings.Index(body, "<Prefix>data/</Prefix>")
 		logsIdx := strings.Index(body, "<Prefix>logs/</Prefix>")
