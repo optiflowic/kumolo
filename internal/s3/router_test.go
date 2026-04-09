@@ -1686,8 +1686,12 @@ func TestRouterListObjects(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Code)
 		body := w.Body.String()
-		assert.Contains(t, body, "<Prefix>logs/</Prefix>")
-		assert.Contains(t, body, "<Prefix>data/</Prefix>")
+		// CommonPrefixes must appear in alphabetical order.
+		dataIdx := strings.Index(body, "<Prefix>data/</Prefix>")
+		logsIdx := strings.Index(body, "<Prefix>logs/</Prefix>")
+		assert.Greater(t, dataIdx, -1)
+		assert.Greater(t, logsIdx, -1)
+		assert.Less(t, dataIdx, logsIdx)
 		assert.NotContains(t, body, "a.txt")
 	})
 

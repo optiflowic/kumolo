@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -238,6 +239,9 @@ func (ro *Router) handleListObjects(w http.ResponseWriter, r *http.Request, buck
 	for cp := range commonPrefixes {
 		cps = append(cps, xmlCommonPrefix{Prefix: cp})
 	}
+	slices.SortFunc(cps, func(a, b xmlCommonPrefix) int {
+		return strings.Compare(a.Prefix, b.Prefix)
+	})
 
 	slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
 		"listed objects",
