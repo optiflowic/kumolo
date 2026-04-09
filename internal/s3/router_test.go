@@ -243,6 +243,11 @@ type mockStore struct {
 	completeMultipartUploadMeta ObjectMetadata
 	completeMultipartUploadErr  error
 	abortMultipartUploadErr     error
+	listMultipartUploadsResult  []MultipartUploadInfo
+	listMultipartUploadsErr     error
+	listPartsUploadMeta         uploadMeta
+	listPartsResult             []PartInfo
+	listPartsErr                error
 }
 
 func (m *mockStore) ListBuckets() ([]BucketInfo, error)    { return nil, m.listBucketsErr }
@@ -278,6 +283,12 @@ func (m *mockStore) CompleteMultipartUpload(_ string, _ []CompletePart) (ObjectM
 	return m.completeMultipartUploadMeta, m.completeMultipartUploadErr
 }
 func (m *mockStore) AbortMultipartUpload(_ string) error { return m.abortMultipartUploadErr }
+func (m *mockStore) ListMultipartUploads(_ string) ([]MultipartUploadInfo, error) {
+	return m.listMultipartUploadsResult, m.listMultipartUploadsErr
+}
+func (m *mockStore) ListParts(_ string) (uploadMeta, []PartInfo, error) {
+	return m.listPartsUploadMeta, m.listPartsResult, m.listPartsErr
+}
 
 func newRouterWithMock(store *mockStore) *Router {
 	return &Router{storage: store, now: time.Now}
@@ -1706,5 +1717,146 @@ func TestRouterListObjects(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Contains(t, w.Body.String(), "<MaxKeys>1000</MaxKeys>")
+	})
+}
+
+func TestRouterListMultipartUploads(t *testing.T) {
+	t.Run("returns 200 with in-progress uploads", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		// Initiate two uploads.
+		for _, key := range []string{"big.txt", "other.txt"} {
+			req := httptest.NewRequest(
+				http.MethodPost,
+				"/my-bucket/"+key+"?uploads",
+				nil,
+			)
+			ro.ServeHTTP(httptest.NewRecorder(), req)
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket?uploads", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		body := w.Body.String()
+		assert.Contains(t, body, "ListMultipartUploadsResult")
+		assert.Contains(t, body, "big.txt")
+		assert.Contains(t, body, "other.txt")
+	})
+
+	t.Run("returns 200 with empty list when no uploads", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket?uploads", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), "ListMultipartUploadsResult")
+	})
+
+	t.Run("returns 404 when bucket does not exist", func(t *testing.T) {
+		ro := newTestRouter(t)
+		req := httptest.NewRequest(http.MethodGet, "/no-bucket?uploads", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchBucket")
+	})
+
+	t.Run("returns 500 on storage error", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			bucketExists:            true,
+			listMultipartUploadsErr: errors.New("disk failure"),
+		})
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket?uploads", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+}
+
+func TestRouterListParts(t *testing.T) {
+	t.Run("returns 200 with uploaded parts", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+
+		// Initiate upload and upload two parts.
+		initReq := httptest.NewRequest(http.MethodPost, "/my-bucket/big.txt?uploads", nil)
+		initW := httptest.NewRecorder()
+		ro.ServeHTTP(initW, initReq)
+		require.Equal(t, http.StatusOK, initW.Code)
+
+		var initResult struct {
+			UploadID string `xml:"UploadId"`
+		}
+		require.NoError(t, xml.Unmarshal(initW.Body.Bytes(), &initResult))
+		uploadID := initResult.UploadID
+
+		for _, pn := range []string{"1", "2"} {
+			req := httptest.NewRequest(
+				http.MethodPut,
+				"/my-bucket/big.txt?partNumber="+pn+"&uploadId="+uploadID,
+				strings.NewReader("part data"),
+			)
+			ro.ServeHTTP(httptest.NewRecorder(), req)
+		}
+
+		req := httptest.NewRequest(
+			http.MethodGet,
+			"/my-bucket/big.txt?uploadId="+uploadID,
+			nil,
+		)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		body := w.Body.String()
+		assert.Contains(t, body, "ListPartsResult")
+		assert.Contains(t, body, "<PartNumber>1</PartNumber>")
+		assert.Contains(t, body, "<PartNumber>2</PartNumber>")
+	})
+
+	t.Run("returns 404 when upload does not exist", func(t *testing.T) {
+		ro := newTestRouter(t)
+		req := httptest.NewRequest(
+			http.MethodGet,
+			"/my-bucket/big.txt?uploadId=nonexistent",
+			nil,
+		)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchUpload")
+	})
+
+	t.Run("returns 400 when uploadId is missing", func(t *testing.T) {
+		ro := newTestRouter(t)
+		// No uploadId param but also no other matching params → falls through to ListParts with empty uploadId.
+		// Simulate by providing empty value explicitly via mock.
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket/big.txt?uploadId=", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidArgument")
+	})
+
+	t.Run("returns 500 on storage error", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{listPartsErr: errors.New("disk failure")})
+		req := httptest.NewRequest(
+			http.MethodGet,
+			"/my-bucket/big.txt?uploadId=abc",
+			nil,
+		)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
 }

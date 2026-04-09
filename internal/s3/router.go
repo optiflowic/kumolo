@@ -39,6 +39,8 @@ type multipartStore interface {
 	UploadPart(uploadID string, partNumber int, r io.Reader) (etag string, err error)
 	CompleteMultipartUpload(uploadID string, parts []CompletePart) (ObjectMetadata, error)
 	AbortMultipartUpload(uploadID string) error
+	ListMultipartUploads(bucket string) ([]MultipartUploadInfo, error)
+	ListParts(uploadID string) (uploadMeta, []PartInfo, error)
 }
 
 // Router handles S3 API requests using path-style URLs: /<bucket>/<key>
@@ -143,6 +145,8 @@ func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, bucket str
 		switch {
 		case r.URL.Query().Has("location"):
 			ro.handleGetBucketLocation(w, r, bucket)
+		case r.URL.Query().Has("uploads"):
+			ro.handleListMultipartUploads(w, r, bucket)
 		case r.URL.Query().Get("list-type") == "2":
 			ro.handleListObjectsV2(w, r, bucket)
 		default:
@@ -343,7 +347,11 @@ func (ro *Router) routeObject(w http.ResponseWriter, r *http.Request, bucket, ke
 			ro.handlePutObject(w, r, bucket, key)
 		}
 	case http.MethodGet:
-		ro.handleGetObject(w, r, bucket, key)
+		if q.Has("uploadId") {
+			ro.handleListParts(w, r, bucket, key)
+		} else {
+			ro.handleGetObject(w, r, bucket, key)
+		}
 	case http.MethodDelete:
 		if q.Has("uploadId") {
 			ro.handleAbortMultipartUpload(w, r, bucket, key)
@@ -1031,6 +1039,124 @@ func (ro *Router) handleDeleteBucket(w http.ResponseWriter, r *http.Request, buc
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (ro *Router) handleListMultipartUploads(
+	w http.ResponseWriter,
+	r *http.Request,
+	bucket string,
+) {
+	uploads, err := ro.storage.ListMultipartUploads(bucket)
+	if err != nil {
+		if errors.Is(err, ErrBucketNotFound) {
+			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"bucket not found",
+				"bucket",
+				bucket,
+			)
+			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+				"The specified bucket does not exist.")
+			return
+		}
+		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			"failed to list multipart uploads",
+			"bucket",
+			bucket,
+			"err",
+			err,
+		)
+		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+		"listed multipart uploads",
+		"bucket",
+		bucket,
+		"count",
+		len(uploads),
+	)
+	xmlUploads := make([]xmlMultipartUpload, len(uploads))
+	for i, u := range uploads {
+		xmlUploads[i] = xmlMultipartUpload{
+			Key:          u.Key,
+			UploadID:     u.UploadID,
+			StorageClass: "STANDARD",
+			Initiated:    u.Initiated.UTC(),
+		}
+	}
+	writeXML(w, http.StatusOK, listMultipartUploadsResult{
+		Bucket:      bucket,
+		MaxUploads:  1000,
+		IsTruncated: false,
+		Uploads:     xmlUploads,
+	})
+}
+
+func (ro *Router) handleListParts(
+	w http.ResponseWriter,
+	r *http.Request,
+	bucket, key string,
+) {
+	uploadID := r.URL.Query().Get("uploadId")
+	if uploadID == "" {
+		writeError(w, r, http.StatusBadRequest, "InvalidArgument", "uploadId is required.")
+		return
+	}
+	umeta, parts, err := ro.storage.ListParts(uploadID)
+	if err != nil {
+		if errors.Is(err, ErrUploadNotFound) {
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"upload not found",
+				"uploadId",
+				uploadID,
+			)
+			writeError(w, r, http.StatusNotFound, "NoSuchUpload",
+				"The specified upload does not exist.")
+			return
+		}
+		slog.Error( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			"failed to list parts",
+			"bucket",
+			bucket,
+			"key",
+			key,
+			"uploadId",
+			uploadID,
+			"err",
+			err,
+		)
+		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+		"listed parts",
+		"bucket",
+		bucket,
+		"key",
+		key,
+		"uploadId",
+		uploadID,
+		"count",
+		len(parts),
+	)
+	xmlParts := make([]xmlPart, len(parts))
+	for i, p := range parts {
+		xmlParts[i] = xmlPart{
+			PartNumber:   p.PartNumber,
+			ETag:         p.ETag,
+			Size:         p.Size,
+			LastModified: p.LastModified.UTC(),
+		}
+	}
+	writeXML(w, http.StatusOK, listPartsResult{
+		Bucket:       umeta.Bucket,
+		Key:          umeta.Key,
+		UploadID:     uploadID,
+		StorageClass: "STANDARD",
+		MaxParts:     1000,
+		IsTruncated:  false,
+		Parts:        xmlParts,
+	})
+}
+
 func (ro *Router) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bucket string) {
 	if !ro.storage.BucketExists(bucket) {
 		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
@@ -1207,6 +1333,39 @@ type completeMultipartUploadResult struct {
 	Bucket   string   `xml:"Bucket"`
 	Key      string   `xml:"Key"`
 	ETag     string   `xml:"ETag"`
+}
+
+type listMultipartUploadsResult struct {
+	XMLName     xml.Name             `xml:"ListMultipartUploadsResult"`
+	Bucket      string               `xml:"Bucket"`
+	MaxUploads  int                  `xml:"MaxUploads"`
+	IsTruncated bool                 `xml:"IsTruncated"`
+	Uploads     []xmlMultipartUpload `xml:"Upload"`
+}
+
+type xmlMultipartUpload struct {
+	Key          string    `xml:"Key"`
+	UploadID     string    `xml:"UploadId"`
+	StorageClass string    `xml:"StorageClass"`
+	Initiated    time.Time `xml:"Initiated"`
+}
+
+type listPartsResult struct {
+	XMLName      xml.Name  `xml:"ListPartsResult"`
+	Bucket       string    `xml:"Bucket"`
+	Key          string    `xml:"Key"`
+	UploadID     string    `xml:"UploadId"`
+	StorageClass string    `xml:"StorageClass"`
+	MaxParts     int       `xml:"MaxParts"`
+	IsTruncated  bool      `xml:"IsTruncated"`
+	Parts        []xmlPart `xml:"Part"`
+}
+
+type xmlPart struct {
+	PartNumber   int       `xml:"PartNumber"`
+	ETag         string    `xml:"ETag"`
+	Size         int64     `xml:"Size"`
+	LastModified time.Time `xml:"LastModified"`
 }
 
 type deleteObjectsRequest struct {
