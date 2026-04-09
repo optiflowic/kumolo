@@ -3,7 +3,7 @@
 BUILD_DIR = build
 BINARY_NAME = $(BUILD_DIR)/kumolo
 
-all: tidy fmt-check vet lint test build
+all: fmt-check vet lint test build
 
 install:
 	go mod download

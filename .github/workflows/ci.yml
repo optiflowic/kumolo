@@ -19,9 +19,14 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: true
 
-      - name: 🧰 Download modules and tools
-        run: make install
+      - name: 🗂️ Cache golangci-lint
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/golangci-lint
+          key: golangci-lint-${{ hashFiles('go.sum') }}
+          restore-keys: golangci-lint-
 
       - name: 🔍 Check go mod tidy
         run: |
