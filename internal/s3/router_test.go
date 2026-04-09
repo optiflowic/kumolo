@@ -1837,8 +1837,7 @@ func TestRouterListParts(t *testing.T) {
 
 	t.Run("returns 400 when uploadId is missing", func(t *testing.T) {
 		ro := newTestRouter(t)
-		// No uploadId param but also no other matching params → falls through to ListParts with empty uploadId.
-		// Simulate by providing empty value explicitly via mock.
+		// uploadId= (empty string) triggers the missing-uploadId validation path.
 		req := httptest.NewRequest(http.MethodGet, "/my-bucket/big.txt?uploadId=", nil)
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
