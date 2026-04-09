@@ -1,4 +1,4 @@
-.PHONY: all install build run fmt fmt-check vet lint test cover clean
+.PHONY: all install build run fmt fmt-check vet lint test cover verify tidy clean
 
 BUILD_DIR = build
 BINARY_NAME = $(BUILD_DIR)/kumolo
@@ -38,6 +38,9 @@ test:
 cover:
 	go test -race -coverprofile=coverage.out ./...
 	go tool cover -func=coverage.out
+
+verify:
+	go mod verify
 
 clean:
 	rm -rf $(BUILD_DIR)
