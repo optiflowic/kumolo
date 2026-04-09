@@ -76,12 +76,12 @@ func TestRouter(t *testing.T) {
 			assert.Equal(t, "application/xml", w.Header().Get("Content-Type"))
 		})
 
-		t.Run("GET returns 501", func(t *testing.T) {
+		t.Run("GET returns 404 for non-existent bucket (ListObjects V1)", func(t *testing.T) {
 			ro := newTestRouter(t)
 			req := httptest.NewRequest(http.MethodGet, "/my-bucket", nil)
 			w := httptest.NewRecorder()
 			ro.ServeHTTP(w, req)
-			assert.Equal(t, http.StatusNotImplemented, w.Code)
+			assert.Equal(t, http.StatusNotFound, w.Code)
 		})
 	})
 
@@ -569,14 +569,15 @@ func TestRouterListObjectsV2(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "ListBucketResult")
 	})
 
-	t.Run("returns 501 when list-type is not 2", func(t *testing.T) {
+	t.Run("returns 200 when list-type is not 2 (ListObjects V1)", func(t *testing.T) {
 		ro := newTestRouter(t)
 		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
 
 		req := httptest.NewRequest(http.MethodGet, "/my-bucket", nil)
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusNotImplemented, w.Code)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), "ListBucketResult")
 	})
 
 	t.Run("returns 404 when bucket does not exist", func(t *testing.T) {
@@ -1578,4 +1579,127 @@ func putRequest(path, body string) *http.Request {
 	req := httptest.NewRequest(http.MethodPut, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "text/plain")
 	return req
+}
+
+func TestRouterListObjects(t *testing.T) {
+	t.Run("returns 200 with object list", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		for _, key := range []string{"a.txt", "b.txt", "c.txt"} {
+			ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/"+key, "data"))
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "application/xml", w.Header().Get("Content-Type"))
+		body := w.Body.String()
+		assert.Contains(t, body, "ListBucketResult")
+		assert.Contains(t, body, "a.txt")
+		assert.Contains(t, body, "b.txt")
+		assert.Contains(t, body, "c.txt")
+	})
+
+	t.Run("returns 404 when bucket does not exist", func(t *testing.T) {
+		ro := newTestRouter(t)
+		req := httptest.NewRequest(http.MethodGet, "/no-bucket", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchBucket")
+	})
+
+	t.Run("returns 500 on storage error", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{listObjectsErr: errors.New("disk failure")})
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+
+	t.Run("filters by prefix", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		for _, key := range []string{"logs/a.txt", "logs/b.txt", "data/c.txt"} {
+			ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/"+key, "data"))
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket?prefix=logs/", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		body := w.Body.String()
+		assert.Contains(t, body, "logs/a.txt")
+		assert.Contains(t, body, "logs/b.txt")
+		assert.NotContains(t, body, "data/c.txt")
+	})
+
+	t.Run("paginates with marker", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		for _, key := range []string{"a.txt", "b.txt", "c.txt"} {
+			ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/"+key, "data"))
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket?marker=a.txt", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		body := w.Body.String()
+		assert.NotContains(t, body, "<Key>a.txt</Key>")
+		assert.Contains(t, body, "<Key>b.txt</Key>")
+		assert.Contains(t, body, "<Key>c.txt</Key>")
+	})
+
+	t.Run("respects max-keys and sets IsTruncated with NextMarker", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		for _, key := range []string{"a.txt", "b.txt", "c.txt"} {
+			ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/"+key, "data"))
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket?max-keys=2", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		body := w.Body.String()
+		assert.Contains(t, body, "<IsTruncated>true</IsTruncated>")
+		assert.Contains(t, body, "<NextMarker>b.txt</NextMarker>")
+		assert.NotContains(t, body, "c.txt")
+	})
+
+	t.Run("groups common prefixes with delimiter", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		for _, key := range []string{"logs/a.txt", "logs/b.txt", "data/c.txt"} {
+			ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/"+key, "data"))
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket?delimiter=/", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		body := w.Body.String()
+		assert.Contains(t, body, "<Prefix>logs/</Prefix>")
+		assert.Contains(t, body, "<Prefix>data/</Prefix>")
+		assert.NotContains(t, body, "a.txt")
+	})
+
+	t.Run("invalid max-keys is ignored and uses default 1000", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket?max-keys=abc", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), "<MaxKeys>1000</MaxKeys>")
+	})
 }
