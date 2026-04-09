@@ -59,9 +59,17 @@ func TestRouter(t *testing.T) {
 	})
 
 	t.Run("bucket path", func(t *testing.T) {
-		t.Run("POST returns 405", func(t *testing.T) {
+		t.Run("POST without query param returns 501", func(t *testing.T) {
 			ro := newTestRouter(t)
 			req := httptest.NewRequest(http.MethodPost, "/my-bucket", nil)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusNotImplemented, w.Code)
+		})
+
+		t.Run("PATCH returns 405", func(t *testing.T) {
+			ro := newTestRouter(t)
+			req := httptest.NewRequest(http.MethodPatch, "/my-bucket", nil)
 			w := httptest.NewRecorder()
 			ro.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
@@ -1465,4 +1473,109 @@ func TestCheckPresigned(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRouterDeleteObjects(t *testing.T) {
+	const xmlBody = `<Delete><Object><Key>a.txt</Key></Object><Object><Key>b.txt</Key></Object></Delete>`
+
+	t.Run("deletes multiple objects and returns Deleted elements", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		for _, key := range []string{"a.txt", "b.txt"} {
+			ro.ServeHTTP(
+				httptest.NewRecorder(),
+				putRequest("/my-bucket/"+key, "hello"),
+			)
+		}
+
+		req := httptest.NewRequest(http.MethodPost, "/my-bucket?delete", strings.NewReader(xmlBody))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		body := w.Body.String()
+		assert.Contains(t, body, "<Key>a.txt</Key>")
+		assert.Contains(t, body, "<Key>b.txt</Key>")
+		assert.NotContains(t, body, "<Error>")
+	})
+
+	t.Run("treats non-existent objects as successfully deleted", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+
+		req := httptest.NewRequest(http.MethodPost, "/my-bucket?delete", strings.NewReader(xmlBody))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), "<Key>a.txt</Key>")
+		assert.NotContains(t, w.Body.String(), "<Error>")
+	})
+
+	t.Run("quiet mode omits Deleted elements", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/a.txt", "hello"))
+
+		body := `<Delete><Quiet>true</Quiet><Object><Key>a.txt</Key></Object></Delete>`
+		req := httptest.NewRequest(http.MethodPost, "/my-bucket?delete", strings.NewReader(body))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		assert.NotContains(t, w.Body.String(), "<Deleted>")
+		assert.NotContains(t, w.Body.String(), "<Error>")
+	})
+
+	t.Run("returns 404 when bucket does not exist", func(t *testing.T) {
+		ro := newTestRouter(t)
+		req := httptest.NewRequest(http.MethodPost, "/no-bucket?delete", strings.NewReader(xmlBody))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchBucket")
+	})
+
+	t.Run("returns 400 on malformed XML", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+
+		req := httptest.NewRequest(
+			http.MethodPost,
+			"/my-bucket?delete",
+			strings.NewReader("not xml"),
+		)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "MalformedXML")
+	})
+
+	t.Run("returns Error element on storage failure", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			bucketExists:    true,
+			deleteObjectErr: errors.New("disk full"),
+		})
+		req := httptest.NewRequest(
+			http.MethodPost,
+			"/my-bucket?delete",
+			strings.NewReader(`<Delete><Object><Key>a.txt</Key></Object></Delete>`),
+		)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		body := w.Body.String()
+		assert.Contains(t, body, "<Error>")
+		assert.Contains(t, body, "InternalError")
+	})
+}
+
+// putRequest is a helper that creates a PUT request with a text/plain body.
+func putRequest(path, body string) *http.Request {
+	req := httptest.NewRequest(http.MethodPut, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "text/plain")
+	return req
 }

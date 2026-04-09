@@ -147,6 +147,12 @@ func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, bucket str
 		default:
 			writeNotImplemented(w, r)
 		}
+	case http.MethodPost:
+		if r.URL.Query().Has("delete") {
+			ro.handleDeleteObjects(w, r, bucket)
+		} else {
+			writeNotImplemented(w, r)
+		}
 	default:
 		writeError(
 			w,
@@ -922,6 +928,59 @@ func (ro *Router) handleDeleteBucket(w http.ResponseWriter, r *http.Request, buc
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (ro *Router) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bucket string) {
+	if !ro.storage.BucketExists(bucket) {
+		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			"bucket not found",
+			"bucket",
+			bucket,
+		)
+		writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+			"The specified bucket does not exist.")
+		return
+	}
+	var req deleteObjectsRequest
+	if err := xml.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, r, http.StatusBadRequest, "MalformedXML",
+			"The XML you provided was not well-formed.")
+		return
+	}
+	result := deleteObjectsResult{}
+	for _, obj := range req.Objects {
+		if err := ro.storage.DeleteObject(bucket, obj.Key); err != nil &&
+			!errors.Is(err, ErrObjectNotFound) {
+			slog.Error( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"failed to delete object",
+				"bucket",
+				bucket,
+				"key",
+				obj.Key,
+				"err",
+				err,
+			)
+			result.Errors = append(result.Errors, xmlDeleteError{
+				Key:     obj.Key,
+				Code:    "InternalError",
+				Message: err.Error(),
+			})
+			continue
+		}
+		if !req.Quiet {
+			result.Deleted = append(result.Deleted, xmlDeletedObject(obj))
+		}
+	}
+	slog.Info( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+		"objects deleted",
+		"bucket",
+		bucket,
+		"deleted",
+		len(result.Deleted),
+		"errors",
+		len(result.Errors),
+	)
+	writeXML(w, http.StatusOK, result)
+}
+
 func (ro *Router) handleHeadBucket(w http.ResponseWriter, r *http.Request, bucket string) {
 	w.Header().Set("Content-Length", "0")
 	if !ro.storage.BucketExists(bucket) {
@@ -1028,4 +1087,30 @@ type completeMultipartUploadResult struct {
 	Bucket   string   `xml:"Bucket"`
 	Key      string   `xml:"Key"`
 	ETag     string   `xml:"ETag"`
+}
+
+type deleteObjectsRequest struct {
+	XMLName xml.Name          `xml:"Delete"`
+	Quiet   bool              `xml:"Quiet"`
+	Objects []xmlDeleteObject `xml:"Object"`
+}
+
+type xmlDeleteObject struct {
+	Key string `xml:"Key"`
+}
+
+type deleteObjectsResult struct {
+	XMLName xml.Name           `xml:"DeleteResult"`
+	Deleted []xmlDeletedObject `xml:"Deleted"`
+	Errors  []xmlDeleteError   `xml:"Error"`
+}
+
+type xmlDeletedObject struct {
+	Key string `xml:"Key"`
+}
+
+type xmlDeleteError struct {
+	Key     string `xml:"Key"`
+	Code    string `xml:"Code"`
+	Message string `xml:"Message"`
 }
