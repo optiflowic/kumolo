@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // bucketStore is the subset of Storage used by the Router for bucket operations.
@@ -821,6 +822,9 @@ func (ro *Router) handleHeadObject(w http.ResponseWriter, r *http.Request, bucke
 	w.Header().Set("Content-Length", strconv.FormatInt(meta.Size, 10))
 	w.Header().Set("ETag", meta.ETag)
 	w.Header().Set("Last-Modified", meta.LastModified.UTC().Format(http.TimeFormat))
+	if tags, err := ro.storage.GetObjectTagging(bucket, key); err == nil && len(tags) > 0 {
+		w.Header().Set("x-amz-tagging-count", strconv.Itoa(len(tags)))
+	}
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -883,6 +887,30 @@ func (ro *Router) handlePutObjectTagging(
 			"The XML you provided was not well-formed.",
 		)
 		return
+	}
+	if len(req.TagSet) > 10 {
+		writeError(w, r, http.StatusBadRequest, "InvalidTag",
+			"Object tags cannot be greater than 10")
+		return
+	}
+	seen := make(map[string]struct{}, len(req.TagSet))
+	for _, t := range req.TagSet {
+		if utf8.RuneCountInString(t.Key) > 128 {
+			writeError(w, r, http.StatusBadRequest, "InvalidTag",
+				"The TagKey you have provided is invalid")
+			return
+		}
+		if utf8.RuneCountInString(t.Value) > 256 {
+			writeError(w, r, http.StatusBadRequest, "InvalidTag",
+				"The TagValue you have provided is invalid")
+			return
+		}
+		if _, dup := seen[t.Key]; dup {
+			writeError(w, r, http.StatusBadRequest, "InvalidTag",
+				"Cannot provide multiple Tags with the same key")
+			return
+		}
+		seen[t.Key] = struct{}{}
 	}
 	tags := make([]Tag, len(req.TagSet))
 	for i, t := range req.TagSet {
@@ -1083,6 +1111,9 @@ func (ro *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 	w.Header().Set("Content-Length", strconv.FormatInt(meta.Size, 10))
 	w.Header().Set("ETag", meta.ETag)
 	w.Header().Set("Last-Modified", meta.LastModified.UTC().Format(http.TimeFormat))
+	if tags, err := ro.storage.GetObjectTagging(bucket, key); err == nil && len(tags) > 0 {
+		w.Header().Set("x-amz-tagging-count", strconv.Itoa(len(tags)))
+	}
 	w.WriteHeader(http.StatusOK)
 	if _, err := io.Copy(w, f); err != nil {
 		slog.Warn( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
