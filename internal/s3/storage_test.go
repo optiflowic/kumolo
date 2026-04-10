@@ -738,6 +738,36 @@ func TestDeleteObject(t *testing.T) {
 
 		assert.NoError(t, s.DeleteObject("my-bucket", "obj.txt"))
 	})
+
+	t.Run("deletes tags file when object is deleted", func(t *testing.T) {
+		s, rootPath := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
+		require.NoError(t, err)
+		require.NoError(
+			t,
+			s.PutObjectTagging("my-bucket", "obj.txt", []Tag{{Key: "k", Value: "v"}}),
+		)
+
+		require.NoError(t, s.DeleteObject("my-bucket", "obj.txt"))
+
+		_, statErr := os.Stat(filepath.Join(rootPath, "my-bucket", "obj.txt.tags.json"))
+		assert.True(t, os.IsNotExist(statErr), "tags file should be removed with the object")
+	})
+
+	t.Run("DeleteBucket succeeds after deleting tagged object", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
+		require.NoError(t, err)
+		require.NoError(
+			t,
+			s.PutObjectTagging("my-bucket", "obj.txt", []Tag{{Key: "k", Value: "v"}}),
+		)
+		require.NoError(t, s.DeleteObject("my-bucket", "obj.txt"))
+
+		assert.NoError(t, s.DeleteBucket("my-bucket"))
+	})
 }
 
 func TestHeadObject(t *testing.T) {
@@ -864,6 +894,22 @@ func TestListObjects(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, objects, 1)
 		assert.Equal(t, "data.json", objects[0].Key)
+	})
+
+	t.Run("does not list tags sidecar files as objects", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
+		require.NoError(t, err)
+		require.NoError(
+			t,
+			s.PutObjectTagging("my-bucket", "obj.txt", []Tag{{Key: "k", Value: "v"}}),
+		)
+
+		objects, err := s.ListObjects("my-bucket")
+		require.NoError(t, err)
+		require.Len(t, objects, 1)
+		assert.Equal(t, "obj.txt", objects[0].Key)
 	})
 }
 

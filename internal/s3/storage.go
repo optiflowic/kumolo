@@ -328,6 +328,15 @@ func (s *Storage) DeleteObject(bucket, key string) error {
 			err,
 		)
 	}
+	if err := s.removeFile(objPath + ".tags.json"); err != nil && !errors.Is(err, os.ErrNotExist) {
+		slog.Warn( // #nosec G706 -- objPath is an internal filesystem path derived from bucket/key, not direct user input
+			"failed to remove tags",
+			"path",
+			objPath,
+			"err",
+			err,
+		)
+	}
 	return nil
 }
 
@@ -379,7 +388,7 @@ func (s *Storage) walkDir(bucket, dir string, objects *[]ObjectInfo) error {
 			}
 			continue
 		}
-		if strings.HasSuffix(e.Name(), ".meta.json") {
+		if strings.HasSuffix(e.Name(), ".meta.json") || strings.HasSuffix(e.Name(), ".tags.json") {
 			continue
 		}
 		key, _ := filepath.Rel(bucket, entryPath)

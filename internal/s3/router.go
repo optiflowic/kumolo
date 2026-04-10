@@ -875,12 +875,18 @@ func (ro *Router) handlePutObjectTagging(
 ) {
 	var req xmlTagging
 	if err := xml.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, r, http.StatusBadRequest, "MalformedXML", "The XML you provided was not well-formed.")
+		writeError(
+			w,
+			r,
+			http.StatusBadRequest,
+			"MalformedXML",
+			"The XML you provided was not well-formed.",
+		)
 		return
 	}
 	tags := make([]Tag, len(req.TagSet))
 	for i, t := range req.TagSet {
-		tags[i] = Tag{Key: t.Key, Value: t.Value}
+		tags[i] = Tag(t)
 	}
 	if err := ro.storage.PutObjectTagging(bucket, key, tags); err != nil {
 		switch {
@@ -975,7 +981,7 @@ func (ro *Router) handleGetObjectTagging(
 	)
 	xmlTags := make([]xmlTag, len(tags))
 	for i, t := range tags {
-		xmlTags[i] = xmlTag{Key: t.Key, Value: t.Value}
+		xmlTags[i] = xmlTag(t)
 	}
 	writeXML(w, http.StatusOK, xmlTagging{TagSet: xmlTags})
 }
