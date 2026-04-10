@@ -1470,4 +1470,144 @@ func TestMultipartUpload(t *testing.T) {
 			assert.Error(t, err)
 		},
 	)
+
+	t.Run("ListMultipartUploads returns nil when mpu dir does not exist", func(t *testing.T) {
+		s, _ := setup(t)
+		uploads, err := s.ListMultipartUploads("my-bucket")
+		require.NoError(t, err)
+		assert.Nil(t, uploads)
+	})
+
+	t.Run("ListMultipartUploads returns ErrBucketNotFound for missing bucket", func(t *testing.T) {
+		s, _ := setup(t)
+		_, err := s.ListMultipartUploads("no-bucket")
+		assert.ErrorIs(t, err, ErrBucketNotFound)
+	})
+
+	t.Run(
+		"ListMultipartUploads returns error when readDir fails with non-ErrNotExist",
+		func(t *testing.T) {
+			s, _ := setup(t)
+			origListDir := s.listDirFn
+			s.listDirFn = func(name string) ([]os.DirEntry, error) {
+				if name == mpuDir {
+					return nil, errors.New("simulated readDir failure")
+				}
+				return origListDir(name)
+			}
+			_, err := s.ListMultipartUploads("my-bucket")
+			assert.Error(t, err)
+		},
+	)
+
+	t.Run("ListMultipartUploads skips non-directory entries in mpu dir", func(t *testing.T) {
+		s, rootPath := setup(t)
+		// Create mpu dir with a regular file inside.
+		mpuPath := filepath.Join(rootPath, mpuDir)
+		require.NoError(t, os.MkdirAll(mpuPath, 0o750))
+		require.NoError(t, os.WriteFile(filepath.Join(mpuPath, "not-a-dir.txt"), []byte{}, 0o600))
+		uploads, err := s.ListMultipartUploads("my-bucket")
+		require.NoError(t, err)
+		assert.Empty(t, uploads)
+	})
+
+	t.Run("ListMultipartUploads skips uploads with unreadable metadata", func(t *testing.T) {
+		s, _ := setup(t)
+		_, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain")
+		require.NoError(t, err)
+		s.readAll = func(r io.Reader) ([]byte, error) {
+			return nil, errors.New("read error")
+		}
+		uploads, err := s.ListMultipartUploads("my-bucket")
+		require.NoError(t, err)
+		assert.Empty(t, uploads)
+	})
+
+	t.Run("ListMultipartUploads filters uploads by bucket", func(t *testing.T) {
+		s, _ := setup(t)
+		require.NoError(t, s.CreateBucket("other-bucket", ""))
+		uploadID1, err := s.CreateMultipartUpload("my-bucket", "key1", "text/plain")
+		require.NoError(t, err)
+		_, err = s.CreateMultipartUpload("other-bucket", "key2", "text/plain")
+		require.NoError(t, err)
+		uploads, err := s.ListMultipartUploads("my-bucket")
+		require.NoError(t, err)
+		require.Len(t, uploads, 1)
+		assert.Equal(t, uploadID1, uploads[0].UploadID)
+	})
+
+	t.Run("ListParts returns ErrUploadNotFound for missing upload", func(t *testing.T) {
+		s, _ := setup(t)
+		_, _, err := s.ListParts("nonexistent-id")
+		assert.ErrorIs(t, err, ErrUploadNotFound)
+	})
+
+	t.Run(
+		"ListParts returns error when readUploadMeta fails with non-ErrNotExist",
+		func(t *testing.T) {
+			s, _ := setup(t)
+			uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain")
+			require.NoError(t, err)
+			s.readAll = func(_ io.Reader) ([]byte, error) {
+				return nil, errors.New("read error")
+			}
+			_, _, err = s.ListParts(uploadID)
+			assert.Error(t, err)
+			assert.NotErrorIs(t, err, ErrUploadNotFound)
+		},
+	)
+
+	t.Run("ListParts returns error when readDir fails", func(t *testing.T) {
+		s, _ := setup(t)
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain")
+		require.NoError(t, err)
+		origListDir := s.listDirFn
+		s.listDirFn = func(name string) ([]os.DirEntry, error) {
+			if strings.Contains(name, uploadID) {
+				return nil, errors.New("simulated readDir failure")
+			}
+			return origListDir(name)
+		}
+		_, _, err = s.ListParts(uploadID)
+		assert.Error(t, err)
+	})
+
+	t.Run("ListParts skips directory and non-meta entries", func(t *testing.T) {
+		s, rootPath := setup(t)
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain")
+		require.NoError(t, err)
+		uploadDir := filepath.Join(rootPath, mpuDir, uploadID)
+		// Add a regular file that doesn't match the part meta pattern.
+		require.NoError(t, os.WriteFile(filepath.Join(uploadDir, "other.txt"), []byte{}, 0o600))
+		// Add a subdirectory.
+		require.NoError(t, os.Mkdir(filepath.Join(uploadDir, "subdir"), 0o750))
+		// Add a file matching the suffix but with an unparseable part number prefix.
+		require.NoError(
+			t,
+			os.WriteFile(filepath.Join(uploadDir, "invalid.part.meta.json"), []byte{}, 0o600),
+		)
+		_, parts, err := s.ListParts(uploadID)
+		require.NoError(t, err)
+		assert.Empty(t, parts)
+	})
+
+	t.Run("ListParts skips parts with unreadable metadata", func(t *testing.T) {
+		s, _ := setup(t)
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain")
+		require.NoError(t, err)
+		_, err = s.UploadPart(uploadID, 1, strings.NewReader("data"))
+		require.NoError(t, err)
+		origReadAll := s.readAll
+		call := 0
+		s.readAll = func(r io.Reader) ([]byte, error) {
+			call++
+			if call == 2 { // 1st = upload.json, 2nd = part meta
+				return nil, errors.New("read error")
+			}
+			return origReadAll(r)
+		}
+		_, parts, err := s.ListParts(uploadID)
+		require.NoError(t, err)
+		assert.Empty(t, parts)
+	})
 }
