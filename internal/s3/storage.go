@@ -610,7 +610,8 @@ func (s *Storage) CompleteMultipartUpload(
 		return ObjectMetadata{}, ErrInvalidPart
 	}
 	for i, p := range parts {
-		if i > 0 && p.PartNumber <= parts[i-1].PartNumber {
+		if i > 0 &&
+			p.PartNumber <= parts[i-1].PartNumber { // #nosec G602 -- i > 0 guard ensures parts[i-1] is valid
 			return ObjectMetadata{}, ErrInvalidPartOrder
 		}
 		pm, err := s.readPartMeta(uploadID, p.PartNumber)
