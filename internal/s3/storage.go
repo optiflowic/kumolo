@@ -32,6 +32,12 @@ type ObjectMetadata struct {
 	Size         int64     `json:"size"`
 }
 
+// Tag is a key-value pair attached to an S3 object.
+type Tag struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
 // Storage is a filesystem-backed S3 backend. os.Root scopes all access to the
 // storage root, preventing path traversal attacks.
 type Storage struct {
@@ -322,6 +328,15 @@ func (s *Storage) DeleteObject(bucket, key string) error {
 			err,
 		)
 	}
+	if err := s.removeFile(objPath + ".tags.json"); err != nil && !errors.Is(err, os.ErrNotExist) {
+		slog.Warn( // #nosec G706 -- objPath is an internal filesystem path derived from bucket/key, not direct user input
+			"failed to remove tags",
+			"path",
+			objPath,
+			"err",
+			err,
+		)
+	}
 	return nil
 }
 
@@ -373,7 +388,7 @@ func (s *Storage) walkDir(bucket, dir string, objects *[]ObjectInfo) error {
 			}
 			continue
 		}
-		if strings.HasSuffix(e.Name(), ".meta.json") {
+		if strings.HasSuffix(e.Name(), ".meta.json") || strings.HasSuffix(e.Name(), ".tags.json") {
 			continue
 		}
 		key, _ := filepath.Rel(bucket, entryPath)
@@ -462,6 +477,64 @@ func (s *Storage) writeMeta(objPath string, meta ObjectMetadata) error {
 
 func (s *Storage) readMeta(objPath string) (ObjectMetadata, error) {
 	return readJSON[ObjectMetadata](s, objPath+".meta.json")
+}
+
+func (s *Storage) PutObjectTagging(bucket, key string, tags []Tag) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.bucketExistsLocked(bucket) {
+		return ErrBucketNotFound
+	}
+	objPath := filepath.Join(bucket, key)
+	if _, err := s.readMeta(objPath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return ErrObjectNotFound
+		}
+		return err
+	}
+	return s.writeJSON(objPath+".tags.json", tags)
+}
+
+func (s *Storage) GetObjectTagging(bucket, key string) ([]Tag, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.bucketExistsLocked(bucket) {
+		return nil, ErrBucketNotFound
+	}
+	objPath := filepath.Join(bucket, key)
+	if _, err := s.readMeta(objPath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, ErrObjectNotFound
+		}
+		return nil, err
+	}
+	tags, err := readJSON[[]Tag](s, objPath+".tags.json")
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return []Tag{}, nil
+		}
+		return nil, err
+	}
+	return tags, nil
+}
+
+func (s *Storage) DeleteObjectTagging(bucket, key string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.bucketExistsLocked(bucket) {
+		return ErrBucketNotFound
+	}
+	objPath := filepath.Join(bucket, key)
+	if _, err := s.readMeta(objPath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return ErrObjectNotFound
+		}
+		return err
+	}
+	if err := s.removeFile(objPath + ".tags.json"); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
 }
 
 type BucketInfo struct {
