@@ -91,8 +91,48 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const pct = process.env.COVERAGE;
-            const body = `## 📊 Coverage\n\`${pct}\` total`;
+            const { execSync } = require('child_process');
+
+            const funcOutput = execSync('go tool cover -func=coverage.out').toString().trim();
+            const lines = funcOutput.split('\n');
+
+            // Extract total from last line
+            const totalMatch = lines.at(-1).match(/([\d.]+)%/);
+            const total = totalMatch ? parseFloat(totalMatch[1]) : 0;
+            const pct = `${total.toFixed(1)}%`;
+            const totalIcon = total >= 90 ? '🟢' : total >= 70 ? '🟡' : '🔴';
+
+            // Aggregate coverage per package
+            const pkgMap = new Map();
+            for (const line of lines.slice(0, -1)) {
+              const m = line.match(/^(.+):\d+:\t.+\t([\d.]+)%/);
+              if (!m) continue;
+              const pkg = m[1].substring(0, m[1].lastIndexOf('/'));
+              const cov = parseFloat(m[2]);
+              if (!pkgMap.has(pkg)) pkgMap.set(pkg, { sum: 0, n: 0 });
+              const e = pkgMap.get(pkg);
+              e.sum += cov;
+              e.n++;
+            }
+
+            // Build table sorted by package name
+            const rows = [...pkgMap.entries()]
+              .sort(([a], [b]) => a.localeCompare(b))
+              .map(([pkg, { sum, n }]) => {
+                const avg = (sum / n).toFixed(1);
+                const icon = parseFloat(avg) >= 90 ? '🟢' : parseFloat(avg) >= 70 ? '🟡' : '🔴';
+                return `| \`${pkg}\` | ${icon} ${avg}% |`;
+              })
+              .join('\n');
+
+            const body = [
+              `## 📊 Coverage: ${totalIcon} ${pct}`,
+              '',
+              '| Package | Coverage |',
+              '|---|---|',
+              rows,
+            ].join('\n');
+
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
