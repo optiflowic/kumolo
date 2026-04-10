@@ -822,6 +822,8 @@ func (ro *Router) handleHeadObject(w http.ResponseWriter, r *http.Request, bucke
 	w.Header().Set("Content-Length", strconv.FormatInt(meta.Size, 10))
 	w.Header().Set("ETag", meta.ETag)
 	w.Header().Set("Last-Modified", meta.LastModified.UTC().Format(http.TimeFormat))
+	// tagging count is best-effort; errors are intentionally ignored so that a
+	// missing or unreadable tags file never prevents a successful object response.
 	if tags, err := ro.storage.GetObjectTagging(bucket, key); err == nil && len(tags) > 0 {
 		w.Header().Set("x-amz-tagging-count", strconv.Itoa(len(tags)))
 	}
@@ -879,6 +881,13 @@ func (ro *Router) handlePutObjectTagging(
 ) {
 	var req xmlTagging
 	if err := xml.NewDecoder(r.Body).Decode(&req); err != nil {
+		slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			"malformed tagging XML",
+			"bucket",
+			bucket,
+			"key",
+			key,
+		)
 		writeError(
 			w,
 			r,
@@ -889,6 +898,15 @@ func (ro *Router) handlePutObjectTagging(
 		return
 	}
 	if len(req.TagSet) > 10 {
+		slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			"too many tags",
+			"bucket",
+			bucket,
+			"key",
+			key,
+			"count",
+			len(req.TagSet),
+		)
 		writeError(w, r, http.StatusBadRequest, "InvalidTag",
 			"Object tags cannot be greater than 10")
 		return
@@ -896,16 +914,37 @@ func (ro *Router) handlePutObjectTagging(
 	seen := make(map[string]struct{}, len(req.TagSet))
 	for _, t := range req.TagSet {
 		if utf8.RuneCountInString(t.Key) > 128 {
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"tag key too long",
+				"bucket",
+				bucket,
+				"key",
+				key,
+			)
 			writeError(w, r, http.StatusBadRequest, "InvalidTag",
 				"The TagKey you have provided is invalid")
 			return
 		}
 		if utf8.RuneCountInString(t.Value) > 256 {
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"tag value too long",
+				"bucket",
+				bucket,
+				"key",
+				key,
+			)
 			writeError(w, r, http.StatusBadRequest, "InvalidTag",
 				"The TagValue you have provided is invalid")
 			return
 		}
 		if _, dup := seen[t.Key]; dup {
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"duplicate tag key",
+				"bucket",
+				bucket,
+				"key",
+				key,
+			)
 			writeError(w, r, http.StatusBadRequest, "InvalidTag",
 				"Cannot provide multiple Tags with the same key")
 			return
@@ -1111,6 +1150,8 @@ func (ro *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 	w.Header().Set("Content-Length", strconv.FormatInt(meta.Size, 10))
 	w.Header().Set("ETag", meta.ETag)
 	w.Header().Set("Last-Modified", meta.LastModified.UTC().Format(http.TimeFormat))
+	// tagging count is best-effort; errors are intentionally ignored so that a
+	// missing or unreadable tags file never prevents a successful object response.
 	if tags, err := ro.storage.GetObjectTagging(bucket, key); err == nil && len(tags) > 0 {
 		w.Header().Set("x-amz-tagging-count", strconv.Itoa(len(tags)))
 	}

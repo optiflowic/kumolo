@@ -2005,9 +2005,8 @@ func TestObjectTaggingHandlers(t *testing.T) {
 			assert.Contains(t, w.Body.String(), "MalformedXML")
 		})
 
-		t.Run("returns 400 when more than 10 tags", func(t *testing.T) {
-			ro := newRouterWithMock(&mockStore{})
-			body := "<Tagging><TagSet>" +
+		t.Run("returns 400 InvalidTag for constraint violations", func(t *testing.T) {
+			tooManyTags := "<Tagging><TagSet>" +
 				"<Tag><Key>k1</Key><Value>v</Value></Tag>" +
 				"<Tag><Key>k2</Key><Value>v</Value></Tag>" +
 				"<Tag><Key>k3</Key><Value>v</Value></Tag>" +
@@ -2020,50 +2019,40 @@ func TestObjectTaggingHandlers(t *testing.T) {
 				"<Tag><Key>k10</Key><Value>v</Value></Tag>" +
 				"<Tag><Key>k11</Key><Value>v</Value></Tag>" +
 				"</TagSet></Tagging>"
-			req := httptest.NewRequest(http.MethodPut, "/my-bucket/key.txt?tagging",
-				strings.NewReader(body))
-			w := httptest.NewRecorder()
-			ro.ServeHTTP(w, req)
-			assert.Equal(t, http.StatusBadRequest, w.Code)
-			assert.Contains(t, w.Body.String(), "InvalidTag")
-		})
-
-		t.Run("returns 400 when tag key exceeds 128 characters", func(t *testing.T) {
-			ro := newRouterWithMock(&mockStore{})
 			longKey := strings.Repeat("a", 129)
-			body := "<Tagging><TagSet><Tag><Key>" + longKey + "</Key><Value>v</Value></Tag></TagSet></Tagging>"
-			req := httptest.NewRequest(http.MethodPut, "/my-bucket/key.txt?tagging",
-				strings.NewReader(body))
-			w := httptest.NewRecorder()
-			ro.ServeHTTP(w, req)
-			assert.Equal(t, http.StatusBadRequest, w.Code)
-			assert.Contains(t, w.Body.String(), "InvalidTag")
-		})
-
-		t.Run("returns 400 when tag value exceeds 256 characters", func(t *testing.T) {
-			ro := newRouterWithMock(&mockStore{})
 			longVal := strings.Repeat("a", 257)
-			body := "<Tagging><TagSet><Tag><Key>k</Key><Value>" + longVal + "</Value></Tag></TagSet></Tagging>"
-			req := httptest.NewRequest(http.MethodPut, "/my-bucket/key.txt?tagging",
-				strings.NewReader(body))
-			w := httptest.NewRecorder()
-			ro.ServeHTTP(w, req)
-			assert.Equal(t, http.StatusBadRequest, w.Code)
-			assert.Contains(t, w.Body.String(), "InvalidTag")
-		})
-
-		t.Run("returns 400 when duplicate tag keys", func(t *testing.T) {
-			ro := newRouterWithMock(&mockStore{})
-			body := "<Tagging><TagSet>" +
-				"<Tag><Key>dup</Key><Value>v1</Value></Tag>" +
-				"<Tag><Key>dup</Key><Value>v2</Value></Tag>" +
-				"</TagSet></Tagging>"
-			req := httptest.NewRequest(http.MethodPut, "/my-bucket/key.txt?tagging",
-				strings.NewReader(body))
-			w := httptest.NewRecorder()
-			ro.ServeHTTP(w, req)
-			assert.Equal(t, http.StatusBadRequest, w.Code)
-			assert.Contains(t, w.Body.String(), "InvalidTag")
+			tests := []struct {
+				name string
+				body string
+			}{
+				{
+					name: "more than 10 tags",
+					body: tooManyTags,
+				},
+				{
+					name: "tag key exceeds 128 characters",
+					body: "<Tagging><TagSet><Tag><Key>" + longKey + "</Key><Value>v</Value></Tag></TagSet></Tagging>",
+				},
+				{
+					name: "tag value exceeds 256 characters",
+					body: "<Tagging><TagSet><Tag><Key>k</Key><Value>" + longVal + "</Value></Tag></TagSet></Tagging>",
+				},
+				{
+					name: "duplicate tag keys",
+					body: "<Tagging><TagSet><Tag><Key>dup</Key><Value>v1</Value></Tag><Tag><Key>dup</Key><Value>v2</Value></Tag></TagSet></Tagging>",
+				},
+			}
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					ro := newRouterWithMock(&mockStore{})
+					req := httptest.NewRequest(http.MethodPut, "/my-bucket/key.txt?tagging",
+						strings.NewReader(tt.body))
+					w := httptest.NewRecorder()
+					ro.ServeHTTP(w, req)
+					assert.Equal(t, http.StatusBadRequest, w.Code)
+					assert.Contains(t, w.Body.String(), "InvalidTag")
+				})
+			}
 		})
 
 		t.Run("returns 404 for missing bucket", func(t *testing.T) {
