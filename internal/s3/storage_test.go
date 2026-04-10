@@ -739,6 +739,25 @@ func TestDeleteObject(t *testing.T) {
 		assert.NoError(t, s.DeleteObject("my-bucket", "obj.txt"))
 	})
 
+	t.Run("logs warning when tags removal fails but still succeeds", func(t *testing.T) {
+		s, rootPath := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
+		require.NoError(t, err)
+		require.NoError(
+			t,
+			s.PutObjectTagging("my-bucket", "obj.txt", []Tag{{Key: "k", Value: "v"}}),
+		)
+
+		require.NoError(t, os.Remove(filepath.Join(rootPath, "my-bucket", "obj.txt.tags.json")))
+		require.NoError(t, os.MkdirAll(
+			filepath.Join(rootPath, "my-bucket", "obj.txt.tags.json", "child"),
+			0o750,
+		))
+
+		assert.NoError(t, s.DeleteObject("my-bucket", "obj.txt"))
+	})
+
 	t.Run("deletes tags file when object is deleted", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
 		require.NoError(t, s.CreateBucket("my-bucket", ""))
