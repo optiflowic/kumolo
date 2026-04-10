@@ -1513,18 +1513,14 @@ func TestMultipartUpload(t *testing.T) {
 
 	t.Run("ListMultipartUploads skips uploads with unreadable metadata", func(t *testing.T) {
 		s, _ := setup(t)
-		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain")
+		_, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain")
 		require.NoError(t, err)
-		origReadAll := s.readAll
 		s.readAll = func(r io.Reader) ([]byte, error) {
 			return nil, errors.New("read error")
 		}
-		uploads, listErr := s.ListMultipartUploads("my-bucket")
-		// Restore so cleanup (if any) works.
-		s.readAll = origReadAll
-		require.NoError(t, listErr)
+		uploads, err := s.ListMultipartUploads("my-bucket")
+		require.NoError(t, err)
 		assert.Empty(t, uploads)
-		_ = uploadID
 	})
 
 	t.Run("ListMultipartUploads filters uploads by bucket", func(t *testing.T) {
