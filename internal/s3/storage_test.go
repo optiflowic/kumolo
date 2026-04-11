@@ -1996,12 +1996,15 @@ func TestBucketCORS(t *testing.T) {
 		assert.ErrorIs(t, err, ErrNoCORSConfiguration)
 	})
 
-	t.Run("GetBucketCors returns ErrNoCORSConfiguration when bucket.json is missing", func(t *testing.T) {
-		s, bucket := setup(t)
-		require.NoError(t, s.root.Remove(bucket+".bucket.json"))
-		_, err := s.GetBucketCors(bucket)
-		assert.ErrorIs(t, err, ErrNoCORSConfiguration)
-	})
+	t.Run(
+		"GetBucketCors returns ErrNoCORSConfiguration when bucket.json is missing",
+		func(t *testing.T) {
+			s, bucket := setup(t)
+			require.NoError(t, s.root.Remove(bucket+".bucket.json"))
+			_, err := s.GetBucketCors(bucket)
+			assert.ErrorIs(t, err, ErrNoCORSConfiguration)
+		},
+	)
 
 	t.Run("PutBucketCors preserves existing bucket tags", func(t *testing.T) {
 		s, bucket := setup(t)
