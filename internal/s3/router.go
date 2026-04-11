@@ -1089,6 +1089,13 @@ func (ro *Router) handlePutBucketVersioning(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if req.Status != "Enabled" && req.Status != "Suspended" {
+		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			"invalid versioning status",
+			"bucket",
+			bucket,
+			"status",
+			req.Status,
+		)
 		writeError(w, r, http.StatusBadRequest, "IllegalVersioningConfigurationException",
 			"The versioning configuration specified is invalid.")
 		return

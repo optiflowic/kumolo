@@ -1972,20 +1972,22 @@ func TestBucketVersioning(t *testing.T) {
 	}
 
 	t.Run("PutBucketVersioning and GetBucketVersioning roundtrip", func(t *testing.T) {
-		s, bucket := setup(t)
-		require.NoError(t, s.PutBucketVersioning(bucket, "Enabled"))
-		status, err := s.GetBucketVersioning(bucket)
-		require.NoError(t, err)
-		assert.Equal(t, "Enabled", status)
-	})
-
-	t.Run("PutBucketVersioning Suspended", func(t *testing.T) {
-		s, bucket := setup(t)
-		require.NoError(t, s.PutBucketVersioning(bucket, "Enabled"))
-		require.NoError(t, s.PutBucketVersioning(bucket, "Suspended"))
-		status, err := s.GetBucketVersioning(bucket)
-		require.NoError(t, err)
-		assert.Equal(t, "Suspended", status)
+		tests := []struct {
+			name   string
+			status string
+		}{
+			{name: "Enabled", status: "Enabled"},
+			{name: "Suspended", status: "Suspended"},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				s, bucket := setup(t)
+				require.NoError(t, s.PutBucketVersioning(bucket, tt.status))
+				got, err := s.GetBucketVersioning(bucket)
+				require.NoError(t, err)
+				assert.Equal(t, tt.status, got)
+			})
+		}
 	})
 
 	t.Run("GetBucketVersioning returns empty string when not set", func(t *testing.T) {
@@ -2004,13 +2006,16 @@ func TestBucketVersioning(t *testing.T) {
 		assert.Equal(t, []Tag{{Key: "env", Value: "prod"}}, tags)
 	})
 
-	t.Run("GetBucketVersioning returns empty string when bucket.json is missing", func(t *testing.T) {
-		s, bucket := setup(t)
-		require.NoError(t, s.root.Remove(bucket+".bucket.json"))
-		status, err := s.GetBucketVersioning(bucket)
-		require.NoError(t, err)
-		assert.Equal(t, "", status)
-	})
+	t.Run(
+		"GetBucketVersioning returns empty string when bucket.json is missing",
+		func(t *testing.T) {
+			s, bucket := setup(t)
+			require.NoError(t, s.root.Remove(bucket+".bucket.json"))
+			status, err := s.GetBucketVersioning(bucket)
+			require.NoError(t, err)
+			assert.Equal(t, "", status)
+		},
+	)
 
 	t.Run("PutBucketVersioning creates fresh meta when bucket.json is missing", func(t *testing.T) {
 		s, bucket := setup(t)
