@@ -2396,50 +2396,54 @@ func TestBucketCORSHandlers(t *testing.T) {
 	t.Run("PutBucketCors", func(t *testing.T) {
 		t.Run("returns 200 on success", func(t *testing.T) {
 			ro := newRouterWithMock(&mockStore{})
-			req := httptest.NewRequest(http.MethodPut, "/my-bucket?cors", strings.NewReader(validBody))
+			req := httptest.NewRequest(
+				http.MethodPut,
+				"/my-bucket?cors",
+				strings.NewReader(validBody),
+			)
 			w := httptest.NewRecorder()
 			ro.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusOK, w.Code)
 		})
 
-		t.Run("returns 400 on malformed XML", func(t *testing.T) {
-			ro := newRouterWithMock(&mockStore{})
-			req := httptest.NewRequest(http.MethodPut, "/my-bucket?cors", strings.NewReader("not-xml"))
-			w := httptest.NewRecorder()
-			ro.ServeHTTP(w, req)
-			assert.Equal(t, http.StatusBadRequest, w.Code)
-		})
-
-		t.Run("returns 400 on empty rules", func(t *testing.T) {
-			ro := newRouterWithMock(&mockStore{})
-			req := httptest.NewRequest(http.MethodPut, "/my-bucket?cors",
-				strings.NewReader(`<CORSConfiguration></CORSConfiguration>`))
-			w := httptest.NewRecorder()
-			ro.ServeHTTP(w, req)
-			assert.Equal(t, http.StatusBadRequest, w.Code)
-		})
-
-		t.Run("returns 400 when rule missing AllowedOrigin", func(t *testing.T) {
-			ro := newRouterWithMock(&mockStore{})
-			body := `<CORSConfiguration><CORSRule><AllowedMethod>GET</AllowedMethod></CORSRule></CORSConfiguration>`
-			req := httptest.NewRequest(http.MethodPut, "/my-bucket?cors", strings.NewReader(body))
-			w := httptest.NewRecorder()
-			ro.ServeHTTP(w, req)
-			assert.Equal(t, http.StatusBadRequest, w.Code)
-		})
-
-		t.Run("returns 400 when rule missing AllowedMethod", func(t *testing.T) {
-			ro := newRouterWithMock(&mockStore{})
-			body := `<CORSConfiguration><CORSRule><AllowedOrigin>*</AllowedOrigin></CORSRule></CORSConfiguration>`
-			req := httptest.NewRequest(http.MethodPut, "/my-bucket?cors", strings.NewReader(body))
-			w := httptest.NewRecorder()
-			ro.ServeHTTP(w, req)
-			assert.Equal(t, http.StatusBadRequest, w.Code)
+		t.Run("returns 400 on invalid input", func(t *testing.T) {
+			tests := []struct {
+				name string
+				body string
+			}{
+				{name: "malformed XML", body: "not-xml"},
+				{name: "empty rules", body: `<CORSConfiguration></CORSConfiguration>`},
+				{
+					name: "rule missing AllowedOrigin",
+					body: `<CORSConfiguration><CORSRule><AllowedMethod>GET</AllowedMethod></CORSRule></CORSConfiguration>`,
+				},
+				{
+					name: "rule missing AllowedMethod",
+					body: `<CORSConfiguration><CORSRule><AllowedOrigin>*</AllowedOrigin></CORSRule></CORSConfiguration>`,
+				},
+			}
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					ro := newRouterWithMock(&mockStore{})
+					req := httptest.NewRequest(
+						http.MethodPut,
+						"/my-bucket?cors",
+						strings.NewReader(tt.body),
+					)
+					w := httptest.NewRecorder()
+					ro.ServeHTTP(w, req)
+					assert.Equal(t, http.StatusBadRequest, w.Code)
+				})
+			}
 		})
 
 		t.Run("returns 404 on bucket not found", func(t *testing.T) {
 			ro := newRouterWithMock(&mockStore{putBucketCorsErr: ErrBucketNotFound})
-			req := httptest.NewRequest(http.MethodPut, "/my-bucket?cors", strings.NewReader(validBody))
+			req := httptest.NewRequest(
+				http.MethodPut,
+				"/my-bucket?cors",
+				strings.NewReader(validBody),
+			)
 			w := httptest.NewRecorder()
 			ro.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusNotFound, w.Code)
@@ -2447,7 +2451,11 @@ func TestBucketCORSHandlers(t *testing.T) {
 
 		t.Run("returns 500 on storage error", func(t *testing.T) {
 			ro := newRouterWithMock(&mockStore{putBucketCorsErr: errors.New("disk full")})
-			req := httptest.NewRequest(http.MethodPut, "/my-bucket?cors", strings.NewReader(validBody))
+			req := httptest.NewRequest(
+				http.MethodPut,
+				"/my-bucket?cors",
+				strings.NewReader(validBody),
+			)
 			w := httptest.NewRecorder()
 			ro.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusInternalServerError, w.Code)

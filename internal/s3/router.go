@@ -1124,14 +1124,7 @@ func (ro *Router) handlePutBucketCors(w http.ResponseWriter, r *http.Request, bu
 				"The XML you provided was not well-formed.")
 			return
 		}
-		rules[i] = CORSRule{
-			ID:             rule.ID,
-			AllowedOrigins: rule.AllowedOrigins,
-			AllowedMethods: rule.AllowedMethods,
-			AllowedHeaders: rule.AllowedHeaders,
-			ExposeHeaders:  rule.ExposeHeaders,
-			MaxAgeSeconds:  rule.MaxAgeSeconds,
-		}
+		rules[i] = CORSRule(rule)
 	}
 	if err := ro.storage.PutBucketCors(bucket, rules); err != nil {
 		if errors.Is(err, ErrBucketNotFound) {
@@ -1204,14 +1197,7 @@ func (ro *Router) handleGetBucketCors(w http.ResponseWriter, r *http.Request, bu
 	)
 	xmlRules := make([]xmlCORSRule, len(rules))
 	for i, rule := range rules {
-		xmlRules[i] = xmlCORSRule{
-			ID:             rule.ID,
-			AllowedOrigins: rule.AllowedOrigins,
-			AllowedMethods: rule.AllowedMethods,
-			AllowedHeaders: rule.AllowedHeaders,
-			ExposeHeaders:  rule.ExposeHeaders,
-			MaxAgeSeconds:  rule.MaxAgeSeconds,
-		}
+		xmlRules[i] = xmlCORSRule(rule)
 	}
 	writeXML(w, http.StatusOK, xmlCORSConfiguration{CORSRules: xmlRules})
 }
