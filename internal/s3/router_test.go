@@ -2437,6 +2437,16 @@ func TestBucketCORSHandlers(t *testing.T) {
 			}
 		})
 
+		t.Run("returns 400 with InvalidArgument on invalid method", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{})
+			body := `<CORSConfiguration><CORSRule><AllowedOrigin>*</AllowedOrigin><AllowedMethod>PATCH</AllowedMethod></CORSRule></CORSConfiguration>`
+			req := httptest.NewRequest(http.MethodPut, "/my-bucket?cors", strings.NewReader(body))
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Contains(t, w.Body.String(), "InvalidArgument")
+		})
+
 		t.Run("returns 404 on bucket not found", func(t *testing.T) {
 			ro := newRouterWithMock(&mockStore{putBucketCorsErr: ErrBucketNotFound})
 			req := httptest.NewRequest(

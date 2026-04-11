@@ -1124,6 +1124,20 @@ func (ro *Router) handlePutBucketCors(w http.ResponseWriter, r *http.Request, bu
 				"The XML you provided was not well-formed.")
 			return
 		}
+		for _, method := range rule.AllowedMethods {
+			if !validCORSMethod(method) {
+				slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+					"invalid cors method",
+					"bucket",
+					bucket,
+					"method",
+					method,
+				)
+				writeError(w, r, http.StatusBadRequest, "InvalidArgument",
+					"Found invalid method in CORS rule.")
+				return
+			}
+		}
 		rules[i] = CORSRule(rule)
 	}
 	if err := ro.storage.PutBucketCors(bucket, rules); err != nil {
@@ -2107,6 +2121,15 @@ type xmlDeleteError struct {
 type xmlVersioningConfiguration struct {
 	XMLName xml.Name `xml:"VersioningConfiguration"`
 	Status  string   `xml:"Status,omitempty"`
+}
+
+// validCORSMethod reports whether method is an AWS-allowed CORS HTTP method.
+func validCORSMethod(method string) bool {
+	switch method {
+	case http.MethodGet, http.MethodPut, http.MethodPost, http.MethodDelete, http.MethodHead:
+		return true
+	}
+	return false
 }
 
 type xmlCORSConfiguration struct {
