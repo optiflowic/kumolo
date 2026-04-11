@@ -277,13 +277,20 @@ func (m *mockStore) BucketExists(_ string) bool            { return m.bucketExis
 func (m *mockStore) GetBucketRegion(_ string) (string, error) {
 	return m.getBucketRegionStr, m.getBucketRegionErr
 }
-func (m *mockStore) PutObject(_ string, _ string, _ io.Reader, _ string) (ObjectMetadata, error) {
+
+func (m *mockStore) PutObject(
+	_ string,
+	_ string,
+	_ io.Reader,
+	_ string,
+	_ map[string]string,
+) (ObjectMetadata, error) {
 	return m.putObjectMeta, m.putObjectErr
 }
 func (m *mockStore) GetObject(_ string, _ string) (*os.File, ObjectMetadata, error) {
 	return m.getObjectFile, m.getObjectMeta, m.getObjectErr
 }
-func (m *mockStore) CopyObject(_, _, _, _ string) (ObjectMetadata, error) {
+func (m *mockStore) CopyObject(_, _, _, _ string, _ map[string]string) (ObjectMetadata, error) {
 	return m.copyObjectMeta, m.copyObjectErr
 }
 func (m *mockStore) DeleteObject(_ string, _ string) error { return m.deleteObjectErr }
@@ -422,6 +429,48 @@ func TestRouterPutObject(t *testing.T) {
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+
+	t.Run("stores and returns user metadata via HeadObject", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+
+		putReq := httptest.NewRequest(
+			http.MethodPut,
+			"/my-bucket/obj.txt",
+			strings.NewReader("data"),
+		)
+		putReq.Header.Set("x-amz-meta-original-filename", "photo.jpg")
+		putReq.Header.Set("x-amz-meta-uploader", "user1")
+		ro.ServeHTTP(httptest.NewRecorder(), putReq)
+
+		req := httptest.NewRequest(http.MethodHead, "/my-bucket/obj.txt", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "photo.jpg", w.Header().Get("x-amz-meta-original-filename"))
+		assert.Equal(t, "user1", w.Header().Get("x-amz-meta-uploader"))
+	})
+
+	t.Run("stores and returns user metadata via GetObject", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+
+		putReq := httptest.NewRequest(
+			http.MethodPut,
+			"/my-bucket/obj.txt",
+			strings.NewReader("data"),
+		)
+		putReq.Header.Set("x-amz-meta-category", "images")
+		ro.ServeHTTP(httptest.NewRecorder(), putReq)
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket/obj.txt", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "images", w.Header().Get("x-amz-meta-category"))
 	})
 }
 
@@ -926,6 +975,51 @@ func TestRouterCopyObject(t *testing.T) {
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.NotEmpty(t, w.Header().Get("ETag"))
+	})
+
+	t.Run("COPY directive inherits source user metadata", func(t *testing.T) {
+		ro := setup(t)
+		// Add user metadata to the source object first.
+		putReq := httptest.NewRequest(
+			http.MethodPut,
+			"/src-bucket/meta-obj.txt",
+			strings.NewReader("data"),
+		)
+		putReq.Header.Set("x-amz-meta-author", "alice")
+		ro.ServeHTTP(httptest.NewRecorder(), putReq)
+
+		copyReq := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
+		copyReq.Header.Set("x-amz-copy-source", "/src-bucket/meta-obj.txt")
+		ro.ServeHTTP(httptest.NewRecorder(), copyReq)
+
+		req := httptest.NewRequest(http.MethodHead, "/dst-bucket/copy.txt", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "alice", w.Header().Get("x-amz-meta-author"))
+	})
+
+	t.Run("REPLACE directive uses new user metadata", func(t *testing.T) {
+		ro := setup(t)
+		putReq := httptest.NewRequest(
+			http.MethodPut,
+			"/src-bucket/meta-obj.txt",
+			strings.NewReader("data"),
+		)
+		putReq.Header.Set("x-amz-meta-author", "alice")
+		ro.ServeHTTP(httptest.NewRecorder(), putReq)
+
+		copyReq := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
+		copyReq.Header.Set("x-amz-copy-source", "/src-bucket/meta-obj.txt")
+		copyReq.Header.Set("x-amz-metadata-directive", "REPLACE")
+		copyReq.Header.Set("x-amz-meta-author", "bob")
+		ro.ServeHTTP(httptest.NewRecorder(), copyReq)
+
+		req := httptest.NewRequest(http.MethodHead, "/dst-bucket/copy.txt", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "bob", w.Header().Get("x-amz-meta-author"))
 	})
 }
 

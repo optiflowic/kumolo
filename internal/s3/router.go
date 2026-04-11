@@ -28,9 +28,17 @@ type bucketStore interface {
 
 // objectStore is the subset of Storage used by the Router for object operations.
 type objectStore interface {
-	PutObject(bucket, key string, r io.Reader, contentType string) (ObjectMetadata, error)
+	PutObject(
+		bucket, key string,
+		r io.Reader,
+		contentType string,
+		userMetadata map[string]string,
+	) (ObjectMetadata, error)
 	GetObject(bucket, key string) (*os.File, ObjectMetadata, error)
-	CopyObject(srcBucket, srcKey, dstBucket, dstKey string) (ObjectMetadata, error)
+	CopyObject(
+		srcBucket, srcKey, dstBucket, dstKey string,
+		userMetadata map[string]string,
+	) (ObjectMetadata, error)
 	DeleteObject(bucket, key string) error
 	HeadObject(bucket, key string) (ObjectMetadata, error)
 	ListObjects(bucket string) ([]ObjectInfo, error)
@@ -755,7 +763,13 @@ func (ro *Router) handleCopyObject(
 			"x-amz-copy-source must be in the form /<bucket>/<key>.")
 		return
 	}
-	meta, err := ro.storage.CopyObject(srcBucket, srcKey, dstBucket, dstKey)
+	// REPLACE directive: use metadata from the request headers.
+	// COPY directive (default): pass nil so CopyObject inherits source metadata.
+	var userMetadata map[string]string
+	if strings.ToUpper(r.Header.Get("x-amz-metadata-directive")) == "REPLACE" {
+		userMetadata = extractUserMetadata(r.Header)
+	}
+	meta, err := ro.storage.CopyObject(srcBucket, srcKey, dstBucket, dstKey, userMetadata)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrBucketNotFound):
@@ -818,7 +832,8 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
-	meta, err := ro.storage.PutObject(bucket, key, r.Body, contentType)
+	userMetadata := extractUserMetadata(r.Header)
+	meta, err := ro.storage.PutObject(bucket, key, r.Body, contentType, userMetadata)
 	if err != nil {
 		if errors.Is(err, ErrBucketNotFound) {
 			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
@@ -884,6 +899,9 @@ func (ro *Router) handleHeadObject(w http.ResponseWriter, r *http.Request, bucke
 	w.Header().Set("Content-Length", strconv.FormatInt(meta.Size, 10))
 	w.Header().Set("ETag", meta.ETag)
 	w.Header().Set("Last-Modified", meta.LastModified.UTC().Format(http.TimeFormat))
+	for k, v := range meta.UserMetadata {
+		w.Header().Set("x-amz-meta-"+k, v)
+	}
 	// tagging count is best-effort; errors are intentionally ignored so that a
 	// missing or unreadable tags file never prevents a successful object response.
 	if tags, err := ro.storage.GetObjectTagging(bucket, key); err == nil && len(tags) > 0 {
@@ -1752,6 +1770,9 @@ func (ro *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 	w.Header().Set("Content-Length", strconv.FormatInt(meta.Size, 10))
 	w.Header().Set("ETag", meta.ETag)
 	w.Header().Set("Last-Modified", meta.LastModified.UTC().Format(http.TimeFormat))
+	for k, v := range meta.UserMetadata {
+		w.Header().Set("x-amz-meta-"+k, v)
+	}
 	// tagging count is best-effort; errors are intentionally ignored so that a
 	// missing or unreadable tags file never prevents a successful object response.
 	if tags, err := ro.storage.GetObjectTagging(bucket, key); err == nil && len(tags) > 0 {
@@ -2088,6 +2109,23 @@ func (ro *Router) handleHeadBucket(w http.ResponseWriter, r *http.Request, bucke
 
 // parsePath splits a path-style S3 URL into bucket and key:
 // "/my-bucket/path/to/object" → ("my-bucket", "path/to/object")
+// extractUserMetadata collects all x-amz-meta-* headers from h and returns
+// them as a map keyed by the suffix after the prefix (lowercased). Returns nil
+// if no such headers are present.
+func extractUserMetadata(h http.Header) map[string]string {
+	const prefix = "X-Amz-Meta-"
+	var m map[string]string
+	for k, vs := range h {
+		if strings.HasPrefix(k, prefix) {
+			if m == nil {
+				m = make(map[string]string)
+			}
+			m[strings.ToLower(k[len(prefix):])] = vs[0]
+		}
+	}
+	return m
+}
+
 func parsePath(path string) (bucket, key string) {
 	path = strings.TrimPrefix(path, "/")
 	if path == "" {
