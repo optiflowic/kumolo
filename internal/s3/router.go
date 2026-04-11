@@ -1013,6 +1013,16 @@ func (ro *Router) handleGetBucketTagging(w http.ResponseWriter, r *http.Request,
 		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
+	if len(tags) == 0 {
+		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			"no tag set on bucket",
+			"bucket",
+			bucket,
+		)
+		writeError(w, r, http.StatusNotFound, "NoSuchTagSet",
+			"There is no tag set associated with the bucket.")
+		return
+	}
 	slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
 		"get bucket tagging",
 		"bucket",

@@ -2184,18 +2184,34 @@ func TestBucketTaggingHandlers(t *testing.T) {
 			ro.ServeHTTP(httptest.NewRecorder(),
 				httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
 
+			// GET before any tags are set → 404 NoSuchTagSet
+			w0 := httptest.NewRecorder()
+			ro.ServeHTTP(w0, httptest.NewRequest(http.MethodGet, "/my-bucket?tagging", nil))
+			assert.Equal(t, http.StatusNotFound, w0.Code)
+			assert.Contains(t, w0.Body.String(), "NoSuchTagSet")
+
+			// PUT tags
 			req := httptest.NewRequest(http.MethodPut, "/my-bucket?tagging",
 				strings.NewReader(taggingBody))
 			w := httptest.NewRecorder()
 			ro.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusOK, w.Code)
 
+			// GET after PUT → 200 with tags
 			req2 := httptest.NewRequest(http.MethodGet, "/my-bucket?tagging", nil)
 			w2 := httptest.NewRecorder()
 			ro.ServeHTTP(w2, req2)
 			assert.Equal(t, http.StatusOK, w2.Code)
 			assert.Contains(t, w2.Body.String(), "env")
 			assert.Contains(t, w2.Body.String(), "prod")
+
+			// DELETE tags then GET → 404 NoSuchTagSet
+			ro.ServeHTTP(httptest.NewRecorder(),
+				httptest.NewRequest(http.MethodDelete, "/my-bucket?tagging", nil))
+			w3 := httptest.NewRecorder()
+			ro.ServeHTTP(w3, httptest.NewRequest(http.MethodGet, "/my-bucket?tagging", nil))
+			assert.Equal(t, http.StatusNotFound, w3.Code)
+			assert.Contains(t, w3.Body.String(), "NoSuchTagSet")
 		})
 
 		t.Run("returns 400 for malformed XML", func(t *testing.T) {
@@ -2295,6 +2311,15 @@ func TestBucketTaggingHandlers(t *testing.T) {
 			ro.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusOK, w.Code)
 			assert.Contains(t, w.Body.String(), "env")
+		})
+
+		t.Run("returns 404 NoSuchTagSet when no tags set", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{getBucketTaggingTags: []Tag{}})
+			req := httptest.NewRequest(http.MethodGet, "/my-bucket?tagging", nil)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusNotFound, w.Code)
+			assert.Contains(t, w.Body.String(), "NoSuchTagSet")
 		})
 
 		t.Run("returns 404 for missing bucket", func(t *testing.T) {
