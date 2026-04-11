@@ -25,6 +25,7 @@ type bucketMeta struct {
 	Tags             []Tag      `json:"tags,omitempty"`
 	VersioningStatus string     `json:"versioningStatus,omitempty"`
 	CORSRules        []CORSRule `json:"corsRules,omitempty"`
+	Policy           string     `json:"policy,omitempty"`
 }
 
 // CORSRule represents a single CORS rule stored in bucket metadata.
@@ -692,6 +693,62 @@ func (s *Storage) DeleteBucketCors(bucket string) error {
 		return nil
 	}
 	meta.CORSRules = nil
+	return s.writeBucketMeta(bucket, meta)
+}
+
+func (s *Storage) PutBucketPolicy(bucket, policy string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.bucketExistsLocked(bucket) {
+		return ErrBucketNotFound
+	}
+	meta, err := s.readBucketMeta(bucket)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		meta = bucketMeta{}
+	}
+	meta.Policy = policy
+	return s.writeBucketMeta(bucket, meta)
+}
+
+func (s *Storage) GetBucketPolicy(bucket string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.bucketExistsLocked(bucket) {
+		return "", ErrBucketNotFound
+	}
+	meta, err := s.readBucketMeta(bucket)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", ErrNoBucketPolicy
+		}
+		return "", err
+	}
+	if meta.Policy == "" {
+		return "", ErrNoBucketPolicy
+	}
+	return meta.Policy, nil
+}
+
+func (s *Storage) DeleteBucketPolicy(bucket string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.bucketExistsLocked(bucket) {
+		return ErrBucketNotFound
+	}
+	meta, err := s.readBucketMeta(bucket)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	if meta.Policy == "" {
+		return nil
+	}
+	meta.Policy = ""
 	return s.writeBucketMeta(bucket, meta)
 }
 

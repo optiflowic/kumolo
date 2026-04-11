@@ -264,6 +264,10 @@ type mockStore struct {
 	getBucketCorsRules          []CORSRule
 	getBucketCorsErr            error
 	deleteBucketCorsErr         error
+	putBucketPolicyErr          error
+	getBucketPolicyResult       string
+	getBucketPolicyErr          error
+	deleteBucketPolicyErr       error
 }
 
 func (m *mockStore) ListBuckets() ([]BucketInfo, error)    { return nil, m.listBucketsErr }
@@ -337,6 +341,15 @@ func (m *mockStore) GetBucketCors(_ string) ([]CORSRule, error) {
 }
 func (m *mockStore) DeleteBucketCors(_ string) error {
 	return m.deleteBucketCorsErr
+}
+func (m *mockStore) PutBucketPolicy(_ string, _ string) error {
+	return m.putBucketPolicyErr
+}
+func (m *mockStore) GetBucketPolicy(_ string) (string, error) {
+	return m.getBucketPolicyResult, m.getBucketPolicyErr
+}
+func (m *mockStore) DeleteBucketPolicy(_ string) error {
+	return m.deleteBucketPolicyErr
 }
 
 func newRouterWithMock(store *mockStore) *Router {
@@ -2538,6 +2551,149 @@ func TestBucketCORSHandlers(t *testing.T) {
 		t.Run("returns 500 on storage error", func(t *testing.T) {
 			ro := newRouterWithMock(&mockStore{deleteBucketCorsErr: errors.New("disk failure")})
 			req := httptest.NewRequest(http.MethodDelete, "/my-bucket?cors", nil)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusInternalServerError, w.Code)
+		})
+	})
+}
+
+func TestBucketPolicyHandlers(t *testing.T) {
+	validPolicy := `{"Version":"2012-10-17","Statement":[]}`
+
+	t.Run("PutBucketPolicy", func(t *testing.T) {
+		t.Run("returns 204 on success", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{})
+			req := httptest.NewRequest(
+				http.MethodPut,
+				"/my-bucket?policy",
+				strings.NewReader(validPolicy),
+			)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusNoContent, w.Code)
+		})
+
+		t.Run("returns 400 on body read error", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{})
+			req := httptest.NewRequest(http.MethodPut, "/my-bucket?policy", errReader{})
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Contains(t, w.Body.String(), "MalformedPolicy")
+		})
+
+		t.Run("returns 400 MalformedPolicy on invalid input", func(t *testing.T) {
+			tests := []struct {
+				name string
+				body string
+			}{
+				{name: "malformed JSON", body: "not-json"},
+				{name: "JSON array", body: `[]`},
+				{name: "JSON string", body: `"just a string"`},
+				{name: "JSON number", body: `42`},
+			}
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					ro := newRouterWithMock(&mockStore{})
+					req := httptest.NewRequest(
+						http.MethodPut,
+						"/my-bucket?policy",
+						strings.NewReader(tt.body),
+					)
+					w := httptest.NewRecorder()
+					ro.ServeHTTP(w, req)
+					assert.Equal(t, http.StatusBadRequest, w.Code)
+					assert.Contains(t, w.Body.String(), "MalformedPolicy")
+				})
+			}
+		})
+
+		t.Run("returns 404 on bucket not found", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{putBucketPolicyErr: ErrBucketNotFound})
+			req := httptest.NewRequest(
+				http.MethodPut,
+				"/my-bucket?policy",
+				strings.NewReader(validPolicy),
+			)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusNotFound, w.Code)
+			assert.Contains(t, w.Body.String(), "NoSuchBucket")
+		})
+
+		t.Run("returns 500 on storage error", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{putBucketPolicyErr: errors.New("disk full")})
+			req := httptest.NewRequest(
+				http.MethodPut,
+				"/my-bucket?policy",
+				strings.NewReader(validPolicy),
+			)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusInternalServerError, w.Code)
+		})
+	})
+
+	t.Run("GetBucketPolicy", func(t *testing.T) {
+		t.Run("returns policy JSON", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{getBucketPolicyResult: validPolicy})
+			req := httptest.NewRequest(http.MethodGet, "/my-bucket?policy", nil)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
+			assert.Equal(t, validPolicy, w.Body.String())
+		})
+
+		t.Run("returns 404 when no policy", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{getBucketPolicyErr: ErrNoBucketPolicy})
+			req := httptest.NewRequest(http.MethodGet, "/my-bucket?policy", nil)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusNotFound, w.Code)
+			assert.Contains(t, w.Body.String(), "NoSuchBucketPolicy")
+		})
+
+		t.Run("returns 404 on bucket not found", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{getBucketPolicyErr: ErrBucketNotFound})
+			req := httptest.NewRequest(http.MethodGet, "/my-bucket?policy", nil)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusNotFound, w.Code)
+			assert.Contains(t, w.Body.String(), "NoSuchBucket")
+		})
+
+		t.Run("returns 500 on storage error", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{getBucketPolicyErr: errors.New("disk failure")})
+			req := httptest.NewRequest(http.MethodGet, "/my-bucket?policy", nil)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusInternalServerError, w.Code)
+		})
+	})
+
+	t.Run("DeleteBucketPolicy", func(t *testing.T) {
+		t.Run("returns 204 on success", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{})
+			req := httptest.NewRequest(http.MethodDelete, "/my-bucket?policy", nil)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusNoContent, w.Code)
+		})
+
+		t.Run("returns 404 on bucket not found", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{deleteBucketPolicyErr: ErrBucketNotFound})
+			req := httptest.NewRequest(http.MethodDelete, "/my-bucket?policy", nil)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusNotFound, w.Code)
+			assert.Contains(t, w.Body.String(), "NoSuchBucket")
+		})
+
+		t.Run("returns 500 on storage error", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{deleteBucketPolicyErr: errors.New("disk failure")})
+			req := httptest.NewRequest(http.MethodDelete, "/my-bucket?policy", nil)
 			w := httptest.NewRecorder()
 			ro.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusInternalServerError, w.Code)

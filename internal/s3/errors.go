@@ -16,6 +16,7 @@ var (
 	ErrInvalidPart         = errors.New("invalid part")
 	ErrInvalidPartOrder    = errors.New("parts not in ascending order")
 	ErrNoCORSConfiguration = errors.New("no CORS configuration")
+	ErrNoBucketPolicy      = errors.New("no bucket policy")
 )
 
 type errorResponse struct {

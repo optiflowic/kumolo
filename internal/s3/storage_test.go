@@ -2222,3 +2222,150 @@ func TestBucketVersioning(t *testing.T) {
 		assert.Error(t, err)
 	})
 }
+
+func TestBucketPolicy(t *testing.T) {
+	setup := func(t *testing.T) (*Storage, string) {
+		t.Helper()
+		s, err := NewStorage(t.TempDir())
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = s.Close() })
+		bucket := "test-bucket"
+		require.NoError(t, s.CreateBucket(bucket, "us-east-1"))
+		return s, bucket
+	}
+
+	policy := `{"Version":"2012-10-17","Statement":[]}`
+
+	t.Run("PutBucketPolicy and GetBucketPolicy roundtrip", func(t *testing.T) {
+		s, bucket := setup(t)
+		require.NoError(t, s.PutBucketPolicy(bucket, policy))
+		got, err := s.GetBucketPolicy(bucket)
+		require.NoError(t, err)
+		assert.Equal(t, policy, got)
+	})
+
+	t.Run("GetBucketPolicy returns ErrNoBucketPolicy when not set", func(t *testing.T) {
+		s, bucket := setup(t)
+		_, err := s.GetBucketPolicy(bucket)
+		assert.ErrorIs(t, err, ErrNoBucketPolicy)
+	})
+
+	t.Run(
+		"GetBucketPolicy returns ErrNoBucketPolicy when bucket.json is missing",
+		func(t *testing.T) {
+			s, bucket := setup(t)
+			require.NoError(t, s.root.Remove(bucket+".bucket.json"))
+			_, err := s.GetBucketPolicy(bucket)
+			assert.ErrorIs(t, err, ErrNoBucketPolicy)
+		},
+	)
+
+	t.Run("PutBucketPolicy preserves existing bucket tags", func(t *testing.T) {
+		s, bucket := setup(t)
+		require.NoError(t, s.PutBucketTagging(bucket, []Tag{{Key: "env", Value: "prod"}}))
+		require.NoError(t, s.PutBucketPolicy(bucket, policy))
+		tags, err := s.GetBucketTagging(bucket)
+		require.NoError(t, err)
+		assert.Equal(t, []Tag{{Key: "env", Value: "prod"}}, tags)
+	})
+
+	t.Run("PutBucketPolicy creates fresh meta when bucket.json is missing", func(t *testing.T) {
+		s, bucket := setup(t)
+		require.NoError(t, s.root.Remove(bucket+".bucket.json"))
+		require.NoError(t, s.PutBucketPolicy(bucket, policy))
+		got, err := s.GetBucketPolicy(bucket)
+		require.NoError(t, err)
+		assert.Equal(t, policy, got)
+	})
+
+	t.Run("DeleteBucketPolicy removes policy", func(t *testing.T) {
+		s, bucket := setup(t)
+		require.NoError(t, s.PutBucketPolicy(bucket, policy))
+		require.NoError(t, s.DeleteBucketPolicy(bucket))
+		_, err := s.GetBucketPolicy(bucket)
+		assert.ErrorIs(t, err, ErrNoBucketPolicy)
+	})
+
+	t.Run("DeleteBucketPolicy is idempotent when not set", func(t *testing.T) {
+		s, bucket := setup(t)
+		assert.NoError(t, s.DeleteBucketPolicy(bucket))
+	})
+
+	t.Run("DeleteBucketPolicy is idempotent when bucket.json is missing", func(t *testing.T) {
+		s, bucket := setup(t)
+		require.NoError(t, s.root.Remove(bucket+".bucket.json"))
+		assert.NoError(t, s.DeleteBucketPolicy(bucket))
+	})
+
+	t.Run("PutBucketPolicy returns ErrBucketNotFound for missing bucket", func(t *testing.T) {
+		s, _ := setup(t)
+		err := s.PutBucketPolicy("no-bucket", policy)
+		assert.ErrorIs(t, err, ErrBucketNotFound)
+	})
+
+	t.Run("GetBucketPolicy returns ErrBucketNotFound for missing bucket", func(t *testing.T) {
+		s, _ := setup(t)
+		_, err := s.GetBucketPolicy("no-bucket")
+		assert.ErrorIs(t, err, ErrBucketNotFound)
+	})
+
+	t.Run("DeleteBucketPolicy returns ErrBucketNotFound for missing bucket", func(t *testing.T) {
+		s, _ := setup(t)
+		err := s.DeleteBucketPolicy("no-bucket")
+		assert.ErrorIs(t, err, ErrBucketNotFound)
+	})
+
+	t.Run("PutBucketPolicy returns error when meta read fails", func(t *testing.T) {
+		s, bucket := setup(t)
+		s.readAll = func(r io.Reader) ([]byte, error) {
+			return nil, errors.New("read error")
+		}
+		err := s.PutBucketPolicy(bucket, policy)
+		assert.Error(t, err)
+	})
+
+	t.Run("PutBucketPolicy returns error when write fails", func(t *testing.T) {
+		s, bucket := setup(t)
+		s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+			if strings.HasSuffix(name, ".bucket.json") {
+				return nil, errors.New("write error")
+			}
+			return s.root.OpenFile(name, flag, perm)
+		}
+		err := s.PutBucketPolicy(bucket, policy)
+		assert.Error(t, err)
+	})
+
+	t.Run("GetBucketPolicy returns error when meta read fails", func(t *testing.T) {
+		s, bucket := setup(t)
+		require.NoError(t, s.PutBucketPolicy(bucket, policy))
+		s.readAll = func(r io.Reader) ([]byte, error) {
+			return nil, errors.New("read error")
+		}
+		_, err := s.GetBucketPolicy(bucket)
+		assert.Error(t, err)
+	})
+
+	t.Run("DeleteBucketPolicy returns error when meta read fails", func(t *testing.T) {
+		s, bucket := setup(t)
+		require.NoError(t, s.PutBucketPolicy(bucket, policy))
+		s.readAll = func(r io.Reader) ([]byte, error) {
+			return nil, errors.New("read error")
+		}
+		err := s.DeleteBucketPolicy(bucket)
+		assert.Error(t, err)
+	})
+
+	t.Run("DeleteBucketPolicy returns error when write fails", func(t *testing.T) {
+		s, bucket := setup(t)
+		require.NoError(t, s.PutBucketPolicy(bucket, policy))
+		s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+			if strings.HasSuffix(name, ".bucket.json") {
+				return nil, errors.New("write error")
+			}
+			return s.root.OpenFile(name, flag, perm)
+		}
+		err := s.DeleteBucketPolicy(bucket)
+		assert.Error(t, err)
+	})
+}
