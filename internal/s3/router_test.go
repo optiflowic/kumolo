@@ -2574,6 +2574,15 @@ func TestBucketPolicyHandlers(t *testing.T) {
 			assert.Equal(t, http.StatusNoContent, w.Code)
 		})
 
+		t.Run("returns 400 on body read error", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{})
+			req := httptest.NewRequest(http.MethodPut, "/my-bucket?policy", errReader{})
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Contains(t, w.Body.String(), "MalformedPolicy")
+		})
+
 		t.Run("returns 400 MalformedPolicy on invalid input", func(t *testing.T) {
 			tests := []struct {
 				name string
