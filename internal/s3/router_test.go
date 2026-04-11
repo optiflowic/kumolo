@@ -290,7 +290,7 @@ func (m *mockStore) PutObject(
 func (m *mockStore) GetObject(_ string, _ string) (*os.File, ObjectMetadata, error) {
 	return m.getObjectFile, m.getObjectMeta, m.getObjectErr
 }
-func (m *mockStore) CopyObject(_, _, _, _ string, _ map[string]string) (ObjectMetadata, error) {
+func (m *mockStore) CopyObject(_, _, _, _, _ string, _ map[string]string) (ObjectMetadata, error) {
 	return m.copyObjectMeta, m.copyObjectErr
 }
 func (m *mockStore) DeleteObject(_ string, _ string) error { return m.deleteObjectErr }
@@ -1020,6 +1020,29 @@ func TestRouterCopyObject(t *testing.T) {
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Equal(t, "bob", w.Header().Get("x-amz-meta-author"))
+	})
+
+	t.Run("REPLACE directive replaces content type", func(t *testing.T) {
+		ro := setup(t)
+		putReq := httptest.NewRequest(
+			http.MethodPut,
+			"/src-bucket/obj.txt",
+			strings.NewReader("data"),
+		)
+		putReq.Header.Set("Content-Type", "text/plain")
+		ro.ServeHTTP(httptest.NewRecorder(), putReq)
+
+		copyReq := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
+		copyReq.Header.Set("x-amz-copy-source", "/src-bucket/obj.txt")
+		copyReq.Header.Set("x-amz-metadata-directive", "REPLACE")
+		copyReq.Header.Set("Content-Type", "application/json")
+		ro.ServeHTTP(httptest.NewRecorder(), copyReq)
+
+		req := httptest.NewRequest(http.MethodHead, "/dst-bucket/copy.txt", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
 	})
 }
 

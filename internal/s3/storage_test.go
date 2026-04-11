@@ -518,7 +518,7 @@ func TestCopyObject(t *testing.T) {
 
 	t.Run("copies object to different key in same bucket", func(t *testing.T) {
 		s, _ := setup(t)
-		_, err := s.CopyObject("src-bucket", "orig.txt", "src-bucket", "copy.txt", nil)
+		_, err := s.CopyObject("src-bucket", "orig.txt", "src-bucket", "copy.txt", "", nil)
 		require.NoError(t, err)
 		f, _, err := s.GetObject("src-bucket", "copy.txt")
 		require.NoError(t, err)
@@ -530,7 +530,7 @@ func TestCopyObject(t *testing.T) {
 
 	t.Run("copies object to different bucket", func(t *testing.T) {
 		s, _ := setup(t)
-		_, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "copy.txt", nil)
+		_, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "copy.txt", "", nil)
 		require.NoError(t, err)
 		f, _, err := s.GetObject("dst-bucket", "copy.txt")
 		require.NoError(t, err)
@@ -544,7 +544,7 @@ func TestCopyObject(t *testing.T) {
 		s, _ := setup(t)
 		origMeta, err := s.HeadObject("src-bucket", "orig.txt")
 		require.NoError(t, err)
-		meta, err := s.CopyObject("src-bucket", "orig.txt", "src-bucket", "orig.txt", nil)
+		meta, err := s.CopyObject("src-bucket", "orig.txt", "src-bucket", "orig.txt", "", nil)
 		require.NoError(t, err)
 		assert.Equal(t, origMeta.ETag, meta.ETag)
 		f, _, err := s.GetObject("src-bucket", "orig.txt")
@@ -565,7 +565,7 @@ func TestCopyObject(t *testing.T) {
 		)
 		t.Cleanup(func() { _ = os.Chmod(metaPath, 0o600) })
 
-		_, err := s.CopyObject("src-bucket", "orig.txt", "src-bucket", "orig.txt", nil)
+		_, err := s.CopyObject("src-bucket", "orig.txt", "src-bucket", "orig.txt", "", nil)
 		assert.Error(t, err)
 	})
 
@@ -573,14 +573,14 @@ func TestCopyObject(t *testing.T) {
 		s, _ := setup(t)
 		srcMeta, err := s.HeadObject("src-bucket", "orig.txt")
 		require.NoError(t, err)
-		dstMeta, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "copy.txt", nil)
+		dstMeta, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "copy.txt", "", nil)
 		require.NoError(t, err)
 		assert.True(t, !dstMeta.LastModified.Before(srcMeta.LastModified))
 	})
 
 	t.Run("copies object with nested destination key", func(t *testing.T) {
 		s, _ := setup(t)
-		_, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "path/to/copy.txt", nil)
+		_, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "path/to/copy.txt", "", nil)
 		require.NoError(t, err)
 		_, _, err = s.GetObject("dst-bucket", "path/to/copy.txt")
 		assert.NoError(t, err)
@@ -594,26 +594,26 @@ func TestCopyObject(t *testing.T) {
 			0o600,
 		))
 
-		_, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "copy.txt", nil)
+		_, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "copy.txt", "", nil)
 		assert.Error(t, err)
 		assert.NotErrorIs(t, err, ErrObjectNotFound)
 	})
 
 	t.Run("returns ErrBucketNotFound when source bucket does not exist", func(t *testing.T) {
 		s, _ := setup(t)
-		_, err := s.CopyObject("no-bucket", "orig.txt", "dst-bucket", "copy.txt", nil)
+		_, err := s.CopyObject("no-bucket", "orig.txt", "dst-bucket", "copy.txt", "", nil)
 		assert.ErrorIs(t, err, ErrBucketNotFound)
 	})
 
 	t.Run("returns ErrObjectNotFound when source key does not exist", func(t *testing.T) {
 		s, _ := setup(t)
-		_, err := s.CopyObject("src-bucket", "missing.txt", "dst-bucket", "copy.txt", nil)
+		_, err := s.CopyObject("src-bucket", "missing.txt", "dst-bucket", "copy.txt", "", nil)
 		assert.ErrorIs(t, err, ErrObjectNotFound)
 	})
 
 	t.Run("returns ErrBucketNotFound when destination bucket does not exist", func(t *testing.T) {
 		s, _ := setup(t)
-		_, err := s.CopyObject("src-bucket", "orig.txt", "no-bucket", "copy.txt", nil)
+		_, err := s.CopyObject("src-bucket", "orig.txt", "no-bucket", "copy.txt", "", nil)
 		assert.ErrorIs(t, err, ErrBucketNotFound)
 	})
 
@@ -625,7 +625,7 @@ func TestCopyObject(t *testing.T) {
 		)
 		t.Cleanup(func() { _ = os.Chmod(filepath.Join(rootPath, "dst-bucket"), 0o750) })
 
-		_, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "nested/copy.txt", nil)
+		_, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "nested/copy.txt", "", nil)
 		assert.Error(t, err)
 	})
 
@@ -633,7 +633,7 @@ func TestCopyObject(t *testing.T) {
 		s, rootPath := setup(t)
 		require.NoError(t, os.Remove(filepath.Join(rootPath, "src-bucket", "orig.txt")))
 
-		_, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "copy.txt", nil)
+		_, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "copy.txt", "", nil)
 		assert.ErrorIs(t, err, ErrObjectNotFound)
 	})
 
@@ -643,7 +643,7 @@ func TestCopyObject(t *testing.T) {
 		require.NoError(t, os.Chmod(dataPath, 0o000))
 		t.Cleanup(func() { _ = os.Chmod(dataPath, 0o600) })
 
-		_, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "copy.txt", nil)
+		_, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "copy.txt", "", nil)
 		assert.Error(t, err)
 		assert.NotErrorIs(t, err, ErrObjectNotFound)
 	})
@@ -662,7 +662,7 @@ func TestCopyObject(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		dstMeta, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "copy.txt", nil)
+		dstMeta, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "copy.txt", "", nil)
 		require.NoError(t, err)
 		assert.Equal(t, srcMeta, dstMeta.UserMetadata)
 	})
@@ -676,7 +676,14 @@ func TestCopyObject(t *testing.T) {
 		require.NoError(t, err)
 
 		newMeta := map[string]string{"y": "2"}
-		dstMeta, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "copy.txt", newMeta)
+		dstMeta, err := s.CopyObject(
+			"src-bucket",
+			"orig.txt",
+			"dst-bucket",
+			"copy.txt",
+			"",
+			newMeta,
+		)
 		require.NoError(t, err)
 		assert.Equal(t, newMeta, dstMeta.UserMetadata)
 	})
@@ -694,7 +701,7 @@ func TestCopyObject(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		dstMeta, err := s.CopyObject("src-bucket", "orig.txt", "src-bucket", "orig.txt", nil)
+		dstMeta, err := s.CopyObject("src-bucket", "orig.txt", "src-bucket", "orig.txt", "", nil)
 		require.NoError(t, err)
 		assert.Equal(t, srcMeta, dstMeta.UserMetadata)
 	})
@@ -707,9 +714,59 @@ func TestCopyObject(t *testing.T) {
 		require.NoError(t, err)
 
 		newMeta := map[string]string{"y": "2"}
-		dstMeta, err := s.CopyObject("src-bucket", "orig.txt", "src-bucket", "orig.txt", newMeta)
+		dstMeta, err := s.CopyObject(
+			"src-bucket",
+			"orig.txt",
+			"src-bucket",
+			"orig.txt",
+			"",
+			newMeta,
+		)
 		require.NoError(t, err)
 		assert.Equal(t, newMeta, dstMeta.UserMetadata)
+	})
+
+	t.Run("REPLACE directive replaces content type", func(t *testing.T) {
+		s, _ := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("src-bucket", ""))
+		require.NoError(t, s.CreateBucket("dst-bucket", ""))
+		_, err := s.PutObject(
+			"src-bucket",
+			"orig.txt",
+			strings.NewReader("hello"),
+			"text/plain",
+			nil,
+		)
+		require.NoError(t, err)
+
+		dstMeta, err := s.CopyObject(
+			"src-bucket",
+			"orig.txt",
+			"dst-bucket",
+			"copy.txt",
+			"application/json",
+			nil,
+		)
+		require.NoError(t, err)
+		assert.Equal(t, "application/json", dstMeta.ContentType)
+	})
+
+	t.Run("COPY directive inherits content type", func(t *testing.T) {
+		s, _ := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("src-bucket", ""))
+		require.NoError(t, s.CreateBucket("dst-bucket", ""))
+		_, err := s.PutObject(
+			"src-bucket",
+			"orig.txt",
+			strings.NewReader("hello"),
+			"text/plain",
+			nil,
+		)
+		require.NoError(t, err)
+
+		dstMeta, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "copy.txt", "", nil)
+		require.NoError(t, err)
+		assert.Equal(t, "text/plain", dstMeta.ContentType)
 	})
 }
 

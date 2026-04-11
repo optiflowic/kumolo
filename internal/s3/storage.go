@@ -280,11 +280,12 @@ func (s *Storage) GetObject(bucket, key string) (*os.File, ObjectMetadata, error
 	return f, meta, nil
 }
 
-// CopyObject copies an object from src to dst. userMetadata controls the
-// metadata directive: nil means COPY (inherit source metadata), non-nil means
-// REPLACE (use the provided metadata instead).
+// CopyObject copies an object from src to dst. userMetadata and contentType
+// implement the metadata directive: nil/empty means COPY (inherit from source),
+// non-nil/non-empty means REPLACE (use the provided values instead).
 func (s *Storage) CopyObject(
 	srcBucket, srcKey, dstBucket, dstKey string,
+	contentType string,
 	userMetadata map[string]string,
 ) (ObjectMetadata, error) {
 	s.mu.Lock()
@@ -306,12 +307,16 @@ func (s *Storage) CopyObject(
 	if userMetadata == nil {
 		userMetadata = srcMeta.UserMetadata
 	}
+	if contentType == "" {
+		contentType = srcMeta.ContentType
+	}
 	dstPath := filepath.Join(dstBucket, dstKey)
 	// Same-source-and-destination copy: opening the destination with O_TRUNC would
 	// truncate the source file before reading it. Just refresh LastModified instead.
 	if srcPath == dstPath {
 		meta := srcMeta
 		meta.LastModified = time.Now().UTC()
+		meta.ContentType = contentType
 		meta.UserMetadata = userMetadata
 		if err := s.writeMeta(dstPath, meta); err != nil {
 			return ObjectMetadata{}, err
@@ -331,7 +336,7 @@ func (s *Storage) CopyObject(
 			return ObjectMetadata{}, err
 		}
 	}
-	return s.writeObject(dstPath, srcFile, srcMeta.ContentType, srcMeta.ETag, userMetadata)
+	return s.writeObject(dstPath, srcFile, contentType, srcMeta.ETag, userMetadata)
 }
 
 func (s *Storage) DeleteObject(bucket, key string) error {

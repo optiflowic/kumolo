@@ -37,6 +37,7 @@ type objectStore interface {
 	GetObject(bucket, key string) (*os.File, ObjectMetadata, error)
 	CopyObject(
 		srcBucket, srcKey, dstBucket, dstKey string,
+		contentType string,
 		userMetadata map[string]string,
 	) (ObjectMetadata, error)
 	DeleteObject(bucket, key string) error
@@ -763,13 +764,24 @@ func (ro *Router) handleCopyObject(
 			"x-amz-copy-source must be in the form /<bucket>/<key>.")
 		return
 	}
-	// REPLACE directive: use metadata from the request headers.
-	// COPY directive (default): pass nil so CopyObject inherits source metadata.
-	var userMetadata map[string]string
+	// REPLACE directive: use Content-Type and x-amz-meta-* from the request.
+	// COPY directive (default): pass empty/nil so CopyObject inherits from source.
+	var (
+		contentType  string
+		userMetadata map[string]string
+	)
 	if strings.ToUpper(r.Header.Get("x-amz-metadata-directive")) == "REPLACE" {
+		contentType = r.Header.Get("Content-Type")
 		userMetadata = extractUserMetadata(r.Header)
 	}
-	meta, err := ro.storage.CopyObject(srcBucket, srcKey, dstBucket, dstKey, userMetadata)
+	meta, err := ro.storage.CopyObject(
+		srcBucket,
+		srcKey,
+		dstBucket,
+		dstKey,
+		contentType,
+		userMetadata,
+	)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrBucketNotFound):
