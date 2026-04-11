@@ -1961,3 +1961,110 @@ func TestBucketTagging(t *testing.T) {
 		assert.Error(t, err)
 	})
 }
+
+func TestBucketVersioning(t *testing.T) {
+	setup := func(t *testing.T) (*Storage, string) {
+		t.Helper()
+		s := newTestStorage(t)
+		bucket := "test-bucket"
+		require.NoError(t, s.CreateBucket(bucket, "us-east-1"))
+		return s, bucket
+	}
+
+	t.Run("PutBucketVersioning and GetBucketVersioning roundtrip", func(t *testing.T) {
+		tests := []struct {
+			name   string
+			status string
+		}{
+			{name: "Enabled", status: "Enabled"},
+			{name: "Suspended", status: "Suspended"},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				s, bucket := setup(t)
+				require.NoError(t, s.PutBucketVersioning(bucket, tt.status))
+				got, err := s.GetBucketVersioning(bucket)
+				require.NoError(t, err)
+				assert.Equal(t, tt.status, got)
+			})
+		}
+	})
+
+	t.Run("GetBucketVersioning returns empty string when not set", func(t *testing.T) {
+		s, bucket := setup(t)
+		status, err := s.GetBucketVersioning(bucket)
+		require.NoError(t, err)
+		assert.Equal(t, "", status)
+	})
+
+	t.Run("PutBucketVersioning preserves existing bucket tags", func(t *testing.T) {
+		s, bucket := setup(t)
+		require.NoError(t, s.PutBucketTagging(bucket, []Tag{{Key: "env", Value: "prod"}}))
+		require.NoError(t, s.PutBucketVersioning(bucket, "Enabled"))
+		tags, err := s.GetBucketTagging(bucket)
+		require.NoError(t, err)
+		assert.Equal(t, []Tag{{Key: "env", Value: "prod"}}, tags)
+	})
+
+	t.Run(
+		"GetBucketVersioning returns empty string when bucket.json is missing",
+		func(t *testing.T) {
+			s, bucket := setup(t)
+			require.NoError(t, s.root.Remove(bucket+".bucket.json"))
+			status, err := s.GetBucketVersioning(bucket)
+			require.NoError(t, err)
+			assert.Equal(t, "", status)
+		},
+	)
+
+	t.Run("PutBucketVersioning creates fresh meta when bucket.json is missing", func(t *testing.T) {
+		s, bucket := setup(t)
+		require.NoError(t, s.root.Remove(bucket+".bucket.json"))
+		require.NoError(t, s.PutBucketVersioning(bucket, "Enabled"))
+		status, err := s.GetBucketVersioning(bucket)
+		require.NoError(t, err)
+		assert.Equal(t, "Enabled", status)
+	})
+
+	t.Run("PutBucketVersioning returns ErrBucketNotFound for missing bucket", func(t *testing.T) {
+		s := newTestStorage(t)
+		err := s.PutBucketVersioning("no-bucket", "Enabled")
+		assert.ErrorIs(t, err, ErrBucketNotFound)
+	})
+
+	t.Run("GetBucketVersioning returns ErrBucketNotFound for missing bucket", func(t *testing.T) {
+		s := newTestStorage(t)
+		_, err := s.GetBucketVersioning("no-bucket")
+		assert.ErrorIs(t, err, ErrBucketNotFound)
+	})
+
+	t.Run("PutBucketVersioning returns error when meta read fails", func(t *testing.T) {
+		s, bucket := setup(t)
+		s.readAll = func(r io.Reader) ([]byte, error) {
+			return nil, errors.New("read error")
+		}
+		err := s.PutBucketVersioning(bucket, "Enabled")
+		assert.Error(t, err)
+	})
+
+	t.Run("PutBucketVersioning returns error when write fails", func(t *testing.T) {
+		s, bucket := setup(t)
+		s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+			if strings.HasSuffix(name, ".bucket.json") {
+				return nil, errors.New("write error")
+			}
+			return s.root.OpenFile(name, flag, perm)
+		}
+		err := s.PutBucketVersioning(bucket, "Enabled")
+		assert.Error(t, err)
+	})
+
+	t.Run("GetBucketVersioning returns error when meta read fails", func(t *testing.T) {
+		s, bucket := setup(t)
+		s.readAll = func(r io.Reader) ([]byte, error) {
+			return nil, errors.New("read error")
+		}
+		_, err := s.GetBucketVersioning(bucket)
+		assert.Error(t, err)
+	})
+}

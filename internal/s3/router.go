@@ -58,6 +58,12 @@ type bucketTaggingStore interface {
 	DeleteBucketTagging(bucket string) error
 }
 
+// bucketVersioningStore is the subset of Storage used by the Router for bucket versioning operations.
+type bucketVersioningStore interface {
+	PutBucketVersioning(bucket, status string) error
+	GetBucketVersioning(bucket string) (string, error)
+}
+
 // Router handles S3 API requests using path-style URLs: /<bucket>/<key>
 type Router struct {
 	storage interface {
@@ -66,6 +72,7 @@ type Router struct {
 		multipartStore
 		objectTaggingStore
 		bucketTaggingStore
+		bucketVersioningStore
 	}
 	now func() time.Time // injectable for testing; defaults to time.Now
 }
@@ -157,6 +164,8 @@ func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, bucket str
 		switch {
 		case q.Has("tagging"):
 			ro.handlePutBucketTagging(w, r, bucket)
+		case q.Has("versioning"):
+			ro.handlePutBucketVersioning(w, r, bucket)
 		default:
 			ro.handleCreateBucket(w, r, bucket)
 		}
@@ -173,6 +182,8 @@ func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, bucket str
 		switch {
 		case q.Has("tagging"):
 			ro.handleGetBucketTagging(w, r, bucket)
+		case q.Has("versioning"):
+			ro.handleGetBucketVersioning(w, r, bucket)
 		case q.Has("location"):
 			ro.handleGetBucketLocation(w, r, bucket)
 		case q.Has("uploads"):
@@ -1065,6 +1076,93 @@ func (ro *Router) handleDeleteBucketTagging(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (ro *Router) handlePutBucketVersioning(w http.ResponseWriter, r *http.Request, bucket string) {
+	var req xmlVersioningConfiguration
+	if err := xml.NewDecoder(r.Body).Decode(&req); err != nil {
+		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			"malformed versioning XML",
+			"bucket",
+			bucket,
+		)
+		writeError(w, r, http.StatusBadRequest, "MalformedXML",
+			"The XML you provided was not well-formed.")
+		return
+	}
+	if req.Status != "Enabled" && req.Status != "Suspended" {
+		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			"invalid versioning status",
+			"bucket",
+			bucket,
+			"status",
+			req.Status,
+		)
+		writeError(w, r, http.StatusBadRequest, "IllegalVersioningConfigurationException",
+			"The versioning configuration specified is invalid.")
+		return
+	}
+	if err := ro.storage.PutBucketVersioning(bucket, req.Status); err != nil {
+		if errors.Is(err, ErrBucketNotFound) {
+			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"bucket not found",
+				"bucket",
+				bucket,
+			)
+			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+				"The specified bucket does not exist.")
+			return
+		}
+		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			"failed to put bucket versioning",
+			"bucket",
+			bucket,
+			"err",
+			err,
+		)
+		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	slog.Info( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+		"bucket versioning updated",
+		"bucket",
+		bucket,
+		"status",
+		req.Status,
+	)
+}
+
+func (ro *Router) handleGetBucketVersioning(w http.ResponseWriter, r *http.Request, bucket string) {
+	status, err := ro.storage.GetBucketVersioning(bucket)
+	if err != nil {
+		if errors.Is(err, ErrBucketNotFound) {
+			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"bucket not found",
+				"bucket",
+				bucket,
+			)
+			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+				"The specified bucket does not exist.")
+			return
+		}
+		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			"failed to get bucket versioning",
+			"bucket",
+			bucket,
+			"err",
+			err,
+		)
+		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+		"get bucket versioning",
+		"bucket",
+		bucket,
+		"status",
+		status,
+	)
+	writeXML(w, http.StatusOK, xmlVersioningConfiguration{Status: status})
+}
+
 func (ro *Router) handlePutObjectTagging(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -1848,4 +1946,9 @@ type xmlDeleteError struct {
 	Key     string `xml:"Key"`
 	Code    string `xml:"Code"`
 	Message string `xml:"Message"`
+}
+
+type xmlVersioningConfiguration struct {
+	XMLName xml.Name `xml:"VersioningConfiguration"`
+	Status  string   `xml:"Status,omitempty"`
 }

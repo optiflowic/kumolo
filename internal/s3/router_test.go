@@ -257,6 +257,9 @@ type mockStore struct {
 	getBucketTaggingTags        []Tag
 	getBucketTaggingErr         error
 	deleteBucketTaggingErr      error
+	putBucketVersioningErr      error
+	getBucketVersioningStatus   string
+	getBucketVersioningErr      error
 }
 
 func (m *mockStore) ListBuckets() ([]BucketInfo, error)    { return nil, m.listBucketsErr }
@@ -315,6 +318,12 @@ func (m *mockStore) GetBucketTagging(_ string) ([]Tag, error) {
 }
 func (m *mockStore) DeleteBucketTagging(_ string) error {
 	return m.deleteBucketTaggingErr
+}
+func (m *mockStore) PutBucketVersioning(_ string, _ string) error {
+	return m.putBucketVersioningErr
+}
+func (m *mockStore) GetBucketVersioning(_ string) (string, error) {
+	return m.getBucketVersioningStatus, m.getBucketVersioningErr
 }
 
 func newRouterWithMock(store *mockStore) *Router {
@@ -2361,6 +2370,134 @@ func TestBucketTaggingHandlers(t *testing.T) {
 		t.Run("returns 500 on storage error", func(t *testing.T) {
 			ro := newRouterWithMock(&mockStore{deleteBucketTaggingErr: errors.New("disk failure")})
 			req := httptest.NewRequest(http.MethodDelete, "/my-bucket?tagging", nil)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusInternalServerError, w.Code)
+		})
+	})
+}
+
+func TestBucketVersioningHandlers(t *testing.T) {
+	t.Run("PutBucketVersioning", func(t *testing.T) {
+		t.Run("returns 200 for valid statuses", func(t *testing.T) {
+			tests := []struct {
+				name   string
+				status string
+			}{
+				{name: "Enabled", status: "Enabled"},
+				{name: "Suspended", status: "Suspended"},
+			}
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					ro := newRouterWithMock(&mockStore{})
+					body := `<VersioningConfiguration><Status>` + tt.status + `</Status></VersioningConfiguration>`
+					req := httptest.NewRequest(
+						http.MethodPut,
+						"/my-bucket?versioning",
+						strings.NewReader(body),
+					)
+					w := httptest.NewRecorder()
+					ro.ServeHTTP(w, req)
+					assert.Equal(t, http.StatusOK, w.Code)
+				})
+			}
+		})
+
+		t.Run("returns 400 on malformed XML", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{})
+			req := httptest.NewRequest(
+				http.MethodPut,
+				"/my-bucket?versioning",
+				strings.NewReader("not-xml"),
+			)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+		})
+
+		t.Run("returns 400 on invalid status", func(t *testing.T) {
+			tests := []struct {
+				name string
+				body string
+			}{
+				{
+					name: "invalid value",
+					body: `<VersioningConfiguration><Status>Invalid</Status></VersioningConfiguration>`,
+				},
+				{name: "empty status", body: `<VersioningConfiguration></VersioningConfiguration>`},
+			}
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					ro := newRouterWithMock(&mockStore{})
+					req := httptest.NewRequest(
+						http.MethodPut,
+						"/my-bucket?versioning",
+						strings.NewReader(tt.body),
+					)
+					w := httptest.NewRecorder()
+					ro.ServeHTTP(w, req)
+					assert.Equal(t, http.StatusBadRequest, w.Code)
+				})
+			}
+		})
+
+		t.Run("returns 404 on bucket not found", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{putBucketVersioningErr: ErrBucketNotFound})
+			body := `<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`
+			req := httptest.NewRequest(
+				http.MethodPut,
+				"/my-bucket?versioning",
+				strings.NewReader(body),
+			)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusNotFound, w.Code)
+		})
+
+		t.Run("returns 500 on storage error", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{putBucketVersioningErr: errors.New("disk full")})
+			body := `<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`
+			req := httptest.NewRequest(
+				http.MethodPut,
+				"/my-bucket?versioning",
+				strings.NewReader(body),
+			)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusInternalServerError, w.Code)
+		})
+	})
+
+	t.Run("GetBucketVersioning", func(t *testing.T) {
+		t.Run("returns versioning status", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{getBucketVersioningStatus: "Enabled"})
+			req := httptest.NewRequest(http.MethodGet, "/my-bucket?versioning", nil)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Contains(t, w.Body.String(), "Enabled")
+		})
+
+		t.Run("returns empty VersioningConfiguration when not set", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{getBucketVersioningStatus: ""})
+			req := httptest.NewRequest(http.MethodGet, "/my-bucket?versioning", nil)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Contains(t, w.Body.String(), "VersioningConfiguration")
+		})
+
+		t.Run("returns 404 on bucket not found", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{getBucketVersioningErr: ErrBucketNotFound})
+			req := httptest.NewRequest(http.MethodGet, "/my-bucket?versioning", nil)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusNotFound, w.Code)
+		})
+
+		t.Run("returns 500 on storage error", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{getBucketVersioningErr: errors.New("disk failure")})
+			req := httptest.NewRequest(http.MethodGet, "/my-bucket?versioning", nil)
 			w := httptest.NewRecorder()
 			ro.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusInternalServerError, w.Code)
