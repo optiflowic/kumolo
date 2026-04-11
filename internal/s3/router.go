@@ -1275,7 +1275,7 @@ func (ro *Router) handlePutBucketPolicy(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	trimmed := bytes.TrimSpace(body)
-	if !json.Valid(trimmed) || len(trimmed) == 0 || trimmed[0] != '{' {
+	if !json.Valid(trimmed) || trimmed[0] != '{' {
 		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
 			"invalid policy JSON",
 			"bucket",
