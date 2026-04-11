@@ -260,6 +260,10 @@ type mockStore struct {
 	putBucketVersioningErr      error
 	getBucketVersioningStatus   string
 	getBucketVersioningErr      error
+	putBucketCorsErr            error
+	getBucketCorsRules          []CORSRule
+	getBucketCorsErr            error
+	deleteBucketCorsErr         error
 }
 
 func (m *mockStore) ListBuckets() ([]BucketInfo, error)    { return nil, m.listBucketsErr }
@@ -324,6 +328,15 @@ func (m *mockStore) PutBucketVersioning(_ string, _ string) error {
 }
 func (m *mockStore) GetBucketVersioning(_ string) (string, error) {
 	return m.getBucketVersioningStatus, m.getBucketVersioningErr
+}
+func (m *mockStore) PutBucketCors(_ string, _ []CORSRule) error {
+	return m.putBucketCorsErr
+}
+func (m *mockStore) GetBucketCors(_ string) ([]CORSRule, error) {
+	return m.getBucketCorsRules, m.getBucketCorsErr
+}
+func (m *mockStore) DeleteBucketCors(_ string) error {
+	return m.deleteBucketCorsErr
 }
 
 func newRouterWithMock(store *mockStore) *Router {
@@ -2370,6 +2383,161 @@ func TestBucketTaggingHandlers(t *testing.T) {
 		t.Run("returns 500 on storage error", func(t *testing.T) {
 			ro := newRouterWithMock(&mockStore{deleteBucketTaggingErr: errors.New("disk failure")})
 			req := httptest.NewRequest(http.MethodDelete, "/my-bucket?tagging", nil)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusInternalServerError, w.Code)
+		})
+	})
+}
+
+func TestBucketCORSHandlers(t *testing.T) {
+	const validBody = `<CORSConfiguration><CORSRule><AllowedOrigin>*</AllowedOrigin><AllowedMethod>GET</AllowedMethod></CORSRule></CORSConfiguration>`
+
+	t.Run("PutBucketCors", func(t *testing.T) {
+		t.Run("returns 200 on success", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{})
+			req := httptest.NewRequest(
+				http.MethodPut,
+				"/my-bucket?cors",
+				strings.NewReader(validBody),
+			)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+		})
+
+		t.Run("returns 400 on invalid input", func(t *testing.T) {
+			tests := []struct {
+				name string
+				body string
+			}{
+				{name: "malformed XML", body: "not-xml"},
+				{name: "empty rules", body: `<CORSConfiguration></CORSConfiguration>`},
+				{
+					name: "rule missing AllowedOrigin",
+					body: `<CORSConfiguration><CORSRule><AllowedMethod>GET</AllowedMethod></CORSRule></CORSConfiguration>`,
+				},
+				{
+					name: "rule missing AllowedMethod",
+					body: `<CORSConfiguration><CORSRule><AllowedOrigin>*</AllowedOrigin></CORSRule></CORSConfiguration>`,
+				},
+			}
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					ro := newRouterWithMock(&mockStore{})
+					req := httptest.NewRequest(
+						http.MethodPut,
+						"/my-bucket?cors",
+						strings.NewReader(tt.body),
+					)
+					w := httptest.NewRecorder()
+					ro.ServeHTTP(w, req)
+					assert.Equal(t, http.StatusBadRequest, w.Code)
+				})
+			}
+		})
+
+		t.Run("returns 400 with InvalidArgument on invalid method", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{})
+			body := `<CORSConfiguration><CORSRule><AllowedOrigin>*</AllowedOrigin><AllowedMethod>PATCH</AllowedMethod></CORSRule></CORSConfiguration>`
+			req := httptest.NewRequest(http.MethodPut, "/my-bucket?cors", strings.NewReader(body))
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Contains(t, w.Body.String(), "InvalidArgument")
+		})
+
+		t.Run("returns 404 on bucket not found", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{putBucketCorsErr: ErrBucketNotFound})
+			req := httptest.NewRequest(
+				http.MethodPut,
+				"/my-bucket?cors",
+				strings.NewReader(validBody),
+			)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusNotFound, w.Code)
+		})
+
+		t.Run("returns 500 on storage error", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{putBucketCorsErr: errors.New("disk full")})
+			req := httptest.NewRequest(
+				http.MethodPut,
+				"/my-bucket?cors",
+				strings.NewReader(validBody),
+			)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusInternalServerError, w.Code)
+		})
+	})
+
+	t.Run("GetBucketCors", func(t *testing.T) {
+		t.Run("returns cors configuration", func(t *testing.T) {
+			rules := []CORSRule{{
+				AllowedOrigins: []string{"http://example.com"},
+				AllowedMethods: []string{"GET", "PUT"},
+				AllowedHeaders: []string{"*"},
+				ExposeHeaders:  []string{"x-amz-meta-custom"},
+				MaxAgeSeconds:  3000,
+			}}
+			ro := newRouterWithMock(&mockStore{getBucketCorsRules: rules})
+			req := httptest.NewRequest(http.MethodGet, "/my-bucket?cors", nil)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Contains(t, w.Body.String(), "CORSConfiguration")
+			assert.Contains(t, w.Body.String(), "http://example.com")
+		})
+
+		t.Run("returns 404 when no cors configuration", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{getBucketCorsErr: ErrNoCORSConfiguration})
+			req := httptest.NewRequest(http.MethodGet, "/my-bucket?cors", nil)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusNotFound, w.Code)
+			assert.Contains(t, w.Body.String(), "NoSuchCORSConfiguration")
+		})
+
+		t.Run("returns 404 on bucket not found", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{getBucketCorsErr: ErrBucketNotFound})
+			req := httptest.NewRequest(http.MethodGet, "/my-bucket?cors", nil)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusNotFound, w.Code)
+			assert.Contains(t, w.Body.String(), "NoSuchBucket")
+		})
+
+		t.Run("returns 500 on storage error", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{getBucketCorsErr: errors.New("disk failure")})
+			req := httptest.NewRequest(http.MethodGet, "/my-bucket?cors", nil)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusInternalServerError, w.Code)
+		})
+	})
+
+	t.Run("DeleteBucketCors", func(t *testing.T) {
+		t.Run("returns 204 on success", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{})
+			req := httptest.NewRequest(http.MethodDelete, "/my-bucket?cors", nil)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusNoContent, w.Code)
+		})
+
+		t.Run("returns 404 on bucket not found", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{deleteBucketCorsErr: ErrBucketNotFound})
+			req := httptest.NewRequest(http.MethodDelete, "/my-bucket?cors", nil)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusNotFound, w.Code)
+			assert.Contains(t, w.Body.String(), "NoSuchBucket")
+		})
+
+		t.Run("returns 500 on storage error", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{deleteBucketCorsErr: errors.New("disk failure")})
+			req := httptest.NewRequest(http.MethodDelete, "/my-bucket?cors", nil)
 			w := httptest.NewRecorder()
 			ro.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusInternalServerError, w.Code)
