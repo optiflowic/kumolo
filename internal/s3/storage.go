@@ -280,9 +280,9 @@ func (s *Storage) GetObject(bucket, key string) (*os.File, ObjectMetadata, error
 	return f, meta, nil
 }
 
-// CopyObject copies an object from src to dst. userMetadata and contentType
-// implement the metadata directive: nil/empty means COPY (inherit from source),
-// non-nil/non-empty means REPLACE (use the provided values instead).
+// CopyObject copies an object from src to dst. nil userMetadata and empty
+// contentType mean COPY (inherit from source). Non-nil userMetadata (even an
+// empty map) and non-empty contentType mean REPLACE (use provided values).
 func (s *Storage) CopyObject(
 	srcBucket, srcKey, dstBucket, dstKey string,
 	contentType string,

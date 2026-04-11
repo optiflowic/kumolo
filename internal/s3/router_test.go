@@ -1044,6 +1044,53 @@ func TestRouterCopyObject(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
 	})
+
+	t.Run("REPLACE directive with no metadata headers clears user metadata", func(t *testing.T) {
+		ro := setup(t)
+		putReq := httptest.NewRequest(
+			http.MethodPut,
+			"/src-bucket/obj.txt",
+			strings.NewReader("data"),
+		)
+		putReq.Header.Set("x-amz-meta-author", "alice")
+		ro.ServeHTTP(httptest.NewRecorder(), putReq)
+
+		copyReq := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
+		copyReq.Header.Set("x-amz-copy-source", "/src-bucket/obj.txt")
+		copyReq.Header.Set("x-amz-metadata-directive", "REPLACE")
+		ro.ServeHTTP(httptest.NewRecorder(), copyReq)
+
+		req := httptest.NewRequest(http.MethodHead, "/dst-bucket/copy.txt", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Empty(t, w.Header().Get("x-amz-meta-author"))
+	})
+
+	t.Run(
+		"REPLACE directive with no Content-Type defaults to application/octet-stream",
+		func(t *testing.T) {
+			ro := setup(t)
+			putReq := httptest.NewRequest(
+				http.MethodPut,
+				"/src-bucket/obj.txt",
+				strings.NewReader("data"),
+			)
+			putReq.Header.Set("Content-Type", "text/plain")
+			ro.ServeHTTP(httptest.NewRecorder(), putReq)
+
+			copyReq := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
+			copyReq.Header.Set("x-amz-copy-source", "/src-bucket/obj.txt")
+			copyReq.Header.Set("x-amz-metadata-directive", "REPLACE")
+			ro.ServeHTTP(httptest.NewRecorder(), copyReq)
+
+			req := httptest.NewRequest(http.MethodHead, "/dst-bucket/copy.txt", nil)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Equal(t, "application/octet-stream", w.Header().Get("Content-Type"))
+		},
+	)
 }
 
 func TestRouterGetBucketLocation(t *testing.T) {

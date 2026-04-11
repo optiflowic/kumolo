@@ -772,7 +772,15 @@ func (ro *Router) handleCopyObject(
 	)
 	if strings.ToUpper(r.Header.Get("x-amz-metadata-directive")) == "REPLACE" {
 		contentType = r.Header.Get("Content-Type")
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+		// Use empty non-nil map when no x-amz-meta-* headers are present so that
+		// CopyObject can distinguish REPLACE-with-no-metadata from COPY (nil).
 		userMetadata = extractUserMetadata(r.Header)
+		if userMetadata == nil {
+			userMetadata = map[string]string{}
+		}
 	}
 	meta, err := ro.storage.CopyObject(
 		srcBucket,
