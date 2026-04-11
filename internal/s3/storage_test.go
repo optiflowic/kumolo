@@ -1821,3 +1821,143 @@ func TestObjectTagging(t *testing.T) {
 		assert.Error(t, err)
 	})
 }
+
+func TestBucketTagging(t *testing.T) {
+	setup := func(t *testing.T) (*Storage, string) {
+		t.Helper()
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("bucket", "us-east-1"))
+		return s, "bucket"
+	}
+
+	t.Run("PutBucketTagging and GetBucketTagging roundtrip", func(t *testing.T) {
+		s, bucket := setup(t)
+		tags := []Tag{{Key: "env", Value: "prod"}, {Key: "team", Value: "backend"}}
+		require.NoError(t, s.PutBucketTagging(bucket, tags))
+		got, err := s.GetBucketTagging(bucket)
+		require.NoError(t, err)
+		assert.Equal(t, tags, got)
+	})
+
+	t.Run("GetBucketTagging returns empty slice when no tags set", func(t *testing.T) {
+		s, bucket := setup(t)
+		got, err := s.GetBucketTagging(bucket)
+		require.NoError(t, err)
+		assert.Empty(t, got)
+	})
+
+	t.Run("PutBucketTagging preserves bucket region", func(t *testing.T) {
+		s, bucket := setup(t)
+		require.NoError(t, s.PutBucketTagging(bucket, []Tag{{Key: "k", Value: "v"}}))
+		region, err := s.GetBucketRegion(bucket)
+		require.NoError(t, err)
+		assert.Equal(t, "us-east-1", region)
+	})
+
+	t.Run("DeleteBucketTagging removes tags", func(t *testing.T) {
+		s, bucket := setup(t)
+		require.NoError(t, s.PutBucketTagging(bucket, []Tag{{Key: "k", Value: "v"}}))
+		require.NoError(t, s.DeleteBucketTagging(bucket))
+		got, err := s.GetBucketTagging(bucket)
+		require.NoError(t, err)
+		assert.Empty(t, got)
+	})
+
+	t.Run("DeleteBucketTagging on bucket with no tags is a no-op", func(t *testing.T) {
+		s, bucket := setup(t)
+		assert.NoError(t, s.DeleteBucketTagging(bucket))
+	})
+
+	t.Run("PutBucketTagging creates fresh meta when bucket.json is missing", func(t *testing.T) {
+		s, bucket := setup(t)
+		require.NoError(t, s.root.Remove(bucket+".bucket.json"))
+		require.NoError(t, s.PutBucketTagging(bucket, []Tag{{Key: "k", Value: "v"}}))
+		got, err := s.GetBucketTagging(bucket)
+		require.NoError(t, err)
+		assert.Equal(t, []Tag{{Key: "k", Value: "v"}}, got)
+	})
+
+	t.Run("GetBucketTagging returns empty slice when bucket.json is missing", func(t *testing.T) {
+		s, bucket := setup(t)
+		require.NoError(t, s.root.Remove(bucket+".bucket.json"))
+		got, err := s.GetBucketTagging(bucket)
+		require.NoError(t, err)
+		assert.Empty(t, got)
+	})
+
+	t.Run("DeleteBucketTagging is no-op when bucket.json is missing", func(t *testing.T) {
+		s, bucket := setup(t)
+		require.NoError(t, s.root.Remove(bucket+".bucket.json"))
+		assert.NoError(t, s.DeleteBucketTagging(bucket))
+	})
+
+	t.Run("PutBucketTagging returns ErrBucketNotFound for missing bucket", func(t *testing.T) {
+		s := newTestStorage(t)
+		err := s.PutBucketTagging("no-bucket", []Tag{})
+		assert.ErrorIs(t, err, ErrBucketNotFound)
+	})
+
+	t.Run("GetBucketTagging returns ErrBucketNotFound for missing bucket", func(t *testing.T) {
+		s := newTestStorage(t)
+		_, err := s.GetBucketTagging("no-bucket")
+		assert.ErrorIs(t, err, ErrBucketNotFound)
+	})
+
+	t.Run("DeleteBucketTagging returns ErrBucketNotFound for missing bucket", func(t *testing.T) {
+		s := newTestStorage(t)
+		err := s.DeleteBucketTagging("no-bucket")
+		assert.ErrorIs(t, err, ErrBucketNotFound)
+	})
+
+	t.Run("PutBucketTagging returns error when meta read fails", func(t *testing.T) {
+		s, bucket := setup(t)
+		s.readAll = func(r io.Reader) ([]byte, error) {
+			return nil, errors.New("read error")
+		}
+		err := s.PutBucketTagging(bucket, []Tag{{Key: "k", Value: "v"}})
+		assert.Error(t, err)
+	})
+
+	t.Run("PutBucketTagging returns error when write fails", func(t *testing.T) {
+		s, bucket := setup(t)
+		s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+			if strings.HasSuffix(name, ".bucket.json") {
+				return nil, errors.New("write error")
+			}
+			return s.root.OpenFile(name, flag, perm)
+		}
+		err := s.PutBucketTagging(bucket, []Tag{{Key: "k", Value: "v"}})
+		assert.Error(t, err)
+	})
+
+	t.Run("GetBucketTagging returns error when meta read fails", func(t *testing.T) {
+		s, bucket := setup(t)
+		s.readAll = func(r io.Reader) ([]byte, error) {
+			return nil, errors.New("read error")
+		}
+		_, err := s.GetBucketTagging(bucket)
+		assert.Error(t, err)
+	})
+
+	t.Run("DeleteBucketTagging returns error when meta read fails", func(t *testing.T) {
+		s, bucket := setup(t)
+		s.readAll = func(r io.Reader) ([]byte, error) {
+			return nil, errors.New("read error")
+		}
+		err := s.DeleteBucketTagging(bucket)
+		assert.Error(t, err)
+	})
+
+	t.Run("DeleteBucketTagging returns error when write fails", func(t *testing.T) {
+		s, bucket := setup(t)
+		require.NoError(t, s.PutBucketTagging(bucket, []Tag{{Key: "k", Value: "v"}}))
+		s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+			if strings.HasSuffix(name, ".bucket.json") {
+				return nil, errors.New("write error")
+			}
+			return s.root.OpenFile(name, flag, perm)
+		}
+		err := s.DeleteBucketTagging(bucket)
+		assert.Error(t, err)
+	})
+}

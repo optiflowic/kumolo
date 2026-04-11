@@ -51,6 +51,13 @@ type objectTaggingStore interface {
 	DeleteObjectTagging(bucket, key string) error
 }
 
+// bucketTaggingStore is the subset of Storage used by the Router for bucket tagging operations.
+type bucketTaggingStore interface {
+	PutBucketTagging(bucket string, tags []Tag) error
+	GetBucketTagging(bucket string) ([]Tag, error)
+	DeleteBucketTagging(bucket string) error
+}
+
 // Router handles S3 API requests using path-style URLs: /<bucket>/<key>
 type Router struct {
 	storage interface {
@@ -58,6 +65,7 @@ type Router struct {
 		objectStore
 		multipartStore
 		objectTaggingStore
+		bucketTaggingStore
 	}
 	now func() time.Time // injectable for testing; defaults to time.Now
 }
@@ -143,26 +151,39 @@ func (ro *Router) routeRoot(w http.ResponseWriter, r *http.Request) {
 }
 
 func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, bucket string) {
+	q := r.URL.Query()
 	switch r.Method {
 	case http.MethodPut:
-		ro.handleCreateBucket(w, r, bucket)
+		switch {
+		case q.Has("tagging"):
+			ro.handlePutBucketTagging(w, r, bucket)
+		default:
+			ro.handleCreateBucket(w, r, bucket)
+		}
 	case http.MethodDelete:
-		ro.handleDeleteBucket(w, r, bucket)
+		switch {
+		case q.Has("tagging"):
+			ro.handleDeleteBucketTagging(w, r, bucket)
+		default:
+			ro.handleDeleteBucket(w, r, bucket)
+		}
 	case http.MethodHead:
 		ro.handleHeadBucket(w, r, bucket)
 	case http.MethodGet:
 		switch {
-		case r.URL.Query().Has("location"):
+		case q.Has("tagging"):
+			ro.handleGetBucketTagging(w, r, bucket)
+		case q.Has("location"):
 			ro.handleGetBucketLocation(w, r, bucket)
-		case r.URL.Query().Has("uploads"):
+		case q.Has("uploads"):
 			ro.handleListMultipartUploads(w, r, bucket)
-		case r.URL.Query().Get("list-type") == "2":
+		case q.Get("list-type") == "2":
 			ro.handleListObjectsV2(w, r, bucket)
 		default:
 			ro.handleListObjects(w, r, bucket)
 		}
 	case http.MethodPost:
-		if r.URL.Query().Has("delete") {
+		if q.Has("delete") {
 			ro.handleDeleteObjects(w, r, bucket)
 		} else {
 			writeNotImplemented(w, r)
@@ -872,6 +893,176 @@ func (ro *Router) handleDeleteObject(w http.ResponseWriter, r *http.Request, buc
 		)
 		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 	}
+}
+
+func (ro *Router) handlePutBucketTagging(w http.ResponseWriter, r *http.Request, bucket string) {
+	var req xmlTagging
+	if err := xml.NewDecoder(r.Body).Decode(&req); err != nil {
+		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			"malformed tagging XML",
+			"bucket",
+			bucket,
+		)
+		writeError(
+			w,
+			r,
+			http.StatusBadRequest,
+			"MalformedXML",
+			"The XML you provided was not well-formed.",
+		)
+		return
+	}
+	if len(req.TagSet) > 50 {
+		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			"too many tags",
+			"bucket",
+			bucket,
+			"count",
+			len(req.TagSet),
+		)
+		writeError(w, r, http.StatusBadRequest, "InvalidTag",
+			"Bucket tag cannot be greater than 50")
+		return
+	}
+	seen := make(map[string]struct{}, len(req.TagSet))
+	for _, t := range req.TagSet {
+		if utf8.RuneCountInString(t.Key) > 128 {
+			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"tag key too long",
+				"bucket",
+				bucket,
+			)
+			writeError(w, r, http.StatusBadRequest, "InvalidTag",
+				"The TagKey you have provided is invalid")
+			return
+		}
+		if utf8.RuneCountInString(t.Value) > 256 {
+			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"tag value too long",
+				"bucket",
+				bucket,
+			)
+			writeError(w, r, http.StatusBadRequest, "InvalidTag",
+				"The TagValue you have provided is invalid")
+			return
+		}
+		if _, dup := seen[t.Key]; dup {
+			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"duplicate tag key",
+				"bucket",
+				bucket,
+			)
+			writeError(w, r, http.StatusBadRequest, "InvalidTag",
+				"Cannot provide multiple Tags with the same key")
+			return
+		}
+		seen[t.Key] = struct{}{}
+	}
+	tags := make([]Tag, len(req.TagSet))
+	for i, t := range req.TagSet {
+		tags[i] = Tag(t)
+	}
+	if err := ro.storage.PutBucketTagging(bucket, tags); err != nil {
+		if errors.Is(err, ErrBucketNotFound) {
+			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"bucket not found",
+				"bucket",
+				bucket,
+			)
+			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+				"The specified bucket does not exist.")
+			return
+		}
+		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			"failed to put bucket tagging",
+			"bucket",
+			bucket,
+			"err",
+			err,
+		)
+		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	slog.Info( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+		"bucket tagging updated",
+		"bucket",
+		bucket,
+	)
+}
+
+func (ro *Router) handleGetBucketTagging(w http.ResponseWriter, r *http.Request, bucket string) {
+	tags, err := ro.storage.GetBucketTagging(bucket)
+	if err != nil {
+		if errors.Is(err, ErrBucketNotFound) {
+			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"bucket not found",
+				"bucket",
+				bucket,
+			)
+			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+				"The specified bucket does not exist.")
+			return
+		}
+		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			"failed to get bucket tagging",
+			"bucket",
+			bucket,
+			"err",
+			err,
+		)
+		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	if len(tags) == 0 {
+		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			"no tag set on bucket",
+			"bucket",
+			bucket,
+		)
+		writeError(w, r, http.StatusNotFound, "NoSuchTagSet",
+			"There is no tag set associated with the bucket.")
+		return
+	}
+	slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+		"get bucket tagging",
+		"bucket",
+		bucket,
+	)
+	xmlTags := make([]xmlTag, len(tags))
+	for i, t := range tags {
+		xmlTags[i] = xmlTag(t)
+	}
+	writeXML(w, http.StatusOK, xmlTagging{TagSet: xmlTags})
+}
+
+func (ro *Router) handleDeleteBucketTagging(w http.ResponseWriter, r *http.Request, bucket string) {
+	if err := ro.storage.DeleteBucketTagging(bucket); err != nil {
+		if errors.Is(err, ErrBucketNotFound) {
+			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"bucket not found",
+				"bucket",
+				bucket,
+			)
+			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+				"The specified bucket does not exist.")
+			return
+		}
+		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			"failed to delete bucket tagging",
+			"bucket",
+			bucket,
+			"err",
+			err,
+		)
+		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	slog.Info( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+		"bucket tagging deleted",
+		"bucket",
+		bucket,
+	)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (ro *Router) handlePutObjectTagging(
