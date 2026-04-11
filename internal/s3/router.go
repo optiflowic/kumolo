@@ -988,7 +988,6 @@ func (ro *Router) handlePutBucketTagging(w http.ResponseWriter, r *http.Request,
 		"bucket",
 		bucket,
 	)
-	w.WriteHeader(http.StatusOK)
 }
 
 func (ro *Router) handleGetBucketTagging(w http.ResponseWriter, r *http.Request, bucket string) {

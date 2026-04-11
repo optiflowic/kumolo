@@ -587,6 +587,9 @@ func (s *Storage) DeleteBucketTagging(bucket string) error {
 		}
 		return err
 	}
+	if meta.Tags == nil {
+		return nil
+	}
 	meta.Tags = nil
 	return s.writeBucketMeta(bucket, meta)
 }
