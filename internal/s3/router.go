@@ -2107,8 +2107,6 @@ func (ro *Router) handleHeadBucket(w http.ResponseWriter, r *http.Request, bucke
 	w.WriteHeader(http.StatusOK)
 }
 
-// parsePath splits a path-style S3 URL into bucket and key:
-// "/my-bucket/path/to/object" → ("my-bucket", "path/to/object")
 // extractUserMetadata collects all x-amz-meta-* headers from h and returns
 // them as a map keyed by the suffix after the prefix (lowercased). Returns nil
 // if no such headers are present.
@@ -2126,6 +2124,8 @@ func extractUserMetadata(h http.Header) map[string]string {
 	return m
 }
 
+// parsePath splits a path-style S3 URL into bucket and key:
+// "/my-bucket/path/to/object" → ("my-bucket", "path/to/object")
 func parsePath(path string) (bucket, key string) {
 	path = strings.TrimPrefix(path, "/")
 	if path == "" {

@@ -303,7 +303,6 @@ func (s *Storage) CopyObject(
 	if !s.bucketExistsLocked(dstBucket) {
 		return ObjectMetadata{}, ErrBucketNotFound
 	}
-	// When userMetadata is nil (COPY directive), inherit source user metadata.
 	if userMetadata == nil {
 		userMetadata = srcMeta.UserMetadata
 	}
