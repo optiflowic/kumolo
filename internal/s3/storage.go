@@ -21,8 +21,9 @@ import (
 
 // bucketMeta is stored as a <bucket>.bucket.json file at the storage root.
 type bucketMeta struct {
-	Region string `json:"region"`
-	Tags   []Tag  `json:"tags,omitempty"`
+	Region           string `json:"region"`
+	Tags             []Tag  `json:"tags,omitempty"`
+	VersioningStatus string `json:"versioningStatus,omitempty"`
 }
 
 // ObjectMetadata is stored as a sidecar .meta.json file alongside each object.
@@ -592,6 +593,39 @@ func (s *Storage) DeleteBucketTagging(bucket string) error {
 	}
 	meta.Tags = nil
 	return s.writeBucketMeta(bucket, meta)
+}
+
+func (s *Storage) PutBucketVersioning(bucket, status string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.bucketExistsLocked(bucket) {
+		return ErrBucketNotFound
+	}
+	meta, err := s.readBucketMeta(bucket)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		meta = bucketMeta{}
+	}
+	meta.VersioningStatus = status
+	return s.writeBucketMeta(bucket, meta)
+}
+
+func (s *Storage) GetBucketVersioning(bucket string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.bucketExistsLocked(bucket) {
+		return "", ErrBucketNotFound
+	}
+	meta, err := s.readBucketMeta(bucket)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", nil
+		}
+		return "", err
+	}
+	return meta.VersioningStatus, nil
 }
 
 type BucketInfo struct {
