@@ -1128,7 +1128,6 @@ func (ro *Router) handlePutBucketVersioning(w http.ResponseWriter, r *http.Reque
 		"status",
 		req.Status,
 	)
-	w.WriteHeader(http.StatusOK)
 }
 
 func (ro *Router) handleGetBucketVersioning(w http.ResponseWriter, r *http.Request, bucket string) {
