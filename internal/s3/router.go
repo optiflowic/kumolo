@@ -1,6 +1,7 @@
 package s3
 
 import (
+	"bytes"
 	"encoding/json"
 	"encoding/xml"
 	"errors"
@@ -1269,21 +1270,22 @@ func (ro *Router) handlePutBucketPolicy(w http.ResponseWriter, r *http.Request, 
 			"bucket",
 			bucket,
 		)
-		writeError(w, r, http.StatusBadRequest, "MalformedJSON",
-			"The JSON you provided was not well-formed.")
+		writeError(w, r, http.StatusBadRequest, "MalformedPolicy",
+			"Policies must be valid JSON and the first byte must be '{'.")
 		return
 	}
-	if !json.Valid(body) {
+	trimmed := bytes.TrimSpace(body)
+	if !json.Valid(trimmed) || len(trimmed) == 0 || trimmed[0] != '{' {
 		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
 			"invalid policy JSON",
 			"bucket",
 			bucket,
 		)
-		writeError(w, r, http.StatusBadRequest, "MalformedJSON",
-			"The JSON you provided was not well-formed.")
+		writeError(w, r, http.StatusBadRequest, "MalformedPolicy",
+			"Policies must be valid JSON and the first byte must be '{'.")
 		return
 	}
-	if err := ro.storage.PutBucketPolicy(bucket, string(body)); err != nil {
+	if err := ro.storage.PutBucketPolicy(bucket, string(trimmed)); err != nil {
 		if errors.Is(err, ErrBucketNotFound) {
 			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
 				"bucket not found",

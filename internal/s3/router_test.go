@@ -2574,17 +2574,30 @@ func TestBucketPolicyHandlers(t *testing.T) {
 			assert.Equal(t, http.StatusNoContent, w.Code)
 		})
 
-		t.Run("returns 400 on malformed JSON", func(t *testing.T) {
-			ro := newRouterWithMock(&mockStore{})
-			req := httptest.NewRequest(
-				http.MethodPut,
-				"/my-bucket?policy",
-				strings.NewReader("not-json"),
-			)
-			w := httptest.NewRecorder()
-			ro.ServeHTTP(w, req)
-			assert.Equal(t, http.StatusBadRequest, w.Code)
-			assert.Contains(t, w.Body.String(), "MalformedJSON")
+		t.Run("returns 400 MalformedPolicy on invalid input", func(t *testing.T) {
+			tests := []struct {
+				name string
+				body string
+			}{
+				{name: "malformed JSON", body: "not-json"},
+				{name: "JSON array", body: `[]`},
+				{name: "JSON string", body: `"just a string"`},
+				{name: "JSON number", body: `42`},
+			}
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					ro := newRouterWithMock(&mockStore{})
+					req := httptest.NewRequest(
+						http.MethodPut,
+						"/my-bucket?policy",
+						strings.NewReader(tt.body),
+					)
+					w := httptest.NewRecorder()
+					ro.ServeHTTP(w, req)
+					assert.Equal(t, http.StatusBadRequest, w.Code)
+					assert.Contains(t, w.Body.String(), "MalformedPolicy")
+				})
+			}
 		})
 
 		t.Run("returns 404 on bucket not found", func(t *testing.T) {
