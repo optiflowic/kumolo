@@ -64,6 +64,13 @@ type bucketVersioningStore interface {
 	GetBucketVersioning(bucket string) (string, error)
 }
 
+// bucketCORSStore is the subset of Storage used by the Router for bucket CORS operations.
+type bucketCORSStore interface {
+	PutBucketCors(bucket string, rules []CORSRule) error
+	GetBucketCors(bucket string) ([]CORSRule, error)
+	DeleteBucketCors(bucket string) error
+}
+
 // Router handles S3 API requests using path-style URLs: /<bucket>/<key>
 type Router struct {
 	storage interface {
@@ -73,6 +80,7 @@ type Router struct {
 		objectTaggingStore
 		bucketTaggingStore
 		bucketVersioningStore
+		bucketCORSStore
 	}
 	now func() time.Time // injectable for testing; defaults to time.Now
 }
@@ -162,6 +170,8 @@ func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, bucket str
 	switch r.Method {
 	case http.MethodPut:
 		switch {
+		case q.Has("cors"):
+			ro.handlePutBucketCors(w, r, bucket)
 		case q.Has("tagging"):
 			ro.handlePutBucketTagging(w, r, bucket)
 		case q.Has("versioning"):
@@ -171,6 +181,8 @@ func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, bucket str
 		}
 	case http.MethodDelete:
 		switch {
+		case q.Has("cors"):
+			ro.handleDeleteBucketCors(w, r, bucket)
 		case q.Has("tagging"):
 			ro.handleDeleteBucketTagging(w, r, bucket)
 		default:
@@ -180,6 +192,8 @@ func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, bucket str
 		ro.handleHeadBucket(w, r, bucket)
 	case http.MethodGet:
 		switch {
+		case q.Has("cors"):
+			ro.handleGetBucketCors(w, r, bucket)
 		case q.Has("tagging"):
 			ro.handleGetBucketTagging(w, r, bucket)
 		case q.Has("versioning"):
@@ -1076,6 +1090,162 @@ func (ro *Router) handleDeleteBucketTagging(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (ro *Router) handlePutBucketCors(w http.ResponseWriter, r *http.Request, bucket string) {
+	var req xmlCORSConfiguration
+	if err := xml.NewDecoder(r.Body).Decode(&req); err != nil {
+		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			"malformed cors XML",
+			"bucket",
+			bucket,
+		)
+		writeError(w, r, http.StatusBadRequest, "MalformedXML",
+			"The XML you provided was not well-formed.")
+		return
+	}
+	if len(req.CORSRules) == 0 {
+		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			"cors configuration has no rules",
+			"bucket",
+			bucket,
+		)
+		writeError(w, r, http.StatusBadRequest, "MalformedXML",
+			"The XML you provided was not well-formed.")
+		return
+	}
+	rules := make([]CORSRule, len(req.CORSRules))
+	for i, rule := range req.CORSRules {
+		if len(rule.AllowedOrigins) == 0 || len(rule.AllowedMethods) == 0 {
+			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"cors rule missing required fields",
+				"bucket",
+				bucket,
+			)
+			writeError(w, r, http.StatusBadRequest, "MalformedXML",
+				"The XML you provided was not well-formed.")
+			return
+		}
+		rules[i] = CORSRule{
+			ID:             rule.ID,
+			AllowedOrigins: rule.AllowedOrigins,
+			AllowedMethods: rule.AllowedMethods,
+			AllowedHeaders: rule.AllowedHeaders,
+			ExposeHeaders:  rule.ExposeHeaders,
+			MaxAgeSeconds:  rule.MaxAgeSeconds,
+		}
+	}
+	if err := ro.storage.PutBucketCors(bucket, rules); err != nil {
+		if errors.Is(err, ErrBucketNotFound) {
+			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"bucket not found",
+				"bucket",
+				bucket,
+			)
+			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+				"The specified bucket does not exist.")
+			return
+		}
+		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			"failed to put bucket cors",
+			"bucket",
+			bucket,
+			"err",
+			err,
+		)
+		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	slog.Info( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+		"bucket cors updated",
+		"bucket",
+		bucket,
+		"rules",
+		len(rules),
+	)
+}
+
+func (ro *Router) handleGetBucketCors(w http.ResponseWriter, r *http.Request, bucket string) {
+	rules, err := ro.storage.GetBucketCors(bucket)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrBucketNotFound):
+			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"bucket not found",
+				"bucket",
+				bucket,
+			)
+			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+				"The specified bucket does not exist.")
+		case errors.Is(err, ErrNoCORSConfiguration):
+			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"no cors configuration",
+				"bucket",
+				bucket,
+			)
+			writeError(w, r, http.StatusNotFound, "NoSuchCORSConfiguration",
+				"The CORS configuration does not exist.")
+		default:
+			slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"failed to get bucket cors",
+				"bucket",
+				bucket,
+				"err",
+				err,
+			)
+			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+	slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+		"get bucket cors",
+		"bucket",
+		bucket,
+		"rules",
+		len(rules),
+	)
+	xmlRules := make([]xmlCORSRule, len(rules))
+	for i, rule := range rules {
+		xmlRules[i] = xmlCORSRule{
+			ID:             rule.ID,
+			AllowedOrigins: rule.AllowedOrigins,
+			AllowedMethods: rule.AllowedMethods,
+			AllowedHeaders: rule.AllowedHeaders,
+			ExposeHeaders:  rule.ExposeHeaders,
+			MaxAgeSeconds:  rule.MaxAgeSeconds,
+		}
+	}
+	writeXML(w, http.StatusOK, xmlCORSConfiguration{CORSRules: xmlRules})
+}
+
+func (ro *Router) handleDeleteBucketCors(w http.ResponseWriter, r *http.Request, bucket string) {
+	if err := ro.storage.DeleteBucketCors(bucket); err != nil {
+		if errors.Is(err, ErrBucketNotFound) {
+			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"bucket not found",
+				"bucket",
+				bucket,
+			)
+			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+				"The specified bucket does not exist.")
+			return
+		}
+		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			"failed to delete bucket cors",
+			"bucket",
+			bucket,
+			"err",
+			err,
+		)
+		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	slog.Info( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+		"bucket cors deleted",
+		"bucket",
+		bucket,
+	)
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (ro *Router) handlePutBucketVersioning(w http.ResponseWriter, r *http.Request, bucket string) {
 	var req xmlVersioningConfiguration
 	if err := xml.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1951,4 +2121,18 @@ type xmlDeleteError struct {
 type xmlVersioningConfiguration struct {
 	XMLName xml.Name `xml:"VersioningConfiguration"`
 	Status  string   `xml:"Status,omitempty"`
+}
+
+type xmlCORSConfiguration struct {
+	XMLName   xml.Name      `xml:"CORSConfiguration"`
+	CORSRules []xmlCORSRule `xml:"CORSRule"`
+}
+
+type xmlCORSRule struct {
+	ID             string   `xml:"ID,omitempty"`
+	AllowedOrigins []string `xml:"AllowedOrigin"`
+	AllowedMethods []string `xml:"AllowedMethod"`
+	AllowedHeaders []string `xml:"AllowedHeader,omitempty"`
+	ExposeHeaders  []string `xml:"ExposeHeader,omitempty"`
+	MaxAgeSeconds  int      `xml:"MaxAgeSeconds,omitempty"`
 }

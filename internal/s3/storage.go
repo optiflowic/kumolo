@@ -21,9 +21,20 @@ import (
 
 // bucketMeta is stored as a <bucket>.bucket.json file at the storage root.
 type bucketMeta struct {
-	Region           string `json:"region"`
-	Tags             []Tag  `json:"tags,omitempty"`
-	VersioningStatus string `json:"versioningStatus,omitempty"`
+	Region           string     `json:"region"`
+	Tags             []Tag      `json:"tags,omitempty"`
+	VersioningStatus string     `json:"versioningStatus,omitempty"`
+	CORSRules        []CORSRule `json:"corsRules,omitempty"`
+}
+
+// CORSRule represents a single CORS rule stored in bucket metadata.
+type CORSRule struct {
+	ID             string   `json:"id,omitempty"`
+	AllowedOrigins []string `json:"allowedOrigins"`
+	AllowedMethods []string `json:"allowedMethods"`
+	AllowedHeaders []string `json:"allowedHeaders,omitempty"`
+	ExposeHeaders  []string `json:"exposeHeaders,omitempty"`
+	MaxAgeSeconds  int      `json:"maxAgeSeconds,omitempty"`
 }
 
 // ObjectMetadata is stored as a sidecar .meta.json file alongside each object.
@@ -626,6 +637,62 @@ func (s *Storage) GetBucketVersioning(bucket string) (string, error) {
 		return "", err
 	}
 	return meta.VersioningStatus, nil
+}
+
+func (s *Storage) PutBucketCors(bucket string, rules []CORSRule) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.bucketExistsLocked(bucket) {
+		return ErrBucketNotFound
+	}
+	meta, err := s.readBucketMeta(bucket)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		meta = bucketMeta{}
+	}
+	meta.CORSRules = rules
+	return s.writeBucketMeta(bucket, meta)
+}
+
+func (s *Storage) GetBucketCors(bucket string) ([]CORSRule, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.bucketExistsLocked(bucket) {
+		return nil, ErrBucketNotFound
+	}
+	meta, err := s.readBucketMeta(bucket)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, ErrNoCORSConfiguration
+		}
+		return nil, err
+	}
+	if len(meta.CORSRules) == 0 {
+		return nil, ErrNoCORSConfiguration
+	}
+	return meta.CORSRules, nil
+}
+
+func (s *Storage) DeleteBucketCors(bucket string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.bucketExistsLocked(bucket) {
+		return ErrBucketNotFound
+	}
+	meta, err := s.readBucketMeta(bucket)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	if meta.CORSRules == nil {
+		return nil
+	}
+	meta.CORSRules = nil
+	return s.writeBucketMeta(bucket, meta)
 }
 
 type BucketInfo struct {

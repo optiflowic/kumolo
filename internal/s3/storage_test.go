@@ -1962,6 +1962,157 @@ func TestBucketTagging(t *testing.T) {
 	})
 }
 
+func TestBucketCORS(t *testing.T) {
+	setup := func(t *testing.T) (*Storage, string) {
+		t.Helper()
+		s := newTestStorage(t)
+		bucket := "test-bucket"
+		require.NoError(t, s.CreateBucket(bucket, "us-east-1"))
+		return s, bucket
+	}
+
+	rules := []CORSRule{
+		{
+			ID:             "rule1",
+			AllowedOrigins: []string{"http://example.com"},
+			AllowedMethods: []string{"GET", "PUT"},
+			AllowedHeaders: []string{"*"},
+			ExposeHeaders:  []string{"x-amz-meta-custom"},
+			MaxAgeSeconds:  3000,
+		},
+	}
+
+	t.Run("PutBucketCors and GetBucketCors roundtrip", func(t *testing.T) {
+		s, bucket := setup(t)
+		require.NoError(t, s.PutBucketCors(bucket, rules))
+		got, err := s.GetBucketCors(bucket)
+		require.NoError(t, err)
+		assert.Equal(t, rules, got)
+	})
+
+	t.Run("GetBucketCors returns ErrNoCORSConfiguration when not set", func(t *testing.T) {
+		s, bucket := setup(t)
+		_, err := s.GetBucketCors(bucket)
+		assert.ErrorIs(t, err, ErrNoCORSConfiguration)
+	})
+
+	t.Run("GetBucketCors returns ErrNoCORSConfiguration when bucket.json is missing", func(t *testing.T) {
+		s, bucket := setup(t)
+		require.NoError(t, s.root.Remove(bucket+".bucket.json"))
+		_, err := s.GetBucketCors(bucket)
+		assert.ErrorIs(t, err, ErrNoCORSConfiguration)
+	})
+
+	t.Run("PutBucketCors preserves existing bucket tags", func(t *testing.T) {
+		s, bucket := setup(t)
+		require.NoError(t, s.PutBucketTagging(bucket, []Tag{{Key: "env", Value: "prod"}}))
+		require.NoError(t, s.PutBucketCors(bucket, rules))
+		tags, err := s.GetBucketTagging(bucket)
+		require.NoError(t, err)
+		assert.Equal(t, []Tag{{Key: "env", Value: "prod"}}, tags)
+	})
+
+	t.Run("PutBucketCors creates fresh meta when bucket.json is missing", func(t *testing.T) {
+		s, bucket := setup(t)
+		require.NoError(t, s.root.Remove(bucket+".bucket.json"))
+		require.NoError(t, s.PutBucketCors(bucket, rules))
+		got, err := s.GetBucketCors(bucket)
+		require.NoError(t, err)
+		assert.Equal(t, rules, got)
+	})
+
+	t.Run("DeleteBucketCors removes rules", func(t *testing.T) {
+		s, bucket := setup(t)
+		require.NoError(t, s.PutBucketCors(bucket, rules))
+		require.NoError(t, s.DeleteBucketCors(bucket))
+		_, err := s.GetBucketCors(bucket)
+		assert.ErrorIs(t, err, ErrNoCORSConfiguration)
+	})
+
+	t.Run("DeleteBucketCors is idempotent when not set", func(t *testing.T) {
+		s, bucket := setup(t)
+		assert.NoError(t, s.DeleteBucketCors(bucket))
+	})
+
+	t.Run("DeleteBucketCors is idempotent when bucket.json is missing", func(t *testing.T) {
+		s, bucket := setup(t)
+		require.NoError(t, s.root.Remove(bucket+".bucket.json"))
+		assert.NoError(t, s.DeleteBucketCors(bucket))
+	})
+
+	t.Run("PutBucketCors returns ErrBucketNotFound for missing bucket", func(t *testing.T) {
+		s := newTestStorage(t)
+		err := s.PutBucketCors("no-bucket", rules)
+		assert.ErrorIs(t, err, ErrBucketNotFound)
+	})
+
+	t.Run("GetBucketCors returns ErrBucketNotFound for missing bucket", func(t *testing.T) {
+		s := newTestStorage(t)
+		_, err := s.GetBucketCors("no-bucket")
+		assert.ErrorIs(t, err, ErrBucketNotFound)
+	})
+
+	t.Run("DeleteBucketCors returns ErrBucketNotFound for missing bucket", func(t *testing.T) {
+		s := newTestStorage(t)
+		err := s.DeleteBucketCors("no-bucket")
+		assert.ErrorIs(t, err, ErrBucketNotFound)
+	})
+
+	t.Run("PutBucketCors returns error when meta read fails", func(t *testing.T) {
+		s, bucket := setup(t)
+		s.readAll = func(r io.Reader) ([]byte, error) {
+			return nil, errors.New("read error")
+		}
+		err := s.PutBucketCors(bucket, rules)
+		assert.Error(t, err)
+	})
+
+	t.Run("PutBucketCors returns error when write fails", func(t *testing.T) {
+		s, bucket := setup(t)
+		s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+			if strings.HasSuffix(name, ".bucket.json") {
+				return nil, errors.New("write error")
+			}
+			return s.root.OpenFile(name, flag, perm)
+		}
+		err := s.PutBucketCors(bucket, rules)
+		assert.Error(t, err)
+	})
+
+	t.Run("GetBucketCors returns error when meta read fails", func(t *testing.T) {
+		s, bucket := setup(t)
+		require.NoError(t, s.PutBucketCors(bucket, rules))
+		s.readAll = func(r io.Reader) ([]byte, error) {
+			return nil, errors.New("read error")
+		}
+		_, err := s.GetBucketCors(bucket)
+		assert.Error(t, err)
+	})
+
+	t.Run("DeleteBucketCors returns error when meta read fails", func(t *testing.T) {
+		s, bucket := setup(t)
+		require.NoError(t, s.PutBucketCors(bucket, rules))
+		s.readAll = func(r io.Reader) ([]byte, error) {
+			return nil, errors.New("read error")
+		}
+		err := s.DeleteBucketCors(bucket)
+		assert.Error(t, err)
+	})
+
+	t.Run("DeleteBucketCors returns error when write fails", func(t *testing.T) {
+		s, bucket := setup(t)
+		require.NoError(t, s.PutBucketCors(bucket, rules))
+		s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+			if strings.HasSuffix(name, ".bucket.json") {
+				return nil, errors.New("write error")
+			}
+			return s.root.OpenFile(name, flag, perm)
+		}
+		err := s.DeleteBucketCors(bucket)
+		assert.Error(t, err)
+	})
+}
+
 func TestBucketVersioning(t *testing.T) {
 	setup := func(t *testing.T) (*Storage, string) {
 		t.Helper()
