@@ -1,6 +1,7 @@
 package s3
 
 import (
+	"encoding/json"
 	"encoding/xml"
 	"errors"
 	"io"
@@ -71,6 +72,13 @@ type bucketCORSStore interface {
 	DeleteBucketCors(bucket string) error
 }
 
+// bucketPolicyStore is the subset of Storage used by the Router for bucket policy operations.
+type bucketPolicyStore interface {
+	PutBucketPolicy(bucket, policy string) error
+	GetBucketPolicy(bucket string) (string, error)
+	DeleteBucketPolicy(bucket string) error
+}
+
 // Router handles S3 API requests using path-style URLs: /<bucket>/<key>
 type Router struct {
 	storage interface {
@@ -81,6 +89,7 @@ type Router struct {
 		bucketTaggingStore
 		bucketVersioningStore
 		bucketCORSStore
+		bucketPolicyStore
 	}
 	now func() time.Time // injectable for testing; defaults to time.Now
 }
@@ -172,6 +181,8 @@ func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, bucket str
 		switch {
 		case q.Has("cors"):
 			ro.handlePutBucketCors(w, r, bucket)
+		case q.Has("policy"):
+			ro.handlePutBucketPolicy(w, r, bucket)
 		case q.Has("tagging"):
 			ro.handlePutBucketTagging(w, r, bucket)
 		case q.Has("versioning"):
@@ -183,6 +194,8 @@ func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, bucket str
 		switch {
 		case q.Has("cors"):
 			ro.handleDeleteBucketCors(w, r, bucket)
+		case q.Has("policy"):
+			ro.handleDeleteBucketPolicy(w, r, bucket)
 		case q.Has("tagging"):
 			ro.handleDeleteBucketTagging(w, r, bucket)
 		default:
@@ -194,6 +207,8 @@ func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, bucket str
 		switch {
 		case q.Has("cors"):
 			ro.handleGetBucketCors(w, r, bucket)
+		case q.Has("policy"):
+			ro.handleGetBucketPolicy(w, r, bucket)
 		case q.Has("tagging"):
 			ro.handleGetBucketTagging(w, r, bucket)
 		case q.Has("versioning"):
@@ -1240,6 +1255,132 @@ func (ro *Router) handleDeleteBucketCors(w http.ResponseWriter, r *http.Request,
 	}
 	slog.Info( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
 		"bucket cors deleted",
+		"bucket",
+		bucket,
+	)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (ro *Router) handlePutBucketPolicy(w http.ResponseWriter, r *http.Request, bucket string) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			"failed to read policy body",
+			"bucket",
+			bucket,
+		)
+		writeError(w, r, http.StatusBadRequest, "MalformedJSON",
+			"The JSON you provided was not well-formed.")
+		return
+	}
+	if !json.Valid(body) {
+		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			"invalid policy JSON",
+			"bucket",
+			bucket,
+		)
+		writeError(w, r, http.StatusBadRequest, "MalformedJSON",
+			"The JSON you provided was not well-formed.")
+		return
+	}
+	if err := ro.storage.PutBucketPolicy(bucket, string(body)); err != nil {
+		if errors.Is(err, ErrBucketNotFound) {
+			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"bucket not found",
+				"bucket",
+				bucket,
+			)
+			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+				"The specified bucket does not exist.")
+			return
+		}
+		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			"failed to put bucket policy",
+			"bucket",
+			bucket,
+			"err",
+			err,
+		)
+		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	slog.Info( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+		"bucket policy updated",
+		"bucket",
+		bucket,
+	)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (ro *Router) handleGetBucketPolicy(w http.ResponseWriter, r *http.Request, bucket string) {
+	policy, err := ro.storage.GetBucketPolicy(bucket)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrBucketNotFound):
+			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"bucket not found",
+				"bucket",
+				bucket,
+			)
+			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+				"The specified bucket does not exist.")
+		case errors.Is(err, ErrNoBucketPolicy):
+			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"no bucket policy",
+				"bucket",
+				bucket,
+			)
+			writeError(w, r, http.StatusNotFound, "NoSuchBucketPolicy",
+				"The bucket policy does not exist.")
+		default:
+			slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"failed to get bucket policy",
+				"bucket",
+				bucket,
+				"err",
+				err,
+			)
+			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+	slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+		"get bucket policy",
+		"bucket",
+		bucket,
+	)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(
+		w,
+		policy,
+	) // #nosec G705 -- policy is stored JSON from a prior validated PUT; XSS risk accepted for a local dev emulator
+}
+
+func (ro *Router) handleDeleteBucketPolicy(w http.ResponseWriter, r *http.Request, bucket string) {
+	if err := ro.storage.DeleteBucketPolicy(bucket); err != nil {
+		if errors.Is(err, ErrBucketNotFound) {
+			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"bucket not found",
+				"bucket",
+				bucket,
+			)
+			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+				"The specified bucket does not exist.")
+			return
+		}
+		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			"failed to delete bucket policy",
+			"bucket",
+			bucket,
+			"err",
+			err,
+		)
+		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	slog.Info( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+		"bucket policy deleted",
 		"bucket",
 		bucket,
 	)
