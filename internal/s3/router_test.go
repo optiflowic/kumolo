@@ -2212,7 +2212,7 @@ func TestBucketTaggingHandlers(t *testing.T) {
 			var tags strings.Builder
 			tags.WriteString("<Tagging><TagSet>")
 			for i := range 51 {
-				tags.WriteString(fmt.Sprintf("<Tag><Key>k%d</Key><Value>v</Value></Tag>", i))
+				fmt.Fprintf(&tags, "<Tag><Key>k%d</Key><Value>v</Value></Tag>", i)
 			}
 			tags.WriteString("</TagSet></Tagging>")
 			ro := newRouterWithMock(&mockStore{bucketExists: true})
