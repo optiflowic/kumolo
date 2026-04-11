@@ -22,6 +22,7 @@ import (
 // bucketMeta is stored as a <bucket>.bucket.json file at the storage root.
 type bucketMeta struct {
 	Region string `json:"region"`
+	Tags   []Tag  `json:"tags,omitempty"`
 }
 
 // ObjectMetadata is stored as a sidecar .meta.json file alongside each object.
@@ -535,6 +536,59 @@ func (s *Storage) DeleteObjectTagging(bucket, key string) error {
 		return err
 	}
 	return nil
+}
+
+func (s *Storage) PutBucketTagging(bucket string, tags []Tag) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.bucketExistsLocked(bucket) {
+		return ErrBucketNotFound
+	}
+	meta, err := s.readBucketMeta(bucket)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		meta = bucketMeta{}
+	}
+	meta.Tags = tags
+	return s.writeBucketMeta(bucket, meta)
+}
+
+func (s *Storage) GetBucketTagging(bucket string) ([]Tag, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.bucketExistsLocked(bucket) {
+		return nil, ErrBucketNotFound
+	}
+	meta, err := s.readBucketMeta(bucket)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return []Tag{}, nil
+		}
+		return nil, err
+	}
+	if meta.Tags == nil {
+		return []Tag{}, nil
+	}
+	return meta.Tags, nil
+}
+
+func (s *Storage) DeleteBucketTagging(bucket string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.bucketExistsLocked(bucket) {
+		return ErrBucketNotFound
+	}
+	meta, err := s.readBucketMeta(bucket)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	meta.Tags = nil
+	return s.writeBucketMeta(bucket, meta)
 }
 
 type BucketInfo struct {

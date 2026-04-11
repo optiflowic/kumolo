@@ -3,6 +3,7 @@ package s3
 import (
 	"encoding/xml"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -252,6 +253,10 @@ type mockStore struct {
 	getObjectTaggingTags        []Tag
 	getObjectTaggingErr         error
 	deleteObjectTaggingErr      error
+	putBucketTaggingErr         error
+	getBucketTaggingTags        []Tag
+	getBucketTaggingErr         error
+	deleteBucketTaggingErr      error
 }
 
 func (m *mockStore) ListBuckets() ([]BucketInfo, error)    { return nil, m.listBucketsErr }
@@ -301,6 +306,15 @@ func (m *mockStore) GetObjectTagging(_ string, _ string) ([]Tag, error) {
 }
 func (m *mockStore) DeleteObjectTagging(_ string, _ string) error {
 	return m.deleteObjectTaggingErr
+}
+func (m *mockStore) PutBucketTagging(_ string, _ []Tag) error {
+	return m.putBucketTaggingErr
+}
+func (m *mockStore) GetBucketTagging(_ string) ([]Tag, error) {
+	return m.getBucketTaggingTags, m.getBucketTaggingErr
+}
+func (m *mockStore) DeleteBucketTagging(_ string) error {
+	return m.deleteBucketTaggingErr
 }
 
 func newRouterWithMock(store *mockStore) *Router {
@@ -2154,6 +2168,174 @@ func TestObjectTaggingHandlers(t *testing.T) {
 		t.Run("returns 500 on storage error", func(t *testing.T) {
 			ro := newRouterWithMock(&mockStore{deleteObjectTaggingErr: errors.New("disk failure")})
 			req := httptest.NewRequest(http.MethodDelete, "/my-bucket/key.txt?tagging", nil)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusInternalServerError, w.Code)
+		})
+	})
+}
+
+func TestBucketTaggingHandlers(t *testing.T) {
+	taggingBody := `<Tagging><TagSet><Tag><Key>env</Key><Value>prod</Value></Tag></TagSet></Tagging>`
+
+	t.Run("PutBucketTagging", func(t *testing.T) {
+		t.Run("roundtrip via real storage", func(t *testing.T) {
+			ro := newTestRouter(t)
+			ro.ServeHTTP(httptest.NewRecorder(),
+				httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+
+			req := httptest.NewRequest(http.MethodPut, "/my-bucket?tagging",
+				strings.NewReader(taggingBody))
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+
+			req2 := httptest.NewRequest(http.MethodGet, "/my-bucket?tagging", nil)
+			w2 := httptest.NewRecorder()
+			ro.ServeHTTP(w2, req2)
+			assert.Equal(t, http.StatusOK, w2.Code)
+			assert.Contains(t, w2.Body.String(), "env")
+			assert.Contains(t, w2.Body.String(), "prod")
+		})
+
+		t.Run("returns 400 for malformed XML", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{bucketExists: true})
+			req := httptest.NewRequest(http.MethodPut, "/my-bucket?tagging",
+				strings.NewReader("not-xml"))
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Contains(t, w.Body.String(), "MalformedXML")
+		})
+
+		t.Run("returns 400 for too many tags", func(t *testing.T) {
+			var tags strings.Builder
+			tags.WriteString("<Tagging><TagSet>")
+			for i := range 51 {
+				tags.WriteString(fmt.Sprintf("<Tag><Key>k%d</Key><Value>v</Value></Tag>", i))
+			}
+			tags.WriteString("</TagSet></Tagging>")
+			ro := newRouterWithMock(&mockStore{bucketExists: true})
+			req := httptest.NewRequest(http.MethodPut, "/my-bucket?tagging",
+				strings.NewReader(tags.String()))
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Contains(t, w.Body.String(), "InvalidTag")
+		})
+
+		t.Run("returns 400 for tag key too long", func(t *testing.T) {
+			longKey := strings.Repeat("a", 129)
+			body := fmt.Sprintf(
+				`<Tagging><TagSet><Tag><Key>%s</Key><Value>v</Value></Tag></TagSet></Tagging>`,
+				longKey,
+			)
+			ro := newRouterWithMock(&mockStore{bucketExists: true})
+			req := httptest.NewRequest(http.MethodPut, "/my-bucket?tagging",
+				strings.NewReader(body))
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Contains(t, w.Body.String(), "InvalidTag")
+		})
+
+		t.Run("returns 400 for tag value too long", func(t *testing.T) {
+			longVal := strings.Repeat("v", 257)
+			body := fmt.Sprintf(
+				`<Tagging><TagSet><Tag><Key>k</Key><Value>%s</Value></Tag></TagSet></Tagging>`,
+				longVal,
+			)
+			ro := newRouterWithMock(&mockStore{bucketExists: true})
+			req := httptest.NewRequest(http.MethodPut, "/my-bucket?tagging",
+				strings.NewReader(body))
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Contains(t, w.Body.String(), "InvalidTag")
+		})
+
+		t.Run("returns 400 for duplicate tag key", func(t *testing.T) {
+			body := `<Tagging><TagSet><Tag><Key>k</Key><Value>v1</Value></Tag><Tag><Key>k</Key><Value>v2</Value></Tag></TagSet></Tagging>`
+			ro := newRouterWithMock(&mockStore{bucketExists: true})
+			req := httptest.NewRequest(http.MethodPut, "/my-bucket?tagging",
+				strings.NewReader(body))
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Contains(t, w.Body.String(), "InvalidTag")
+		})
+
+		t.Run("returns 404 for missing bucket", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{putBucketTaggingErr: ErrBucketNotFound})
+			req := httptest.NewRequest(http.MethodPut, "/no-bucket?tagging",
+				strings.NewReader(taggingBody))
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusNotFound, w.Code)
+			assert.Contains(t, w.Body.String(), "NoSuchBucket")
+		})
+
+		t.Run("returns 500 on storage error", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{putBucketTaggingErr: errors.New("disk full")})
+			req := httptest.NewRequest(http.MethodPut, "/my-bucket?tagging",
+				strings.NewReader(taggingBody))
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusInternalServerError, w.Code)
+		})
+	})
+
+	t.Run("GetBucketTagging", func(t *testing.T) {
+		t.Run("returns tags as XML", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{
+				getBucketTaggingTags: []Tag{{Key: "env", Value: "prod"}},
+			})
+			req := httptest.NewRequest(http.MethodGet, "/my-bucket?tagging", nil)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Contains(t, w.Body.String(), "env")
+		})
+
+		t.Run("returns 404 for missing bucket", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{getBucketTaggingErr: ErrBucketNotFound})
+			req := httptest.NewRequest(http.MethodGet, "/no-bucket?tagging", nil)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusNotFound, w.Code)
+			assert.Contains(t, w.Body.String(), "NoSuchBucket")
+		})
+
+		t.Run("returns 500 on storage error", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{getBucketTaggingErr: errors.New("disk failure")})
+			req := httptest.NewRequest(http.MethodGet, "/my-bucket?tagging", nil)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusInternalServerError, w.Code)
+		})
+	})
+
+	t.Run("DeleteBucketTagging", func(t *testing.T) {
+		t.Run("returns 204 on success", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{})
+			req := httptest.NewRequest(http.MethodDelete, "/my-bucket?tagging", nil)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusNoContent, w.Code)
+		})
+
+		t.Run("returns 404 for missing bucket", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{deleteBucketTaggingErr: ErrBucketNotFound})
+			req := httptest.NewRequest(http.MethodDelete, "/no-bucket?tagging", nil)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusNotFound, w.Code)
+			assert.Contains(t, w.Body.String(), "NoSuchBucket")
+		})
+
+		t.Run("returns 500 on storage error", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{deleteBucketTaggingErr: errors.New("disk failure")})
+			req := httptest.NewRequest(http.MethodDelete, "/my-bucket?tagging", nil)
 			w := httptest.NewRecorder()
 			ro.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusInternalServerError, w.Code)
