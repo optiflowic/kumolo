@@ -17,6 +17,12 @@ import (
 	"unicode/utf8"
 )
 
+const (
+	amzCopySource   = "x-amz-copy-source"
+	amzMetaPrefix   = "X-Amz-Meta-"
+	amzTaggingCount = "x-amz-tagging-count"
+)
+
 // bucketStore is the subset of Storage used by the Router for bucket operations.
 type bucketStore interface {
 	ListBuckets() ([]BucketInfo, error)
@@ -423,7 +429,7 @@ func (ro *Router) routeObject(w http.ResponseWriter, r *http.Request, bucket, ke
 			ro.handlePutObjectTagging(w, r, bucket, key)
 		case q.Has("partNumber") && q.Has("uploadId"):
 			ro.handleUploadPart(w, r, bucket, key)
-		case r.Header.Get("x-amz-copy-source") != "":
+		case r.Header.Get(amzCopySource) != "":
 			ro.handleCopyObject(w, r, bucket, key)
 		default:
 			ro.handlePutObject(w, r, bucket, key)
@@ -753,7 +759,7 @@ func (ro *Router) handleCopyObject(
 	r *http.Request,
 	dstBucket, dstKey string,
 ) {
-	copySource, err := url.PathUnescape(r.Header.Get("x-amz-copy-source"))
+	copySource, err := url.PathUnescape(r.Header.Get(amzCopySource))
 	if err != nil {
 		writeError(w, r, http.StatusBadRequest, "InvalidArgument", "x-amz-copy-source is invalid.")
 		return
@@ -920,12 +926,12 @@ func (ro *Router) handleHeadObject(w http.ResponseWriter, r *http.Request, bucke
 	w.Header().Set("ETag", meta.ETag)
 	w.Header().Set("Last-Modified", meta.LastModified.UTC().Format(http.TimeFormat))
 	for k, v := range meta.UserMetadata {
-		w.Header().Set("x-amz-meta-"+k, v)
+		w.Header().Set(amzMetaPrefix+k, v)
 	}
 	// tagging count is best-effort; errors are intentionally ignored so that a
 	// missing or unreadable tags file never prevents a successful object response.
 	if tags, err := ro.storage.GetObjectTagging(bucket, key); err == nil && len(tags) > 0 {
-		w.Header().Set("x-amz-tagging-count", strconv.Itoa(len(tags)))
+		w.Header().Set(amzTaggingCount, strconv.Itoa(len(tags)))
 	}
 	w.WriteHeader(http.StatusOK)
 }
@@ -1791,12 +1797,12 @@ func (ro *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 	w.Header().Set("ETag", meta.ETag)
 	w.Header().Set("Last-Modified", meta.LastModified.UTC().Format(http.TimeFormat))
 	for k, v := range meta.UserMetadata {
-		w.Header().Set("x-amz-meta-"+k, v)
+		w.Header().Set(amzMetaPrefix+k, v)
 	}
 	// tagging count is best-effort; errors are intentionally ignored so that a
 	// missing or unreadable tags file never prevents a successful object response.
 	if tags, err := ro.storage.GetObjectTagging(bucket, key); err == nil && len(tags) > 0 {
-		w.Header().Set("x-amz-tagging-count", strconv.Itoa(len(tags)))
+		w.Header().Set(amzTaggingCount, strconv.Itoa(len(tags)))
 	}
 	w.WriteHeader(http.StatusOK)
 	if _, err := io.Copy(w, f); err != nil {
@@ -2131,14 +2137,13 @@ func (ro *Router) handleHeadBucket(w http.ResponseWriter, r *http.Request, bucke
 // them as a map keyed by the suffix after the prefix (lowercased). Returns nil
 // if no such headers are present.
 func extractUserMetadata(h http.Header) map[string]string {
-	const prefix = "X-Amz-Meta-"
 	var m map[string]string
 	for k, vs := range h {
-		if strings.HasPrefix(k, prefix) {
+		if strings.HasPrefix(k, amzMetaPrefix) {
 			if m == nil {
 				m = make(map[string]string)
 			}
-			m[strings.ToLower(k[len(prefix):])] = vs[0]
+			m[strings.ToLower(k[len(amzMetaPrefix):])] = vs[0]
 		}
 	}
 	return m
