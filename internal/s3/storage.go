@@ -308,7 +308,7 @@ func (s *Storage) GetObject(bucket, key string) (*os.File, ObjectMetadata, error
 		return nil, ObjectMetadata{}, err
 	}
 	if meta.IsDeleteMarker {
-		return nil, ObjectMetadata{}, ErrObjectNotFound
+		return nil, ObjectMetadata{}, &DeleteMarkerError{VersionID: meta.VersionID}
 	}
 	f, err := s.root.Open(objPath)
 	if err != nil {
@@ -563,7 +563,13 @@ func (s *Storage) DeleteObjectVersion(bucket, key, versionID string) (bool, erro
 		return false, err
 	}
 	if err := s.removeFile(vp + ".meta.json"); err != nil && !errors.Is(err, os.ErrNotExist) {
-		slog.Warn("failed to remove archived version metadata", "path", vp, "err", err)
+		slog.Warn( // #nosec G706 -- vp is an internal filesystem path derived from bucket/key, not direct user input
+			"failed to remove archived version metadata",
+			"path",
+			vp,
+			"err",
+			err,
+		)
 	}
 	return isMarker, nil
 }
@@ -582,7 +588,7 @@ func (s *Storage) GetObjectVersion(
 	objPath := filepath.Join(bucket, key)
 	if cm, err := s.readMeta(objPath); err == nil && cm.VersionID == versionID {
 		if cm.IsDeleteMarker {
-			return nil, ObjectMetadata{}, ErrObjectNotFound
+			return nil, ObjectMetadata{}, &DeleteMarkerError{VersionID: versionID}
 		}
 		f, err := s.root.Open(objPath)
 		if err != nil {
@@ -604,7 +610,7 @@ func (s *Storage) GetObjectVersion(
 		return nil, ObjectMetadata{}, err
 	}
 	if vm.IsDeleteMarker {
-		return nil, ObjectMetadata{}, ErrObjectNotFound
+		return nil, ObjectMetadata{}, &DeleteMarkerError{VersionID: versionID}
 	}
 	f, err := s.root.Open(vp)
 	if err != nil {
@@ -628,7 +634,7 @@ func (s *Storage) HeadObjectVersion(bucket, key, versionID string) (ObjectMetada
 	objPath := filepath.Join(bucket, key)
 	if cm, err := s.readMeta(objPath); err == nil && cm.VersionID == versionID {
 		if cm.IsDeleteMarker {
-			return ObjectMetadata{}, ErrObjectNotFound
+			return ObjectMetadata{}, &DeleteMarkerError{VersionID: versionID}
 		}
 		return cm, nil
 	}
@@ -643,7 +649,7 @@ func (s *Storage) HeadObjectVersion(bucket, key, versionID string) (ObjectMetada
 		return ObjectMetadata{}, err
 	}
 	if vm.IsDeleteMarker {
-		return ObjectMetadata{}, ErrObjectNotFound
+		return ObjectMetadata{}, &DeleteMarkerError{VersionID: versionID}
 	}
 	return vm, nil
 }
@@ -818,7 +824,7 @@ func (s *Storage) HeadObject(bucket, key string) (ObjectMetadata, error) {
 		return ObjectMetadata{}, err
 	}
 	if meta.IsDeleteMarker {
-		return ObjectMetadata{}, ErrObjectNotFound
+		return ObjectMetadata{}, &DeleteMarkerError{VersionID: meta.VersionID}
 	}
 	return meta, nil
 }
@@ -1456,6 +1462,11 @@ func (s *Storage) CompleteMultipartUpload(
 	}
 	// Open all part files and assemble via io.MultiReader.
 	files := make([]*os.File, 0, len(parts))
+	defer func() {
+		for _, f := range files {
+			_ = f.Close()
+		}
+	}()
 	readers := make([]io.Reader, 0, len(parts))
 	// Compute multipart ETag: MD5 of the concatenated raw MD5 digests.
 	h := md5.New() // #nosec G401 -- MD5 is required by the S3 ETag specification
@@ -1463,9 +1474,6 @@ func (s *Storage) CompleteMultipartUpload(
 		partPath := filepath.Join(uploadDir, fmt.Sprintf("%d.part", p.PartNumber))
 		f, err := s.root.Open(partPath)
 		if err != nil {
-			for _, of := range files {
-				_ = of.Close()
-			}
 			return ObjectMetadata{}, err
 		}
 		files = append(files, f)
@@ -1477,30 +1485,18 @@ func (s *Storage) CompleteMultipartUpload(
 	objPath := filepath.Join(umeta.Bucket, umeta.Key)
 	if dir := filepath.Dir(objPath); dir != umeta.Bucket {
 		if err := s.root.MkdirAll(dir, 0o750); err != nil {
-			for _, f := range files {
-				_ = f.Close()
-			}
 			return ObjectMetadata{}, err
 		}
 	}
 	versionID := ""
 	if enabled, verErr := s.isVersioningEnabledLocked(umeta.Bucket); verErr != nil {
-		for _, f := range files {
-			_ = f.Close()
-		}
 		return ObjectMetadata{}, verErr
 	} else if enabled {
 		if err := s.archiveCurrentVersionLocked(umeta.Bucket, umeta.Key, objPath); err != nil {
-			for _, f := range files {
-				_ = f.Close()
-			}
 			return ObjectMetadata{}, err
 		}
 		vid, err := s.newVersionID()
 		if err != nil {
-			for _, f := range files {
-				_ = f.Close()
-			}
 			return ObjectMetadata{}, err
 		}
 		versionID = vid
@@ -1513,10 +1509,6 @@ func (s *Storage) CompleteMultipartUpload(
 		nil,
 		versionID,
 	)
-	// Close part files before removing the upload directory.
-	for _, f := range files {
-		_ = f.Close()
-	}
 	if err != nil {
 		return ObjectMetadata{}, err
 	}

@@ -19,6 +19,14 @@ var (
 	ErrNoBucketPolicy      = errors.New("no bucket policy")
 )
 
+// DeleteMarkerError is returned when a get/head operation resolves to a delete marker.
+// It carries the marker's version ID so the HTTP handler can set x-amz-version-id.
+type DeleteMarkerError struct {
+	VersionID string
+}
+
+func (e *DeleteMarkerError) Error() string { return "object is a delete marker" }
+
 type errorResponse struct {
 	XMLName   xml.Name `xml:"Error"`
 	Code      string   `xml:"Code"`
