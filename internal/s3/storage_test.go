@@ -518,7 +518,7 @@ func TestCopyObject(t *testing.T) {
 
 	t.Run("copies object to different key in same bucket", func(t *testing.T) {
 		s, _ := setup(t)
-		_, err := s.CopyObject("src-bucket", "orig.txt", "src-bucket", "copy.txt", "", nil)
+		_, err := s.CopyObject("src-bucket", "orig.txt", "", "src-bucket", "copy.txt", "", nil)
 		require.NoError(t, err)
 		f, _, err := s.GetObject("src-bucket", "copy.txt")
 		require.NoError(t, err)
@@ -530,7 +530,7 @@ func TestCopyObject(t *testing.T) {
 
 	t.Run("copies object to different bucket", func(t *testing.T) {
 		s, _ := setup(t)
-		_, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "copy.txt", "", nil)
+		_, err := s.CopyObject("src-bucket", "orig.txt", "", "dst-bucket", "copy.txt", "", nil)
 		require.NoError(t, err)
 		f, _, err := s.GetObject("dst-bucket", "copy.txt")
 		require.NoError(t, err)
@@ -544,7 +544,7 @@ func TestCopyObject(t *testing.T) {
 		s, _ := setup(t)
 		origMeta, err := s.HeadObject("src-bucket", "orig.txt")
 		require.NoError(t, err)
-		meta, err := s.CopyObject("src-bucket", "orig.txt", "src-bucket", "orig.txt", "", nil)
+		meta, err := s.CopyObject("src-bucket", "orig.txt", "", "src-bucket", "orig.txt", "", nil)
 		require.NoError(t, err)
 		assert.Equal(t, origMeta.ETag, meta.ETag)
 		f, _, err := s.GetObject("src-bucket", "orig.txt")
@@ -565,7 +565,7 @@ func TestCopyObject(t *testing.T) {
 		)
 		t.Cleanup(func() { _ = os.Chmod(metaPath, 0o600) })
 
-		_, err := s.CopyObject("src-bucket", "orig.txt", "src-bucket", "orig.txt", "", nil)
+		_, err := s.CopyObject("src-bucket", "orig.txt", "", "src-bucket", "orig.txt", "", nil)
 		assert.Error(t, err)
 	})
 
@@ -573,14 +573,30 @@ func TestCopyObject(t *testing.T) {
 		s, _ := setup(t)
 		srcMeta, err := s.HeadObject("src-bucket", "orig.txt")
 		require.NoError(t, err)
-		dstMeta, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "copy.txt", "", nil)
+		dstMeta, err := s.CopyObject(
+			"src-bucket",
+			"orig.txt",
+			"",
+			"dst-bucket",
+			"copy.txt",
+			"",
+			nil,
+		)
 		require.NoError(t, err)
 		assert.True(t, !dstMeta.LastModified.Before(srcMeta.LastModified))
 	})
 
 	t.Run("copies object with nested destination key", func(t *testing.T) {
 		s, _ := setup(t)
-		_, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "path/to/copy.txt", "", nil)
+		_, err := s.CopyObject(
+			"src-bucket",
+			"orig.txt",
+			"",
+			"dst-bucket",
+			"path/to/copy.txt",
+			"",
+			nil,
+		)
 		require.NoError(t, err)
 		_, _, err = s.GetObject("dst-bucket", "path/to/copy.txt")
 		assert.NoError(t, err)
@@ -594,26 +610,26 @@ func TestCopyObject(t *testing.T) {
 			0o600,
 		))
 
-		_, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "copy.txt", "", nil)
+		_, err := s.CopyObject("src-bucket", "orig.txt", "", "dst-bucket", "copy.txt", "", nil)
 		assert.Error(t, err)
 		assert.NotErrorIs(t, err, ErrObjectNotFound)
 	})
 
 	t.Run("returns ErrBucketNotFound when source bucket does not exist", func(t *testing.T) {
 		s, _ := setup(t)
-		_, err := s.CopyObject("no-bucket", "orig.txt", "dst-bucket", "copy.txt", "", nil)
+		_, err := s.CopyObject("no-bucket", "orig.txt", "", "dst-bucket", "copy.txt", "", nil)
 		assert.ErrorIs(t, err, ErrBucketNotFound)
 	})
 
 	t.Run("returns ErrObjectNotFound when source key does not exist", func(t *testing.T) {
 		s, _ := setup(t)
-		_, err := s.CopyObject("src-bucket", "missing.txt", "dst-bucket", "copy.txt", "", nil)
+		_, err := s.CopyObject("src-bucket", "missing.txt", "", "dst-bucket", "copy.txt", "", nil)
 		assert.ErrorIs(t, err, ErrObjectNotFound)
 	})
 
 	t.Run("returns ErrBucketNotFound when destination bucket does not exist", func(t *testing.T) {
 		s, _ := setup(t)
-		_, err := s.CopyObject("src-bucket", "orig.txt", "no-bucket", "copy.txt", "", nil)
+		_, err := s.CopyObject("src-bucket", "orig.txt", "", "no-bucket", "copy.txt", "", nil)
 		assert.ErrorIs(t, err, ErrBucketNotFound)
 	})
 
@@ -625,7 +641,15 @@ func TestCopyObject(t *testing.T) {
 		)
 		t.Cleanup(func() { _ = os.Chmod(filepath.Join(rootPath, "dst-bucket"), 0o750) })
 
-		_, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "nested/copy.txt", "", nil)
+		_, err := s.CopyObject(
+			"src-bucket",
+			"orig.txt",
+			"",
+			"dst-bucket",
+			"nested/copy.txt",
+			"",
+			nil,
+		)
 		assert.Error(t, err)
 	})
 
@@ -633,7 +657,7 @@ func TestCopyObject(t *testing.T) {
 		s, rootPath := setup(t)
 		require.NoError(t, os.Remove(filepath.Join(rootPath, "src-bucket", "orig.txt")))
 
-		_, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "copy.txt", "", nil)
+		_, err := s.CopyObject("src-bucket", "orig.txt", "", "dst-bucket", "copy.txt", "", nil)
 		assert.ErrorIs(t, err, ErrObjectNotFound)
 	})
 
@@ -643,7 +667,7 @@ func TestCopyObject(t *testing.T) {
 		require.NoError(t, os.Chmod(dataPath, 0o000))
 		t.Cleanup(func() { _ = os.Chmod(dataPath, 0o600) })
 
-		_, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "copy.txt", "", nil)
+		_, err := s.CopyObject("src-bucket", "orig.txt", "", "dst-bucket", "copy.txt", "", nil)
 		assert.Error(t, err)
 		assert.NotErrorIs(t, err, ErrObjectNotFound)
 	})
@@ -662,7 +686,15 @@ func TestCopyObject(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		dstMeta, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "copy.txt", "", nil)
+		dstMeta, err := s.CopyObject(
+			"src-bucket",
+			"orig.txt",
+			"",
+			"dst-bucket",
+			"copy.txt",
+			"",
+			nil,
+		)
 		require.NoError(t, err)
 		assert.Equal(t, srcMeta, dstMeta.UserMetadata)
 	})
@@ -679,6 +711,7 @@ func TestCopyObject(t *testing.T) {
 		dstMeta, err := s.CopyObject(
 			"src-bucket",
 			"orig.txt",
+			"",
 			"dst-bucket",
 			"copy.txt",
 			"",
@@ -701,7 +734,15 @@ func TestCopyObject(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		dstMeta, err := s.CopyObject("src-bucket", "orig.txt", "src-bucket", "orig.txt", "", nil)
+		dstMeta, err := s.CopyObject(
+			"src-bucket",
+			"orig.txt",
+			"",
+			"src-bucket",
+			"orig.txt",
+			"",
+			nil,
+		)
 		require.NoError(t, err)
 		assert.Equal(t, srcMeta, dstMeta.UserMetadata)
 	})
@@ -717,6 +758,7 @@ func TestCopyObject(t *testing.T) {
 		dstMeta, err := s.CopyObject(
 			"src-bucket",
 			"orig.txt",
+			"",
 			"src-bucket",
 			"orig.txt",
 			"",
@@ -742,6 +784,7 @@ func TestCopyObject(t *testing.T) {
 		dstMeta, err := s.CopyObject(
 			"src-bucket",
 			"orig.txt",
+			"",
 			"dst-bucket",
 			"copy.txt",
 			"application/json",
@@ -764,7 +807,15 @@ func TestCopyObject(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		dstMeta, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "copy.txt", "", nil)
+		dstMeta, err := s.CopyObject(
+			"src-bucket",
+			"orig.txt",
+			"",
+			"dst-bucket",
+			"copy.txt",
+			"",
+			nil,
+		)
 		require.NoError(t, err)
 		assert.Equal(t, "text/plain", dstMeta.ContentType)
 	})
@@ -2538,4 +2589,482 @@ func TestBucketPolicy(t *testing.T) {
 		err := s.DeleteBucketPolicy(bucket)
 		assert.Error(t, err)
 	})
+}
+
+func TestVersioning(t *testing.T) {
+	setup := func(t *testing.T) (*Storage, string) {
+		t.Helper()
+		s, _ := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("versioned-bucket", "us-east-1"))
+		require.NoError(t, s.PutBucketVersioning("versioned-bucket", "Enabled"))
+		return s, "versioned-bucket"
+	}
+
+	t.Run("PutObject on versioned bucket sets VersionID in metadata", func(t *testing.T) {
+		s, bucket := setup(t)
+		meta, err := s.PutObject(bucket, "obj.txt", strings.NewReader("v1"), "text/plain", nil)
+		require.NoError(t, err)
+		assert.NotEmpty(t, meta.VersionID)
+	})
+
+	t.Run("PutObject twice creates two versions", func(t *testing.T) {
+		s, bucket := setup(t)
+		m1, err := s.PutObject(bucket, "obj.txt", strings.NewReader("v1"), "text/plain", nil)
+		require.NoError(t, err)
+		m2, err := s.PutObject(bucket, "obj.txt", strings.NewReader("v2"), "text/plain", nil)
+		require.NoError(t, err)
+		assert.NotEqual(t, m1.VersionID, m2.VersionID)
+	})
+
+	t.Run("GetObject without versionId returns latest version", func(t *testing.T) {
+		s, bucket := setup(t)
+		_, err := s.PutObject(bucket, "obj.txt", strings.NewReader("v1"), "text/plain", nil)
+		require.NoError(t, err)
+		_, err = s.PutObject(bucket, "obj.txt", strings.NewReader("v2"), "text/plain", nil)
+		require.NoError(t, err)
+
+		f, _, err := s.GetObject(bucket, "obj.txt")
+		require.NoError(t, err)
+		defer func() { _ = f.Close() }()
+		body, _ := io.ReadAll(f)
+		assert.Equal(t, "v2", string(body))
+	})
+
+	t.Run("GetObjectVersion retrieves a specific archived version", func(t *testing.T) {
+		s, bucket := setup(t)
+		m1, err := s.PutObject(bucket, "obj.txt", strings.NewReader("v1"), "text/plain", nil)
+		require.NoError(t, err)
+		_, err = s.PutObject(bucket, "obj.txt", strings.NewReader("v2"), "text/plain", nil)
+		require.NoError(t, err)
+
+		f, meta, err := s.GetObjectVersion(bucket, "obj.txt", m1.VersionID)
+		require.NoError(t, err)
+		defer func() { _ = f.Close() }()
+		body, _ := io.ReadAll(f)
+		assert.Equal(t, "v1", string(body))
+		assert.Equal(t, m1.VersionID, meta.VersionID)
+	})
+
+	t.Run("GetObjectVersion with current versionId returns current object", func(t *testing.T) {
+		s, bucket := setup(t)
+		_, err := s.PutObject(bucket, "obj.txt", strings.NewReader("v1"), "text/plain", nil)
+		require.NoError(t, err)
+		m2, err := s.PutObject(bucket, "obj.txt", strings.NewReader("v2"), "text/plain", nil)
+		require.NoError(t, err)
+
+		f, meta, err := s.GetObjectVersion(bucket, "obj.txt", m2.VersionID)
+		require.NoError(t, err)
+		defer func() { _ = f.Close() }()
+		body, _ := io.ReadAll(f)
+		assert.Equal(t, "v2", string(body))
+		assert.Equal(t, m2.VersionID, meta.VersionID)
+	})
+
+	t.Run("HeadObjectVersion returns metadata for a specific version", func(t *testing.T) {
+		s, bucket := setup(t)
+		m1, err := s.PutObject(bucket, "obj.txt", strings.NewReader("v1"), "text/plain", nil)
+		require.NoError(t, err)
+		_, err = s.PutObject(bucket, "obj.txt", strings.NewReader("v2"), "text/plain", nil)
+		require.NoError(t, err)
+
+		meta, err := s.HeadObjectVersion(bucket, "obj.txt", m1.VersionID)
+		require.NoError(t, err)
+		assert.Equal(t, m1.VersionID, meta.VersionID)
+		assert.Equal(t, int64(2), meta.Size)
+	})
+
+	t.Run(
+		"DeleteObjectVersioned creates delete marker when versioning is enabled",
+		func(t *testing.T) {
+			s, bucket := setup(t)
+			_, err := s.PutObject(bucket, "obj.txt", strings.NewReader("v1"), "text/plain", nil)
+			require.NoError(t, err)
+
+			vid, isMarker, err := s.DeleteObjectVersioned(bucket, "obj.txt")
+			require.NoError(t, err)
+			assert.True(t, isMarker)
+			assert.NotEmpty(t, vid)
+
+			// GetObject should now return not found.
+			_, _, err = s.GetObject(bucket, "obj.txt")
+			assert.ErrorIs(t, err, ErrObjectNotFound)
+		},
+	)
+
+	t.Run(
+		"DeleteObjectVersioned on non-versioned bucket removes object normally",
+		func(t *testing.T) {
+			s, _ := newTestStorageWithRoot(t)
+			require.NoError(t, s.CreateBucket("plain-bucket", ""))
+			_, err := s.PutObject(
+				"plain-bucket",
+				"obj.txt",
+				strings.NewReader("data"),
+				"text/plain",
+				nil,
+			)
+			require.NoError(t, err)
+
+			vid, isMarker, err := s.DeleteObjectVersioned("plain-bucket", "obj.txt")
+			require.NoError(t, err)
+			assert.Empty(t, vid)
+			assert.False(t, isMarker)
+
+			_, _, err = s.GetObject("plain-bucket", "obj.txt")
+			assert.ErrorIs(t, err, ErrObjectNotFound)
+		},
+	)
+
+	t.Run("DeleteObjectVersion removes a specific archived version", func(t *testing.T) {
+		s, bucket := setup(t)
+		m1, err := s.PutObject(bucket, "obj.txt", strings.NewReader("v1"), "text/plain", nil)
+		require.NoError(t, err)
+		_, err = s.PutObject(bucket, "obj.txt", strings.NewReader("v2"), "text/plain", nil)
+		require.NoError(t, err)
+
+		isMarker, err := s.DeleteObjectVersion(bucket, "obj.txt", m1.VersionID)
+		require.NoError(t, err)
+		assert.False(t, isMarker)
+
+		_, _, err = s.GetObjectVersion(bucket, "obj.txt", m1.VersionID)
+		assert.ErrorIs(t, err, ErrObjectNotFound)
+	})
+
+	t.Run("DeleteObjectVersion on current version removes it", func(t *testing.T) {
+		s, bucket := setup(t)
+		_, err := s.PutObject(bucket, "obj.txt", strings.NewReader("v1"), "text/plain", nil)
+		require.NoError(t, err)
+		m2, err := s.PutObject(bucket, "obj.txt", strings.NewReader("v2"), "text/plain", nil)
+		require.NoError(t, err)
+
+		isMarker, err := s.DeleteObjectVersion(bucket, "obj.txt", m2.VersionID)
+		require.NoError(t, err)
+		assert.False(t, isMarker)
+	})
+
+	t.Run(
+		"DeleteObjectVersion returns ErrObjectNotFound for unknown versionId",
+		func(t *testing.T) {
+			s, bucket := setup(t)
+			_, err := s.PutObject(bucket, "obj.txt", strings.NewReader("v1"), "text/plain", nil)
+			require.NoError(t, err)
+
+			_, err = s.DeleteObjectVersion(bucket, "obj.txt", "deadbeefdeadbeef")
+			assert.ErrorIs(t, err, ErrObjectNotFound)
+		},
+	)
+
+	t.Run("DeleteObjectVersion removes a delete marker", func(t *testing.T) {
+		s, bucket := setup(t)
+		_, err := s.PutObject(bucket, "obj.txt", strings.NewReader("v1"), "text/plain", nil)
+		require.NoError(t, err)
+		markerVID, _, err := s.DeleteObjectVersioned(bucket, "obj.txt")
+		require.NoError(t, err)
+
+		isMarker, err := s.DeleteObjectVersion(bucket, "obj.txt", markerVID)
+		require.NoError(t, err)
+		assert.True(t, isMarker)
+	})
+
+	t.Run("ListObjectVersions returns all versions and delete markers", func(t *testing.T) {
+		s, bucket := setup(t)
+		m1, err := s.PutObject(bucket, "obj.txt", strings.NewReader("v1"), "text/plain", nil)
+		require.NoError(t, err)
+		m2, err := s.PutObject(bucket, "obj.txt", strings.NewReader("v2"), "text/plain", nil)
+		require.NoError(t, err)
+		markerVID, _, err := s.DeleteObjectVersioned(bucket, "obj.txt")
+		require.NoError(t, err)
+
+		versions, deleteMarkers, err := s.ListObjectVersions(bucket)
+		require.NoError(t, err)
+		assert.Len(t, deleteMarkers, 1)
+		assert.Equal(t, markerVID, deleteMarkers[0].VersionID)
+		assert.True(t, deleteMarkers[0].IsLatest)
+
+		var vids []string
+		for _, v := range versions {
+			vids = append(vids, v.VersionID)
+		}
+		assert.Contains(t, vids, m1.VersionID)
+		assert.Contains(t, vids, m2.VersionID)
+	})
+
+	t.Run(
+		"ListObjectVersions on non-versioned bucket returns objects with null versionId",
+		func(t *testing.T) {
+			s, _ := newTestStorageWithRoot(t)
+			require.NoError(t, s.CreateBucket("plain-bucket", ""))
+			_, err := s.PutObject(
+				"plain-bucket",
+				"obj.txt",
+				strings.NewReader("data"),
+				"text/plain",
+				nil,
+			)
+			require.NoError(t, err)
+
+			versions, deleteMarkers, err := s.ListObjectVersions("plain-bucket")
+			require.NoError(t, err)
+			require.Len(t, versions, 1)
+			assert.Equal(t, "null", versions[0].VersionID)
+			assert.Empty(t, deleteMarkers)
+		},
+	)
+
+	t.Run("ListObjectVersions returns ErrBucketNotFound for missing bucket", func(t *testing.T) {
+		s, _ := newTestStorageWithRoot(t)
+		_, _, err := s.ListObjectVersions("no-bucket")
+		assert.ErrorIs(t, err, ErrBucketNotFound)
+	})
+
+	t.Run(
+		"GetObject returns ErrObjectNotFound when current version is delete marker",
+		func(t *testing.T) {
+			s, bucket := setup(t)
+			_, err := s.PutObject(bucket, "obj.txt", strings.NewReader("v1"), "text/plain", nil)
+			require.NoError(t, err)
+			_, _, err = s.DeleteObjectVersioned(bucket, "obj.txt")
+			require.NoError(t, err)
+
+			_, _, err = s.GetObject(bucket, "obj.txt")
+			assert.ErrorIs(t, err, ErrObjectNotFound)
+		},
+	)
+
+	t.Run(
+		"HeadObject returns ErrObjectNotFound when current version is delete marker",
+		func(t *testing.T) {
+			s, bucket := setup(t)
+			_, err := s.PutObject(bucket, "obj.txt", strings.NewReader("v1"), "text/plain", nil)
+			require.NoError(t, err)
+			_, _, err = s.DeleteObjectVersioned(bucket, "obj.txt")
+			require.NoError(t, err)
+
+			_, err = s.HeadObject(bucket, "obj.txt")
+			assert.ErrorIs(t, err, ErrObjectNotFound)
+		},
+	)
+
+	t.Run("ListObjects does not show delete-marker objects", func(t *testing.T) {
+		s, bucket := setup(t)
+		_, err := s.PutObject(bucket, "obj.txt", strings.NewReader("v1"), "text/plain", nil)
+		require.NoError(t, err)
+		_, _, err = s.DeleteObjectVersioned(bucket, "obj.txt")
+		require.NoError(t, err)
+
+		objects, err := s.ListObjects(bucket)
+		require.NoError(t, err)
+		assert.Empty(t, objects)
+	})
+
+	t.Run("CopyObject on versioned destination creates new version", func(t *testing.T) {
+		s, bucket := setup(t)
+		require.NoError(t, s.CreateBucket("src-bucket", ""))
+		_, err := s.PutObject(
+			"src-bucket",
+			"src.txt",
+			strings.NewReader("hello"),
+			"text/plain",
+			nil,
+		)
+		require.NoError(t, err)
+		m1, err := s.PutObject(bucket, "dst.txt", strings.NewReader("original"), "text/plain", nil)
+		require.NoError(t, err)
+
+		m2, err := s.CopyObject("src-bucket", "src.txt", "", bucket, "dst.txt", "", nil)
+		require.NoError(t, err)
+		assert.NotEqual(t, m1.VersionID, m2.VersionID)
+		assert.NotEmpty(t, m2.VersionID)
+	})
+
+	t.Run("CopyObject with srcVersionId copies a specific version", func(t *testing.T) {
+		s, bucket := setup(t)
+		m1, err := s.PutObject(bucket, "obj.txt", strings.NewReader("v1"), "text/plain", nil)
+		require.NoError(t, err)
+		_, err = s.PutObject(bucket, "obj.txt", strings.NewReader("v2"), "text/plain", nil)
+		require.NoError(t, err)
+
+		require.NoError(t, s.CreateBucket("dst-bucket", ""))
+		dstMeta, err := s.CopyObject(
+			bucket,
+			"obj.txt",
+			m1.VersionID,
+			"dst-bucket",
+			"copy.txt",
+			"",
+			nil,
+		)
+		require.NoError(t, err)
+		assert.Equal(t, m1.ETag, dstMeta.ETag)
+	})
+}
+
+func TestVersioningErrorPaths(t *testing.T) {
+	t.Run("GetObjectVersion returns ErrBucketNotFound", func(t *testing.T) {
+		s, _ := newTestStorageWithRoot(t)
+		_, _, err := s.GetObjectVersion("no-bucket", "obj.txt", "abc123")
+		assert.ErrorIs(t, err, ErrBucketNotFound)
+	})
+
+	t.Run("GetObjectVersion returns ErrObjectNotFound for unknown versionId", func(t *testing.T) {
+		s, _ := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
+		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil)
+		require.NoError(t, err)
+
+		_, _, err = s.GetObjectVersion("my-bucket", "obj.txt", "deadbeefdeadbeef")
+		assert.ErrorIs(t, err, ErrObjectNotFound)
+	})
+
+	t.Run(
+		"GetObjectVersion returns ErrObjectNotFound for delete marker versionId",
+		func(t *testing.T) {
+			s, _ := newTestStorageWithRoot(t)
+			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
+			_, err := s.PutObject(
+				"my-bucket",
+				"obj.txt",
+				strings.NewReader("v1"),
+				"text/plain",
+				nil,
+			)
+			require.NoError(t, err)
+			markerVID, _, err := s.DeleteObjectVersioned("my-bucket", "obj.txt")
+			require.NoError(t, err)
+
+			// Accessing the delete marker directly should return not found.
+			_, _, err = s.GetObjectVersion("my-bucket", "obj.txt", markerVID)
+			assert.ErrorIs(t, err, ErrObjectNotFound)
+		},
+	)
+
+	t.Run("HeadObjectVersion returns ErrBucketNotFound", func(t *testing.T) {
+		s, _ := newTestStorageWithRoot(t)
+		_, err := s.HeadObjectVersion("no-bucket", "obj.txt", "abc123")
+		assert.ErrorIs(t, err, ErrBucketNotFound)
+	})
+
+	t.Run("HeadObjectVersion returns ErrObjectNotFound for unknown versionId", func(t *testing.T) {
+		s, _ := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
+		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil)
+		require.NoError(t, err)
+
+		_, err = s.HeadObjectVersion("my-bucket", "obj.txt", "deadbeefdeadbeef")
+		assert.ErrorIs(t, err, ErrObjectNotFound)
+	})
+
+	t.Run("HeadObjectVersion returns ErrObjectNotFound for delete marker", func(t *testing.T) {
+		s, _ := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
+		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil)
+		require.NoError(t, err)
+		markerVID, _, err := s.DeleteObjectVersioned("my-bucket", "obj.txt")
+		require.NoError(t, err)
+
+		_, err = s.HeadObjectVersion("my-bucket", "obj.txt", markerVID)
+		assert.ErrorIs(t, err, ErrObjectNotFound)
+	})
+
+	t.Run("DeleteObjectVersioned returns ErrBucketNotFound", func(t *testing.T) {
+		s, _ := newTestStorageWithRoot(t)
+		_, _, err := s.DeleteObjectVersioned("no-bucket", "obj.txt")
+		assert.ErrorIs(t, err, ErrBucketNotFound)
+	})
+
+	t.Run("DeleteObjectVersion returns ErrBucketNotFound", func(t *testing.T) {
+		s, _ := newTestStorageWithRoot(t)
+		_, err := s.DeleteObjectVersion("no-bucket", "obj.txt", "abc123")
+		assert.ErrorIs(t, err, ErrBucketNotFound)
+	})
+
+	t.Run("PutObject returns error when newVersionID fails", func(t *testing.T) {
+		s, _ := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
+		s.randRead = func(b []byte) (int, error) { return 0, errors.New("rand failure") }
+		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil)
+		assert.Error(t, err)
+	})
+
+	t.Run(
+		"archiveCurrentVersionLocked handles randRead failure for unversioned object",
+		func(t *testing.T) {
+			s, _ := newTestStorageWithRoot(t)
+			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			// Put object WITHOUT versioning first.
+			_, err := s.PutObject(
+				"my-bucket",
+				"obj.txt",
+				strings.NewReader("v1"),
+				"text/plain",
+				nil,
+			)
+			require.NoError(t, err)
+			// Enable versioning.
+			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
+			// Make randRead fail — triggered during archiveCurrentVersionLocked for pre-versioning object.
+			s.randRead = func(b []byte) (int, error) { return 0, errors.New("rand failure") }
+			_, err = s.PutObject("my-bucket", "obj.txt", strings.NewReader("v2"), "text/plain", nil)
+			assert.Error(t, err)
+		},
+	)
+
+	t.Run("DeleteObjectVersioned returns error when newVersionID fails", func(t *testing.T) {
+		s, _ := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
+		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil)
+		require.NoError(t, err)
+		s.randRead = func(b []byte) (int, error) { return 0, errors.New("rand failure") }
+		_, _, err = s.DeleteObjectVersioned("my-bucket", "obj.txt")
+		assert.Error(t, err)
+	})
+
+	t.Run("archiveCurrentVersionLocked returns error when openFile fails", func(t *testing.T) {
+		s, _ := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
+		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil)
+		require.NoError(t, err)
+		// Fail on .ver writes.
+		s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+			if strings.Contains(name, ".ver") {
+				return nil, errors.New("write error")
+			}
+			return s.root.OpenFile(name, flag, perm)
+		}
+		_, err = s.PutObject("my-bucket", "obj.txt", strings.NewReader("v2"), "text/plain", nil)
+		assert.Error(t, err)
+	})
+
+	t.Run(
+		"GetObjectVersion archived version ErrObjectNotFound when body missing",
+		func(t *testing.T) {
+			s, _ := newTestStorageWithRoot(t)
+			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
+			m1, err := s.PutObject(
+				"my-bucket",
+				"obj.txt",
+				strings.NewReader("v1"),
+				"text/plain",
+				nil,
+			)
+			require.NoError(t, err)
+			_, err = s.PutObject("my-bucket", "obj.txt", strings.NewReader("v2"), "text/plain", nil)
+			require.NoError(t, err)
+
+			// Remove the archived body to simulate corruption.
+			vp := verPath("my-bucket", "obj.txt", m1.VersionID)
+			require.NoError(t, s.root.Remove(vp))
+
+			_, _, err = s.GetObjectVersion("my-bucket", "obj.txt", m1.VersionID)
+			assert.ErrorIs(t, err, ErrObjectNotFound)
+		},
+	)
 }

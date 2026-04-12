@@ -290,15 +290,39 @@ func (m *mockStore) PutObject(
 func (m *mockStore) GetObject(_ string, _ string) (*os.File, ObjectMetadata, error) {
 	return m.getObjectFile, m.getObjectMeta, m.getObjectErr
 }
-func (m *mockStore) CopyObject(_, _, _, _, _ string, _ map[string]string) (ObjectMetadata, error) {
+
+func (m *mockStore) GetObjectVersion(
+	_ string,
+	_ string,
+	_ string,
+) (*os.File, ObjectMetadata, error) {
+	return m.getObjectFile, m.getObjectMeta, m.getObjectErr
+}
+
+func (m *mockStore) CopyObject(
+	_, _, _, _, _, _ string,
+	_ map[string]string,
+) (ObjectMetadata, error) {
 	return m.copyObjectMeta, m.copyObjectErr
 }
 func (m *mockStore) DeleteObject(_ string, _ string) error { return m.deleteObjectErr }
+func (m *mockStore) DeleteObjectVersioned(_ string, _ string) (string, bool, error) {
+	return "", false, m.deleteObjectErr
+}
+func (m *mockStore) DeleteObjectVersion(_ string, _ string, _ string) (bool, error) {
+	return false, m.deleteObjectErr
+}
 func (m *mockStore) HeadObject(_ string, _ string) (ObjectMetadata, error) {
+	return m.headObjectMeta, m.headObjectErr
+}
+func (m *mockStore) HeadObjectVersion(_ string, _ string, _ string) (ObjectMetadata, error) {
 	return m.headObjectMeta, m.headObjectErr
 }
 func (m *mockStore) ListObjects(_ string) ([]ObjectInfo, error) {
 	return m.listObjectsObjs, m.listObjectsErr
+}
+func (m *mockStore) ListObjectVersions(_ string) ([]VersionInfo, []DeleteMarkerInfo, error) {
+	return nil, nil, nil
 }
 func (m *mockStore) CreateMultipartUpload(_ string, _ string, _ string) (string, error) {
 	return m.createMultipartUploadID, m.createMultipartUploadErr
@@ -3344,4 +3368,175 @@ func TestIsRangeSatisfiable(t *testing.T) {
 			assert.Equal(t, tt.want, isRangeSatisfiable(tt.header, tt.size))
 		})
 	}
+}
+
+func TestRouterListObjectVersions(t *testing.T) {
+	t.Run("returns versions and delete markers", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		require.NoError(t, ro.storage.(*Storage).PutBucketVersioning("my-bucket", "Enabled"))
+		ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/obj.txt", "v1"))
+		ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/obj.txt", "v2"))
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket?versions", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		body := w.Body.String()
+		assert.Contains(t, body, "<ListVersionsResult")
+		assert.Contains(t, body, "<Key>obj.txt</Key>")
+	})
+
+	t.Run("returns 404 for missing bucket", func(t *testing.T) {
+		ro := newTestRouter(t)
+		req := httptest.NewRequest(http.MethodGet, "/no-bucket?versions", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchBucket")
+	})
+}
+
+func TestRouterDeleteObjectVersioned(t *testing.T) {
+	t.Run("delete without versionId returns 204", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/obj.txt", "hello"))
+
+		req := httptest.NewRequest(http.MethodDelete, "/my-bucket/obj.txt", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNoContent, w.Code)
+	})
+
+	t.Run(
+		"delete without versionId on versioned bucket sets x-amz-delete-marker header",
+		func(t *testing.T) {
+			ro := newTestRouter(t)
+			ro.ServeHTTP(
+				httptest.NewRecorder(),
+				httptest.NewRequest(http.MethodPut, "/my-bucket", nil),
+			)
+			require.NoError(t, ro.storage.(*Storage).PutBucketVersioning("my-bucket", "Enabled"))
+			ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/obj.txt", "hello"))
+
+			req := httptest.NewRequest(http.MethodDelete, "/my-bucket/obj.txt", nil)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusNoContent, w.Code)
+			assert.Equal(t, "true", w.Header().Get("x-amz-delete-marker"))
+			assert.NotEmpty(t, w.Header().Get("x-amz-version-id"))
+		},
+	)
+
+	t.Run("delete with versionId permanently removes version", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		require.NoError(t, ro.storage.(*Storage).PutBucketVersioning("my-bucket", "Enabled"))
+		putW := httptest.NewRecorder()
+		ro.ServeHTTP(putW, putRequest("/my-bucket/obj.txt", "hello"))
+		versionID := putW.Header().Get("x-amz-version-id")
+		require.NotEmpty(t, versionID)
+
+		req := httptest.NewRequest(
+			http.MethodDelete,
+			"/my-bucket/obj.txt?versionId="+versionID,
+			nil,
+		)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNoContent, w.Code)
+		assert.Equal(t, versionID, w.Header().Get("x-amz-version-id"))
+	})
+
+	t.Run("delete with unknown versionId returns 204", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+
+		req := httptest.NewRequest(
+			http.MethodDelete,
+			"/my-bucket/obj.txt?versionId=deadbeefdeadbeef",
+			nil,
+		)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNoContent, w.Code)
+	})
+}
+
+func TestRouterGetObjectVersion(t *testing.T) {
+	t.Run("GET with versionId returns specific version body", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		require.NoError(t, ro.storage.(*Storage).PutBucketVersioning("my-bucket", "Enabled"))
+
+		w1 := httptest.NewRecorder()
+		ro.ServeHTTP(w1, putRequest("/my-bucket/obj.txt", "v1"))
+		vid1 := w1.Header().Get("x-amz-version-id")
+		ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/obj.txt", "v2"))
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket/obj.txt?versionId="+vid1, nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "v1", w.Body.String())
+		assert.Equal(t, vid1, w.Header().Get("x-amz-version-id"))
+	})
+}
+
+func TestRouterHeadObjectVersion(t *testing.T) {
+	t.Run("HEAD with versionId returns 200 with x-amz-version-id header", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		require.NoError(t, ro.storage.(*Storage).PutBucketVersioning("my-bucket", "Enabled"))
+
+		w1 := httptest.NewRecorder()
+		ro.ServeHTTP(w1, putRequest("/my-bucket/obj.txt", "hello"))
+		vid1 := w1.Header().Get("x-amz-version-id")
+		ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/obj.txt", "updated"))
+
+		req := httptest.NewRequest(http.MethodHead, "/my-bucket/obj.txt?versionId="+vid1, nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, vid1, w.Header().Get("x-amz-version-id"))
+	})
+}
+
+func TestRouterCopyObjectVersionId(t *testing.T) {
+	t.Run("CopyObject with ?versionId in copy-source copies specific version", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/src-bucket", nil),
+		)
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/dst-bucket", nil),
+		)
+		require.NoError(t, ro.storage.(*Storage).PutBucketVersioning("src-bucket", "Enabled"))
+
+		w1 := httptest.NewRecorder()
+		ro.ServeHTTP(w1, putRequest("/src-bucket/obj.txt", "v1"))
+		vid1 := w1.Header().Get("x-amz-version-id")
+		ro.ServeHTTP(httptest.NewRecorder(), putRequest("/src-bucket/obj.txt", "v2"))
+
+		req := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
+		req.Header.Set("x-amz-copy-source", "/src-bucket/obj.txt?versionId="+vid1)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		// Verify the copy contains v1 content.
+		getReq := httptest.NewRequest(http.MethodGet, "/dst-bucket/copy.txt", nil)
+		getW := httptest.NewRecorder()
+		ro.ServeHTTP(getW, getReq)
+		assert.Equal(t, "v1", getW.Body.String())
+	})
 }
