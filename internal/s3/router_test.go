@@ -558,7 +558,7 @@ func TestRouterGetObject(t *testing.T) {
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
 
-	t.Run("logs warning when response body write fails", func(t *testing.T) {
+	t.Run("returns 200 when body write fails mid-stream", func(t *testing.T) {
 		ro := newTestRouter(t)
 		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
 		putReq := httptest.NewRequest(
@@ -574,6 +574,208 @@ func TestRouterGetObject(t *testing.T) {
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
+
+	t.Run("returns Accept-Ranges header", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(
+				http.MethodPut,
+				"/my-bucket/obj.txt",
+				strings.NewReader("hello world"),
+			),
+		)
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket/obj.txt", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "bytes", w.Header().Get("Accept-Ranges"))
+	})
+
+	t.Run("returns 206 with partial content for Range request", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(
+				http.MethodPut,
+				"/my-bucket/obj.txt",
+				strings.NewReader("hello world"),
+			),
+		)
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket/obj.txt", nil)
+		req.Header.Set("Range", "bytes=0-4")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusPartialContent, w.Code)
+		assert.Equal(t, "bytes 0-4/11", w.Header().Get("Content-Range"))
+		assert.Equal(t, "5", w.Header().Get("Content-Length"))
+		assert.Equal(t, "hello", w.Body.String())
+	})
+
+	t.Run("returns 206 for suffix range", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(
+				http.MethodPut,
+				"/my-bucket/obj.txt",
+				strings.NewReader("hello world"),
+			),
+		)
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket/obj.txt", nil)
+		req.Header.Set("Range", "bytes=-5")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusPartialContent, w.Code)
+		assert.Equal(t, "world", w.Body.String())
+	})
+
+	t.Run("returns 304 for matching If-None-Match", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		ro.ServeHTTP(httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", strings.NewReader("hello")))
+
+		// First request to get the ETag.
+		getReq := httptest.NewRequest(http.MethodGet, "/my-bucket/obj.txt", nil)
+		getW := httptest.NewRecorder()
+		ro.ServeHTTP(getW, getReq)
+		etag := getW.Header().Get("ETag")
+		require.NotEmpty(t, etag)
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket/obj.txt", nil)
+		req.Header.Set("If-None-Match", etag)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotModified, w.Code)
+		assert.Empty(t, w.Body.String())
+	})
+
+	t.Run("returns 200 for non-matching If-None-Match", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		ro.ServeHTTP(httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", strings.NewReader("hello")))
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket/obj.txt", nil)
+		req.Header.Set("If-None-Match", `"stale-etag"`)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("returns 412 with XML body for non-matching If-Match", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		ro.ServeHTTP(httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", strings.NewReader("hello")))
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket/obj.txt", nil)
+		req.Header.Set("If-Match", `"wrong-etag"`)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusPreconditionFailed, w.Code)
+		assert.Equal(t, "application/xml", w.Header().Get("Content-Type"))
+		assert.Contains(t, w.Body.String(), "PreconditionFailed")
+	})
+
+	t.Run("returns 200 for matching If-Match", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		ro.ServeHTTP(httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", strings.NewReader("hello")))
+
+		getReq := httptest.NewRequest(http.MethodGet, "/my-bucket/obj.txt", nil)
+		getW := httptest.NewRecorder()
+		ro.ServeHTTP(getW, getReq)
+		etag := getW.Header().Get("ETag")
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket/obj.txt", nil)
+		req.Header.Set("If-Match", etag)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("returns 304 for If-Modified-Since when not modified", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		ro.ServeHTTP(httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", strings.NewReader("hello")))
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket/obj.txt", nil)
+		req.Header.Set("If-Modified-Since", time.Now().Add(time.Hour).UTC().Format(http.TimeFormat))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotModified, w.Code)
+	})
+
+	t.Run(
+		"returns 412 with XML body for If-Unmodified-Since when modified after",
+		func(t *testing.T) {
+			ro := newTestRouter(t)
+			ro.ServeHTTP(
+				httptest.NewRecorder(),
+				httptest.NewRequest(http.MethodPut, "/my-bucket", nil),
+			)
+			ro.ServeHTTP(
+				httptest.NewRecorder(),
+				httptest.NewRequest(
+					http.MethodPut,
+					"/my-bucket/obj.txt",
+					strings.NewReader("hello"),
+				),
+			)
+
+			req := httptest.NewRequest(http.MethodGet, "/my-bucket/obj.txt", nil)
+			req.Header.Set(
+				"If-Unmodified-Since",
+				time.Now().Add(-time.Hour).UTC().Format(http.TimeFormat),
+			)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusPreconditionFailed, w.Code)
+			assert.Equal(t, "application/xml", w.Header().Get("Content-Type"))
+			assert.Contains(t, w.Body.String(), "PreconditionFailed")
+		},
+	)
+
+	t.Run(
+		"returns 416 with XML body and Content-Range for unsatisfiable Range",
+		func(t *testing.T) {
+			ro := newTestRouter(t)
+			ro.ServeHTTP(
+				httptest.NewRecorder(),
+				httptest.NewRequest(http.MethodPut, "/my-bucket", nil),
+			)
+			ro.ServeHTTP(
+				httptest.NewRecorder(),
+				httptest.NewRequest(
+					http.MethodPut,
+					"/my-bucket/obj.txt",
+					strings.NewReader("hello"),
+				),
+			)
+
+			req := httptest.NewRequest(http.MethodGet, "/my-bucket/obj.txt", nil)
+			req.Header.Set("Range", "bytes=100-200")
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusRequestedRangeNotSatisfiable, w.Code)
+			assert.Equal(t, "application/xml", w.Header().Get("Content-Type"))
+			assert.Equal(t, "bytes */5", w.Header().Get("Content-Range"))
+			assert.Contains(t, w.Body.String(), "InvalidRange")
+		},
+	)
 }
 
 // failBodyWriter wraps ResponseRecorder and returns an error on Write after headers are sent.
@@ -723,6 +925,111 @@ func TestRouterHeadObject(t *testing.T) {
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+
+	t.Run("returns Accept-Ranges header", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		ro.ServeHTTP(httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", strings.NewReader("hello")))
+
+		req := httptest.NewRequest(http.MethodHead, "/my-bucket/obj.txt", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "bytes", w.Header().Get("Accept-Ranges"))
+	})
+
+	t.Run("returns 304 for matching If-None-Match", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		ro.ServeHTTP(httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", strings.NewReader("hello")))
+
+		getReq := httptest.NewRequest(http.MethodHead, "/my-bucket/obj.txt", nil)
+		getW := httptest.NewRecorder()
+		ro.ServeHTTP(getW, getReq)
+		etag := getW.Header().Get("ETag")
+		require.NotEmpty(t, etag)
+
+		req := httptest.NewRequest(http.MethodHead, "/my-bucket/obj.txt", nil)
+		req.Header.Set("If-None-Match", etag)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotModified, w.Code)
+	})
+
+	t.Run("returns 200 for non-matching If-None-Match", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		ro.ServeHTTP(httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", strings.NewReader("hello")))
+
+		req := httptest.NewRequest(http.MethodHead, "/my-bucket/obj.txt", nil)
+		req.Header.Set("If-None-Match", `"stale-etag"`)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("returns 412 for non-matching If-Match", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		ro.ServeHTTP(httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", strings.NewReader("hello")))
+
+		req := httptest.NewRequest(http.MethodHead, "/my-bucket/obj.txt", nil)
+		req.Header.Set("If-Match", `"wrong-etag"`)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusPreconditionFailed, w.Code)
+	})
+
+	t.Run("returns 200 for matching If-Match", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		ro.ServeHTTP(httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", strings.NewReader("hello")))
+
+		getReq := httptest.NewRequest(http.MethodHead, "/my-bucket/obj.txt", nil)
+		getW := httptest.NewRecorder()
+		ro.ServeHTTP(getW, getReq)
+		etag := getW.Header().Get("ETag")
+
+		req := httptest.NewRequest(http.MethodHead, "/my-bucket/obj.txt", nil)
+		req.Header.Set("If-Match", etag)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("returns 304 for If-Modified-Since when not modified", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		ro.ServeHTTP(httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", strings.NewReader("hello")))
+
+		req := httptest.NewRequest(http.MethodHead, "/my-bucket/obj.txt", nil)
+		req.Header.Set("If-Modified-Since", time.Now().Add(time.Hour).UTC().Format(http.TimeFormat))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotModified, w.Code)
+	})
+
+	t.Run("returns 412 for If-Unmodified-Since when modified after", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		ro.ServeHTTP(httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", strings.NewReader("hello")))
+
+		req := httptest.NewRequest(http.MethodHead, "/my-bucket/obj.txt", nil)
+		req.Header.Set(
+			"If-Unmodified-Since",
+			time.Now().Add(-time.Hour).UTC().Format(http.TimeFormat),
+		)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusPreconditionFailed, w.Code)
 	})
 }
 
@@ -2991,4 +3298,50 @@ func TestBucketVersioningHandlers(t *testing.T) {
 			assert.Equal(t, http.StatusInternalServerError, w.Code)
 		})
 	})
+}
+
+func TestEtagListContains(t *testing.T) {
+	tests := []struct {
+		name      string
+		headerVal string
+		etag      string
+		want      bool
+	}{
+		{"wildcard matches any", "*", `"abc"`, true},
+		{"exact match", `"abc"`, `"abc"`, true},
+		{"no match", `"abc"`, `"def"`, false},
+		{"multiple ETags match", `"abc", "def"`, `"def"`, true},
+		{"multiple ETags no match", `"abc", "def"`, `"ghi"`, false},
+		{"whitespace trimmed", `  "abc"  `, `"abc"`, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, etagListContains(tt.headerVal, tt.etag))
+		})
+	}
+}
+
+func TestIsRangeSatisfiable(t *testing.T) {
+	tests := []struct {
+		name   string
+		header string
+		size   int64
+		want   bool
+	}{
+		{"start within object", "bytes=0-4", 10, true},
+		{"start at last byte", "bytes=9-9", 10, true},
+		{"start beyond end", "bytes=10-20", 10, false},
+		{"start well beyond end", "bytes=100-200", 5, false},
+		{"suffix range", "bytes=-5", 10, true},
+		{"multiple ranges one satisfiable", "bytes=100-200,0-4", 10, true},
+		{"multiple ranges all unsatisfiable", "bytes=100-200,50-60", 10, false},
+		{"non-bytes range passes through", "other=0-4", 10, true},
+		{"malformed no dash passes through", "bytes=abc", 10, true},
+		{"malformed start passes through", "bytes=abc-10", 10, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isRangeSatisfiable(tt.header, tt.size))
+		})
+	}
 }

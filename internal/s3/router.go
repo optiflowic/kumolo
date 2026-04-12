@@ -894,6 +894,90 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 	w.WriteHeader(http.StatusOK)
 }
 
+// checkConditionals evaluates conditional request headers per RFC 7232.
+// Response headers on w (ETag, Content-Type, etc.) must be set before calling,
+// so that any 304/412 short-circuit response includes them.
+// Returns 0 to proceed normally, or the written status code (304/412) to short-circuit.
+func checkConditionals(
+	w http.ResponseWriter,
+	r *http.Request,
+	etag string,
+	lastModified time.Time,
+) int {
+	modtime := lastModified.Truncate(time.Second)
+
+	// If-Match: 412 if no listed ETag matches.
+	if im := r.Header.Get("If-Match"); im != "" {
+		if !etagListContains(im, etag) {
+			w.WriteHeader(http.StatusPreconditionFailed)
+			return http.StatusPreconditionFailed
+		}
+	} else if ius := r.Header.Get("If-Unmodified-Since"); ius != "" {
+		// If-Unmodified-Since (only when If-Match absent): 412 if modified after.
+		if t, err := http.ParseTime(ius); err == nil && modtime.After(t) {
+			w.WriteHeader(http.StatusPreconditionFailed)
+			return http.StatusPreconditionFailed
+		}
+	}
+
+	// If-None-Match: 304 if any listed ETag matches.
+	if inm := r.Header.Get("If-None-Match"); inm != "" {
+		if etagListContains(inm, etag) {
+			w.WriteHeader(http.StatusNotModified)
+			return http.StatusNotModified
+		}
+	} else if ims := r.Header.Get("If-Modified-Since"); ims != "" {
+		// If-Modified-Since (only when If-None-Match absent): 304 if not modified.
+		if t, err := http.ParseTime(ims); err == nil && !modtime.After(t) {
+			w.WriteHeader(http.StatusNotModified)
+			return http.StatusNotModified
+		}
+	}
+
+	return 0
+}
+
+// etagListContains reports whether etag appears in a comma-separated ETag list header value.
+// A wildcard "*" matches any etag.
+func etagListContains(headerVal, etag string) bool {
+	if strings.TrimSpace(headerVal) == "*" {
+		return true
+	}
+	for _, s := range strings.Split(headerVal, ",") {
+		if strings.TrimSpace(s) == etag {
+			return true
+		}
+	}
+	return false
+}
+
+// isRangeSatisfiable reports whether at least one range in a "bytes=..." Range
+// header is satisfiable for an object of the given size.
+func isRangeSatisfiable(rangeHeader string, size int64) bool {
+	const prefix = "bytes="
+	if !strings.HasPrefix(rangeHeader, prefix) {
+		return true // non-bytes range: let ServeContent handle
+	}
+	for _, spec := range strings.Split(rangeHeader[len(prefix):], ",") {
+		spec = strings.TrimSpace(spec)
+		dash := strings.IndexByte(spec, '-')
+		if dash < 0 {
+			return true // malformed: let ServeContent handle
+		}
+		if dash == 0 {
+			return true // suffix range (e.g. bytes=-500): always satisfiable
+		}
+		start, err := strconv.ParseInt(spec[:dash], 10, 64)
+		if err != nil || start < 0 {
+			return true // malformed: let ServeContent handle
+		}
+		if start < size {
+			return true
+		}
+	}
+	return false
+}
+
 func (ro *Router) handleHeadObject(w http.ResponseWriter, r *http.Request, bucket, key string) {
 	meta, err := ro.storage.HeadObject(bucket, key)
 	if err != nil {
@@ -925,6 +1009,7 @@ func (ro *Router) handleHeadObject(w http.ResponseWriter, r *http.Request, bucke
 	w.Header().Set("Content-Length", strconv.FormatInt(meta.Size, 10))
 	w.Header().Set("ETag", meta.ETag)
 	w.Header().Set("Last-Modified", meta.LastModified.UTC().Format(http.TimeFormat))
+	w.Header().Set("Accept-Ranges", "bytes")
 	for k, v := range meta.UserMetadata {
 		w.Header().Set(amzMetaPrefix+k, v)
 	}
@@ -932,6 +1017,18 @@ func (ro *Router) handleHeadObject(w http.ResponseWriter, r *http.Request, bucke
 	// missing or unreadable tags file never prevents a successful object response.
 	if tags, err := ro.storage.GetObjectTagging(bucket, key); err == nil && len(tags) > 0 {
 		w.Header().Set(amzTaggingCount, strconv.Itoa(len(tags)))
+	}
+	if status := checkConditionals(w, r, meta.ETag, meta.LastModified); status != 0 {
+		slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			"conditional check short-circuited",
+			"bucket",
+			bucket,
+			"key",
+			key,
+			"status",
+			status,
+		)
+		return
 	}
 	w.WriteHeader(http.StatusOK)
 }
@@ -1785,6 +1882,54 @@ func (ro *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 		return
 	}
 	defer func() { _ = f.Close() }()
+	// Pre-check If-Match / If-Unmodified-Since before setting response headers.
+	// http.ServeContent returns an empty 412; AWS S3 requires an XML error body.
+	if im := r.Header.Get("If-Match"); im != "" {
+		if !etagListContains(im, meta.ETag) {
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"precondition failed: If-Match",
+				"bucket",
+				bucket,
+				"key",
+				key,
+			)
+			writeError(w, r, http.StatusPreconditionFailed, "PreconditionFailed",
+				"At least one of the pre-conditions you specified did not hold")
+			return
+		}
+	} else if ius := r.Header.Get("If-Unmodified-Since"); ius != "" {
+		if t, err := http.ParseTime(ius); err == nil &&
+			meta.LastModified.Truncate(time.Second).After(t) {
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"precondition failed: If-Unmodified-Since",
+				"bucket",
+				bucket,
+				"key",
+				key,
+			)
+			writeError(w, r, http.StatusPreconditionFailed, "PreconditionFailed",
+				"At least one of the pre-conditions you specified did not hold")
+			return
+		}
+	}
+
+	// Pre-check Range satisfiability.
+	// http.ServeContent returns a text/plain 416 without Content-Range;
+	// AWS S3 requires an XML body and Content-Range: bytes */size.
+	if rng := r.Header.Get("Range"); rng != "" && !isRangeSatisfiable(rng, meta.Size) {
+		slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			"range not satisfiable",
+			"bucket",
+			bucket,
+			"key",
+			key,
+		)
+		w.Header().Set("Content-Range", "bytes */"+strconv.FormatInt(meta.Size, 10))
+		writeError(w, r, http.StatusRequestedRangeNotSatisfiable, "InvalidRange",
+			"The requested range is not satisfiable")
+		return
+	}
+
 	slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
 		"serving object",
 		"bucket",
@@ -1792,10 +1937,11 @@ func (ro *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 		"key",
 		key,
 	)
+	// Set custom headers before ServeContent so that:
+	//   - Content-Type is preserved (ServeContent skips sniffing when already set)
+	//   - ETag is available for If-Match / If-None-Match evaluation
 	w.Header().Set("Content-Type", meta.ContentType)
-	w.Header().Set("Content-Length", strconv.FormatInt(meta.Size, 10))
 	w.Header().Set("ETag", meta.ETag)
-	w.Header().Set("Last-Modified", meta.LastModified.UTC().Format(http.TimeFormat))
 	for k, v := range meta.UserMetadata {
 		w.Header().Set(amzMetaPrefix+k, v)
 	}
@@ -1804,18 +1950,7 @@ func (ro *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 	if tags, err := ro.storage.GetObjectTagging(bucket, key); err == nil && len(tags) > 0 {
 		w.Header().Set(amzTaggingCount, strconv.Itoa(len(tags)))
 	}
-	w.WriteHeader(http.StatusOK)
-	if _, err := io.Copy(w, f); err != nil {
-		slog.Warn( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-			"failed to stream object body",
-			"bucket",
-			bucket,
-			"key",
-			key,
-			"err",
-			err,
-		)
-	}
+	http.ServeContent(w, r, "", meta.LastModified, f)
 }
 
 func (ro *Router) handleGetBucketLocation(w http.ResponseWriter, r *http.Request, bucket string) {
