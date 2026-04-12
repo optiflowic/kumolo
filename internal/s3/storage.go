@@ -40,10 +40,11 @@ type CORSRule struct {
 
 // ObjectMetadata is stored as a sidecar .meta.json file alongside each object.
 type ObjectMetadata struct {
-	ContentType  string    `json:"contentType"`
-	ETag         string    `json:"etag"`
-	LastModified time.Time `json:"lastModified"`
-	Size         int64     `json:"size"`
+	ContentType  string            `json:"contentType"`
+	ETag         string            `json:"etag"`
+	LastModified time.Time         `json:"lastModified"`
+	Size         int64             `json:"size"`
+	UserMetadata map[string]string `json:"userMetadata,omitempty"`
 }
 
 // Tag is a key-value pair attached to an S3 object.
@@ -187,6 +188,7 @@ func (s *Storage) PutObject(
 	bucket, key string,
 	r io.Reader,
 	contentType string,
+	userMetadata map[string]string,
 ) (ObjectMetadata, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -201,7 +203,7 @@ func (s *Storage) PutObject(
 		}
 	}
 
-	return s.writeObject(objPath, r, contentType, "")
+	return s.writeObject(objPath, r, contentType, "", userMetadata)
 }
 
 // writeObject writes r to objPath and records metadata. If etag is non-empty
@@ -211,6 +213,7 @@ func (s *Storage) writeObject(
 	r io.Reader,
 	contentType string,
 	etag string,
+	userMetadata map[string]string,
 ) (retMeta ObjectMetadata, retErr error) {
 	f, err := s.openFile(objPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
@@ -241,6 +244,7 @@ func (s *Storage) writeObject(
 		ETag:         etag,
 		LastModified: time.Now().UTC(),
 		Size:         size,
+		UserMetadata: userMetadata,
 	}
 	if err := s.writeMeta(objPath, meta); err != nil {
 		if removeErr := s.removeFile(objPath); removeErr != nil &&
@@ -276,7 +280,14 @@ func (s *Storage) GetObject(bucket, key string) (*os.File, ObjectMetadata, error
 	return f, meta, nil
 }
 
-func (s *Storage) CopyObject(srcBucket, srcKey, dstBucket, dstKey string) (ObjectMetadata, error) {
+// CopyObject copies an object from src to dst. nil userMetadata and empty
+// contentType mean COPY (inherit from source). Non-nil userMetadata (even an
+// empty map) and non-empty contentType mean REPLACE (use provided values).
+func (s *Storage) CopyObject(
+	srcBucket, srcKey, dstBucket, dstKey string,
+	contentType string,
+	userMetadata map[string]string,
+) (ObjectMetadata, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.bucketExistsLocked(srcBucket) {
@@ -293,12 +304,20 @@ func (s *Storage) CopyObject(srcBucket, srcKey, dstBucket, dstKey string) (Objec
 	if !s.bucketExistsLocked(dstBucket) {
 		return ObjectMetadata{}, ErrBucketNotFound
 	}
+	if userMetadata == nil {
+		userMetadata = srcMeta.UserMetadata
+	}
+	if contentType == "" {
+		contentType = srcMeta.ContentType
+	}
 	dstPath := filepath.Join(dstBucket, dstKey)
 	// Same-source-and-destination copy: opening the destination with O_TRUNC would
 	// truncate the source file before reading it. Just refresh LastModified instead.
 	if srcPath == dstPath {
 		meta := srcMeta
 		meta.LastModified = time.Now().UTC()
+		meta.ContentType = contentType
+		meta.UserMetadata = userMetadata
 		if err := s.writeMeta(dstPath, meta); err != nil {
 			return ObjectMetadata{}, err
 		}
@@ -317,7 +336,7 @@ func (s *Storage) CopyObject(srcBucket, srcKey, dstBucket, dstKey string) (Objec
 			return ObjectMetadata{}, err
 		}
 	}
-	return s.writeObject(dstPath, srcFile, srcMeta.ContentType, srcMeta.ETag)
+	return s.writeObject(dstPath, srcFile, contentType, srcMeta.ETag, userMetadata)
 }
 
 func (s *Storage) DeleteObject(bucket, key string) error {
@@ -947,6 +966,7 @@ func (s *Storage) CompleteMultipartUpload(
 		io.MultiReader(readers...),
 		umeta.ContentType,
 		multipartETag,
+		nil,
 	)
 	// Close part files before removing the upload directory.
 	for _, f := range files {

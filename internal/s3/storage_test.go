@@ -220,7 +220,7 @@ func TestDeleteBucket(t *testing.T) {
 	t.Run("returns ErrBucketNotEmpty when bucket has objects", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateBucket("my-bucket", ""))
-		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("hello"), "text/plain")
+		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("hello"), "text/plain", nil)
 		require.NoError(t, err)
 		assert.ErrorIs(t, s.DeleteBucket("my-bucket"), ErrBucketNotEmpty)
 	})
@@ -308,6 +308,7 @@ func TestPutObject(t *testing.T) {
 			"hello.txt",
 			strings.NewReader("hello world"),
 			"text/plain",
+			nil,
 		)
 		require.NoError(t, err)
 		assert.Equal(t, int64(11), meta.Size)
@@ -324,6 +325,7 @@ func TestPutObject(t *testing.T) {
 			"dir/sub/obj.txt",
 			strings.NewReader("data"),
 			"text/plain",
+			nil,
 		)
 		require.NoError(t, err)
 
@@ -335,7 +337,7 @@ func TestPutObject(t *testing.T) {
 
 	t.Run("returns ErrBucketNotFound when bucket does not exist", func(t *testing.T) {
 		s := newTestStorage(t)
-		_, err := s.PutObject("no-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
+		_, err := s.PutObject("no-bucket", "obj.txt", strings.NewReader("data"), "text/plain", nil)
 		assert.ErrorIs(t, err, ErrBucketNotFound)
 	})
 
@@ -347,7 +349,7 @@ func TestPutObject(t *testing.T) {
 			func() { _ = os.Chmod(filepath.Join(rootPath, "my-bucket"), 0o750) },
 		)
 
-		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
+		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain", nil)
 		assert.Error(t, err)
 	})
 
@@ -367,6 +369,7 @@ func TestPutObject(t *testing.T) {
 			"nested/obj.txt",
 			strings.NewReader("data"),
 			"text/plain",
+			nil,
 		)
 		assert.Error(t, err)
 	})
@@ -375,7 +378,7 @@ func TestPutObject(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateBucket("my-bucket", ""))
 
-		_, err := s.PutObject("my-bucket", "obj.txt", errReader{}, "text/plain")
+		_, err := s.PutObject("my-bucket", "obj.txt", errReader{}, "text/plain", nil)
 		assert.Error(t, err)
 	})
 
@@ -387,7 +390,7 @@ func TestPutObject(t *testing.T) {
 			os.MkdirAll(filepath.Join(rootPath, "my-bucket", "obj.txt.meta.json"), 0o750),
 		)
 
-		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
+		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain", nil)
 		assert.Error(t, err)
 		assert.NoFileExists(t, filepath.Join(rootPath, "my-bucket", "obj.txt"))
 	})
@@ -404,7 +407,7 @@ func TestPutObject(t *testing.T) {
 			return errors.New("simulated remove failure")
 		}
 
-		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
+		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain", nil)
 		assert.Error(t, err)
 	})
 
@@ -430,7 +433,13 @@ func TestPutObject(t *testing.T) {
 				return wc, nil
 			}
 
-			_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
+			_, err := s.PutObject(
+				"my-bucket",
+				"obj.txt",
+				strings.NewReader("data"),
+				"text/plain",
+				nil,
+			)
 			assert.Error(t, err)
 		},
 	)
@@ -458,10 +467,36 @@ func TestPutObject(t *testing.T) {
 				return wc, nil
 			}
 
-			_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
+			_, err := s.PutObject(
+				"my-bucket",
+				"obj.txt",
+				strings.NewReader("data"),
+				"text/plain",
+				nil,
+			)
 			assert.Error(t, err)
 		},
 	)
+
+	t.Run("stores and returns user metadata", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("my-bucket", ""))
+
+		userMeta := map[string]string{"original-filename": "photo.jpg", "uploader": "user1"}
+		meta, err := s.PutObject(
+			"my-bucket",
+			"obj.txt",
+			strings.NewReader("data"),
+			"text/plain",
+			userMeta,
+		)
+		require.NoError(t, err)
+		assert.Equal(t, userMeta, meta.UserMetadata)
+
+		got, err := s.HeadObject("my-bucket", "obj.txt")
+		require.NoError(t, err)
+		assert.Equal(t, userMeta, got.UserMetadata)
+	})
 }
 
 func TestCopyObject(t *testing.T) {
@@ -470,14 +505,20 @@ func TestCopyObject(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
 		require.NoError(t, s.CreateBucket("src-bucket", ""))
 		require.NoError(t, s.CreateBucket("dst-bucket", ""))
-		_, err := s.PutObject("src-bucket", "orig.txt", strings.NewReader("hello"), "text/plain")
+		_, err := s.PutObject(
+			"src-bucket",
+			"orig.txt",
+			strings.NewReader("hello"),
+			"text/plain",
+			nil,
+		)
 		require.NoError(t, err)
 		return s, rootPath
 	}
 
 	t.Run("copies object to different key in same bucket", func(t *testing.T) {
 		s, _ := setup(t)
-		_, err := s.CopyObject("src-bucket", "orig.txt", "src-bucket", "copy.txt")
+		_, err := s.CopyObject("src-bucket", "orig.txt", "src-bucket", "copy.txt", "", nil)
 		require.NoError(t, err)
 		f, _, err := s.GetObject("src-bucket", "copy.txt")
 		require.NoError(t, err)
@@ -489,7 +530,7 @@ func TestCopyObject(t *testing.T) {
 
 	t.Run("copies object to different bucket", func(t *testing.T) {
 		s, _ := setup(t)
-		_, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "copy.txt")
+		_, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "copy.txt", "", nil)
 		require.NoError(t, err)
 		f, _, err := s.GetObject("dst-bucket", "copy.txt")
 		require.NoError(t, err)
@@ -503,7 +544,7 @@ func TestCopyObject(t *testing.T) {
 		s, _ := setup(t)
 		origMeta, err := s.HeadObject("src-bucket", "orig.txt")
 		require.NoError(t, err)
-		meta, err := s.CopyObject("src-bucket", "orig.txt", "src-bucket", "orig.txt")
+		meta, err := s.CopyObject("src-bucket", "orig.txt", "src-bucket", "orig.txt", "", nil)
 		require.NoError(t, err)
 		assert.Equal(t, origMeta.ETag, meta.ETag)
 		f, _, err := s.GetObject("src-bucket", "orig.txt")
@@ -524,7 +565,7 @@ func TestCopyObject(t *testing.T) {
 		)
 		t.Cleanup(func() { _ = os.Chmod(metaPath, 0o600) })
 
-		_, err := s.CopyObject("src-bucket", "orig.txt", "src-bucket", "orig.txt")
+		_, err := s.CopyObject("src-bucket", "orig.txt", "src-bucket", "orig.txt", "", nil)
 		assert.Error(t, err)
 	})
 
@@ -532,14 +573,14 @@ func TestCopyObject(t *testing.T) {
 		s, _ := setup(t)
 		srcMeta, err := s.HeadObject("src-bucket", "orig.txt")
 		require.NoError(t, err)
-		dstMeta, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "copy.txt")
+		dstMeta, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "copy.txt", "", nil)
 		require.NoError(t, err)
 		assert.True(t, !dstMeta.LastModified.Before(srcMeta.LastModified))
 	})
 
 	t.Run("copies object with nested destination key", func(t *testing.T) {
 		s, _ := setup(t)
-		_, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "path/to/copy.txt")
+		_, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "path/to/copy.txt", "", nil)
 		require.NoError(t, err)
 		_, _, err = s.GetObject("dst-bucket", "path/to/copy.txt")
 		assert.NoError(t, err)
@@ -553,26 +594,26 @@ func TestCopyObject(t *testing.T) {
 			0o600,
 		))
 
-		_, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "copy.txt")
+		_, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "copy.txt", "", nil)
 		assert.Error(t, err)
 		assert.NotErrorIs(t, err, ErrObjectNotFound)
 	})
 
 	t.Run("returns ErrBucketNotFound when source bucket does not exist", func(t *testing.T) {
 		s, _ := setup(t)
-		_, err := s.CopyObject("no-bucket", "orig.txt", "dst-bucket", "copy.txt")
+		_, err := s.CopyObject("no-bucket", "orig.txt", "dst-bucket", "copy.txt", "", nil)
 		assert.ErrorIs(t, err, ErrBucketNotFound)
 	})
 
 	t.Run("returns ErrObjectNotFound when source key does not exist", func(t *testing.T) {
 		s, _ := setup(t)
-		_, err := s.CopyObject("src-bucket", "missing.txt", "dst-bucket", "copy.txt")
+		_, err := s.CopyObject("src-bucket", "missing.txt", "dst-bucket", "copy.txt", "", nil)
 		assert.ErrorIs(t, err, ErrObjectNotFound)
 	})
 
 	t.Run("returns ErrBucketNotFound when destination bucket does not exist", func(t *testing.T) {
 		s, _ := setup(t)
-		_, err := s.CopyObject("src-bucket", "orig.txt", "no-bucket", "copy.txt")
+		_, err := s.CopyObject("src-bucket", "orig.txt", "no-bucket", "copy.txt", "", nil)
 		assert.ErrorIs(t, err, ErrBucketNotFound)
 	})
 
@@ -584,7 +625,7 @@ func TestCopyObject(t *testing.T) {
 		)
 		t.Cleanup(func() { _ = os.Chmod(filepath.Join(rootPath, "dst-bucket"), 0o750) })
 
-		_, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "nested/copy.txt")
+		_, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "nested/copy.txt", "", nil)
 		assert.Error(t, err)
 	})
 
@@ -592,7 +633,7 @@ func TestCopyObject(t *testing.T) {
 		s, rootPath := setup(t)
 		require.NoError(t, os.Remove(filepath.Join(rootPath, "src-bucket", "orig.txt")))
 
-		_, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "copy.txt")
+		_, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "copy.txt", "", nil)
 		assert.ErrorIs(t, err, ErrObjectNotFound)
 	})
 
@@ -602,9 +643,130 @@ func TestCopyObject(t *testing.T) {
 		require.NoError(t, os.Chmod(dataPath, 0o000))
 		t.Cleanup(func() { _ = os.Chmod(dataPath, 0o600) })
 
-		_, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "copy.txt")
+		_, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "copy.txt", "", nil)
 		assert.Error(t, err)
 		assert.NotErrorIs(t, err, ErrObjectNotFound)
+	})
+
+	t.Run("COPY directive inherits source user metadata", func(t *testing.T) {
+		s, _ := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("src-bucket", ""))
+		require.NoError(t, s.CreateBucket("dst-bucket", ""))
+		srcMeta := map[string]string{"x": "1"}
+		_, err := s.PutObject(
+			"src-bucket",
+			"orig.txt",
+			strings.NewReader("hello"),
+			"text/plain",
+			srcMeta,
+		)
+		require.NoError(t, err)
+
+		dstMeta, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "copy.txt", "", nil)
+		require.NoError(t, err)
+		assert.Equal(t, srcMeta, dstMeta.UserMetadata)
+	})
+
+	t.Run("REPLACE directive uses new user metadata", func(t *testing.T) {
+		s, _ := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("src-bucket", ""))
+		require.NoError(t, s.CreateBucket("dst-bucket", ""))
+		_, err := s.PutObject("src-bucket", "orig.txt", strings.NewReader("hello"), "text/plain",
+			map[string]string{"x": "1"})
+		require.NoError(t, err)
+
+		newMeta := map[string]string{"y": "2"}
+		dstMeta, err := s.CopyObject(
+			"src-bucket",
+			"orig.txt",
+			"dst-bucket",
+			"copy.txt",
+			"",
+			newMeta,
+		)
+		require.NoError(t, err)
+		assert.Equal(t, newMeta, dstMeta.UserMetadata)
+	})
+
+	t.Run("same-key COPY directive inherits user metadata", func(t *testing.T) {
+		s, _ := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("src-bucket", ""))
+		srcMeta := map[string]string{"x": "1"}
+		_, err := s.PutObject(
+			"src-bucket",
+			"orig.txt",
+			strings.NewReader("hello"),
+			"text/plain",
+			srcMeta,
+		)
+		require.NoError(t, err)
+
+		dstMeta, err := s.CopyObject("src-bucket", "orig.txt", "src-bucket", "orig.txt", "", nil)
+		require.NoError(t, err)
+		assert.Equal(t, srcMeta, dstMeta.UserMetadata)
+	})
+
+	t.Run("same-key REPLACE directive uses new user metadata", func(t *testing.T) {
+		s, _ := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("src-bucket", ""))
+		_, err := s.PutObject("src-bucket", "orig.txt", strings.NewReader("hello"), "text/plain",
+			map[string]string{"x": "1"})
+		require.NoError(t, err)
+
+		newMeta := map[string]string{"y": "2"}
+		dstMeta, err := s.CopyObject(
+			"src-bucket",
+			"orig.txt",
+			"src-bucket",
+			"orig.txt",
+			"",
+			newMeta,
+		)
+		require.NoError(t, err)
+		assert.Equal(t, newMeta, dstMeta.UserMetadata)
+	})
+
+	t.Run("REPLACE directive replaces content type", func(t *testing.T) {
+		s, _ := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("src-bucket", ""))
+		require.NoError(t, s.CreateBucket("dst-bucket", ""))
+		_, err := s.PutObject(
+			"src-bucket",
+			"orig.txt",
+			strings.NewReader("hello"),
+			"text/plain",
+			nil,
+		)
+		require.NoError(t, err)
+
+		dstMeta, err := s.CopyObject(
+			"src-bucket",
+			"orig.txt",
+			"dst-bucket",
+			"copy.txt",
+			"application/json",
+			nil,
+		)
+		require.NoError(t, err)
+		assert.Equal(t, "application/json", dstMeta.ContentType)
+	})
+
+	t.Run("COPY directive inherits content type", func(t *testing.T) {
+		s, _ := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("src-bucket", ""))
+		require.NoError(t, s.CreateBucket("dst-bucket", ""))
+		_, err := s.PutObject(
+			"src-bucket",
+			"orig.txt",
+			strings.NewReader("hello"),
+			"text/plain",
+			nil,
+		)
+		require.NoError(t, err)
+
+		dstMeta, err := s.CopyObject("src-bucket", "orig.txt", "dst-bucket", "copy.txt", "", nil)
+		require.NoError(t, err)
+		assert.Equal(t, "text/plain", dstMeta.ContentType)
 	})
 }
 
@@ -617,6 +779,7 @@ func TestGetObject(t *testing.T) {
 			"hello.txt",
 			strings.NewReader("hello world"),
 			"text/plain",
+			nil,
 		)
 		require.NoError(t, err)
 
@@ -657,7 +820,7 @@ func TestGetObject(t *testing.T) {
 	t.Run("returns error when data file is unreadable", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
 		require.NoError(t, s.CreateBucket("my-bucket", ""))
-		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
+		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain", nil)
 		require.NoError(t, err)
 
 		dataPath := filepath.Join(rootPath, "my-bucket", "obj.txt")
@@ -691,7 +854,7 @@ func TestDeleteObject(t *testing.T) {
 	t.Run("deletes object and metadata successfully", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateBucket("my-bucket", ""))
-		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
+		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain", nil)
 		require.NoError(t, err)
 
 		require.NoError(t, s.DeleteObject("my-bucket", "obj.txt"))
@@ -727,7 +890,7 @@ func TestDeleteObject(t *testing.T) {
 	t.Run("logs warning when metadata removal fails but still succeeds", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
 		require.NoError(t, s.CreateBucket("my-bucket", ""))
-		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
+		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain", nil)
 		require.NoError(t, err)
 
 		require.NoError(t, os.Remove(filepath.Join(rootPath, "my-bucket", "obj.txt.meta.json")))
@@ -742,7 +905,7 @@ func TestDeleteObject(t *testing.T) {
 	t.Run("logs warning when tags removal fails but still succeeds", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
 		require.NoError(t, s.CreateBucket("my-bucket", ""))
-		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
+		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain", nil)
 		require.NoError(t, err)
 		require.NoError(
 			t,
@@ -761,7 +924,7 @@ func TestDeleteObject(t *testing.T) {
 	t.Run("deletes tags file when object is deleted", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
 		require.NoError(t, s.CreateBucket("my-bucket", ""))
-		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
+		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain", nil)
 		require.NoError(t, err)
 		require.NoError(
 			t,
@@ -777,7 +940,7 @@ func TestDeleteObject(t *testing.T) {
 	t.Run("DeleteBucket succeeds after deleting tagged object", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateBucket("my-bucket", ""))
-		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
+		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain", nil)
 		require.NoError(t, err)
 		require.NoError(
 			t,
@@ -793,7 +956,7 @@ func TestHeadObject(t *testing.T) {
 	t.Run("returns metadata for existing object", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateBucket("my-bucket", ""))
-		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
+		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain", nil)
 		require.NoError(t, err)
 
 		meta, err := s.HeadObject("my-bucket", "obj.txt")
@@ -831,7 +994,7 @@ func TestHeadObject(t *testing.T) {
 	t.Run("returns error when metadata read fails", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateBucket("my-bucket", ""))
-		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
+		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain", nil)
 		require.NoError(t, err)
 
 		s.readAll = func(io.Reader) ([]byte, error) {
@@ -847,11 +1010,11 @@ func TestListObjects(t *testing.T) {
 	t.Run("lists all objects in lexicographic order", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateBucket("my-bucket", ""))
-		_, err := s.PutObject("my-bucket", "c.txt", strings.NewReader("c"), "text/plain")
+		_, err := s.PutObject("my-bucket", "c.txt", strings.NewReader("c"), "text/plain", nil)
 		require.NoError(t, err)
-		_, err = s.PutObject("my-bucket", "a.txt", strings.NewReader("a"), "text/plain")
+		_, err = s.PutObject("my-bucket", "a.txt", strings.NewReader("a"), "text/plain", nil)
 		require.NoError(t, err)
-		_, err = s.PutObject("my-bucket", "b.txt", strings.NewReader("b"), "text/plain")
+		_, err = s.PutObject("my-bucket", "b.txt", strings.NewReader("b"), "text/plain", nil)
 		require.NoError(t, err)
 
 		objects, err := s.ListObjects("my-bucket")
@@ -871,7 +1034,7 @@ func TestListObjects(t *testing.T) {
 	t.Run("skips orphan files without metadata", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
 		require.NoError(t, s.CreateBucket("my-bucket", ""))
-		_, err := s.PutObject("my-bucket", "real.txt", strings.NewReader("data"), "text/plain")
+		_, err := s.PutObject("my-bucket", "real.txt", strings.NewReader("data"), "text/plain", nil)
 		require.NoError(t, err)
 		require.NoError(t, os.WriteFile(
 			filepath.Join(rootPath, "my-bucket", "orphan.txt"),
@@ -892,6 +1055,7 @@ func TestListObjects(t *testing.T) {
 			"subdir/obj.txt",
 			strings.NewReader("data"),
 			"text/plain",
+			nil,
 		)
 		require.NoError(t, err)
 
@@ -906,7 +1070,13 @@ func TestListObjects(t *testing.T) {
 	t.Run("includes .json objects in listing", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateBucket("my-bucket", ""))
-		_, err := s.PutObject("my-bucket", "data.json", strings.NewReader("{}"), "application/json")
+		_, err := s.PutObject(
+			"my-bucket",
+			"data.json",
+			strings.NewReader("{}"),
+			"application/json",
+			nil,
+		)
 		require.NoError(t, err)
 
 		objects, err := s.ListObjects("my-bucket")
@@ -918,7 +1088,7 @@ func TestListObjects(t *testing.T) {
 	t.Run("does not list tags sidecar files as objects", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateBucket("my-bucket", ""))
-		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain")
+		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("data"), "text/plain", nil)
 		require.NoError(t, err)
 		require.NoError(
 			t,
@@ -1682,7 +1852,7 @@ func TestObjectTagging(t *testing.T) {
 		t.Helper()
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateBucket("bucket", "us-east-1"))
-		_, err := s.PutObject("bucket", "key.txt", strings.NewReader("hello"), "text/plain")
+		_, err := s.PutObject("bucket", "key.txt", strings.NewReader("hello"), "text/plain", nil)
 		require.NoError(t, err)
 		return s, "bucket"
 	}
