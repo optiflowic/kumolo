@@ -1873,17 +1873,17 @@ func (ro *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 		return
 	}
 	defer func() { _ = f.Close() }()
-	slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-		"serving object",
-		"bucket",
-		bucket,
-		"key",
-		key,
-	)
 	// Pre-check If-Match / If-Unmodified-Since before setting response headers.
 	// http.ServeContent returns an empty 412; AWS S3 requires an XML error body.
 	if im := r.Header.Get("If-Match"); im != "" {
 		if !etagListContains(im, meta.ETag) {
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"precondition failed: If-Match",
+				"bucket",
+				bucket,
+				"key",
+				key,
+			)
 			writeError(w, r, http.StatusPreconditionFailed, "PreconditionFailed",
 				"At least one of the pre-conditions you specified did not hold")
 			return
@@ -1891,6 +1891,13 @@ func (ro *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 	} else if ius := r.Header.Get("If-Unmodified-Since"); ius != "" {
 		if t, err := http.ParseTime(ius); err == nil &&
 			meta.LastModified.Truncate(time.Second).After(t) {
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"precondition failed: If-Unmodified-Since",
+				"bucket",
+				bucket,
+				"key",
+				key,
+			)
 			writeError(w, r, http.StatusPreconditionFailed, "PreconditionFailed",
 				"At least one of the pre-conditions you specified did not hold")
 			return
@@ -1901,12 +1908,26 @@ func (ro *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 	// http.ServeContent returns a text/plain 416 without Content-Range;
 	// AWS S3 requires an XML body and Content-Range: bytes */size.
 	if rng := r.Header.Get("Range"); rng != "" && !isRangeSatisfiable(rng, meta.Size) {
+		slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			"range not satisfiable",
+			"bucket",
+			bucket,
+			"key",
+			key,
+		)
 		w.Header().Set("Content-Range", "bytes */"+strconv.FormatInt(meta.Size, 10))
 		writeError(w, r, http.StatusRequestedRangeNotSatisfiable, "InvalidRange",
 			"The requested range is not satisfiable")
 		return
 	}
 
+	slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+		"serving object",
+		"bucket",
+		bucket,
+		"key",
+		key,
+	)
 	// Set custom headers before ServeContent so that:
 	//   - Content-Type is preserved (ServeContent skips sniffing when already set)
 	//   - ETag is available for If-Match / If-None-Match evaluation
