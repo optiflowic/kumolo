@@ -951,6 +951,33 @@ func etagListContains(headerVal, etag string) bool {
 	return false
 }
 
+// isRangeSatisfiable reports whether at least one range in a "bytes=..." Range
+// header is satisfiable for an object of the given size.
+func isRangeSatisfiable(rangeHeader string, size int64) bool {
+	const prefix = "bytes="
+	if !strings.HasPrefix(rangeHeader, prefix) {
+		return true // non-bytes range: let ServeContent handle
+	}
+	for _, spec := range strings.Split(rangeHeader[len(prefix):], ",") {
+		spec = strings.TrimSpace(spec)
+		dash := strings.IndexByte(spec, '-')
+		if dash < 0 {
+			return true // malformed: let ServeContent handle
+		}
+		if dash == 0 {
+			return true // suffix range (e.g. bytes=-500): always satisfiable
+		}
+		start, err := strconv.ParseInt(spec[:dash], 10, 64)
+		if err != nil || start < 0 {
+			return true // malformed: let ServeContent handle
+		}
+		if start < size {
+			return true
+		}
+	}
+	return false
+}
+
 func (ro *Router) handleHeadObject(w http.ResponseWriter, r *http.Request, bucket, key string) {
 	meta, err := ro.storage.HeadObject(bucket, key)
 	if err != nil {
@@ -1853,6 +1880,33 @@ func (ro *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 		"key",
 		key,
 	)
+	// Pre-check If-Match / If-Unmodified-Since before setting response headers.
+	// http.ServeContent returns an empty 412; AWS S3 requires an XML error body.
+	if im := r.Header.Get("If-Match"); im != "" {
+		if !etagListContains(im, meta.ETag) {
+			writeError(w, r, http.StatusPreconditionFailed, "PreconditionFailed",
+				"At least one of the pre-conditions you specified did not hold")
+			return
+		}
+	} else if ius := r.Header.Get("If-Unmodified-Since"); ius != "" {
+		if t, err := http.ParseTime(ius); err == nil &&
+			meta.LastModified.Truncate(time.Second).After(t) {
+			writeError(w, r, http.StatusPreconditionFailed, "PreconditionFailed",
+				"At least one of the pre-conditions you specified did not hold")
+			return
+		}
+	}
+
+	// Pre-check Range satisfiability.
+	// http.ServeContent returns a text/plain 416 without Content-Range;
+	// AWS S3 requires an XML body and Content-Range: bytes */size.
+	if rng := r.Header.Get("Range"); rng != "" && !isRangeSatisfiable(rng, meta.Size) {
+		w.Header().Set("Content-Range", "bytes */"+strconv.FormatInt(meta.Size, 10))
+		writeError(w, r, http.StatusRequestedRangeNotSatisfiable, "InvalidRange",
+			"The requested range is not satisfiable")
+		return
+	}
+
 	// Set custom headers before ServeContent so that:
 	//   - Content-Type is preserved (ServeContent skips sniffing when already set)
 	//   - ETag is available for If-Match / If-None-Match evaluation
