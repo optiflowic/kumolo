@@ -18,9 +18,9 @@ import (
 )
 
 const (
-	amzCopySource   = "x-amz-copy-source"
+	amzCopySource   = "X-Amz-Copy-Source"
 	amzMetaPrefix   = "X-Amz-Meta-"
-	amzTaggingCount = "x-amz-tagging-count"
+	amzTaggingCount = "X-Amz-Tagging-Count"
 )
 
 // bucketStore is the subset of Storage used by the Router for bucket operations.
