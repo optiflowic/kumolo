@@ -894,6 +894,62 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 	w.WriteHeader(http.StatusOK)
 }
 
+// checkConditionals evaluates conditional request headers per RFC 7232.
+// Headers must already be set on w (ETag, Last-Modified) before this is called.
+// Returns false and writes a 304 or 412 status when the request should short-circuit.
+func checkConditionals(
+	w http.ResponseWriter,
+	r *http.Request,
+	etag string,
+	lastModified time.Time,
+) bool {
+	modtime := lastModified.Truncate(time.Second)
+
+	// If-Match: 412 if no listed ETag matches.
+	if im := r.Header.Get("If-Match"); im != "" {
+		if !etagListContains(im, etag) {
+			w.WriteHeader(http.StatusPreconditionFailed)
+			return false
+		}
+	} else if ius := r.Header.Get("If-Unmodified-Since"); ius != "" {
+		// If-Unmodified-Since (only when If-Match absent): 412 if modified after.
+		if t, err := http.ParseTime(ius); err == nil && modtime.After(t) {
+			w.WriteHeader(http.StatusPreconditionFailed)
+			return false
+		}
+	}
+
+	// If-None-Match: 304 if any listed ETag matches.
+	if inm := r.Header.Get("If-None-Match"); inm != "" {
+		if etagListContains(inm, etag) {
+			w.WriteHeader(http.StatusNotModified)
+			return false
+		}
+	} else if ims := r.Header.Get("If-Modified-Since"); ims != "" {
+		// If-Modified-Since (only when If-None-Match absent): 304 if not modified.
+		if t, err := http.ParseTime(ims); err == nil && !modtime.After(t) {
+			w.WriteHeader(http.StatusNotModified)
+			return false
+		}
+	}
+
+	return true
+}
+
+// etagListContains reports whether etag appears in a comma-separated ETag list header value.
+// A wildcard "*" matches any etag.
+func etagListContains(headerVal, etag string) bool {
+	if strings.TrimSpace(headerVal) == "*" {
+		return true
+	}
+	for _, s := range strings.Split(headerVal, ",") {
+		if strings.TrimSpace(s) == etag {
+			return true
+		}
+	}
+	return false
+}
+
 func (ro *Router) handleHeadObject(w http.ResponseWriter, r *http.Request, bucket, key string) {
 	meta, err := ro.storage.HeadObject(bucket, key)
 	if err != nil {
@@ -925,6 +981,7 @@ func (ro *Router) handleHeadObject(w http.ResponseWriter, r *http.Request, bucke
 	w.Header().Set("Content-Length", strconv.FormatInt(meta.Size, 10))
 	w.Header().Set("ETag", meta.ETag)
 	w.Header().Set("Last-Modified", meta.LastModified.UTC().Format(http.TimeFormat))
+	w.Header().Set("Accept-Ranges", "bytes")
 	for k, v := range meta.UserMetadata {
 		w.Header().Set(amzMetaPrefix+k, v)
 	}
@@ -932,6 +989,9 @@ func (ro *Router) handleHeadObject(w http.ResponseWriter, r *http.Request, bucke
 	// missing or unreadable tags file never prevents a successful object response.
 	if tags, err := ro.storage.GetObjectTagging(bucket, key); err == nil && len(tags) > 0 {
 		w.Header().Set(amzTaggingCount, strconv.Itoa(len(tags)))
+	}
+	if !checkConditionals(w, r, meta.ETag, meta.LastModified) {
+		return
 	}
 	w.WriteHeader(http.StatusOK)
 }
@@ -1792,10 +1852,11 @@ func (ro *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 		"key",
 		key,
 	)
+	// Set custom headers before ServeContent so that:
+	//   - Content-Type is preserved (ServeContent skips sniffing when already set)
+	//   - ETag is available for If-Match / If-None-Match evaluation
 	w.Header().Set("Content-Type", meta.ContentType)
-	w.Header().Set("Content-Length", strconv.FormatInt(meta.Size, 10))
 	w.Header().Set("ETag", meta.ETag)
-	w.Header().Set("Last-Modified", meta.LastModified.UTC().Format(http.TimeFormat))
 	for k, v := range meta.UserMetadata {
 		w.Header().Set(amzMetaPrefix+k, v)
 	}
@@ -1804,18 +1865,10 @@ func (ro *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 	if tags, err := ro.storage.GetObjectTagging(bucket, key); err == nil && len(tags) > 0 {
 		w.Header().Set(amzTaggingCount, strconv.Itoa(len(tags)))
 	}
-	w.WriteHeader(http.StatusOK)
-	if _, err := io.Copy(w, f); err != nil {
-		slog.Warn( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-			"failed to stream object body",
-			"bucket",
-			bucket,
-			"key",
-			key,
-			"err",
-			err,
-		)
-	}
+	// ServeContent handles Range (206 Partial Content + Content-Range),
+	// Accept-Ranges, Content-Length, Last-Modified, and conditional headers
+	// (If-Match, If-None-Match, If-Modified-Since, If-Unmodified-Since).
+	http.ServeContent(w, r, "", meta.LastModified, f)
 }
 
 func (ro *Router) handleGetBucketLocation(w http.ResponseWriter, r *http.Request, bucket string) {
