@@ -21,8 +21,8 @@ const (
 	amzCopySource   = "X-Amz-Copy-Source"
 	amzMetaPrefix   = "X-Amz-Meta-"
 	amzTaggingCount = "X-Amz-Tagging-Count"
-	amzVersionID    = "x-amz-version-id"
-	amzDeleteMarker = "x-amz-delete-marker"
+	amzVersionID    = "X-Amz-Version-Id"
+	amzDeleteMarker = "X-Amz-Delete-Marker"
 )
 
 // bucketStore is the subset of Storage used by the Router for bucket operations.
