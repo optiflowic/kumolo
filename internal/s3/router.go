@@ -895,7 +895,8 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 }
 
 // checkConditionals evaluates conditional request headers per RFC 7232.
-// Headers must already be set on w (ETag, Last-Modified) before this is called.
+// Response headers on w (ETag, Content-Type, etc.) must be set before calling,
+// so that any 304/412 short-circuit response includes them.
 // Returns false and writes a 304 or 412 status when the request should short-circuit.
 func checkConditionals(
 	w http.ResponseWriter,

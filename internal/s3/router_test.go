@@ -558,7 +558,7 @@ func TestRouterGetObject(t *testing.T) {
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
 
-	t.Run("logs warning when response body write fails", func(t *testing.T) {
+	t.Run("returns 200 when body write fails mid-stream", func(t *testing.T) {
 		ro := newTestRouter(t)
 		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
 		putReq := httptest.NewRequest(
