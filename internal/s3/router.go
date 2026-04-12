@@ -21,6 +21,8 @@ const (
 	amzCopySource   = "X-Amz-Copy-Source"
 	amzMetaPrefix   = "X-Amz-Meta-"
 	amzTaggingCount = "X-Amz-Tagging-Count"
+	amzVersionID    = "X-Amz-Version-Id"
+	amzDeleteMarker = "X-Amz-Delete-Marker"
 )
 
 // bucketStore is the subset of Storage used by the Router for bucket operations.
@@ -41,14 +43,19 @@ type objectStore interface {
 		userMetadata map[string]string,
 	) (ObjectMetadata, error)
 	GetObject(bucket, key string) (*os.File, ObjectMetadata, error)
+	GetObjectVersion(bucket, key, versionID string) (*os.File, ObjectMetadata, error)
 	CopyObject(
-		srcBucket, srcKey, dstBucket, dstKey string,
+		srcBucket, srcKey, srcVersionID, dstBucket, dstKey string,
 		contentType string,
 		userMetadata map[string]string,
 	) (ObjectMetadata, error)
 	DeleteObject(bucket, key string) error
+	DeleteObjectVersioned(bucket, key string) (versionID string, isDeleteMarker bool, err error)
+	DeleteObjectVersion(bucket, key, versionID string) (isDeleteMarker bool, err error)
 	HeadObject(bucket, key string) (ObjectMetadata, error)
+	HeadObjectVersion(bucket, key, versionID string) (ObjectMetadata, error)
 	ListObjects(bucket string) ([]ObjectInfo, error)
+	ListObjectVersions(bucket string) ([]VersionInfo, []DeleteMarkerInfo, error)
 }
 
 // multipartStore is the subset of Storage used by the Router for multipart upload operations.
@@ -229,6 +236,8 @@ func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, bucket str
 			ro.handleGetBucketTagging(w, r, bucket)
 		case q.Has("versioning"):
 			ro.handleGetBucketVersioning(w, r, bucket)
+		case q.Has("versions"):
+			ro.handleListObjectVersions(w, r, bucket)
 		case q.Has("location"):
 			ro.handleGetBucketLocation(w, r, bucket)
 		case q.Has("uploads"):
@@ -759,10 +768,19 @@ func (ro *Router) handleCopyObject(
 	r *http.Request,
 	dstBucket, dstKey string,
 ) {
-	copySource, err := url.PathUnescape(r.Header.Get(amzCopySource))
+	rawCopySource, err := url.PathUnescape(r.Header.Get(amzCopySource))
 	if err != nil {
 		writeError(w, r, http.StatusBadRequest, "InvalidArgument", "x-amz-copy-source is invalid.")
 		return
+	}
+	// Copy source may include a ?versionId=<id> query string.
+	var srcVersionID string
+	copySource := rawCopySource
+	if idx := strings.IndexByte(rawCopySource, '?'); idx != -1 {
+		copySource = rawCopySource[:idx]
+		if q, qErr := url.ParseQuery(rawCopySource[idx+1:]); qErr == nil {
+			srcVersionID = q.Get("versionId")
+		}
 	}
 	srcBucket, srcKey := parsePath(copySource)
 	if srcBucket == "" || srcKey == "" {
@@ -791,6 +809,7 @@ func (ro *Router) handleCopyObject(
 	meta, err := ro.storage.CopyObject(
 		srcBucket,
 		srcKey,
+		srcVersionID,
 		dstBucket,
 		dstKey,
 		contentType,
@@ -847,6 +866,9 @@ func (ro *Router) handleCopyObject(
 		"dstKey",
 		dstKey,
 	)
+	if meta.VersionID != "" {
+		w.Header().Set(amzVersionID, meta.VersionID)
+	}
 	writeXML(w, http.StatusOK, copyObjectResult{
 		ETag:         meta.ETag,
 		LastModified: meta.LastModified,
@@ -891,6 +913,9 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 		key,
 	)
 	w.Header().Set("ETag", meta.ETag)
+	if meta.VersionID != "" {
+		w.Header().Set(amzVersionID, meta.VersionID)
+	}
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -979,8 +1004,15 @@ func isRangeSatisfiable(rangeHeader string, size int64) bool {
 }
 
 func (ro *Router) handleHeadObject(w http.ResponseWriter, r *http.Request, bucket, key string) {
-	meta, err := ro.storage.HeadObject(bucket, key)
+	var meta ObjectMetadata
+	var err error
+	if versionID := r.URL.Query().Get("versionId"); versionID != "" {
+		meta, err = ro.storage.HeadObjectVersion(bucket, key, versionID)
+	} else {
+		meta, err = ro.storage.HeadObject(bucket, key)
+	}
 	if err != nil {
+		var dme *DeleteMarkerError
 		switch {
 		case errors.Is(err, ErrBucketNotFound), errors.Is(err, ErrObjectNotFound):
 			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
@@ -991,6 +1023,23 @@ func (ro *Router) handleHeadObject(w http.ResponseWriter, r *http.Request, bucke
 				key,
 			)
 			w.WriteHeader(http.StatusNotFound)
+		case errors.As(err, &dme):
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"object is a delete marker",
+				"bucket",
+				bucket,
+				"key",
+				key,
+			)
+			w.Header().Set(amzDeleteMarker, "true")
+			if dme.VersionID != "" {
+				w.Header().Set(amzVersionID, dme.VersionID)
+			}
+			if r.URL.Query().Get("versionId") != "" {
+				w.WriteHeader(http.StatusMethodNotAllowed)
+			} else {
+				w.WriteHeader(http.StatusNotFound)
+			}
 		default:
 			slog.Error( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
 				"failed to head object",
@@ -1010,6 +1059,9 @@ func (ro *Router) handleHeadObject(w http.ResponseWriter, r *http.Request, bucke
 	w.Header().Set("ETag", meta.ETag)
 	w.Header().Set("Last-Modified", meta.LastModified.UTC().Format(http.TimeFormat))
 	w.Header().Set("Accept-Ranges", "bytes")
+	if meta.VersionID != "" {
+		w.Header().Set(amzVersionID, meta.VersionID)
+	}
 	for k, v := range meta.UserMetadata {
 		w.Header().Set(amzMetaPrefix+k, v)
 	}
@@ -1034,7 +1086,54 @@ func (ro *Router) handleHeadObject(w http.ResponseWriter, r *http.Request, bucke
 }
 
 func (ro *Router) handleDeleteObject(w http.ResponseWriter, r *http.Request, bucket, key string) {
-	err := ro.storage.DeleteObject(bucket, key)
+	if versionID := r.URL.Query().Get("versionId"); versionID != "" {
+		// Permanently delete a specific version.
+		isMarker, err := ro.storage.DeleteObjectVersion(bucket, key, versionID)
+		switch {
+		case err == nil:
+			slog.Info( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"object version deleted",
+				"bucket",
+				bucket,
+				"key",
+				key,
+				"versionId",
+				versionID,
+			)
+			w.Header().Set(amzVersionID, versionID)
+			if isMarker {
+				w.Header().Set(amzDeleteMarker, "true")
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case errors.Is(err, ErrObjectNotFound):
+			w.WriteHeader(http.StatusNoContent)
+		case errors.Is(err, ErrBucketNotFound):
+			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"bucket not found",
+				"bucket",
+				bucket,
+			)
+			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+				"The specified bucket does not exist.")
+		default:
+			slog.Error( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"failed to delete object version",
+				"bucket",
+				bucket,
+				"key",
+				key,
+				"versionId",
+				versionID,
+				"err",
+				err,
+			)
+			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+
+	// Versioning-aware delete (may create a delete marker).
+	versionID, isMarker, err := ro.storage.DeleteObjectVersioned(bucket, key)
 	switch {
 	case err == nil:
 		slog.Info( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
@@ -1044,19 +1143,15 @@ func (ro *Router) handleDeleteObject(w http.ResponseWriter, r *http.Request, buc
 			"key",
 			key,
 		)
-		w.WriteHeader(http.StatusNoContent)
-	case errors.Is(err, ErrObjectNotFound):
-		// S3 returns 204 regardless of whether the object existed.
-		slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-			"delete skipped: object not found",
-			"bucket",
-			bucket,
-			"key",
-			key,
-		)
+		if versionID != "" {
+			w.Header().Set(amzVersionID, versionID)
+		}
+		if isMarker {
+			w.Header().Set(amzDeleteMarker, "true")
+		}
 		w.WriteHeader(http.StatusNoContent)
 	case errors.Is(err, ErrBucketNotFound):
-		slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
 			"bucket not found",
 			"bucket",
 			bucket,
@@ -1846,8 +1941,16 @@ func (ro *Router) handleDeleteObjectTagging(
 }
 
 func (ro *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket, key string) {
-	f, meta, err := ro.storage.GetObject(bucket, key)
+	var f *os.File
+	var meta ObjectMetadata
+	var err error
+	if versionID := r.URL.Query().Get("versionId"); versionID != "" {
+		f, meta, err = ro.storage.GetObjectVersion(bucket, key, versionID)
+	} else {
+		f, meta, err = ro.storage.GetObject(bucket, key)
+	}
 	if err != nil {
+		var dme *DeleteMarkerError
 		switch {
 		case errors.Is(err, ErrBucketNotFound):
 			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
@@ -1857,6 +1960,25 @@ func (ro *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 			)
 			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 				"The specified bucket does not exist.")
+		case errors.As(err, &dme):
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"object is a delete marker",
+				"bucket",
+				bucket,
+				"key",
+				key,
+			)
+			w.Header().Set(amzDeleteMarker, "true")
+			if dme.VersionID != "" {
+				w.Header().Set(amzVersionID, dme.VersionID)
+			}
+			if r.URL.Query().Get("versionId") != "" {
+				writeError(w, r, http.StatusMethodNotAllowed, "MethodNotAllowed",
+					"The specified method is not allowed against this resource.")
+			} else {
+				writeError(w, r, http.StatusNotFound, "NoSuchKey",
+					"The specified key does not exist.")
+			}
 		case errors.Is(err, ErrObjectNotFound):
 			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
 				"object not found",
@@ -1865,8 +1987,13 @@ func (ro *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 				"key",
 				key,
 			)
-			writeError(w, r, http.StatusNotFound, "NoSuchKey",
-				"The specified key does not exist.")
+			if r.URL.Query().Get("versionId") != "" {
+				writeError(w, r, http.StatusNotFound, "NoSuchVersion",
+					"The specified version does not exist.")
+			} else {
+				writeError(w, r, http.StatusNotFound, "NoSuchKey",
+					"The specified key does not exist.")
+			}
 		default:
 			slog.Error( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
 				"failed to get object",
@@ -1942,6 +2069,9 @@ func (ro *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 	//   - ETag is available for If-Match / If-None-Match evaluation
 	w.Header().Set("Content-Type", meta.ContentType)
 	w.Header().Set("ETag", meta.ETag)
+	if meta.VersionID != "" {
+		w.Header().Set(amzVersionID, meta.VersionID)
+	}
 	for k, v := range meta.UserMetadata {
 		w.Header().Set(amzMetaPrefix+k, v)
 	}
@@ -2249,6 +2379,69 @@ func (ro *Router) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 	writeXML(w, http.StatusOK, result)
 }
 
+func (ro *Router) handleListObjectVersions(w http.ResponseWriter, r *http.Request, bucket string) {
+	versions, deleteMarkers, err := ro.storage.ListObjectVersions(bucket)
+	if err != nil {
+		if errors.Is(err, ErrBucketNotFound) {
+			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"bucket not found",
+				"bucket",
+				bucket,
+			)
+			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+				"The specified bucket does not exist.")
+			return
+		}
+		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			"failed to list object versions",
+			"bucket",
+			bucket,
+			"err",
+			err,
+		)
+		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+		"listed object versions",
+		"bucket",
+		bucket,
+		"versions",
+		len(versions),
+		"deleteMarkers",
+		len(deleteMarkers),
+	)
+
+	result := xmlListVersionsResult{
+		Xmlns:       "http://s3.amazonaws.com/doc/2006-03-01/",
+		Name:        bucket,
+		MaxKeys:     1000,
+		IsTruncated: false,
+	}
+	for _, v := range versions {
+		result.Versions = append(result.Versions, xmlObjectVersion{
+			Key:          v.Key,
+			VersionId:    v.VersionID,
+			IsLatest:     v.IsLatest,
+			LastModified: v.LastModified.UTC().Format(time.RFC3339),
+			ETag:         v.ETag,
+			Size:         v.Size,
+			StorageClass: "STANDARD",
+			Owner:        xmlOwner{ID: "owner", DisplayName: "owner"},
+		})
+	}
+	for _, dm := range deleteMarkers {
+		result.DeleteMarkers = append(result.DeleteMarkers, xmlDeleteMarker{
+			Key:          dm.Key,
+			VersionId:    dm.VersionID,
+			IsLatest:     dm.IsLatest,
+			LastModified: dm.LastModified.UTC().Format(time.RFC3339),
+			Owner:        xmlOwner{ID: "owner", DisplayName: "owner"},
+		})
+	}
+	writeXML(w, http.StatusOK, result)
+}
+
 func (ro *Router) handleHeadBucket(w http.ResponseWriter, r *http.Request, bucket string) {
 	w.Header().Set("Content-Length", "0")
 	if !ro.storage.BucketExists(bucket) {
@@ -2462,6 +2655,38 @@ type xmlDeleteError struct {
 type xmlVersioningConfiguration struct {
 	XMLName xml.Name `xml:"VersioningConfiguration"`
 	Status  string   `xml:"Status,omitempty"`
+}
+
+type xmlListVersionsResult struct {
+	XMLName         xml.Name           `xml:"ListVersionsResult"`
+	Xmlns           string             `xml:"xmlns,attr"`
+	Name            string             `xml:"Name"`
+	Prefix          string             `xml:"Prefix"`
+	KeyMarker       string             `xml:"KeyMarker"`
+	VersionIdMarker string             `xml:"VersionIdMarker"`
+	MaxKeys         int                `xml:"MaxKeys"`
+	IsTruncated     bool               `xml:"IsTruncated"`
+	Versions        []xmlObjectVersion `xml:"Version"`
+	DeleteMarkers   []xmlDeleteMarker  `xml:"DeleteMarker"`
+}
+
+type xmlObjectVersion struct {
+	Key          string   `xml:"Key"`
+	VersionId    string   `xml:"VersionId"`
+	IsLatest     bool     `xml:"IsLatest"`
+	LastModified string   `xml:"LastModified"`
+	ETag         string   `xml:"ETag"`
+	Size         int64    `xml:"Size"`
+	StorageClass string   `xml:"StorageClass"`
+	Owner        xmlOwner `xml:"Owner"`
+}
+
+type xmlDeleteMarker struct {
+	Key          string   `xml:"Key"`
+	VersionId    string   `xml:"VersionId"`
+	IsLatest     bool     `xml:"IsLatest"`
+	LastModified string   `xml:"LastModified"`
+	Owner        xmlOwner `xml:"Owner"`
 }
 
 // validCORSMethod reports whether method is an AWS-allowed CORS HTTP method.

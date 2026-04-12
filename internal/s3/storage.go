@@ -40,11 +40,31 @@ type CORSRule struct {
 
 // ObjectMetadata is stored as a sidecar .meta.json file alongside each object.
 type ObjectMetadata struct {
-	ContentType  string            `json:"contentType"`
-	ETag         string            `json:"etag"`
-	LastModified time.Time         `json:"lastModified"`
-	Size         int64             `json:"size"`
-	UserMetadata map[string]string `json:"userMetadata,omitempty"`
+	ContentType    string            `json:"contentType"`
+	ETag           string            `json:"etag"`
+	LastModified   time.Time         `json:"lastModified"`
+	Size           int64             `json:"size"`
+	UserMetadata   map[string]string `json:"userMetadata,omitempty"`
+	VersionID      string            `json:"versionId,omitempty"`
+	IsDeleteMarker bool              `json:"isDeleteMarker,omitempty"`
+}
+
+// VersionInfo represents a non-delete-marker version of an object in a versioned bucket.
+type VersionInfo struct {
+	Key          string
+	VersionID    string
+	IsLatest     bool
+	LastModified time.Time
+	ETag         string
+	Size         int64
+}
+
+// DeleteMarkerInfo represents a delete marker version in a versioned bucket.
+type DeleteMarkerInfo struct {
+	Key          string
+	VersionID    string
+	IsLatest     bool
+	LastModified time.Time
 }
 
 // Tag is a key-value pair attached to an S3 object.
@@ -203,17 +223,33 @@ func (s *Storage) PutObject(
 		}
 	}
 
-	return s.writeObject(objPath, r, contentType, "", userMetadata)
+	versionID := ""
+	if enabled, err := s.isVersioningEnabledLocked(bucket); err != nil {
+		return ObjectMetadata{}, err
+	} else if enabled {
+		if err := s.archiveCurrentVersionLocked(bucket, key, objPath); err != nil {
+			return ObjectMetadata{}, err
+		}
+		vid, err := s.newVersionID()
+		if err != nil {
+			return ObjectMetadata{}, err
+		}
+		versionID = vid
+	}
+
+	return s.writeObject(objPath, r, contentType, "", userMetadata, versionID)
 }
 
 // writeObject writes r to objPath and records metadata. If etag is non-empty
 // it is used as-is (multipart ETag); otherwise the MD5 of the content is used.
+// versionID is stored in the metadata; pass "" for non-versioned objects.
 func (s *Storage) writeObject(
 	objPath string,
 	r io.Reader,
 	contentType string,
 	etag string,
 	userMetadata map[string]string,
+	versionID string,
 ) (retMeta ObjectMetadata, retErr error) {
 	f, err := s.openFile(objPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
@@ -245,6 +281,7 @@ func (s *Storage) writeObject(
 		LastModified: time.Now().UTC(),
 		Size:         size,
 		UserMetadata: userMetadata,
+		VersionID:    versionID,
 	}
 	if err := s.writeMeta(objPath, meta); err != nil {
 		if removeErr := s.removeFile(objPath); removeErr != nil &&
@@ -270,6 +307,9 @@ func (s *Storage) GetObject(bucket, key string) (*os.File, ObjectMetadata, error
 		}
 		return nil, ObjectMetadata{}, err
 	}
+	if meta.IsDeleteMarker {
+		return nil, ObjectMetadata{}, &DeleteMarkerError{VersionID: meta.VersionID}
+	}
 	f, err := s.root.Open(objPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -283,8 +323,9 @@ func (s *Storage) GetObject(bucket, key string) (*os.File, ObjectMetadata, error
 // CopyObject copies an object from src to dst. nil userMetadata and empty
 // contentType mean COPY (inherit from source). Non-nil userMetadata (even an
 // empty map) and non-empty contentType mean REPLACE (use provided values).
+// srcVersionID, if non-empty, copies from that specific source version.
 func (s *Storage) CopyObject(
-	srcBucket, srcKey, dstBucket, dstKey string,
+	srcBucket, srcKey, srcVersionID, dstBucket, dstKey string,
 	contentType string,
 	userMetadata map[string]string,
 ) (ObjectMetadata, error) {
@@ -293,14 +334,48 @@ func (s *Storage) CopyObject(
 	if !s.bucketExistsLocked(srcBucket) {
 		return ObjectMetadata{}, ErrBucketNotFound
 	}
-	srcPath := filepath.Join(srcBucket, srcKey)
-	srcMeta, err := s.readMeta(srcPath)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+
+	// Resolve source path (current or versioned).
+	var srcPath string
+	var srcMeta ObjectMetadata
+	if srcVersionID != "" {
+		// Try current version first.
+		curPath := filepath.Join(srcBucket, srcKey)
+		cm, err := s.readMeta(curPath)
+		if err == nil && cm.VersionID == srcVersionID {
+			srcPath = curPath
+			srcMeta = cm
+		} else {
+			// Fall back to archived version.
+			vp := verPath(srcBucket, srcKey, srcVersionID)
+			vm, err := s.readMeta(vp)
+			if err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					return ObjectMetadata{}, ErrObjectNotFound
+				}
+				return ObjectMetadata{}, err
+			}
+			srcPath = vp
+			srcMeta = vm
+		}
+		if srcMeta.IsDeleteMarker {
 			return ObjectMetadata{}, ErrObjectNotFound
 		}
-		return ObjectMetadata{}, err
+	} else {
+		srcPath = filepath.Join(srcBucket, srcKey)
+		var err error
+		srcMeta, err = s.readMeta(srcPath)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return ObjectMetadata{}, ErrObjectNotFound
+			}
+			return ObjectMetadata{}, err
+		}
+		if srcMeta.IsDeleteMarker {
+			return ObjectMetadata{}, ErrObjectNotFound
+		}
 	}
+
 	if !s.bucketExistsLocked(dstBucket) {
 		return ObjectMetadata{}, ErrBucketNotFound
 	}
@@ -311,9 +386,25 @@ func (s *Storage) CopyObject(
 		contentType = srcMeta.ContentType
 	}
 	dstPath := filepath.Join(dstBucket, dstKey)
-	// Same-source-and-destination copy: opening the destination with O_TRUNC would
-	// truncate the source file before reading it. Just refresh LastModified instead.
-	if srcPath == dstPath {
+
+	dstVersionID := ""
+	if enabled, err := s.isVersioningEnabledLocked(dstBucket); err != nil {
+		return ObjectMetadata{}, err
+	} else if enabled {
+		if err := s.archiveCurrentVersionLocked(dstBucket, dstKey, dstPath); err != nil {
+			return ObjectMetadata{}, err
+		}
+		vid, err := s.newVersionID()
+		if err != nil {
+			return ObjectMetadata{}, err
+		}
+		dstVersionID = vid
+	}
+
+	// Same-source-and-destination copy (non-versioned): opening the destination
+	// with O_TRUNC would truncate the source file before reading it. Just refresh
+	// LastModified instead.
+	if srcPath == dstPath && dstVersionID == "" {
 		meta := srcMeta
 		meta.LastModified = time.Now().UTC()
 		meta.ContentType = contentType
@@ -336,7 +427,7 @@ func (s *Storage) CopyObject(
 			return ObjectMetadata{}, err
 		}
 	}
-	return s.writeObject(dstPath, srcFile, contentType, srcMeta.ETag, userMetadata)
+	return s.writeObject(dstPath, srcFile, contentType, srcMeta.ETag, userMetadata, dstVersionID)
 }
 
 func (s *Storage) DeleteObject(bucket, key string) error {
@@ -345,7 +436,12 @@ func (s *Storage) DeleteObject(bucket, key string) error {
 	if !s.bucketExistsLocked(bucket) {
 		return ErrBucketNotFound
 	}
-	objPath := filepath.Join(bucket, key)
+	return s.deleteObjectFilesLocked(filepath.Join(bucket, key))
+}
+
+// deleteObjectFilesLocked removes the body, metadata, and tags for an object.
+// Caller must hold the write lock.
+func (s *Storage) deleteObjectFilesLocked(objPath string) error {
 	if err := s.root.Remove(objPath); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return ErrObjectNotFound
@@ -373,6 +469,347 @@ func (s *Storage) DeleteObject(bucket, key string) error {
 	return nil
 }
 
+// DeleteObjectVersioned performs a versioning-aware delete.
+// If versioning is enabled: archives current version and creates a delete marker.
+// If versioning is disabled: removes the object normally (same as DeleteObject).
+// Returns the versionID of the created delete marker (or "") and whether a
+// delete marker was created.
+func (s *Storage) DeleteObjectVersioned(bucket, key string) (string, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.bucketExistsLocked(bucket) {
+		return "", false, ErrBucketNotFound
+	}
+
+	enabled, err := s.isVersioningEnabledLocked(bucket)
+	if err != nil {
+		return "", false, err
+	}
+
+	objPath := filepath.Join(bucket, key)
+
+	if !enabled {
+		if err := s.deleteObjectFilesLocked(objPath); err != nil {
+			if errors.Is(err, ErrObjectNotFound) {
+				return "", false, nil // S3 returns 204 for non-existent objects
+			}
+			return "", false, err
+		}
+		return "", false, nil
+	}
+
+	// Versioning enabled: archive current version (if any) then write delete marker.
+	if err := s.archiveCurrentVersionLocked(bucket, key, objPath); err != nil {
+		return "", false, err
+	}
+
+	vid, err := s.newVersionID()
+	if err != nil {
+		return "", false, err
+	}
+
+	// Write empty body for the delete marker.
+	f, err := s.openFile(objPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return "", false, err
+	}
+	if err := f.Close(); err != nil {
+		return "", false, err
+	}
+	marker := ObjectMetadata{
+		LastModified:   time.Now().UTC(),
+		VersionID:      vid,
+		IsDeleteMarker: true,
+	}
+	if err := s.writeMeta(objPath, marker); err != nil {
+		_ = s.removeFile(objPath)
+		return "", false, err
+	}
+	return vid, true, nil
+}
+
+// DeleteObjectVersion permanently deletes a specific version (or delete marker) by versionID.
+// Returns whether the deleted entry was a delete marker.
+func (s *Storage) DeleteObjectVersion(bucket, key, versionID string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.bucketExistsLocked(bucket) {
+		return false, ErrBucketNotFound
+	}
+
+	objPath := filepath.Join(bucket, key)
+
+	// Check if it's the current version.
+	if cm, err := s.readMeta(objPath); err == nil && cm.VersionID == versionID {
+		isMarker := cm.IsDeleteMarker
+		if err := s.deleteObjectFilesLocked(objPath); err != nil &&
+			!errors.Is(err, ErrObjectNotFound) {
+			return false, err
+		}
+		return isMarker, nil
+	}
+
+	// Check archived versions.
+	vp := verPath(bucket, key, versionID)
+	vm, err := s.readMeta(vp)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, ErrObjectNotFound
+		}
+		return false, err
+	}
+	isMarker := vm.IsDeleteMarker
+	if err := s.removeFile(vp); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
+	if err := s.removeFile(vp + ".meta.json"); err != nil && !errors.Is(err, os.ErrNotExist) {
+		slog.Warn( // #nosec G706 -- vp is an internal filesystem path derived from bucket/key, not direct user input
+			"failed to remove archived version metadata",
+			"path",
+			vp,
+			"err",
+			err,
+		)
+	}
+	return isMarker, nil
+}
+
+// GetObjectVersion retrieves a specific version of an object by versionID.
+func (s *Storage) GetObjectVersion(
+	bucket, key, versionID string,
+) (*os.File, ObjectMetadata, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.bucketExistsLocked(bucket) {
+		return nil, ObjectMetadata{}, ErrBucketNotFound
+	}
+
+	// Check current version.
+	objPath := filepath.Join(bucket, key)
+	if cm, err := s.readMeta(objPath); err == nil && cm.VersionID == versionID {
+		if cm.IsDeleteMarker {
+			return nil, ObjectMetadata{}, &DeleteMarkerError{VersionID: versionID}
+		}
+		f, err := s.root.Open(objPath)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil, ObjectMetadata{}, ErrObjectNotFound
+			}
+			return nil, ObjectMetadata{}, err
+		}
+		return f, cm, nil
+	}
+
+	// Check archived versions.
+	vp := verPath(bucket, key, versionID)
+	vm, err := s.readMeta(vp)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, ObjectMetadata{}, ErrObjectNotFound
+		}
+		return nil, ObjectMetadata{}, err
+	}
+	if vm.IsDeleteMarker {
+		return nil, ObjectMetadata{}, &DeleteMarkerError{VersionID: versionID}
+	}
+	f, err := s.root.Open(vp)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, ObjectMetadata{}, ErrObjectNotFound
+		}
+		return nil, ObjectMetadata{}, err
+	}
+	return f, vm, nil
+}
+
+// HeadObjectVersion retrieves metadata for a specific version of an object.
+func (s *Storage) HeadObjectVersion(bucket, key, versionID string) (ObjectMetadata, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.bucketExistsLocked(bucket) {
+		return ObjectMetadata{}, ErrBucketNotFound
+	}
+
+	// Check current version.
+	objPath := filepath.Join(bucket, key)
+	if cm, err := s.readMeta(objPath); err == nil && cm.VersionID == versionID {
+		if cm.IsDeleteMarker {
+			return ObjectMetadata{}, &DeleteMarkerError{VersionID: versionID}
+		}
+		return cm, nil
+	}
+
+	// Check archived versions.
+	vp := verPath(bucket, key, versionID)
+	vm, err := s.readMeta(vp)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return ObjectMetadata{}, ErrObjectNotFound
+		}
+		return ObjectMetadata{}, err
+	}
+	if vm.IsDeleteMarker {
+		return ObjectMetadata{}, &DeleteMarkerError{VersionID: versionID}
+	}
+	return vm, nil
+}
+
+// ListObjectVersions returns all versions and delete markers for objects in the bucket.
+func (s *Storage) ListObjectVersions(bucket string) ([]VersionInfo, []DeleteMarkerInfo, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.bucketExistsLocked(bucket) {
+		return nil, nil, ErrBucketNotFound
+	}
+
+	var entries []versionEntry
+
+	// Collect current-version objects (including delete markers).
+	if err := s.collectVersionEntries(bucket, bucket, &entries); err != nil {
+		return nil, nil, err
+	}
+
+	// Collect archived versions from .ver/<key>/<versionID>.
+	verRoot := filepath.Join(bucket, ".ver")
+	if err := s.collectArchivedEntries(verRoot, "", &entries); err != nil &&
+		!errors.Is(err, os.ErrNotExist) {
+		return nil, nil, err
+	}
+
+	// Sort by key ASC, then LastModified DESC (most recent first per key).
+	slices.SortFunc(entries, func(a, b versionEntry) int {
+		if c := cmp.Compare(a.key, b.key); c != 0 {
+			return c
+		}
+		if a.meta.LastModified.After(b.meta.LastModified) {
+			return -1
+		}
+		if b.meta.LastModified.After(a.meta.LastModified) {
+			return 1
+		}
+		return 0
+	})
+
+	var versions []VersionInfo
+	var deleteMarkers []DeleteMarkerInfo
+	seenKeys := make(map[string]bool)
+
+	for _, e := range entries {
+		isLatest := !seenKeys[e.key]
+		seenKeys[e.key] = true
+		vid := e.meta.VersionID
+		if vid == "" {
+			vid = "null"
+		}
+		if e.meta.IsDeleteMarker {
+			deleteMarkers = append(deleteMarkers, DeleteMarkerInfo{
+				Key:          e.key,
+				VersionID:    vid,
+				IsLatest:     isLatest,
+				LastModified: e.meta.LastModified,
+			})
+		} else {
+			versions = append(versions, VersionInfo{
+				Key:          e.key,
+				VersionID:    vid,
+				IsLatest:     isLatest,
+				LastModified: e.meta.LastModified,
+				ETag:         e.meta.ETag,
+				Size:         e.meta.Size,
+			})
+		}
+	}
+
+	return versions, deleteMarkers, nil
+}
+
+// versionEntry is used internally by ListObjectVersions to collect versions.
+type versionEntry struct {
+	key  string
+	meta ObjectMetadata
+}
+
+// collectVersionEntries walks dir collecting all current-version objects (and delete markers).
+func (s *Storage) collectVersionEntries(bucket, dir string, entries *[]versionEntry) error {
+	dirEntries, err := s.readDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, e := range dirEntries {
+		entryPath := filepath.Join(dir, e.Name())
+		if e.IsDir() {
+			if e.Name() == ".mpu" || e.Name() == ".ver" {
+				continue
+			}
+			if err := s.collectVersionEntries(bucket, entryPath, entries); err != nil {
+				return err
+			}
+			continue
+		}
+		if strings.HasSuffix(e.Name(), ".meta.json") || strings.HasSuffix(e.Name(), ".tags.json") {
+			continue
+		}
+		key, _ := filepath.Rel(bucket, entryPath)
+		meta, err := s.readMeta(entryPath)
+		if err != nil {
+			slog.Warn( // #nosec G706 -- entryPath is an internal filesystem path, not direct user input
+				"skipping object with unreadable metadata",
+				"path",
+				entryPath,
+				"err",
+				err,
+			)
+			continue
+		}
+		*entries = append(*entries, versionEntry{key: key, meta: meta})
+	}
+	return nil
+}
+
+// collectArchivedEntries walks the .ver tree collecting archived versions.
+// baseVerDir is the .ver directory path; relPath is the path relative to it.
+func (s *Storage) collectArchivedEntries(
+	baseVerDir, relPath string,
+	entries *[]versionEntry,
+) error {
+	dirPath := baseVerDir
+	if relPath != "" {
+		dirPath = filepath.Join(baseVerDir, relPath)
+	}
+	dirEntries, err := s.readDir(dirPath)
+	if err != nil {
+		return err
+	}
+	for _, e := range dirEntries {
+		entryRel := filepath.Join(relPath, e.Name())
+		entryAbs := filepath.Join(baseVerDir, entryRel)
+		if e.IsDir() {
+			if err := s.collectArchivedEntries(baseVerDir, entryRel, entries); err != nil {
+				return err
+			}
+			continue
+		}
+		if strings.HasSuffix(e.Name(), ".meta.json") || strings.HasSuffix(e.Name(), ".tags.json") {
+			continue
+		}
+		// entryRel is <key>/<versionID>; key is everything but the last component.
+		key := filepath.Dir(entryRel)
+		meta, err := s.readMeta(entryAbs)
+		if err != nil {
+			slog.Warn( // #nosec G706 -- entryAbs is an internal filesystem path, not direct user input
+				"skipping archived version with unreadable metadata",
+				"path",
+				entryAbs,
+				"err",
+				err,
+			)
+			continue
+		}
+		*entries = append(*entries, versionEntry{key: key, meta: meta})
+	}
+	return nil
+}
+
 func (s *Storage) HeadObject(bucket, key string) (ObjectMetadata, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -385,6 +822,9 @@ func (s *Storage) HeadObject(bucket, key string) (ObjectMetadata, error) {
 			return ObjectMetadata{}, ErrObjectNotFound
 		}
 		return ObjectMetadata{}, err
+	}
+	if meta.IsDeleteMarker {
+		return ObjectMetadata{}, &DeleteMarkerError{VersionID: meta.VersionID}
 	}
 	return meta, nil
 }
@@ -413,7 +853,7 @@ func (s *Storage) walkDir(bucket, dir string, objects *[]ObjectInfo) error {
 	for _, e := range entries {
 		entryPath := filepath.Join(dir, e.Name())
 		if e.IsDir() {
-			if e.Name() == ".mpu" {
+			if e.Name() == ".mpu" || e.Name() == ".ver" {
 				continue
 			}
 			if err := s.walkDir(bucket, entryPath, objects); err != nil {
@@ -436,6 +876,9 @@ func (s *Storage) walkDir(bucket, dir string, objects *[]ObjectInfo) error {
 			)
 			continue
 		}
+		if meta.IsDeleteMarker {
+			continue
+		}
 		*objects = append(*objects, ObjectInfo{Key: key, Metadata: meta})
 	}
 	return nil
@@ -443,6 +886,91 @@ func (s *Storage) walkDir(bucket, dir string, objects *[]ObjectInfo) error {
 
 func (s *Storage) readDir(name string) ([]os.DirEntry, error) {
 	return s.listDirFn(name)
+}
+
+// newVersionID generates a random 16-character hex version ID.
+func (s *Storage) newVersionID() (string, error) {
+	b := make([]byte, 8)
+	if _, err := s.randRead(b); err != nil {
+		return "", fmt.Errorf("generate version ID: %w", err)
+	}
+	return hex.EncodeToString(b), nil
+}
+
+// isVersioningEnabledLocked reports whether versioning is enabled on bucket.
+// Caller must hold at least a read lock.
+func (s *Storage) isVersioningEnabledLocked(bucket string) (bool, error) {
+	meta, err := s.readBucketMeta(bucket)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	return meta.VersioningStatus == "Enabled", nil
+}
+
+// verPath returns the storage path for an archived version.
+func verPath(bucket, key, versionID string) string {
+	return filepath.Join(bucket, ".ver", key, versionID)
+}
+
+// archiveCurrentVersionLocked copies the current object at objPath to the
+// versioned archive (.ver/<key>/<versionID>). It is a no-op if the object
+// does not yet exist. Caller must hold the write lock.
+func (s *Storage) archiveCurrentVersionLocked(bucket, key, objPath string) error {
+	meta, err := s.readMeta(objPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil // nothing to archive
+		}
+		return err
+	}
+
+	vid := meta.VersionID
+	if vid == "" {
+		// Object predates versioning; assign a version ID now.
+		vid, err = s.newVersionID()
+		if err != nil {
+			return err
+		}
+		meta.VersionID = vid
+	}
+
+	vp := verPath(bucket, key, vid)
+	if err := s.root.MkdirAll(filepath.Dir(vp), 0o750); err != nil {
+		return err
+	}
+
+	// Copy body.
+	src, err := s.root.Open(objPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	dst, err := s.openFile(vp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		_ = src.Close()
+		return err
+	}
+	_, copyErr := io.Copy(dst, src)
+	_ = src.Close()
+	if err := dst.Close(); err != nil && copyErr == nil {
+		copyErr = err
+	}
+	if copyErr != nil {
+		_ = s.removeFile(vp)
+		return copyErr
+	}
+
+	// Write metadata with resolved version ID.
+	if err := s.writeJSON(vp+".meta.json", meta); err != nil {
+		_ = s.removeFile(vp)
+		return err
+	}
+	return nil
 }
 
 func (s *Storage) GetBucketRegion(bucket string) (string, error) {
@@ -934,6 +1462,11 @@ func (s *Storage) CompleteMultipartUpload(
 	}
 	// Open all part files and assemble via io.MultiReader.
 	files := make([]*os.File, 0, len(parts))
+	defer func() {
+		for _, f := range files {
+			_ = f.Close()
+		}
+	}()
 	readers := make([]io.Reader, 0, len(parts))
 	// Compute multipart ETag: MD5 of the concatenated raw MD5 digests.
 	h := md5.New() // #nosec G401 -- MD5 is required by the S3 ETag specification
@@ -941,9 +1474,6 @@ func (s *Storage) CompleteMultipartUpload(
 		partPath := filepath.Join(uploadDir, fmt.Sprintf("%d.part", p.PartNumber))
 		f, err := s.root.Open(partPath)
 		if err != nil {
-			for _, of := range files {
-				_ = of.Close()
-			}
 			return ObjectMetadata{}, err
 		}
 		files = append(files, f)
@@ -955,11 +1485,21 @@ func (s *Storage) CompleteMultipartUpload(
 	objPath := filepath.Join(umeta.Bucket, umeta.Key)
 	if dir := filepath.Dir(objPath); dir != umeta.Bucket {
 		if err := s.root.MkdirAll(dir, 0o750); err != nil {
-			for _, f := range files {
-				_ = f.Close()
-			}
 			return ObjectMetadata{}, err
 		}
+	}
+	versionID := ""
+	if enabled, verErr := s.isVersioningEnabledLocked(umeta.Bucket); verErr != nil {
+		return ObjectMetadata{}, verErr
+	} else if enabled {
+		if err := s.archiveCurrentVersionLocked(umeta.Bucket, umeta.Key, objPath); err != nil {
+			return ObjectMetadata{}, err
+		}
+		vid, err := s.newVersionID()
+		if err != nil {
+			return ObjectMetadata{}, err
+		}
+		versionID = vid
 	}
 	meta, err := s.writeObject(
 		objPath,
@@ -967,11 +1507,8 @@ func (s *Storage) CompleteMultipartUpload(
 		umeta.ContentType,
 		multipartETag,
 		nil,
+		versionID,
 	)
-	// Close part files before removing the upload directory.
-	for _, f := range files {
-		_ = f.Close()
-	}
 	if err != nil {
 		return ObjectMetadata{}, err
 	}
