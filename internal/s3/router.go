@@ -1866,9 +1866,6 @@ func (ro *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 	if tags, err := ro.storage.GetObjectTagging(bucket, key); err == nil && len(tags) > 0 {
 		w.Header().Set(amzTaggingCount, strconv.Itoa(len(tags)))
 	}
-	// ServeContent handles Range (206 Partial Content + Content-Range),
-	// Accept-Ranges, Content-Length, Last-Modified, and conditional headers
-	// (If-Match, If-None-Match, If-Modified-Since, If-Unmodified-Since).
 	http.ServeContent(w, r, "", meta.LastModified, f)
 }
 
