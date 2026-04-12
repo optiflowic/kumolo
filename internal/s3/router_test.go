@@ -233,10 +233,12 @@ type mockStore struct {
 	copyObjectMeta              ObjectMetadata
 	copyObjectErr               error
 	deleteObjectErr             error
+	deleteObjectVersionErr      error
 	headObjectMeta              ObjectMetadata
 	headObjectErr               error
 	listObjectsObjs             []ObjectInfo
 	listObjectsErr              error
+	listObjectVersionsErr       error
 	createMultipartUploadID     string
 	createMultipartUploadErr    error
 	uploadPartETag              string
@@ -310,7 +312,7 @@ func (m *mockStore) DeleteObjectVersioned(_ string, _ string) (string, bool, err
 	return "", false, m.deleteObjectErr
 }
 func (m *mockStore) DeleteObjectVersion(_ string, _ string, _ string) (bool, error) {
-	return false, m.deleteObjectErr
+	return false, m.deleteObjectVersionErr
 }
 func (m *mockStore) HeadObject(_ string, _ string) (ObjectMetadata, error) {
 	return m.headObjectMeta, m.headObjectErr
@@ -322,7 +324,7 @@ func (m *mockStore) ListObjects(_ string) ([]ObjectInfo, error) {
 	return m.listObjectsObjs, m.listObjectsErr
 }
 func (m *mockStore) ListObjectVersions(_ string) ([]VersionInfo, []DeleteMarkerInfo, error) {
-	return nil, nil, nil
+	return nil, nil, m.listObjectVersionsErr
 }
 func (m *mockStore) CreateMultipartUpload(_ string, _ string, _ string) (string, error) {
 	return m.createMultipartUploadID, m.createMultipartUploadErr
@@ -3396,6 +3398,15 @@ func TestRouterListObjectVersions(t *testing.T) {
 		assert.Equal(t, http.StatusNotFound, w.Code)
 		assert.Contains(t, w.Body.String(), "NoSuchBucket")
 	})
+
+	t.Run("returns 500 on storage error", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{listObjectVersionsErr: errors.New("disk failure")})
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket?versions", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assert.Contains(t, w.Body.String(), "InternalError")
+	})
 }
 
 func TestRouterDeleteObjectVersioned(t *testing.T) {
@@ -3426,8 +3437,8 @@ func TestRouterDeleteObjectVersioned(t *testing.T) {
 			ro.ServeHTTP(w, req)
 
 			assert.Equal(t, http.StatusNoContent, w.Code)
-			assert.Equal(t, "true", w.Header().Get("x-amz-delete-marker"))
-			assert.NotEmpty(t, w.Header().Get("x-amz-version-id"))
+			assert.Equal(t, "true", w.Header().Get(amzDeleteMarker))
+			assert.NotEmpty(t, w.Header().Get(amzVersionID))
 		},
 	)
 
@@ -3437,7 +3448,7 @@ func TestRouterDeleteObjectVersioned(t *testing.T) {
 		require.NoError(t, ro.storage.(*Storage).PutBucketVersioning("my-bucket", "Enabled"))
 		putW := httptest.NewRecorder()
 		ro.ServeHTTP(putW, putRequest("/my-bucket/obj.txt", "hello"))
-		versionID := putW.Header().Get("x-amz-version-id")
+		versionID := putW.Header().Get(amzVersionID)
 		require.NotEmpty(t, versionID)
 
 		req := httptest.NewRequest(
@@ -3449,7 +3460,7 @@ func TestRouterDeleteObjectVersioned(t *testing.T) {
 		ro.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusNoContent, w.Code)
-		assert.Equal(t, versionID, w.Header().Get("x-amz-version-id"))
+		assert.Equal(t, versionID, w.Header().Get(amzVersionID))
 	})
 
 	t.Run("delete with unknown versionId returns 204", func(t *testing.T) {
@@ -3465,6 +3476,68 @@ func TestRouterDeleteObjectVersioned(t *testing.T) {
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNoContent, w.Code)
 	})
+
+	t.Run("delete with versionId returns 404 when bucket not found", func(t *testing.T) {
+		ro := newTestRouter(t)
+		req := httptest.NewRequest(
+			http.MethodDelete,
+			"/no-bucket/obj.txt?versionId=abc123",
+			nil,
+		)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchBucket")
+	})
+
+	t.Run("delete with versionId returns 500 on storage error", func(t *testing.T) {
+		ro := newRouterWithMock(
+			&mockStore{deleteObjectVersionErr: errors.New("disk failure")},
+		)
+		req := httptest.NewRequest(
+			http.MethodDelete,
+			"/my-bucket/obj.txt?versionId=abc123",
+			nil,
+		)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assert.Contains(t, w.Body.String(), "InternalError")
+	})
+
+	t.Run(
+		"delete with versionId sets x-amz-delete-marker when target is a delete marker",
+		func(t *testing.T) {
+			ro := newTestRouter(t)
+			ro.ServeHTTP(
+				httptest.NewRecorder(),
+				httptest.NewRequest(http.MethodPut, "/my-bucket", nil),
+			)
+			require.NoError(t, ro.storage.(*Storage).PutBucketVersioning("my-bucket", "Enabled"))
+			ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/obj.txt", "hello"))
+
+			// Create a delete marker.
+			delW := httptest.NewRecorder()
+			ro.ServeHTTP(
+				delW,
+				httptest.NewRequest(http.MethodDelete, "/my-bucket/obj.txt", nil),
+			)
+			markerVID := delW.Header().Get(amzVersionID)
+			require.NotEmpty(t, markerVID)
+
+			// Permanently delete the delete marker itself.
+			req := httptest.NewRequest(
+				http.MethodDelete,
+				"/my-bucket/obj.txt?versionId="+markerVID,
+				nil,
+			)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusNoContent, w.Code)
+			assert.Equal(t, "true", w.Header().Get(amzDeleteMarker))
+			assert.Equal(t, markerVID, w.Header().Get(amzVersionID))
+		},
+	)
 }
 
 func TestRouterGetObjectVersion(t *testing.T) {
@@ -3475,7 +3548,7 @@ func TestRouterGetObjectVersion(t *testing.T) {
 
 		w1 := httptest.NewRecorder()
 		ro.ServeHTTP(w1, putRequest("/my-bucket/obj.txt", "v1"))
-		vid1 := w1.Header().Get("x-amz-version-id")
+		vid1 := w1.Header().Get(amzVersionID)
 		ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/obj.txt", "v2"))
 
 		req := httptest.NewRequest(http.MethodGet, "/my-bucket/obj.txt?versionId="+vid1, nil)
@@ -3484,7 +3557,21 @@ func TestRouterGetObjectVersion(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Equal(t, "v1", w.Body.String())
-		assert.Equal(t, vid1, w.Header().Get("x-amz-version-id"))
+		assert.Equal(t, vid1, w.Header().Get(amzVersionID))
+	})
+
+	t.Run("GET with nonexistent versionId returns 404 NoSuchVersion", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		require.NoError(t, ro.storage.(*Storage).PutBucketVersioning("my-bucket", "Enabled"))
+		ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/obj.txt", "v1"))
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket/obj.txt?versionId=nonexistent", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchVersion")
 	})
 }
 
@@ -3496,7 +3583,7 @@ func TestRouterHeadObjectVersion(t *testing.T) {
 
 		w1 := httptest.NewRecorder()
 		ro.ServeHTTP(w1, putRequest("/my-bucket/obj.txt", "hello"))
-		vid1 := w1.Header().Get("x-amz-version-id")
+		vid1 := w1.Header().Get(amzVersionID)
 		ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/obj.txt", "updated"))
 
 		req := httptest.NewRequest(http.MethodHead, "/my-bucket/obj.txt?versionId="+vid1, nil)
@@ -3504,7 +3591,7 @@ func TestRouterHeadObjectVersion(t *testing.T) {
 		ro.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Equal(t, vid1, w.Header().Get("x-amz-version-id"))
+		assert.Equal(t, vid1, w.Header().Get(amzVersionID))
 	})
 }
 
@@ -3523,7 +3610,7 @@ func TestRouterCopyObjectVersionId(t *testing.T) {
 
 		w1 := httptest.NewRecorder()
 		ro.ServeHTTP(w1, putRequest("/src-bucket/obj.txt", "v1"))
-		vid1 := w1.Header().Get("x-amz-version-id")
+		vid1 := w1.Header().Get(amzVersionID)
 		ro.ServeHTTP(httptest.NewRecorder(), putRequest("/src-bucket/obj.txt", "v2"))
 
 		req := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
@@ -3539,4 +3626,136 @@ func TestRouterCopyObjectVersionId(t *testing.T) {
 		ro.ServeHTTP(getW, getReq)
 		assert.Equal(t, "v1", getW.Body.String())
 	})
+
+	t.Run("CopyObject to versioned destination sets x-amz-version-id header", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/src-bucket", nil),
+		)
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/dst-bucket", nil),
+		)
+		require.NoError(t, ro.storage.(*Storage).PutBucketVersioning("dst-bucket", "Enabled"))
+		ro.ServeHTTP(httptest.NewRecorder(), putRequest("/src-bucket/obj.txt", "content"))
+
+		req := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
+		req.Header.Set("x-amz-copy-source", "/src-bucket/obj.txt")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.NotEmpty(t, w.Header().Get(amzVersionID))
+	})
+}
+
+func TestRouterGetObjectDeleteMarker(t *testing.T) {
+	t.Run(
+		"GET without versionId on delete marker returns 404 with x-amz-delete-marker",
+		func(t *testing.T) {
+			ro := newTestRouter(t)
+			ro.ServeHTTP(
+				httptest.NewRecorder(),
+				httptest.NewRequest(http.MethodPut, "/my-bucket", nil),
+			)
+			require.NoError(t, ro.storage.(*Storage).PutBucketVersioning("my-bucket", "Enabled"))
+			ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/obj.txt", "v1"))
+			ro.ServeHTTP(
+				httptest.NewRecorder(),
+				httptest.NewRequest(http.MethodDelete, "/my-bucket/obj.txt", nil),
+			)
+
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/my-bucket/obj.txt", nil))
+
+			assert.Equal(t, http.StatusNotFound, w.Code)
+			assert.Equal(t, "true", w.Header().Get(amzDeleteMarker))
+		},
+	)
+
+	t.Run(
+		"GET with versionId pointing to delete marker returns 405 with headers",
+		func(t *testing.T) {
+			ro := newTestRouter(t)
+			ro.ServeHTTP(
+				httptest.NewRecorder(),
+				httptest.NewRequest(http.MethodPut, "/my-bucket", nil),
+			)
+			require.NoError(t, ro.storage.(*Storage).PutBucketVersioning("my-bucket", "Enabled"))
+			ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/obj.txt", "v1"))
+
+			delW := httptest.NewRecorder()
+			ro.ServeHTTP(delW, httptest.NewRequest(http.MethodDelete, "/my-bucket/obj.txt", nil))
+			markerVID := delW.Header().Get(amzVersionID)
+			require.NotEmpty(t, markerVID)
+
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(
+				w,
+				httptest.NewRequest(http.MethodGet, "/my-bucket/obj.txt?versionId="+markerVID, nil),
+			)
+
+			assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+			assert.Equal(t, "true", w.Header().Get(amzDeleteMarker))
+			assert.Equal(t, markerVID, w.Header().Get(amzVersionID))
+		},
+	)
+}
+
+func TestRouterHeadObjectDeleteMarker(t *testing.T) {
+	t.Run(
+		"HEAD without versionId on delete marker returns 404 with x-amz-delete-marker",
+		func(t *testing.T) {
+			ro := newTestRouter(t)
+			ro.ServeHTTP(
+				httptest.NewRecorder(),
+				httptest.NewRequest(http.MethodPut, "/my-bucket", nil),
+			)
+			require.NoError(t, ro.storage.(*Storage).PutBucketVersioning("my-bucket", "Enabled"))
+			ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/obj.txt", "v1"))
+			ro.ServeHTTP(
+				httptest.NewRecorder(),
+				httptest.NewRequest(http.MethodDelete, "/my-bucket/obj.txt", nil),
+			)
+
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, httptest.NewRequest(http.MethodHead, "/my-bucket/obj.txt", nil))
+
+			assert.Equal(t, http.StatusNotFound, w.Code)
+			assert.Equal(t, "true", w.Header().Get(amzDeleteMarker))
+		},
+	)
+
+	t.Run(
+		"HEAD with versionId pointing to delete marker returns 405 with headers",
+		func(t *testing.T) {
+			ro := newTestRouter(t)
+			ro.ServeHTTP(
+				httptest.NewRecorder(),
+				httptest.NewRequest(http.MethodPut, "/my-bucket", nil),
+			)
+			require.NoError(t, ro.storage.(*Storage).PutBucketVersioning("my-bucket", "Enabled"))
+			ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/obj.txt", "v1"))
+
+			delW := httptest.NewRecorder()
+			ro.ServeHTTP(delW, httptest.NewRequest(http.MethodDelete, "/my-bucket/obj.txt", nil))
+			markerVID := delW.Header().Get(amzVersionID)
+			require.NotEmpty(t, markerVID)
+
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(
+				w,
+				httptest.NewRequest(
+					http.MethodHead,
+					"/my-bucket/obj.txt?versionId="+markerVID,
+					nil,
+				),
+			)
+
+			assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+			assert.Equal(t, "true", w.Header().Get(amzDeleteMarker))
+			assert.Equal(t, markerVID, w.Header().Get(amzVersionID))
+		},
+	)
 }
