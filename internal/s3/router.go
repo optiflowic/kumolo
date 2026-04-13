@@ -396,7 +396,6 @@ func (ro *Router) routeObject(w http.ResponseWriter, r *http.Request, bucket, ke
 	}
 }
 
-
 func (ro *Router) handlePutBucketTagging(w http.ResponseWriter, r *http.Request, bucket string) {
 	var req xmlTagging
 	if err := xml.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1122,7 +1121,6 @@ func (ro *Router) handleListMultipartUploads(
 	})
 }
 
-
 func (ro *Router) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bucket string) {
 	if !ro.storage.BucketExists(bucket) {
 		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
@@ -1276,4 +1274,3 @@ func parsePath(path string) (bucket, key string) {
 	}
 	return bucket, key
 }
-

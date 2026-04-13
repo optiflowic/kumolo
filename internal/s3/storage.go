@@ -28,7 +28,6 @@ type bucketMeta struct {
 	Policy           string     `json:"policy,omitempty"`
 }
 
-
 // Storage is a filesystem-backed S3 backend. os.Root scopes all access to the
 // storage root, preventing path traversal attacks.
 type Storage struct {
@@ -1255,7 +1254,6 @@ func (s *Storage) DeleteBucketPolicy(bucket string) error {
 	return s.writeBucketMeta(bucket, meta)
 }
 
-
 // uploadMeta is stored as .mpu/<uploadID>/upload.json.
 type uploadMeta struct {
 	Bucket      string    `json:"bucket"`
@@ -1488,7 +1486,6 @@ func (s *Storage) readPartMeta(uploadID string, partNumber int) (partMeta, error
 		filepath.Join(mpuDir, uploadID, fmt.Sprintf("%d.part.meta.json", partNumber)),
 	)
 }
-
 
 func (s *Storage) ListMultipartUploads(bucket string) ([]MultipartUploadInfo, error) {
 	s.mu.RLock()
