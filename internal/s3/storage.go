@@ -28,50 +28,6 @@ type bucketMeta struct {
 	Policy           string     `json:"policy,omitempty"`
 }
 
-// CORSRule represents a single CORS rule stored in bucket metadata.
-type CORSRule struct {
-	ID             string   `json:"id,omitempty"`
-	AllowedOrigins []string `json:"allowedOrigins"`
-	AllowedMethods []string `json:"allowedMethods"`
-	AllowedHeaders []string `json:"allowedHeaders,omitempty"`
-	ExposeHeaders  []string `json:"exposeHeaders,omitempty"`
-	MaxAgeSeconds  int      `json:"maxAgeSeconds,omitempty"`
-}
-
-// ObjectMetadata is stored as a sidecar .meta.json file alongside each object.
-type ObjectMetadata struct {
-	ContentType    string            `json:"contentType"`
-	ETag           string            `json:"etag"`
-	LastModified   time.Time         `json:"lastModified"`
-	Size           int64             `json:"size"`
-	UserMetadata   map[string]string `json:"userMetadata,omitempty"`
-	VersionID      string            `json:"versionId,omitempty"`
-	IsDeleteMarker bool              `json:"isDeleteMarker,omitempty"`
-}
-
-// VersionInfo represents a non-delete-marker version of an object in a versioned bucket.
-type VersionInfo struct {
-	Key          string
-	VersionID    string
-	IsLatest     bool
-	LastModified time.Time
-	ETag         string
-	Size         int64
-}
-
-// DeleteMarkerInfo represents a delete marker version in a versioned bucket.
-type DeleteMarkerInfo struct {
-	Key          string
-	VersionID    string
-	IsLatest     bool
-	LastModified time.Time
-}
-
-// Tag is a key-value pair attached to an S3 object.
-type Tag struct {
-	Key   string `json:"key"`
-	Value string `json:"value"`
-}
 
 // Storage is a filesystem-backed S3 backend. os.Root scopes all access to the
 // storage root, preventing path traversal attacks.
@@ -1299,21 +1255,6 @@ func (s *Storage) DeleteBucketPolicy(bucket string) error {
 	return s.writeBucketMeta(bucket, meta)
 }
 
-type BucketInfo struct {
-	Name         string
-	CreationDate time.Time
-}
-
-type ObjectInfo struct {
-	Key      string
-	Metadata ObjectMetadata
-}
-
-// CompletePart identifies a part by number and ETag for CompleteMultipartUpload.
-type CompletePart struct {
-	PartNumber int
-	ETag       string
-}
 
 // uploadMeta is stored as .mpu/<uploadID>/upload.json.
 type uploadMeta struct {
@@ -1548,20 +1489,6 @@ func (s *Storage) readPartMeta(uploadID string, partNumber int) (partMeta, error
 	)
 }
 
-// MultipartUploadInfo describes an in-progress multipart upload.
-type MultipartUploadInfo struct {
-	UploadID  string
-	Key       string
-	Initiated time.Time
-}
-
-// PartInfo describes an uploaded part.
-type PartInfo struct {
-	PartNumber   int
-	ETag         string
-	Size         int64
-	LastModified time.Time
-}
 
 func (s *Storage) ListMultipartUploads(bucket string) ([]MultipartUploadInfo, error) {
 	s.mu.RLock()
