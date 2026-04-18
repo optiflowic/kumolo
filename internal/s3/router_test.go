@@ -3407,6 +3407,28 @@ func TestRouterListObjectVersions(t *testing.T) {
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 		assert.Contains(t, w.Body.String(), "InternalError")
 	})
+
+	t.Run("includes delete markers in response", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		require.NoError(t, ro.storage.(*Storage).PutBucketVersioning("my-bucket", "Enabled"))
+		ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/obj.txt", "v1"))
+		// Delete without versionId creates a delete marker.
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodDelete, "/my-bucket/obj.txt", nil),
+		)
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket?versions", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		body := w.Body.String()
+		assert.Contains(t, body, "<DeleteMarker>")
+		assert.Contains(t, body, "<Key>obj.txt</Key>")
+		assert.Contains(t, body, "<VersionId>")
+	})
 }
 
 func TestRouterDeleteObjectVersioned(t *testing.T) {

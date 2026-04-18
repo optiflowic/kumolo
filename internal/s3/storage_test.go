@@ -1902,6 +1902,29 @@ func TestMultipartUpload(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, parts)
 	})
+
+	t.Run(
+		"CompleteMultipartUpload on versioning-enabled bucket assigns versionId",
+		func(t *testing.T) {
+			s, _ := setup(t)
+			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
+
+			uploadID, err := s.CreateMultipartUpload("my-bucket", "big.txt", "text/plain")
+			require.NoError(t, err)
+			etag1, err := s.UploadPart(uploadID, 1, strings.NewReader("hello "))
+			require.NoError(t, err)
+			etag2, err := s.UploadPart(uploadID, 2, strings.NewReader("world"))
+			require.NoError(t, err)
+
+			meta, err := s.CompleteMultipartUpload(uploadID, []CompletePart{
+				{PartNumber: 1, ETag: etag1},
+				{PartNumber: 2, ETag: etag2},
+			})
+			require.NoError(t, err)
+			assert.NotEmpty(t, meta.VersionID)
+			assert.Contains(t, meta.ETag, "-2")
+		},
+	)
 }
 
 func TestObjectTagging(t *testing.T) {
@@ -2906,6 +2929,77 @@ func TestVersioning(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, m1.ETag, dstMeta.ETag)
 	})
+
+	t.Run(
+		"CopyObject with srcVersionId matching current version copies from current version",
+		func(t *testing.T) {
+			s, bucket := setup(t)
+			_, err := s.PutObject(bucket, "obj.txt", strings.NewReader("v1"), "text/plain", nil)
+			require.NoError(t, err)
+			m2, err := s.PutObject(bucket, "obj.txt", strings.NewReader("v2"), "text/plain", nil)
+			require.NoError(t, err)
+
+			require.NoError(t, s.CreateBucket("dst-bucket", ""))
+			// Pass m2.VersionID as srcVersionID; m2 is the current version.
+			dstMeta, err := s.CopyObject(
+				bucket, "obj.txt", m2.VersionID,
+				"dst-bucket", "copy.txt", "", nil,
+			)
+			require.NoError(t, err)
+			assert.Equal(t, m2.ETag, dstMeta.ETag)
+		},
+	)
+
+	t.Run(
+		"ListObjectVersions with multiple distinct keys sorts entries by key",
+		func(t *testing.T) {
+			s, bucket := setup(t)
+			_, err := s.PutObject(bucket, "b.txt", strings.NewReader("b1"), "text/plain", nil)
+			require.NoError(t, err)
+			_, err = s.PutObject(bucket, "a.txt", strings.NewReader("a1"), "text/plain", nil)
+			require.NoError(t, err)
+			_, err = s.PutObject(bucket, "b.txt", strings.NewReader("b2"), "text/plain", nil)
+			require.NoError(t, err)
+
+			versions, _, err := s.ListObjectVersions(bucket)
+			require.NoError(t, err)
+			require.GreaterOrEqual(t, len(versions), 2)
+			// Verify a.txt appears before b.txt.
+			var keys []string
+			for _, v := range versions {
+				if len(keys) == 0 || keys[len(keys)-1] != v.Key {
+					keys = append(keys, v.Key)
+				}
+			}
+			assert.Equal(t, "a.txt", keys[0])
+			assert.Equal(t, "b.txt", keys[1])
+		},
+	)
+
+	t.Run(
+		"archiveCurrentVersionLocked assigns versionId to pre-versioning object on re-put",
+		func(t *testing.T) {
+			s, _ := newTestStorageWithRoot(t)
+			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			// Put WITHOUT versioning — object has no VersionID.
+			_, err := s.PutObject(
+				"my-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil,
+			)
+			require.NoError(t, err)
+			// Enable versioning after the fact.
+			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
+			// Second put archives the pre-versioning object (assigns it a versionId).
+			m2, err := s.PutObject(
+				"my-bucket", "obj.txt", strings.NewReader("v2"), "text/plain", nil,
+			)
+			require.NoError(t, err)
+			assert.NotEmpty(t, m2.VersionID)
+
+			versions, _, err := s.ListObjectVersions("my-bucket")
+			require.NoError(t, err)
+			assert.Len(t, versions, 2)
+		},
+	)
 }
 
 func TestDeleteMarkerError(t *testing.T) {
@@ -3436,6 +3530,586 @@ func TestVersioningErrorPaths(t *testing.T) {
 				return orig(name)
 			}
 			_, err = s.DeleteObjectVersion("my-bucket", "obj.txt", m1.VersionID)
+			assert.Error(t, err)
+		},
+	)
+
+	t.Run(
+		"DeleteObjectVersion warns and continues when archived version meta removal fails",
+		func(t *testing.T) {
+			s, _ := newTestStorageWithRoot(t)
+			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
+			m1, err := s.PutObject(
+				"my-bucket",
+				"obj.txt",
+				strings.NewReader("v1"),
+				"text/plain",
+				nil,
+			)
+			require.NoError(t, err)
+			_, err = s.PutObject("my-bucket", "obj.txt", strings.NewReader("v2"), "text/plain", nil)
+			require.NoError(t, err)
+			// Body removal succeeds but meta removal fails → slog.Warn, still returns nil.
+			orig := s.removeFile
+			s.removeFile = func(name string) error {
+				if strings.Contains(name, ".ver") && strings.HasSuffix(name, ".meta.json") {
+					return errors.New("meta remove failure")
+				}
+				return orig(name)
+			}
+			isMarker, err := s.DeleteObjectVersion("my-bucket", "obj.txt", m1.VersionID)
+			require.NoError(t, err)
+			assert.False(t, isMarker)
+		},
+	)
+
+	t.Run(
+		"GetObjectVersion returns ErrObjectNotFound when current version body is missing",
+		func(t *testing.T) {
+			s, _ := newTestStorageWithRoot(t)
+			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
+			_, err := s.PutObject(
+				"my-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil,
+			)
+			require.NoError(t, err)
+			m2, err := s.PutObject(
+				"my-bucket", "obj.txt", strings.NewReader("v2"), "text/plain", nil,
+			)
+			require.NoError(t, err)
+			// Remove the current version body but keep the meta file.
+			require.NoError(t, s.root.Remove("my-bucket/obj.txt"))
+
+			_, _, err = s.GetObjectVersion("my-bucket", "obj.txt", m2.VersionID)
+			assert.ErrorIs(t, err, ErrObjectNotFound)
+		},
+	)
+
+	t.Run(
+		"GetObjectVersion returns DeleteMarkerError for archived delete marker",
+		func(t *testing.T) {
+			s, _ := newTestStorageWithRoot(t)
+			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
+			_, err := s.PutObject(
+				"my-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil,
+			)
+			require.NoError(t, err)
+			// Delete creates a delete marker as current.
+			markerVID, _, err := s.DeleteObjectVersioned("my-bucket", "obj.txt")
+			require.NoError(t, err)
+			// Put again — delete marker gets archived.
+			_, err = s.PutObject(
+				"my-bucket", "obj.txt", strings.NewReader("v2"), "text/plain", nil,
+			)
+			require.NoError(t, err)
+
+			// The archived delete marker should return DeleteMarkerError.
+			_, _, err = s.GetObjectVersion("my-bucket", "obj.txt", markerVID)
+			var dme *DeleteMarkerError
+			assert.ErrorAs(t, err, &dme)
+			assert.Equal(t, markerVID, dme.VersionID)
+		},
+	)
+
+	t.Run(
+		"GetObjectVersion returns error for archived version with corrupt metadata",
+		func(t *testing.T) {
+			s, _ := newTestStorageWithRoot(t)
+			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
+			m1, err := s.PutObject(
+				"my-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil,
+			)
+			require.NoError(t, err)
+			_, err = s.PutObject(
+				"my-bucket", "obj.txt", strings.NewReader("v2"), "text/plain", nil,
+			)
+			require.NoError(t, err)
+			// Corrupt the archived v1 meta so readMeta returns a non-ErrNotExist error.
+			vp := verPath("my-bucket", "obj.txt", m1.VersionID)
+			f, err := s.root.OpenFile(vp+".meta.json", os.O_WRONLY|os.O_TRUNC, 0o600)
+			require.NoError(t, err)
+			_, err = f.Write([]byte("not-json"))
+			require.NoError(t, err)
+			require.NoError(t, f.Close())
+
+			_, _, err = s.GetObjectVersion("my-bucket", "obj.txt", m1.VersionID)
+			assert.Error(t, err)
+			assert.NotErrorIs(t, err, ErrObjectNotFound)
+		},
+	)
+
+	t.Run(
+		"HeadObjectVersion returns metadata for current version when queried by its versionId",
+		func(t *testing.T) {
+			s, _ := newTestStorageWithRoot(t)
+			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
+			_, err := s.PutObject(
+				"my-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil,
+			)
+			require.NoError(t, err)
+			m2, err := s.PutObject(
+				"my-bucket", "obj.txt", strings.NewReader("v2"), "text/plain", nil,
+			)
+			require.NoError(t, err)
+
+			// m2 is the current version; HeadObjectVersion with m2.VersionID hits the
+			// "check current version" branch.
+			meta, err := s.HeadObjectVersion("my-bucket", "obj.txt", m2.VersionID)
+			require.NoError(t, err)
+			assert.Equal(t, m2.VersionID, meta.VersionID)
+		},
+	)
+
+	t.Run(
+		"HeadObjectVersion returns DeleteMarkerError for archived delete marker",
+		func(t *testing.T) {
+			s, _ := newTestStorageWithRoot(t)
+			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
+			_, err := s.PutObject(
+				"my-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil,
+			)
+			require.NoError(t, err)
+			markerVID, _, err := s.DeleteObjectVersioned("my-bucket", "obj.txt")
+			require.NoError(t, err)
+			// Put v2 — archives the delete marker.
+			_, err = s.PutObject(
+				"my-bucket", "obj.txt", strings.NewReader("v2"), "text/plain", nil,
+			)
+			require.NoError(t, err)
+
+			_, err = s.HeadObjectVersion("my-bucket", "obj.txt", markerVID)
+			var dme *DeleteMarkerError
+			assert.ErrorAs(t, err, &dme)
+			assert.Equal(t, markerVID, dme.VersionID)
+		},
+	)
+
+	t.Run(
+		"CopyObject with srcVersionId not found in archived versions returns ErrObjectNotFound",
+		func(t *testing.T) {
+			s, _ := newTestStorageWithRoot(t)
+			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
+			_, err := s.PutObject(
+				"my-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil,
+			)
+			require.NoError(t, err)
+			require.NoError(t, s.CreateBucket("dst-bucket", ""))
+
+			_, err = s.CopyObject(
+				"my-bucket", "obj.txt", "deadbeefdeadbeef",
+				"dst-bucket", "copy.txt", "", nil,
+			)
+			assert.ErrorIs(t, err, ErrObjectNotFound)
+		},
+	)
+
+	t.Run(
+		"CopyObject with srcVersionId pointing to delete marker returns ErrObjectNotFound",
+		func(t *testing.T) {
+			s, _ := newTestStorageWithRoot(t)
+			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
+			_, err := s.PutObject(
+				"my-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil,
+			)
+			require.NoError(t, err)
+			markerVID, _, err := s.DeleteObjectVersioned("my-bucket", "obj.txt")
+			require.NoError(t, err)
+			require.NoError(t, s.CreateBucket("dst-bucket", ""))
+
+			// Copying from the current delete marker should return ErrObjectNotFound.
+			_, err = s.CopyObject(
+				"my-bucket", "obj.txt", markerVID,
+				"dst-bucket", "copy.txt", "", nil,
+			)
+			assert.ErrorIs(t, err, ErrObjectNotFound)
+		},
+	)
+
+	t.Run(
+		"DeleteObjectVersioned returns error when isVersioningEnabledLocked fails",
+		func(t *testing.T) {
+			s, _ := newTestStorageWithRoot(t)
+			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			// Corrupt bucket meta so isVersioningEnabledLocked fails.
+			f, err := s.root.OpenFile("my-bucket.bucket.json", os.O_WRONLY|os.O_TRUNC, 0o600)
+			require.NoError(t, err)
+			_, err = f.Write([]byte("not-json"))
+			require.NoError(t, err)
+			require.NoError(t, f.Close())
+
+			_, _, err = s.DeleteObjectVersioned("my-bucket", "obj.txt")
+			assert.Error(t, err)
+		},
+	)
+
+	t.Run(
+		"DeleteObjectVersioned returns error when archiveCurrentVersionLocked fails",
+		func(t *testing.T) {
+			s, _ := newTestStorageWithRoot(t)
+			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
+			_, err := s.PutObject(
+				"my-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil,
+			)
+			require.NoError(t, err)
+			// Fail openFile for .ver paths so archiving fails.
+			orig := s.openFile
+			s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+				if strings.Contains(name, ".ver") {
+					return nil, errors.New("archive write error")
+				}
+				return orig(name, flag, perm)
+			}
+			_, _, err = s.DeleteObjectVersioned("my-bucket", "obj.txt")
+			assert.Error(t, err)
+		},
+	)
+
+	t.Run(
+		"DeleteObjectVersioned returns error when delete marker body Close fails",
+		func(t *testing.T) {
+			s, _ := newTestStorageWithRoot(t)
+			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
+			_, err := s.PutObject(
+				"my-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil,
+			)
+			require.NoError(t, err)
+			// Archive must succeed (.ver); fail Close() only for the marker body.
+			orig := s.openFile
+			s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+				wc, err := orig(name, flag, perm)
+				if err != nil {
+					return nil, err
+				}
+				if !strings.Contains(name, ".ver") && !strings.HasSuffix(name, ".meta.json") {
+					return badCloseWriter{wc}, nil
+				}
+				return wc, nil
+			}
+			_, _, err = s.DeleteObjectVersioned("my-bucket", "obj.txt")
+			assert.Error(t, err)
+		},
+	)
+
+	t.Run(
+		"collectVersionEntries skips objects with corrupt metadata",
+		func(t *testing.T) {
+			s, _ := newTestStorageWithRoot(t)
+			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			_, err := s.PutObject(
+				"my-bucket", "good.txt", strings.NewReader("data"), "text/plain", nil,
+			)
+			require.NoError(t, err)
+			_, err = s.PutObject(
+				"my-bucket", "bad.txt", strings.NewReader("data"), "text/plain", nil,
+			)
+			require.NoError(t, err)
+			// Corrupt bad.txt's metadata — ListObjectVersions should skip it.
+			f, err := s.root.OpenFile(
+				"my-bucket/bad.txt.meta.json", os.O_WRONLY|os.O_TRUNC, 0o600,
+			)
+			require.NoError(t, err)
+			_, err = f.Write([]byte("not-json"))
+			require.NoError(t, err)
+			require.NoError(t, f.Close())
+
+			versions, _, err := s.ListObjectVersions("my-bucket")
+			require.NoError(t, err)
+			require.Len(t, versions, 1)
+			assert.Equal(t, "good.txt", versions[0].Key)
+		},
+	)
+
+	t.Run(
+		"collectArchivedEntries skips archived versions with corrupt metadata",
+		func(t *testing.T) {
+			s, _ := newTestStorageWithRoot(t)
+			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
+			m1, err := s.PutObject(
+				"my-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil,
+			)
+			require.NoError(t, err)
+			_, err = s.PutObject(
+				"my-bucket", "obj.txt", strings.NewReader("v2"), "text/plain", nil,
+			)
+			require.NoError(t, err)
+			// Corrupt the archived v1 meta — ListObjectVersions should skip it.
+			vp := verPath("my-bucket", "obj.txt", m1.VersionID)
+			f, err := s.root.OpenFile(vp+".meta.json", os.O_WRONLY|os.O_TRUNC, 0o600)
+			require.NoError(t, err)
+			_, err = f.Write([]byte("not-json"))
+			require.NoError(t, err)
+			require.NoError(t, f.Close())
+
+			versions, _, err := s.ListObjectVersions("my-bucket")
+			require.NoError(t, err)
+			// Only v2 (current) should be returned.
+			assert.Len(t, versions, 1)
+		},
+	)
+
+	t.Run(
+		"archiveCurrentVersionLocked is a no-op when body file is missing",
+		func(t *testing.T) {
+			s, _ := newTestStorageWithRoot(t)
+			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
+			_, err := s.PutObject(
+				"my-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil,
+			)
+			require.NoError(t, err)
+			// Remove the body file, keeping the meta — simulates partial corruption.
+			require.NoError(t, s.root.Remove("my-bucket/obj.txt"))
+			// Second put triggers archiveCurrentVersionLocked; body is missing → no-op.
+			m2, err := s.PutObject(
+				"my-bucket", "obj.txt", strings.NewReader("v2"), "text/plain", nil,
+			)
+			require.NoError(t, err)
+			assert.NotEmpty(t, m2.VersionID)
+		},
+	)
+
+	t.Run(
+		"archiveCurrentVersionLocked returns error when dst.Close fails",
+		func(t *testing.T) {
+			s, _ := newTestStorageWithRoot(t)
+			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
+			_, err := s.PutObject(
+				"my-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil,
+			)
+			require.NoError(t, err)
+			// Return a writer that succeeds on Write but fails on Close for archive body.
+			orig := s.openFile
+			s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+				wc, err := orig(name, flag, perm)
+				if err != nil {
+					return nil, err
+				}
+				if strings.Contains(name, ".ver") && !strings.HasSuffix(name, ".meta.json") {
+					return badCloseWriter{wc}, nil
+				}
+				return wc, nil
+			}
+			_, err = s.PutObject("my-bucket", "obj.txt", strings.NewReader("v2"), "text/plain", nil)
+			assert.Error(t, err)
+		},
+	)
+
+	t.Run(
+		"CompleteMultipartUpload returns error when isVersioningEnabledLocked fails",
+		func(t *testing.T) {
+			s, _ := newTestStorageWithRoot(t)
+			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			uploadID, err := s.CreateMultipartUpload("my-bucket", "big.txt", "text/plain")
+			require.NoError(t, err)
+			etag, err := s.UploadPart(uploadID, 1, strings.NewReader("data"))
+			require.NoError(t, err)
+			// Corrupt bucket meta so isVersioningEnabledLocked fails.
+			f, err := s.root.OpenFile("my-bucket.bucket.json", os.O_WRONLY|os.O_TRUNC, 0o600)
+			require.NoError(t, err)
+			_, err = f.Write([]byte("not-json"))
+			require.NoError(t, err)
+			require.NoError(t, f.Close())
+
+			_, err = s.CompleteMultipartUpload(
+				uploadID,
+				[]CompletePart{{PartNumber: 1, ETag: etag}},
+			)
+			assert.Error(t, err)
+		},
+	)
+
+	t.Run(
+		"CompleteMultipartUpload returns error when archiveCurrentVersionLocked fails",
+		func(t *testing.T) {
+			s, _ := newTestStorageWithRoot(t)
+			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
+			_, err := s.PutObject(
+				"my-bucket", "big.txt", strings.NewReader("existing"), "text/plain", nil,
+			)
+			require.NoError(t, err)
+
+			uploadID, err := s.CreateMultipartUpload("my-bucket", "big.txt", "text/plain")
+			require.NoError(t, err)
+			etag, err := s.UploadPart(uploadID, 1, strings.NewReader("data"))
+			require.NoError(t, err)
+			// Fail openFile for .ver paths so archiving fails.
+			orig := s.openFile
+			s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+				if strings.Contains(name, ".ver") {
+					return nil, errors.New("archive write error")
+				}
+				return orig(name, flag, perm)
+			}
+			_, err = s.CompleteMultipartUpload(
+				uploadID,
+				[]CompletePart{{PartNumber: 1, ETag: etag}},
+			)
+			assert.Error(t, err)
+		},
+	)
+
+	t.Run(
+		"CompleteMultipartUpload returns error when newVersionID fails on versioned bucket",
+		func(t *testing.T) {
+			s, _ := newTestStorageWithRoot(t)
+			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
+			// Put v1 WITH versioning so it already has a VersionID; archive won't need randRead.
+			_, err := s.PutObject(
+				"my-bucket", "big.txt", strings.NewReader("existing"), "text/plain", nil,
+			)
+			require.NoError(t, err)
+
+			uploadID, err := s.CreateMultipartUpload("my-bucket", "big.txt", "text/plain")
+			require.NoError(t, err)
+			etag, err := s.UploadPart(uploadID, 1, strings.NewReader("data"))
+			require.NoError(t, err)
+			// Fail randRead after archiving (which already has a VersionID and won't call randRead).
+			s.randRead = func(b []byte) (int, error) { return 0, errors.New("rand failure") }
+			_, err = s.CompleteMultipartUpload(
+				uploadID,
+				[]CompletePart{{PartNumber: 1, ETag: etag}},
+			)
+			assert.Error(t, err)
+		},
+	)
+
+	t.Run(
+		"CopyObject without srcVersionId returns ErrObjectNotFound when source is delete marker",
+		func(t *testing.T) {
+			s, _ := newTestStorageWithRoot(t)
+			require.NoError(t, s.CreateBucket("src-bucket", ""))
+			require.NoError(t, s.PutBucketVersioning("src-bucket", "Enabled"))
+			_, err := s.PutObject(
+				"src-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil,
+			)
+			require.NoError(t, err)
+			// Delete the object — current version becomes a delete marker.
+			_, _, err = s.DeleteObjectVersioned("src-bucket", "obj.txt")
+			require.NoError(t, err)
+			require.NoError(t, s.CreateBucket("dst-bucket", ""))
+
+			// Copying without specifying a versionId should return ErrObjectNotFound
+			// because the current version is a delete marker.
+			_, err = s.CopyObject("src-bucket", "obj.txt", "", "dst-bucket", "copy.txt", "", nil)
+			assert.ErrorIs(t, err, ErrObjectNotFound)
+		},
+	)
+
+	t.Run(
+		"CopyObject with srcVersionId and corrupt archived version meta returns error",
+		func(t *testing.T) {
+			s, _ := newTestStorageWithRoot(t)
+			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
+			m1, err := s.PutObject(
+				"my-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil,
+			)
+			require.NoError(t, err)
+			_, err = s.PutObject(
+				"my-bucket", "obj.txt", strings.NewReader("v2"), "text/plain", nil,
+			)
+			require.NoError(t, err)
+			// Corrupt the archived v1 meta.
+			vp := verPath("my-bucket", "obj.txt", m1.VersionID)
+			f, err := s.root.OpenFile(vp+".meta.json", os.O_WRONLY|os.O_TRUNC, 0o600)
+			require.NoError(t, err)
+			_, err = f.Write([]byte("not-json"))
+			require.NoError(t, err)
+			require.NoError(t, f.Close())
+			require.NoError(t, s.CreateBucket("dst-bucket", ""))
+
+			_, err = s.CopyObject(
+				"my-bucket", "obj.txt", m1.VersionID,
+				"dst-bucket", "copy.txt", "", nil,
+			)
+			assert.Error(t, err)
+			assert.NotErrorIs(t, err, ErrObjectNotFound)
+		},
+	)
+
+	t.Run(
+		"CopyObject returns error when isVersioningEnabledLocked fails for dst bucket",
+		func(t *testing.T) {
+			s, _ := newTestStorageWithRoot(t)
+			require.NoError(t, s.CreateBucket("src-bucket", ""))
+			_, err := s.PutObject(
+				"src-bucket", "obj.txt", strings.NewReader("hello"), "text/plain", nil,
+			)
+			require.NoError(t, err)
+			require.NoError(t, s.CreateBucket("dst-bucket", ""))
+			// Corrupt dst bucket meta so isVersioningEnabledLocked fails.
+			f, err := s.root.OpenFile("dst-bucket.bucket.json", os.O_WRONLY|os.O_TRUNC, 0o600)
+			require.NoError(t, err)
+			_, err = f.Write([]byte("not-json"))
+			require.NoError(t, err)
+			require.NoError(t, f.Close())
+
+			_, err = s.CopyObject("src-bucket", "obj.txt", "", "dst-bucket", "copy.txt", "", nil)
+			assert.Error(t, err)
+		},
+	)
+
+	t.Run(
+		"CopyObject returns error when archiveCurrentVersionLocked fails for dst bucket",
+		func(t *testing.T) {
+			s, _ := newTestStorageWithRoot(t)
+			require.NoError(t, s.CreateBucket("src-bucket", ""))
+			_, err := s.PutObject(
+				"src-bucket", "obj.txt", strings.NewReader("hello"), "text/plain", nil,
+			)
+			require.NoError(t, err)
+			require.NoError(t, s.CreateBucket("dst-bucket", ""))
+			require.NoError(t, s.PutBucketVersioning("dst-bucket", "Enabled"))
+			_, err = s.PutObject(
+				"dst-bucket", "copy.txt", strings.NewReader("existing"), "text/plain", nil,
+			)
+			require.NoError(t, err)
+			// Fail openFile for .ver paths (dst archive).
+			orig := s.openFile
+			s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+				if strings.Contains(name, ".ver") {
+					return nil, errors.New("archive write error")
+				}
+				return orig(name, flag, perm)
+			}
+			_, err = s.CopyObject("src-bucket", "obj.txt", "", "dst-bucket", "copy.txt", "", nil)
+			assert.Error(t, err)
+		},
+	)
+
+	t.Run(
+		"CopyObject returns error when newVersionID fails for versioned dst bucket",
+		func(t *testing.T) {
+			s, _ := newTestStorageWithRoot(t)
+			require.NoError(t, s.CreateBucket("src-bucket", ""))
+			_, err := s.PutObject(
+				"src-bucket", "obj.txt", strings.NewReader("hello"), "text/plain", nil,
+			)
+			require.NoError(t, err)
+			require.NoError(t, s.CreateBucket("dst-bucket", ""))
+			require.NoError(t, s.PutBucketVersioning("dst-bucket", "Enabled"))
+			// Put existing dst object WITH versioning so it has a VersionID;
+			// archiveCurrentVersionLocked won't call randRead.
+			_, err = s.PutObject(
+				"dst-bucket", "copy.txt", strings.NewReader("existing"), "text/plain", nil,
+			)
+			require.NoError(t, err)
+			// Fail randRead only for the new version ID assignment.
+			s.randRead = func(b []byte) (int, error) { return 0, errors.New("rand failure") }
+			_, err = s.CopyObject("src-bucket", "obj.txt", "", "dst-bucket", "copy.txt", "", nil)
 			assert.Error(t, err)
 		},
 	)
