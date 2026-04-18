@@ -23,6 +23,8 @@ const (
 	amzTaggingCount = "X-Amz-Tagging-Count"
 	amzVersionID    = "X-Amz-Version-Id"
 	amzDeleteMarker = "X-Amz-Delete-Marker"
+	amzSSE          = "X-Amz-Server-Side-Encryption"
+	amzSSEKMSKeyID  = "X-Amz-Server-Side-Encryption-Aws-Kms-Key-Id"
 )
 
 // Router handles S3 API requests using path-style URLs: /<bucket>/<key>

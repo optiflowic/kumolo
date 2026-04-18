@@ -24,6 +24,8 @@ type ObjectMetadata struct {
 	UserMetadata   map[string]string `json:"userMetadata,omitempty"`
 	VersionID      string            `json:"versionId,omitempty"`
 	IsDeleteMarker bool              `json:"isDeleteMarker,omitempty"`
+	SSEAlgorithm   string            `json:"sseAlgorithm,omitempty"`
+	SSEKMSKeyID    string            `json:"sseKmsKeyId,omitempty"`
 }
 
 // VersionInfo represents a non-delete-marker version of an object in a versioned bucket.

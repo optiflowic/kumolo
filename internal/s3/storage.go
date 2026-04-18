@@ -21,11 +21,21 @@ import (
 
 // bucketMeta is stored as a <bucket>.bucket.json file at the storage root.
 type bucketMeta struct {
-	Region           string     `json:"region"`
-	Tags             []Tag      `json:"tags,omitempty"`
-	VersioningStatus string     `json:"versioningStatus,omitempty"`
-	CORSRules        []CORSRule `json:"corsRules,omitempty"`
-	Policy           string     `json:"policy,omitempty"`
+	Region            string     `json:"region"`
+	Tags              []Tag      `json:"tags,omitempty"`
+	VersioningStatus  string     `json:"versioningStatus,omitempty"`
+	CORSRules         []CORSRule `json:"corsRules,omitempty"`
+	Policy            string     `json:"policy,omitempty"`
+	PublicAccessBlock string     `json:"publicAccessBlock,omitempty"`
+	Encryption        string     `json:"encryption,omitempty"`
+	OwnershipControls string     `json:"ownershipControls,omitempty"`
+	Notification      string     `json:"notification,omitempty"`
+	Lifecycle         string     `json:"lifecycle,omitempty"`
+	Website           string     `json:"website,omitempty"`
+	Logging           string     `json:"logging,omitempty"`
+	Accelerate        string     `json:"accelerate,omitempty"`
+	Replication       string     `json:"replication,omitempty"`
+	RequestPayment    string     `json:"requestPayment,omitempty"`
 }
 
 // Storage is a filesystem-backed S3 backend. os.Root scopes all access to the
@@ -164,6 +174,7 @@ func (s *Storage) PutObject(
 	r io.Reader,
 	contentType string,
 	userMetadata map[string]string,
+	sseAlgorithm, sseKMSKeyID string,
 ) (ObjectMetadata, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -192,7 +203,16 @@ func (s *Storage) PutObject(
 		versionID = vid
 	}
 
-	return s.writeObject(objPath, r, contentType, "", userMetadata, versionID)
+	return s.writeObject(
+		objPath,
+		r,
+		contentType,
+		"",
+		userMetadata,
+		versionID,
+		sseAlgorithm,
+		sseKMSKeyID,
+	)
 }
 
 // writeObject writes r to objPath and records metadata. If etag is non-empty
@@ -205,6 +225,7 @@ func (s *Storage) writeObject(
 	etag string,
 	userMetadata map[string]string,
 	versionID string,
+	sseAlgorithm, sseKMSKeyID string,
 ) (retMeta ObjectMetadata, retErr error) {
 	f, err := s.openFile(objPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
@@ -237,6 +258,8 @@ func (s *Storage) writeObject(
 		Size:         size,
 		UserMetadata: userMetadata,
 		VersionID:    versionID,
+		SSEAlgorithm: sseAlgorithm,
+		SSEKMSKeyID:  sseKMSKeyID,
 	}
 	if err := s.writeMeta(objPath, meta); err != nil {
 		if removeErr := s.removeFile(objPath); removeErr != nil &&
@@ -279,10 +302,12 @@ func (s *Storage) GetObject(bucket, key string) (*os.File, ObjectMetadata, error
 // contentType mean COPY (inherit from source). Non-nil userMetadata (even an
 // empty map) and non-empty contentType mean REPLACE (use provided values).
 // srcVersionID, if non-empty, copies from that specific source version.
+// sseAlgorithm and sseKMSKeyID are applied to the destination object.
 func (s *Storage) CopyObject(
 	srcBucket, srcKey, srcVersionID, dstBucket, dstKey string,
 	contentType string,
 	userMetadata map[string]string,
+	sseAlgorithm, sseKMSKeyID string,
 ) (ObjectMetadata, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -364,6 +389,8 @@ func (s *Storage) CopyObject(
 		meta.LastModified = time.Now().UTC()
 		meta.ContentType = contentType
 		meta.UserMetadata = userMetadata
+		meta.SSEAlgorithm = sseAlgorithm
+		meta.SSEKMSKeyID = sseKMSKeyID
 		if err := s.writeMeta(dstPath, meta); err != nil {
 			return ObjectMetadata{}, err
 		}
@@ -382,7 +409,16 @@ func (s *Storage) CopyObject(
 			return ObjectMetadata{}, err
 		}
 	}
-	return s.writeObject(dstPath, srcFile, contentType, srcMeta.ETag, userMetadata, dstVersionID)
+	return s.writeObject(
+		dstPath,
+		srcFile,
+		contentType,
+		srcMeta.ETag,
+		userMetadata,
+		dstVersionID,
+		sseAlgorithm,
+		sseKMSKeyID,
+	)
 }
 
 func (s *Storage) DeleteObject(bucket, key string) error {
@@ -1256,10 +1292,12 @@ func (s *Storage) DeleteBucketPolicy(bucket string) error {
 
 // uploadMeta is stored as .mpu/<uploadID>/upload.json.
 type uploadMeta struct {
-	Bucket      string    `json:"bucket"`
-	Key         string    `json:"key"`
-	ContentType string    `json:"contentType"`
-	Initiated   time.Time `json:"initiated"`
+	Bucket       string    `json:"bucket"`
+	Key          string    `json:"key"`
+	ContentType  string    `json:"contentType"`
+	Initiated    time.Time `json:"initiated"`
+	SSEAlgorithm string    `json:"sseAlgorithm,omitempty"`
+	SSEKMSKeyID  string    `json:"sseKmsKeyId,omitempty"`
 }
 
 // partMeta is stored as .mpu/<uploadID>/<partNumber>.part.meta.json.
@@ -1270,7 +1308,9 @@ type partMeta struct {
 
 const mpuDir = ".mpu"
 
-func (s *Storage) CreateMultipartUpload(bucket, key, contentType string) (string, error) {
+func (s *Storage) CreateMultipartUpload(
+	bucket, key, contentType, sseAlgorithm, sseKMSKeyID string,
+) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.bucketExistsLocked(bucket) {
@@ -1286,10 +1326,12 @@ func (s *Storage) CreateMultipartUpload(bucket, key, contentType string) (string
 		return "", err
 	}
 	meta := uploadMeta{
-		Bucket:      bucket,
-		Key:         key,
-		ContentType: contentType,
-		Initiated:   time.Now().UTC(),
+		Bucket:       bucket,
+		Key:          key,
+		ContentType:  contentType,
+		Initiated:    time.Now().UTC(),
+		SSEAlgorithm: sseAlgorithm,
+		SSEKMSKeyID:  sseKMSKeyID,
 	}
 	data, _ := json.Marshal(meta) // json.Marshal never fails for uploadMeta
 	var uploadJSONWritten bool
@@ -1447,6 +1489,8 @@ func (s *Storage) CompleteMultipartUpload(
 		multipartETag,
 		nil,
 		versionID,
+		umeta.SSEAlgorithm,
+		umeta.SSEKMSKeyID,
 	)
 	if err != nil {
 		return ObjectMetadata{}, err
