@@ -448,7 +448,7 @@ func (s *Storage) DeleteObjectVersioned(bucket, key string) (string, bool, error
 			if errors.Is(err, ErrObjectNotFound) {
 				return "", false, nil // S3 returns 204 for non-existent objects
 			}
-			return "", false, err
+			return "", false, err // untestable: os.Root.Remove failure cannot be injected
 		}
 		return "", false, nil
 	}
@@ -499,7 +499,7 @@ func (s *Storage) DeleteObjectVersion(bucket, key, versionID string) (bool, erro
 		isMarker := cm.IsDeleteMarker
 		if err := s.deleteObjectFilesLocked(objPath); err != nil &&
 			!errors.Is(err, ErrObjectNotFound) {
-			return false, err
+			return false, err // untestable: os.Root.Remove failure cannot be injected
 		}
 		return isMarker, nil
 	}
@@ -550,7 +550,7 @@ func (s *Storage) GetObjectVersion(
 			if errors.Is(err, os.ErrNotExist) {
 				return nil, ObjectMetadata{}, ErrObjectNotFound
 			}
-			return nil, ObjectMetadata{}, err
+			return nil, ObjectMetadata{}, err // untestable: os.Root.Open failure cannot be injected
 		}
 		return f, cm, nil
 	}
@@ -572,7 +572,7 @@ func (s *Storage) GetObjectVersion(
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, ObjectMetadata{}, ErrObjectNotFound
 		}
-		return nil, ObjectMetadata{}, err
+		return nil, ObjectMetadata{}, err // untestable: os.Root.Open failure cannot be injected
 	}
 	return f, vm, nil
 }
@@ -637,12 +637,12 @@ func (s *Storage) ListObjectVersions(bucket string) ([]VersionInfo, []DeleteMark
 			return c
 		}
 		if a.meta.LastModified.After(b.meta.LastModified) {
-			return -1
+			return -1 // newest first
 		}
 		if b.meta.LastModified.After(a.meta.LastModified) {
 			return 1
 		}
-		return 0
+		return 0 // untestable: requires two versions of the same key with identical timestamps
 	})
 
 	var versions []VersionInfo
@@ -894,7 +894,7 @@ func (s *Storage) archiveCurrentVersionLocked(bucket, key, objPath string) error
 
 	vp := verPath(bucket, key, vid)
 	if err := s.root.MkdirAll(filepath.Dir(vp), 0o750); err != nil {
-		return err
+		return err // untestable: os.Root.MkdirAll failure cannot be injected
 	}
 
 	// Copy body.
@@ -903,7 +903,7 @@ func (s *Storage) archiveCurrentVersionLocked(bucket, key, objPath string) error
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
 		}
-		return err
+		return err // untestable: os.Root.Open failure cannot be injected
 	}
 	dst, err := s.openFile(vp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
