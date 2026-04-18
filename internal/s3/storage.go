@@ -1626,6 +1626,145 @@ func (s *Storage) ListParts(uploadID string) (uploadMeta, []PartInfo, error) {
 	return umeta, parts, nil
 }
 
+// putBucketConfigField reads bucket meta, applies set(), and writes it back.
+func (s *Storage) putBucketConfigField(bucket string, set func(*bucketMeta)) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.bucketExistsLocked(bucket) {
+		return ErrBucketNotFound
+	}
+	meta, err := s.readBucketMeta(bucket)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		meta = bucketMeta{}
+	}
+	set(&meta)
+	return s.writeBucketMeta(bucket, meta)
+}
+
+// getBucketConfigField reads bucket meta and extracts one field.
+func (s *Storage) getBucketConfigField(bucket string, get func(bucketMeta) string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.bucketExistsLocked(bucket) {
+		return "", ErrBucketNotFound
+	}
+	meta, err := s.readBucketMeta(bucket)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", nil
+		}
+		return "", err
+	}
+	return get(meta), nil
+}
+
+func (s *Storage) PutPublicAccessBlock(bucket, xmlBody string) error {
+	return s.putBucketConfigField(bucket, func(m *bucketMeta) { m.PublicAccessBlock = xmlBody })
+}
+
+func (s *Storage) GetPublicAccessBlock(bucket string) (string, error) {
+	return s.getBucketConfigField(bucket, func(m bucketMeta) string { return m.PublicAccessBlock })
+}
+
+func (s *Storage) DeletePublicAccessBlock(bucket string) error {
+	return s.putBucketConfigField(bucket, func(m *bucketMeta) { m.PublicAccessBlock = "" })
+}
+
+func (s *Storage) PutBucketEncryption(bucket, xmlBody string) error {
+	return s.putBucketConfigField(bucket, func(m *bucketMeta) { m.Encryption = xmlBody })
+}
+
+func (s *Storage) GetBucketEncryption(bucket string) (string, error) {
+	return s.getBucketConfigField(bucket, func(m bucketMeta) string { return m.Encryption })
+}
+
+func (s *Storage) DeleteBucketEncryption(bucket string) error {
+	return s.putBucketConfigField(bucket, func(m *bucketMeta) { m.Encryption = "" })
+}
+
+func (s *Storage) PutBucketOwnershipControls(bucket, xmlBody string) error {
+	return s.putBucketConfigField(bucket, func(m *bucketMeta) { m.OwnershipControls = xmlBody })
+}
+
+func (s *Storage) GetBucketOwnershipControls(bucket string) (string, error) {
+	return s.getBucketConfigField(bucket, func(m bucketMeta) string { return m.OwnershipControls })
+}
+
+func (s *Storage) DeleteBucketOwnershipControls(bucket string) error {
+	return s.putBucketConfigField(bucket, func(m *bucketMeta) { m.OwnershipControls = "" })
+}
+
+func (s *Storage) PutBucketNotification(bucket, xmlBody string) error {
+	return s.putBucketConfigField(bucket, func(m *bucketMeta) { m.Notification = xmlBody })
+}
+
+func (s *Storage) GetBucketNotification(bucket string) (string, error) {
+	return s.getBucketConfigField(bucket, func(m bucketMeta) string { return m.Notification })
+}
+
+func (s *Storage) PutBucketLifecycle(bucket, xmlBody string) error {
+	return s.putBucketConfigField(bucket, func(m *bucketMeta) { m.Lifecycle = xmlBody })
+}
+
+func (s *Storage) GetBucketLifecycle(bucket string) (string, error) {
+	return s.getBucketConfigField(bucket, func(m bucketMeta) string { return m.Lifecycle })
+}
+
+func (s *Storage) DeleteBucketLifecycle(bucket string) error {
+	return s.putBucketConfigField(bucket, func(m *bucketMeta) { m.Lifecycle = "" })
+}
+
+func (s *Storage) PutBucketWebsite(bucket, xmlBody string) error {
+	return s.putBucketConfigField(bucket, func(m *bucketMeta) { m.Website = xmlBody })
+}
+
+func (s *Storage) GetBucketWebsite(bucket string) (string, error) {
+	return s.getBucketConfigField(bucket, func(m bucketMeta) string { return m.Website })
+}
+
+func (s *Storage) DeleteBucketWebsite(bucket string) error {
+	return s.putBucketConfigField(bucket, func(m *bucketMeta) { m.Website = "" })
+}
+
+func (s *Storage) PutBucketLogging(bucket, xmlBody string) error {
+	return s.putBucketConfigField(bucket, func(m *bucketMeta) { m.Logging = xmlBody })
+}
+
+func (s *Storage) GetBucketLogging(bucket string) (string, error) {
+	return s.getBucketConfigField(bucket, func(m bucketMeta) string { return m.Logging })
+}
+
+func (s *Storage) PutBucketAccelerate(bucket, xmlBody string) error {
+	return s.putBucketConfigField(bucket, func(m *bucketMeta) { m.Accelerate = xmlBody })
+}
+
+func (s *Storage) GetBucketAccelerate(bucket string) (string, error) {
+	return s.getBucketConfigField(bucket, func(m bucketMeta) string { return m.Accelerate })
+}
+
+func (s *Storage) PutBucketReplication(bucket, xmlBody string) error {
+	return s.putBucketConfigField(bucket, func(m *bucketMeta) { m.Replication = xmlBody })
+}
+
+func (s *Storage) GetBucketReplication(bucket string) (string, error) {
+	return s.getBucketConfigField(bucket, func(m bucketMeta) string { return m.Replication })
+}
+
+func (s *Storage) DeleteBucketReplication(bucket string) error {
+	return s.putBucketConfigField(bucket, func(m *bucketMeta) { m.Replication = "" })
+}
+
+func (s *Storage) PutBucketRequestPayment(bucket, xmlBody string) error {
+	return s.putBucketConfigField(bucket, func(m *bucketMeta) { m.RequestPayment = xmlBody })
+}
+
+func (s *Storage) GetBucketRequestPayment(bucket string) (string, error) {
+	return s.getBucketConfigField(bucket, func(m bucketMeta) string { return m.RequestPayment })
+}
+
 // removeUploadDir removes all files in uploadDir and then the directory itself.
 // os.Root does not expose RemoveAll, so we must walk and remove manually.
 func (s *Storage) removeUploadDir(uploadDir string) error {

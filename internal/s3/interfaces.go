@@ -21,6 +21,7 @@ type objectStore interface {
 		r io.Reader,
 		contentType string,
 		userMetadata map[string]string,
+		sseAlgorithm, sseKMSKeyID string,
 	) (ObjectMetadata, error)
 	GetObject(bucket, key string) (*os.File, ObjectMetadata, error)
 	GetObjectVersion(bucket, key, versionID string) (*os.File, ObjectMetadata, error)
@@ -28,6 +29,7 @@ type objectStore interface {
 		srcBucket, srcKey, srcVersionID, dstBucket, dstKey string,
 		contentType string,
 		userMetadata map[string]string,
+		sseAlgorithm, sseKMSKeyID string,
 	) (ObjectMetadata, error)
 	DeleteObject(bucket, key string) error
 	DeleteObjectVersioned(bucket, key string) (versionID string, isDeleteMarker bool, err error)
@@ -40,7 +42,9 @@ type objectStore interface {
 
 // multipartStore is the subset of Storage used by the Router for multipart upload operations.
 type multipartStore interface {
-	CreateMultipartUpload(bucket, key, contentType string) (uploadID string, err error)
+	CreateMultipartUpload(
+		bucket, key, contentType, sseAlgorithm, sseKMSKeyID string,
+	) (uploadID string, err error)
 	UploadPart(uploadID string, partNumber int, r io.Reader) (etag string, err error)
 	CompleteMultipartUpload(uploadID string, parts []CompletePart) (ObjectMetadata, error)
 	AbortMultipartUpload(uploadID string) error
@@ -80,4 +84,70 @@ type bucketPolicyStore interface {
 	PutBucketPolicy(bucket, policy string) error
 	GetBucketPolicy(bucket string) (string, error)
 	DeleteBucketPolicy(bucket string) error
+}
+
+// bucketPublicAccessBlockStore handles public access block configuration.
+type bucketPublicAccessBlockStore interface {
+	PutPublicAccessBlock(bucket, xmlBody string) error
+	GetPublicAccessBlock(bucket string) (string, error)
+	DeletePublicAccessBlock(bucket string) error
+}
+
+// bucketEncryptionStore handles server-side encryption configuration.
+type bucketEncryptionStore interface {
+	PutBucketEncryption(bucket, xmlBody string) error
+	GetBucketEncryption(bucket string) (string, error)
+	DeleteBucketEncryption(bucket string) error
+}
+
+// bucketOwnershipControlsStore handles ownership controls configuration.
+type bucketOwnershipControlsStore interface {
+	PutBucketOwnershipControls(bucket, xmlBody string) error
+	GetBucketOwnershipControls(bucket string) (string, error)
+	DeleteBucketOwnershipControls(bucket string) error
+}
+
+// bucketNotificationStore handles notification configuration.
+type bucketNotificationStore interface {
+	PutBucketNotification(bucket, xmlBody string) error
+	GetBucketNotification(bucket string) (string, error)
+}
+
+// bucketLifecycleStore handles lifecycle configuration.
+type bucketLifecycleStore interface {
+	PutBucketLifecycle(bucket, xmlBody string) error
+	GetBucketLifecycle(bucket string) (string, error)
+	DeleteBucketLifecycle(bucket string) error
+}
+
+// bucketWebsiteStore handles website configuration.
+type bucketWebsiteStore interface {
+	PutBucketWebsite(bucket, xmlBody string) error
+	GetBucketWebsite(bucket string) (string, error)
+	DeleteBucketWebsite(bucket string) error
+}
+
+// bucketLoggingStore handles logging configuration.
+type bucketLoggingStore interface {
+	PutBucketLogging(bucket, xmlBody string) error
+	GetBucketLogging(bucket string) (string, error)
+}
+
+// bucketAccelerateStore handles transfer acceleration configuration.
+type bucketAccelerateStore interface {
+	PutBucketAccelerate(bucket, xmlBody string) error
+	GetBucketAccelerate(bucket string) (string, error)
+}
+
+// bucketReplicationStore handles replication configuration.
+type bucketReplicationStore interface {
+	PutBucketReplication(bucket, xmlBody string) error
+	GetBucketReplication(bucket string) (string, error)
+	DeleteBucketReplication(bucket string) error
+}
+
+// bucketRequestPaymentStore handles request payment configuration.
+type bucketRequestPaymentStore interface {
+	PutBucketRequestPayment(bucket, xmlBody string) error
+	GetBucketRequestPayment(bucket string) (string, error)
 }
