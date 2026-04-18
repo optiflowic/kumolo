@@ -9,14 +9,20 @@ import (
 )
 
 var (
-	ErrBucketNotFound      = errors.New("bucket not found")
-	ErrBucketNotEmpty      = errors.New("bucket not empty")
-	ErrObjectNotFound      = errors.New("object not found")
-	ErrUploadNotFound      = errors.New("multipart upload not found")
-	ErrInvalidPart         = errors.New("invalid part")
-	ErrInvalidPartOrder    = errors.New("parts not in ascending order")
-	ErrNoCORSConfiguration = errors.New("no CORS configuration")
-	ErrNoBucketPolicy      = errors.New("no bucket policy")
+	ErrBucketNotFound                   = errors.New("bucket not found")
+	ErrBucketNotEmpty                   = errors.New("bucket not empty")
+	ErrObjectNotFound                   = errors.New("object not found")
+	ErrUploadNotFound                   = errors.New("multipart upload not found")
+	ErrInvalidPart                      = errors.New("invalid part")
+	ErrInvalidPartOrder                 = errors.New("parts not in ascending order")
+	ErrNoCORSConfiguration              = errors.New("no CORS configuration")
+	ErrNoBucketPolicy                   = errors.New("no bucket policy")
+	ErrNoPublicAccessBlockConfiguration = errors.New("no public access block configuration")
+	ErrNoEncryptionConfiguration        = errors.New("no server-side encryption configuration")
+	ErrNoOwnershipControlsConfiguration = errors.New("no ownership controls")
+	ErrNoLifecycleConfiguration         = errors.New("no lifecycle configuration")
+	ErrNoWebsiteConfiguration           = errors.New("no website configuration")
+	ErrNoReplicationConfiguration       = errors.New("no replication configuration")
 )
 
 // DeleteMarkerError is returned when a get/head operation resolves to a delete marker.
