@@ -4151,6 +4151,23 @@ func TestBucketConfigHandlers(t *testing.T) {
 		}
 	})
 
+	t.Run("PUT returns 400 on body read error", func(t *testing.T) {
+		for _, q := range []string{
+			"publicAccessBlock", "encryption", "ownershipControls",
+			"lifecycle", "website", "logging", "replication",
+		} {
+			q := q
+			t.Run(q, func(t *testing.T) {
+				ro := newRouterWithMock(&mockStore{})
+				req := httptest.NewRequest(http.MethodPut, "/b?"+q, errReader{})
+				w := httptest.NewRecorder()
+				ro.ServeHTTP(w, req)
+				assert.Equal(t, http.StatusBadRequest, w.Code)
+				assert.Contains(t, w.Body.String(), "MalformedXML")
+			})
+		}
+	})
+
 	t.Run("PUT publicAccessBlock returns 404 on bucket not found", func(t *testing.T) {
 		ro := newRouterWithMock(
 			ms(func(m *mockStore) { m.putPublicAccessBlockErr = ErrBucketNotFound }),
