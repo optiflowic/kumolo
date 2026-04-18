@@ -42,7 +42,19 @@ func (ro *Router) handlePutBucketRawXML(
 	put func(bucket, xmlBody string) error,
 ) {
 	body, err := io.ReadAll(r.Body)
-	if err != nil || !isWellFormedXML(body) {
+	if err != nil {
+		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			opName+" read error",
+			"bucket",
+			bucket,
+			"err",
+			err,
+		)
+		writeError(w, r, http.StatusBadRequest, "MalformedXML",
+			"The XML you provided was not well-formed.")
+		return
+	}
+	if !isWellFormedXML(body) {
 		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
 			opName+" malformed XML",
 			"bucket",
@@ -118,9 +130,9 @@ func (ro *Router) handleDeleteBucketRawXML(
 }
 
 // handleGetBucketRawXML is a shared handler for retrieving raw XML bucket configurations.
-// notFoundErr is the sentinel returned when the config has not been set; if nil, an
-// empty body is returned rather than 404.
-// defaultBody is returned when the config is empty and notFoundErr is nil.
+// notFoundCode is the S3 error code returned when the config has not been set; if empty,
+// a default body is returned instead of 404.
+// defaultBody is returned when the config is empty and notFoundCode is empty.
 func (ro *Router) handleGetBucketRawXML(
 	w http.ResponseWriter,
 	r *http.Request,
