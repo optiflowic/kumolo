@@ -312,6 +312,7 @@ func (ro *Router) handleGetBucketACL(w http.ResponseWriter, r *http.Request, buc
 }
 
 func (ro *Router) handlePutBucketACL(w http.ResponseWriter, r *http.Request, bucket string) {
+	_, _ = io.Copy(io.Discard, r.Body)
 	if !ro.storage.BucketExists(bucket) {
 		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
 			"bucket not found",
@@ -377,6 +378,7 @@ func (ro *Router) handleGetObjectACL(w http.ResponseWriter, r *http.Request, buc
 }
 
 func (ro *Router) handlePutObjectACL(w http.ResponseWriter, r *http.Request, bucket, key string) {
+	_, _ = io.Copy(io.Discard, r.Body)
 	if !ro.storage.BucketExists(bucket) {
 		slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
 			"bucket not found",

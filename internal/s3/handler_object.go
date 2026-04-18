@@ -3,6 +3,7 @@ package s3
 import (
 	"encoding/xml"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -791,6 +792,7 @@ func (ro *Router) handleGetObjectTagging(
 // handleRestoreObject is a stub for RestoreObject (#95).
 // It accepts the request and returns 202 Accepted without actually restoring.
 func (ro *Router) handleRestoreObject(w http.ResponseWriter, r *http.Request, bucket, key string) {
+	_, _ = io.Copy(io.Discard, r.Body)
 	if !ro.storage.BucketExists(bucket) {
 		slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
 			"bucket not found",
