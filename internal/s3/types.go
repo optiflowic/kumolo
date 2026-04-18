@@ -117,13 +117,18 @@ type xmlCommonPrefix struct {
 }
 
 type listObjectsV2Result struct {
-	XMLName     xml.Name           `xml:"ListBucketResult"`
-	Name        string             `xml:"Name"`
-	Prefix      string             `xml:"Prefix"`
-	KeyCount    int                `xml:"KeyCount"`
-	MaxKeys     int                `xml:"MaxKeys"`
-	IsTruncated bool               `xml:"IsTruncated"`
-	Contents    []xmlObjectContent `xml:"Contents"`
+	XMLName               xml.Name           `xml:"ListBucketResult"`
+	Name                  string             `xml:"Name"`
+	Prefix                string             `xml:"Prefix"`
+	Delimiter             string             `xml:"Delimiter,omitempty"`
+	MaxKeys               int                `xml:"MaxKeys"`
+	KeyCount              int                `xml:"KeyCount"`
+	IsTruncated           bool               `xml:"IsTruncated"`
+	ContinuationToken     string             `xml:"ContinuationToken,omitempty"`
+	NextContinuationToken string             `xml:"NextContinuationToken,omitempty"`
+	StartAfter            string             `xml:"StartAfter,omitempty"`
+	Contents              []xmlObjectContent `xml:"Contents"`
+	CommonPrefixes        []xmlCommonPrefix  `xml:"CommonPrefixes"`
 }
 
 type xmlObjectContent struct {
@@ -132,6 +137,7 @@ type xmlObjectContent struct {
 	ETag         string    `xml:"ETag"`
 	Size         int64     `xml:"Size"`
 	StorageClass string    `xml:"StorageClass"`
+	Owner        *xmlOwner `xml:"Owner,omitempty"`
 }
 
 // locationConstraint represents the GetBucketLocation response.

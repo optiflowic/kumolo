@@ -2,6 +2,7 @@ package s3
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/xml"
 	"errors"
@@ -289,7 +290,30 @@ func (ro *Router) handleListObjects(w http.ResponseWriter, r *http.Request, buck
 }
 
 func (ro *Router) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bucket string) {
-	prefix := r.URL.Query().Get("prefix")
+	q := r.URL.Query()
+	prefix := q.Get("prefix")
+	delimiter := q.Get("delimiter")
+	continuationToken := q.Get("continuation-token")
+	startAfter := q.Get("start-after")
+	fetchOwner := q.Get("fetch-owner") == "true"
+	maxKeys := 1000
+	if s := q.Get("max-keys"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n >= 0 {
+			maxKeys = n
+		}
+	}
+
+	// continuation-token encodes the last key returned in the previous page;
+	// use it as the effective cursor (overrides start-after if it sorts later).
+	effectiveStartAfter := startAfter
+	if continuationToken != "" {
+		if decoded, err := base64.URLEncoding.DecodeString(continuationToken); err == nil {
+			if tokenKey := string(decoded); tokenKey > effectiveStartAfter {
+				effectiveStartAfter = tokenKey
+			}
+		}
+	}
+
 	objects, err := ro.storage.ListObjects(bucket)
 	if err != nil {
 		if errors.Is(err, ErrBucketNotFound) {
@@ -312,19 +336,86 @@ func (ro *Router) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
-	contents := make([]xmlObjectContent, 0, len(objects))
+
+	// maxKeys=0: return empty result without iterating (bucket existence already validated above).
+	if maxKeys == 0 {
+		writeXML(w, http.StatusOK, listObjectsV2Result{
+			Name:              bucket,
+			Prefix:            prefix,
+			Delimiter:         delimiter,
+			MaxKeys:           0,
+			KeyCount:          0,
+			IsTruncated:       false,
+			ContinuationToken: continuationToken,
+			StartAfter:        startAfter,
+		})
+		return
+	}
+
+	var contents []xmlObjectContent
+	seenPrefixes := make(map[string]struct{})
+	var lastCPAdded string
+	var isTruncated bool
+	count := 0
+
 	for _, obj := range objects {
 		if !strings.HasPrefix(obj.Key, prefix) {
 			continue
 		}
-		contents = append(contents, xmlObjectContent{
+		if obj.Key <= effectiveStartAfter {
+			continue
+		}
+		// When the cursor is a common prefix (e.g. "a/"), skip all keys that
+		// belong to that prefix group (e.g. "a/x.txt"), since they were already
+		// counted in the previous page.
+		if delimiter != "" && strings.HasSuffix(effectiveStartAfter, delimiter) &&
+			strings.HasPrefix(obj.Key, effectiveStartAfter) {
+			continue
+		}
+		// Group keys sharing a common prefix up to the delimiter.
+		// Each unique common prefix counts as one entry toward maxKeys.
+		if delimiter != "" {
+			rest := strings.TrimPrefix(obj.Key, prefix)
+			if idx := strings.Index(rest, delimiter); idx >= 0 {
+				cp := prefix + rest[:idx+len(delimiter)]
+				if _, seen := seenPrefixes[cp]; !seen {
+					if count >= maxKeys {
+						isTruncated = true
+						break
+					}
+					seenPrefixes[cp] = struct{}{}
+					lastCPAdded = cp
+					count++
+				}
+				continue
+			}
+		}
+		if count >= maxKeys {
+			isTruncated = true
+			break
+		}
+		content := xmlObjectContent{
 			Key:          obj.Key,
 			LastModified: obj.Metadata.LastModified.UTC(),
 			ETag:         obj.Metadata.ETag,
 			Size:         obj.Metadata.Size,
 			StorageClass: "STANDARD",
-		})
+		}
+		if fetchOwner {
+			content.Owner = &xmlOwner{ID: "owner", DisplayName: "owner"}
+		}
+		contents = append(contents, content)
+		count++
 	}
+
+	cps := make([]xmlCommonPrefix, 0, len(seenPrefixes))
+	for cp := range seenPrefixes {
+		cps = append(cps, xmlCommonPrefix{Prefix: cp})
+	}
+	slices.SortFunc(cps, func(a, b xmlCommonPrefix) int {
+		return strings.Compare(a.Prefix, b.Prefix)
+	})
+
 	slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
 		"listed objects",
 		"bucket",
@@ -332,14 +423,33 @@ func (ro *Router) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 		"count",
 		len(contents),
 	)
-	writeXML(w, http.StatusOK, listObjectsV2Result{
-		Name:        bucket,
-		Prefix:      prefix,
-		KeyCount:    len(contents),
-		MaxKeys:     1000,
-		IsTruncated: false,
-		Contents:    contents,
-	})
+
+	result := listObjectsV2Result{
+		Name:              bucket,
+		Prefix:            prefix,
+		Delimiter:         delimiter,
+		MaxKeys:           maxKeys,
+		KeyCount:          len(contents) + len(cps),
+		IsTruncated:       isTruncated,
+		ContinuationToken: continuationToken,
+		StartAfter:        startAfter,
+		Contents:          contents,
+		CommonPrefixes:    cps,
+	}
+	if isTruncated {
+		// Use the last content key as cursor; fall back to the last common prefix
+		// when the page consisted entirely of common prefixes.
+		if len(contents) > 0 {
+			result.NextContinuationToken = base64.URLEncoding.EncodeToString(
+				[]byte(contents[len(contents)-1].Key),
+			)
+		} else if lastCPAdded != "" {
+			result.NextContinuationToken = base64.URLEncoding.EncodeToString(
+				[]byte(lastCPAdded),
+			)
+		}
+	}
+	writeXML(w, http.StatusOK, result)
 }
 
 func (ro *Router) routeObject(w http.ResponseWriter, r *http.Request, bucket, key string) {
