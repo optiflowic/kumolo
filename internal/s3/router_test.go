@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -1159,6 +1160,211 @@ func TestRouterListObjectsV2(t *testing.T) {
 		body := w.Body.String()
 		assert.Contains(t, body, "logs/a.txt")
 		assert.Contains(t, body, "data/b.txt")
+	})
+
+	t.Run(
+		"respects max-keys and returns IsTruncated with NextContinuationToken",
+		func(t *testing.T) {
+			ro := newTestRouter(t)
+			ro.ServeHTTP(
+				httptest.NewRecorder(),
+				httptest.NewRequest(http.MethodPut, "/my-bucket", nil),
+			)
+			for _, key := range []string{"a.txt", "b.txt", "c.txt"} {
+				ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/"+key, "data"))
+			}
+
+			req := httptest.NewRequest(http.MethodGet, "/my-bucket?list-type=2&max-keys=2", nil)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			body := w.Body.String()
+			assert.Contains(t, body, "<IsTruncated>true</IsTruncated>")
+			assert.Contains(t, body, "<MaxKeys>2</MaxKeys>")
+			assert.Contains(t, body, "NextContinuationToken")
+			assert.Contains(t, body, "a.txt")
+			assert.Contains(t, body, "b.txt")
+			assert.NotContains(t, body, "c.txt")
+		},
+	)
+
+	t.Run("paginates with continuation-token", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		for _, key := range []string{"a.txt", "b.txt", "c.txt"} {
+			ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/"+key, "data"))
+		}
+
+		// First page: max-keys=2
+		req1 := httptest.NewRequest(http.MethodGet, "/my-bucket?list-type=2&max-keys=2", nil)
+		w1 := httptest.NewRecorder()
+		ro.ServeHTTP(w1, req1)
+		require.Equal(t, http.StatusOK, w1.Code)
+
+		// Extract NextContinuationToken from first response.
+		var result1 listObjectsV2Result
+		require.NoError(t, xml.Unmarshal(w1.Body.Bytes(), &result1))
+		require.True(t, result1.IsTruncated)
+		require.NotEmpty(t, result1.NextContinuationToken)
+
+		// Second page using continuation-token (URL-encoded so base64 padding is safe).
+		req2 := httptest.NewRequest(
+			http.MethodGet,
+			"/my-bucket?list-type=2&max-keys=2&continuation-token="+url.QueryEscape(
+				result1.NextContinuationToken,
+			),
+			nil,
+		)
+		w2 := httptest.NewRecorder()
+		ro.ServeHTTP(w2, req2)
+		require.Equal(t, http.StatusOK, w2.Code)
+
+		body2 := w2.Body.String()
+		assert.NotContains(t, body2, "a.txt")
+		assert.NotContains(t, body2, "b.txt")
+		assert.Contains(t, body2, "c.txt")
+		assert.Contains(t, body2, "<IsTruncated>false</IsTruncated>")
+	})
+
+	t.Run("skips objects at or before start-after", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		for _, key := range []string{"a.txt", "b.txt", "c.txt"} {
+			ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/"+key, "data"))
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket?list-type=2&start-after=b.txt", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		body := w.Body.String()
+		assert.NotContains(t, body, "<Key>a.txt</Key>")
+		assert.NotContains(t, body, "<Key>b.txt</Key>")
+		assert.Contains(t, body, "<Key>c.txt</Key>")
+		assert.Contains(t, body, "<StartAfter>b.txt</StartAfter>")
+	})
+
+	t.Run("groups common prefixes with delimiter", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		for _, key := range []string{"logs/a.txt", "logs/b.txt", "data/c.txt"} {
+			ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/"+key, "data"))
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket?list-type=2&delimiter=/", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		body := w.Body.String()
+		assert.Contains(t, body, "<Delimiter>/</Delimiter>")
+		// CommonPrefixes must appear in alphabetical order.
+		dataIdx := strings.Index(body, "<Prefix>data/</Prefix>")
+		logsIdx := strings.Index(body, "<Prefix>logs/</Prefix>")
+		assert.Greater(t, dataIdx, -1)
+		assert.Greater(t, logsIdx, -1)
+		assert.Less(t, dataIdx, logsIdx)
+		assert.NotContains(t, body, "a.txt")
+	})
+
+	t.Run("includes Owner when fetch-owner=true", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/a.txt", "data"))
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket?list-type=2&fetch-owner=true", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), "<Owner>")
+	})
+
+	t.Run("does not include Owner when fetch-owner is not set", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/a.txt", "data"))
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket?list-type=2", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.NotContains(t, w.Body.String(), "<Owner>")
+	})
+
+	t.Run("KeyCount equals number of contents plus common prefixes", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		for _, key := range []string{"logs/a.txt", "data/b.txt", "root.txt"} {
+			ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/"+key, "data"))
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket?list-type=2&delimiter=/", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var result listObjectsV2Result
+		require.NoError(t, xml.Unmarshal(w.Body.Bytes(), &result))
+		// root.txt is a content, logs/ and data/ are common prefixes → KeyCount=3
+		assert.Equal(t, 3, result.KeyCount)
+	})
+
+	t.Run("invalid max-keys is ignored and uses default 1000", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket?list-type=2&max-keys=abc", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), "<MaxKeys>1000</MaxKeys>")
+	})
+
+	t.Run("max-keys=0 returns empty result with IsTruncated false", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/a.txt", "data"))
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket?list-type=2&max-keys=0", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		var result listObjectsV2Result
+		require.NoError(t, xml.Unmarshal(w.Body.Bytes(), &result))
+		assert.Equal(t, 0, result.KeyCount)
+		assert.False(t, result.IsTruncated)
+		assert.Empty(t, result.NextContinuationToken)
+	})
+
+	t.Run("truncates when new common prefix would exceed max-keys", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		for _, key := range []string{"a/x.txt", "b/y.txt"} {
+			ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/"+key, "data"))
+		}
+
+		req := httptest.NewRequest(
+			http.MethodGet,
+			"/my-bucket?list-type=2&delimiter=/&max-keys=1",
+			nil,
+		)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		var result listObjectsV2Result
+		require.NoError(t, xml.Unmarshal(w.Body.Bytes(), &result))
+		assert.True(t, result.IsTruncated)
+		assert.Equal(t, 1, result.KeyCount)
+		assert.NotEmpty(t, result.NextContinuationToken)
+		require.Len(t, result.CommonPrefixes, 1)
+		assert.Equal(t, "a/", result.CommonPrefixes[0].Prefix)
 	})
 }
 
