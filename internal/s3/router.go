@@ -365,6 +365,13 @@ func (ro *Router) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 		if obj.Key <= effectiveStartAfter {
 			continue
 		}
+		// When the cursor is a common prefix (e.g. "a/"), skip all keys that
+		// belong to that prefix group (e.g. "a/x.txt"), since they were already
+		// counted in the previous page.
+		if delimiter != "" && strings.HasSuffix(effectiveStartAfter, delimiter) &&
+			strings.HasPrefix(obj.Key, effectiveStartAfter) {
+			continue
+		}
 		// Group keys sharing a common prefix up to the delimiter.
 		// Each unique common prefix counts as one entry toward maxKeys.
 		if delimiter != "" {

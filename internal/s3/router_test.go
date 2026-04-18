@@ -1362,9 +1362,26 @@ func TestRouterListObjectsV2(t *testing.T) {
 		require.NoError(t, xml.Unmarshal(w.Body.Bytes(), &result))
 		assert.True(t, result.IsTruncated)
 		assert.Equal(t, 1, result.KeyCount)
-		assert.NotEmpty(t, result.NextContinuationToken)
+		require.NotEmpty(t, result.NextContinuationToken)
 		require.Len(t, result.CommonPrefixes, 1)
 		assert.Equal(t, "a/", result.CommonPrefixes[0].Prefix)
+
+		// Second page: token from first page must advance past a/ and return b/.
+		req2 := httptest.NewRequest(
+			http.MethodGet,
+			"/my-bucket?list-type=2&delimiter=/&max-keys=1&continuation-token="+url.QueryEscape(
+				result.NextContinuationToken,
+			),
+			nil,
+		)
+		w2 := httptest.NewRecorder()
+		ro.ServeHTTP(w2, req2)
+		require.Equal(t, http.StatusOK, w2.Code)
+		var result2 listObjectsV2Result
+		require.NoError(t, xml.Unmarshal(w2.Body.Bytes(), &result2))
+		assert.False(t, result2.IsTruncated)
+		require.Len(t, result2.CommonPrefixes, 1)
+		assert.Equal(t, "b/", result2.CommonPrefixes[0].Prefix)
 	})
 }
 
