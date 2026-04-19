@@ -64,6 +64,7 @@ func (ro *Router) handleCreateMultipartUpload(
 		"uploadId",
 		uploadID,
 	)
+	setSSEHeaders(w, ObjectMetadata{SSEAlgorithm: sseAlgorithm, SSEKMSKeyID: sseKMSKeyID})
 	writeXML(w, http.StatusOK, initiateMultipartUploadResult{
 		Bucket:   bucket,
 		Key:      key,
