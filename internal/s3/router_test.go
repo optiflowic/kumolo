@@ -4841,6 +4841,27 @@ func TestObjectACLHandlers(t *testing.T) {
 		assert.Equal(t, http.StatusNotFound, w.Code)
 		assert.Contains(t, w.Body.String(), "NoSuchBucket")
 	})
+
+	t.Run("PUT returns 404 when object not found", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{bucketExists: true, headObjectErr: ErrObjectNotFound})
+		req := httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt?acl",
+			strings.NewReader(`<AccessControlPolicy/>`))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchKey")
+	})
+
+	t.Run("PUT returns 500 on HeadObject error", func(t *testing.T) {
+		ro := newRouterWithMock(
+			&mockStore{bucketExists: true, headObjectErr: errors.New("disk fail")},
+		)
+		req := httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt?acl",
+			strings.NewReader(`<AccessControlPolicy/>`))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
 }
 
 func TestRestoreObject(t *testing.T) {

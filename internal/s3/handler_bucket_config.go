@@ -401,6 +401,31 @@ func (ro *Router) handlePutObjectACL(w http.ResponseWriter, r *http.Request, buc
 			"The specified bucket does not exist.")
 		return
 	}
+	if _, err := ro.storage.HeadObject(bucket, key); err != nil {
+		if errors.Is(err, ErrObjectNotFound) {
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"object not found",
+				"bucket",
+				bucket,
+				"key",
+				key,
+			)
+			writeError(w, r, http.StatusNotFound, "NoSuchKey",
+				"The specified key does not exist.")
+			return
+		}
+		slog.Error( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			"failed to head object for ACL",
+			"bucket",
+			bucket,
+			"key",
+			key,
+			"err",
+			err,
+		)
+		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
 	slog.Info( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
 		"object ACL updated (stub)",
 		"bucket",
