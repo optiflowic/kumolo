@@ -4978,7 +4978,15 @@ func TestSetObjectRestoreInitiated(t *testing.T) {
 		t.Helper()
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateBucket("bucket", "us-east-1"))
-		_, err := s.PutObject("bucket", "obj.txt", strings.NewReader("data"), "text/plain", nil, "", "")
+		_, err := s.PutObject(
+			"bucket",
+			"obj.txt",
+			strings.NewReader("data"),
+			"text/plain",
+			nil,
+			"",
+			"",
+		)
 		require.NoError(t, err)
 		return s, "bucket"
 	}
