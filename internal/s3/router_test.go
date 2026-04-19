@@ -5024,6 +5024,20 @@ func TestSSEResponseHeaders(t *testing.T) {
 		assert.Equal(t, "AES256", w.Header().Get(amzSSE))
 	})
 
+	t.Run("CreateMultipartUpload echoes aws:kms SSE headers from request", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			createMultipartUploadID: "uid-kms",
+		})
+		req := httptest.NewRequest(http.MethodPost, "/b/k?uploads", nil)
+		req.Header.Set(amzSSE, "aws:kms")
+		req.Header.Set(amzSSEKMSKeyID, "my-key")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "aws:kms", w.Header().Get(amzSSE))
+		assert.Equal(t, "my-key", w.Header().Get(amzSSEKMSKeyID))
+	})
+
 	t.Run("CompleteMultipartUpload echoes SSE headers from metadata", func(t *testing.T) {
 		ro := newRouterWithMock(&mockStore{
 			completeMultipartUploadMeta: ObjectMetadata{SSEAlgorithm: "AES256"},
