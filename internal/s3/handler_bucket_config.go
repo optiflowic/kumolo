@@ -480,7 +480,7 @@ func (ro *Router) handleGetBucketNotification(
 		ro.storage.GetBucketNotification,
 		"",
 		"",
-		"<NotificationConfiguration/>",
+		`<NotificationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"/>`,
 	)
 }
 
