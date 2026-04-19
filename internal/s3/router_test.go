@@ -4751,6 +4751,35 @@ func TestBucketConfigHandlers(t *testing.T) {
 	})
 }
 
+func TestStripXMLDecl(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"no declaration", `<Config/>`, `<Config/>`},
+		{
+			"standard xml.Header",
+			"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Config/>",
+			"<Config/>",
+		},
+		{"declaration without newline", `<?xml version="1.0"?><Config/>`, `<Config/>`},
+		{"declaration with whitespace", "  <?xml version=\"1.0\"?>  <Config/>", "<Config/>"},
+		{"no closing ?>", `<?xml version="1.0" <Config/>`, `<?xml version="1.0" <Config/>`},
+		{
+			"xml-stylesheet PI not stripped",
+			`<?xml-stylesheet type="text/xsl" href="s.xsl"?><Config/>`,
+			`<?xml-stylesheet type="text/xsl" href="s.xsl"?><Config/>`,
+		},
+		{"empty string", "", ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, stripXMLDecl(tc.input))
+		})
+	}
+}
+
 func TestBucketACLHandlers(t *testing.T) {
 	t.Run("GET returns 200 with default ACL when bucket exists", func(t *testing.T) {
 		ro := newRouterWithMock(&mockStore{bucketExists: true})

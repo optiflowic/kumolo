@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 )
 
 // isWellFormedXML reports whether data is well-formed XML with at least one element.
@@ -22,6 +23,22 @@ func isWellFormedXML(data []byte) bool {
 			found = true
 		}
 	}
+}
+
+// stripXMLDecl removes a leading <?xml ... ?> processing instruction, if present,
+// so that writeRawXML can prepend xml.Header without producing a double prolog.
+// The prefix check uses "<?xml " (with a trailing space) per the XML spec, so that
+// other PIs such as <?xml-stylesheet ... ?> are left intact.
+func stripXMLDecl(s string) string {
+	t := strings.TrimSpace(s)
+	if !strings.HasPrefix(t, "<?xml ") {
+		return t
+	}
+	idx := strings.Index(t, "?>")
+	if idx < 0 {
+		return t
+	}
+	return strings.TrimSpace(t[idx+2:])
 }
 
 // writeRawXML writes a raw XML string with the appropriate Content-Type header.
@@ -64,7 +81,9 @@ func (ro *Router) handlePutBucketRawXML(
 			"The XML you provided was not well-formed.")
 		return
 	}
-	if err := put(bucket, string(body)); err != nil {
+	// Strip any leading XML declaration so that writeRawXML does not emit a
+	// double prolog when serving the stored body back to the client.
+	if err := put(bucket, stripXMLDecl(string(body))); err != nil {
 		if errors.Is(err, ErrBucketNotFound) {
 			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
 				"bucket not found",
