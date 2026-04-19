@@ -3385,6 +3385,270 @@ func TestBucketCORSHandlers(t *testing.T) {
 	})
 }
 
+func TestCORSHelpers(t *testing.T) {
+	t.Run("corsMatchOrigin", func(t *testing.T) {
+		tests := []struct {
+			name     string
+			patterns []string
+			origin   string
+			want     bool
+		}{
+			{"wildcard star matches any", []string{"*"}, "http://example.com", true},
+			{"exact match", []string{"http://example.com"}, "http://example.com", true},
+			{"no match", []string{"http://other.com"}, "http://example.com", false},
+			{"subdomain wildcard", []string{"http://*.example.com"}, "http://foo.example.com", true},
+			{"subdomain wildcard no match", []string{"http://*.example.com"}, "http://example.com", false},
+			{"multiple patterns first matches", []string{"http://a.com", "http://b.com"}, "http://a.com", true},
+			{"multiple patterns second matches", []string{"http://a.com", "http://b.com"}, "http://b.com", true},
+			{"empty patterns", []string{}, "http://example.com", false},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				assert.Equal(t, tt.want, corsMatchOrigin(tt.patterns, tt.origin))
+			})
+		}
+	})
+
+	t.Run("corsMatchMethod", func(t *testing.T) {
+		tests := []struct {
+			name    string
+			allowed []string
+			method  string
+			want    bool
+		}{
+			{"exact match", []string{"GET"}, "GET", true},
+			{"case insensitive", []string{"get"}, "GET", true},
+			{"no match", []string{"PUT"}, "GET", false},
+			{"multiple allowed", []string{"GET", "PUT"}, "PUT", true},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				assert.Equal(t, tt.want, corsMatchMethod(tt.allowed, tt.method))
+			})
+		}
+	})
+
+	t.Run("corsMatchRequestedHeaders", func(t *testing.T) {
+		tests := []struct {
+			name             string
+			allowed          []string
+			requestedHeaders string
+			want             bool
+		}{
+			{"empty requested always matches", []string{"Content-Type"}, "", true},
+			{"wildcard allowed matches any", []string{"*"}, "X-Custom-Header", true},
+			{"exact match case insensitive", []string{"Content-Type"}, "content-type", true},
+			{"multiple requested all match", []string{"content-type", "x-amz-meta-foo"}, "content-type, x-amz-meta-foo", true},
+			{"one unmatched header fails", []string{"content-type"}, "content-type, x-custom", false},
+			{"empty allowed rejects any header", []string{}, "content-type", false},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				assert.Equal(t, tt.want, corsMatchRequestedHeaders(tt.allowed, tt.requestedHeaders))
+			})
+		}
+	})
+}
+
+func TestCORSPreflight(t *testing.T) {
+	rules := []CORSRule{{
+		AllowedOrigins: []string{"http://example.com"},
+		AllowedMethods: []string{"GET", "PUT"},
+		AllowedHeaders: []string{"Content-Type", "X-Amz-Date"},
+		ExposeHeaders:  []string{"x-amz-request-id"},
+		MaxAgeSeconds:  3600,
+	}}
+
+	t.Run("returns 200 with CORS headers on match", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{getBucketCorsRules: rules})
+		req := httptest.NewRequest(http.MethodOptions, "/my-bucket/key", nil)
+		req.Header.Set("Origin", "http://example.com")
+		req.Header.Set("Access-Control-Request-Method", "PUT")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "http://example.com", w.Header().Get("Access-Control-Allow-Origin"))
+		assert.Equal(t, "GET, PUT", w.Header().Get("Access-Control-Allow-Methods"))
+		assert.Equal(t, "3600", w.Header().Get("Access-Control-Max-Age"))
+		assert.Contains(t, w.Header().Get("Vary"), "Origin")
+	})
+
+	t.Run("returns 200 with wildcard origin", func(t *testing.T) {
+		wildRules := []CORSRule{{
+			AllowedOrigins: []string{"*"},
+			AllowedMethods: []string{"GET"},
+		}}
+		ro := newRouterWithMock(&mockStore{getBucketCorsRules: wildRules})
+		req := httptest.NewRequest(http.MethodOptions, "/my-bucket/key", nil)
+		req.Header.Set("Origin", "http://anything.com")
+		req.Header.Set("Access-Control-Request-Method", "GET")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "*", w.Header().Get("Access-Control-Allow-Origin"))
+		assert.Empty(t, w.Header().Get("Vary"))
+	})
+
+	t.Run("includes Access-Control-Allow-Headers when present", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{getBucketCorsRules: rules})
+		req := httptest.NewRequest(http.MethodOptions, "/my-bucket/key", nil)
+		req.Header.Set("Origin", "http://example.com")
+		req.Header.Set("Access-Control-Request-Method", "GET")
+		req.Header.Set("Access-Control-Request-Headers", "Content-Type")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.NotEmpty(t, w.Header().Get("Access-Control-Allow-Headers"))
+	})
+
+	t.Run("returns 400 when Origin header is missing", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{getBucketCorsRules: rules})
+		req := httptest.NewRequest(http.MethodOptions, "/my-bucket/key", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("returns 403 when no CORS config", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{getBucketCorsErr: ErrNoCORSConfiguration})
+		req := httptest.NewRequest(http.MethodOptions, "/my-bucket/key", nil)
+		req.Header.Set("Origin", "http://example.com")
+		req.Header.Set("Access-Control-Request-Method", "GET")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusForbidden, w.Code)
+	})
+
+	t.Run("returns 403 when no rule matches origin", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{getBucketCorsRules: rules})
+		req := httptest.NewRequest(http.MethodOptions, "/my-bucket/key", nil)
+		req.Header.Set("Origin", "http://evil.com")
+		req.Header.Set("Access-Control-Request-Method", "GET")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusForbidden, w.Code)
+	})
+
+	t.Run("returns 403 when method not allowed", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{getBucketCorsRules: rules})
+		req := httptest.NewRequest(http.MethodOptions, "/my-bucket/key", nil)
+		req.Header.Set("Origin", "http://example.com")
+		req.Header.Set("Access-Control-Request-Method", "DELETE")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusForbidden, w.Code)
+	})
+
+	t.Run("returns 403 when requested headers not allowed", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{getBucketCorsRules: rules})
+		req := httptest.NewRequest(http.MethodOptions, "/my-bucket/key", nil)
+		req.Header.Set("Origin", "http://example.com")
+		req.Header.Set("Access-Control-Request-Method", "GET")
+		req.Header.Set("Access-Control-Request-Headers", "X-Not-Allowed")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusForbidden, w.Code)
+	})
+
+	t.Run("OPTIONS on bucket endpoint also handled", func(t *testing.T) {
+		wildRules := []CORSRule{{
+			AllowedOrigins: []string{"*"},
+			AllowedMethods: []string{"PUT"},
+		}}
+		ro := newRouterWithMock(&mockStore{getBucketCorsRules: wildRules})
+		req := httptest.NewRequest(http.MethodOptions, "/my-bucket", nil)
+		req.Header.Set("Origin", "http://example.com")
+		req.Header.Set("Access-Control-Request-Method", "PUT")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+}
+
+func TestCORSSimpleRequest(t *testing.T) {
+	// setUp creates a bucket, puts an object, and configures CORS rules.
+	setUp := func(t *testing.T, corsBody string) *Router {
+		t.Helper()
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		putObj := httptest.NewRequest(http.MethodPut, "/my-bucket/key.txt", strings.NewReader("hello"))
+		putObj.Header.Set("Content-Type", "text/plain")
+		ro.ServeHTTP(httptest.NewRecorder(), putObj)
+		putCORS := httptest.NewRequest(http.MethodPut, "/my-bucket?cors", strings.NewReader(corsBody))
+		ro.ServeHTTP(httptest.NewRecorder(), putCORS)
+		return ro
+	}
+
+	t.Run("GET with matching origin gets CORS headers", func(t *testing.T) {
+		corsBody := `<CORSConfiguration><CORSRule>` +
+			`<AllowedOrigin>http://example.com</AllowedOrigin>` +
+			`<AllowedMethod>GET</AllowedMethod>` +
+			`<ExposeHeader>x-amz-request-id</ExposeHeader>` +
+			`<ExposeHeader>ETag</ExposeHeader>` +
+			`</CORSRule></CORSConfiguration>`
+		ro := setUp(t, corsBody)
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket/key.txt", nil)
+		req.Header.Set("Origin", "http://example.com")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, "http://example.com", w.Header().Get("Access-Control-Allow-Origin"))
+		assert.Equal(t, "x-amz-request-id, ETag", w.Header().Get("Access-Control-Expose-Headers"))
+		assert.Equal(t, "Origin", w.Header().Get("Vary"))
+	})
+
+	t.Run("GET with wildcard origin gets Access-Control-Allow-Origin: *", func(t *testing.T) {
+		corsBody := `<CORSConfiguration><CORSRule>` +
+			`<AllowedOrigin>*</AllowedOrigin>` +
+			`<AllowedMethod>GET</AllowedMethod>` +
+			`</CORSRule></CORSConfiguration>`
+		ro := setUp(t, corsBody)
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket/key.txt", nil)
+		req.Header.Set("Origin", "http://anything.com")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, "*", w.Header().Get("Access-Control-Allow-Origin"))
+		assert.Empty(t, w.Header().Get("Vary"))
+	})
+
+	t.Run("GET without Origin header gets no CORS headers", func(t *testing.T) {
+		corsBody := `<CORSConfiguration><CORSRule>` +
+			`<AllowedOrigin>http://example.com</AllowedOrigin>` +
+			`<AllowedMethod>GET</AllowedMethod>` +
+			`</CORSRule></CORSConfiguration>`
+		ro := setUp(t, corsBody)
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket/key.txt", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Empty(t, w.Header().Get("Access-Control-Allow-Origin"))
+	})
+
+	t.Run("GET with non-matching origin gets no CORS headers", func(t *testing.T) {
+		corsBody := `<CORSConfiguration><CORSRule>` +
+			`<AllowedOrigin>http://example.com</AllowedOrigin>` +
+			`<AllowedMethod>GET</AllowedMethod>` +
+			`</CORSRule></CORSConfiguration>`
+		ro := setUp(t, corsBody)
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket/key.txt", nil)
+		req.Header.Set("Origin", "http://evil.com")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Empty(t, w.Header().Get("Access-Control-Allow-Origin"))
+	})
+
+	t.Run("GET with no CORS config gets no CORS headers", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		putObj := httptest.NewRequest(http.MethodPut, "/my-bucket/key.txt", strings.NewReader("hello"))
+		putObj.Header.Set("Content-Type", "text/plain")
+		ro.ServeHTTP(httptest.NewRecorder(), putObj)
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket/key.txt", nil)
+		req.Header.Set("Origin", "http://example.com")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Empty(t, w.Header().Get("Access-Control-Allow-Origin"))
+	})
+}
+
 func TestBucketPolicyHandlers(t *testing.T) {
 	validPolicy := `{"Version":"2012-10-17","Statement":[]}`
 
