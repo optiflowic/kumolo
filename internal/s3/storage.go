@@ -21,11 +21,21 @@ import (
 
 // bucketMeta is stored as a <bucket>.bucket.json file at the storage root.
 type bucketMeta struct {
-	Region           string     `json:"region"`
-	Tags             []Tag      `json:"tags,omitempty"`
-	VersioningStatus string     `json:"versioningStatus,omitempty"`
-	CORSRules        []CORSRule `json:"corsRules,omitempty"`
-	Policy           string     `json:"policy,omitempty"`
+	Region            string     `json:"region"`
+	Tags              []Tag      `json:"tags,omitempty"`
+	VersioningStatus  string     `json:"versioningStatus,omitempty"`
+	CORSRules         []CORSRule `json:"corsRules,omitempty"`
+	Policy            string     `json:"policy,omitempty"`
+	PublicAccessBlock string     `json:"publicAccessBlock,omitempty"`
+	Encryption        string     `json:"encryption,omitempty"`
+	OwnershipControls string     `json:"ownershipControls,omitempty"`
+	Notification      string     `json:"notification,omitempty"`
+	Lifecycle         string     `json:"lifecycle,omitempty"`
+	Website           string     `json:"website,omitempty"`
+	Logging           string     `json:"logging,omitempty"`
+	Accelerate        string     `json:"accelerate,omitempty"`
+	Replication       string     `json:"replication,omitempty"`
+	RequestPayment    string     `json:"requestPayment,omitempty"`
 }
 
 // Storage is a filesystem-backed S3 backend. os.Root scopes all access to the
@@ -164,6 +174,7 @@ func (s *Storage) PutObject(
 	r io.Reader,
 	contentType string,
 	userMetadata map[string]string,
+	sseAlgorithm, sseKMSKeyID string,
 ) (ObjectMetadata, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -192,7 +203,16 @@ func (s *Storage) PutObject(
 		versionID = vid
 	}
 
-	return s.writeObject(objPath, r, contentType, "", userMetadata, versionID)
+	return s.writeObject(
+		objPath,
+		r,
+		contentType,
+		"",
+		userMetadata,
+		versionID,
+		sseAlgorithm,
+		sseKMSKeyID,
+	)
 }
 
 // writeObject writes r to objPath and records metadata. If etag is non-empty
@@ -205,6 +225,7 @@ func (s *Storage) writeObject(
 	etag string,
 	userMetadata map[string]string,
 	versionID string,
+	sseAlgorithm, sseKMSKeyID string,
 ) (retMeta ObjectMetadata, retErr error) {
 	f, err := s.openFile(objPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
@@ -237,6 +258,8 @@ func (s *Storage) writeObject(
 		Size:         size,
 		UserMetadata: userMetadata,
 		VersionID:    versionID,
+		SSEAlgorithm: sseAlgorithm,
+		SSEKMSKeyID:  sseKMSKeyID,
 	}
 	if err := s.writeMeta(objPath, meta); err != nil {
 		if removeErr := s.removeFile(objPath); removeErr != nil &&
@@ -279,10 +302,12 @@ func (s *Storage) GetObject(bucket, key string) (*os.File, ObjectMetadata, error
 // contentType mean COPY (inherit from source). Non-nil userMetadata (even an
 // empty map) and non-empty contentType mean REPLACE (use provided values).
 // srcVersionID, if non-empty, copies from that specific source version.
+// sseAlgorithm and sseKMSKeyID are applied to the destination object.
 func (s *Storage) CopyObject(
 	srcBucket, srcKey, srcVersionID, dstBucket, dstKey string,
 	contentType string,
 	userMetadata map[string]string,
+	sseAlgorithm, sseKMSKeyID string,
 ) (ObjectMetadata, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -364,6 +389,8 @@ func (s *Storage) CopyObject(
 		meta.LastModified = time.Now().UTC()
 		meta.ContentType = contentType
 		meta.UserMetadata = userMetadata
+		meta.SSEAlgorithm = sseAlgorithm
+		meta.SSEKMSKeyID = sseKMSKeyID
 		if err := s.writeMeta(dstPath, meta); err != nil {
 			return ObjectMetadata{}, err
 		}
@@ -382,7 +409,16 @@ func (s *Storage) CopyObject(
 			return ObjectMetadata{}, err
 		}
 	}
-	return s.writeObject(dstPath, srcFile, contentType, srcMeta.ETag, userMetadata, dstVersionID)
+	return s.writeObject(
+		dstPath,
+		srcFile,
+		contentType,
+		srcMeta.ETag,
+		userMetadata,
+		dstVersionID,
+		sseAlgorithm,
+		sseKMSKeyID,
+	)
 }
 
 func (s *Storage) DeleteObject(bucket, key string) error {
@@ -782,6 +818,26 @@ func (s *Storage) HeadObject(bucket, key string) (ObjectMetadata, error) {
 		return ObjectMetadata{}, &DeleteMarkerError{VersionID: meta.VersionID}
 	}
 	return meta, nil
+}
+
+// SetObjectRestoreInitiated marks an object as having a restore request in progress.
+// Subsequent calls to handleRestoreObject will detect this and return 200 instead of 202.
+func (s *Storage) SetObjectRestoreInitiated(bucket, key string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.bucketExistsLocked(bucket) {
+		return ErrBucketNotFound
+	}
+	objPath := filepath.Join(bucket, key)
+	meta, err := s.readMeta(objPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return ErrObjectNotFound
+		}
+		return err
+	}
+	meta.RestoreInitiated = true
+	return s.writeMeta(objPath, meta)
 }
 
 func (s *Storage) ListObjects(bucket string) ([]ObjectInfo, error) {
@@ -1256,10 +1312,12 @@ func (s *Storage) DeleteBucketPolicy(bucket string) error {
 
 // uploadMeta is stored as .mpu/<uploadID>/upload.json.
 type uploadMeta struct {
-	Bucket      string    `json:"bucket"`
-	Key         string    `json:"key"`
-	ContentType string    `json:"contentType"`
-	Initiated   time.Time `json:"initiated"`
+	Bucket       string    `json:"bucket"`
+	Key          string    `json:"key"`
+	ContentType  string    `json:"contentType"`
+	Initiated    time.Time `json:"initiated"`
+	SSEAlgorithm string    `json:"sseAlgorithm,omitempty"`
+	SSEKMSKeyID  string    `json:"sseKmsKeyId,omitempty"`
 }
 
 // partMeta is stored as .mpu/<uploadID>/<partNumber>.part.meta.json.
@@ -1270,7 +1328,9 @@ type partMeta struct {
 
 const mpuDir = ".mpu"
 
-func (s *Storage) CreateMultipartUpload(bucket, key, contentType string) (string, error) {
+func (s *Storage) CreateMultipartUpload(
+	bucket, key, contentType, sseAlgorithm, sseKMSKeyID string,
+) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.bucketExistsLocked(bucket) {
@@ -1286,10 +1346,12 @@ func (s *Storage) CreateMultipartUpload(bucket, key, contentType string) (string
 		return "", err
 	}
 	meta := uploadMeta{
-		Bucket:      bucket,
-		Key:         key,
-		ContentType: contentType,
-		Initiated:   time.Now().UTC(),
+		Bucket:       bucket,
+		Key:          key,
+		ContentType:  contentType,
+		Initiated:    time.Now().UTC(),
+		SSEAlgorithm: sseAlgorithm,
+		SSEKMSKeyID:  sseKMSKeyID,
 	}
 	data, _ := json.Marshal(meta) // json.Marshal never fails for uploadMeta
 	var uploadJSONWritten bool
@@ -1447,6 +1509,8 @@ func (s *Storage) CompleteMultipartUpload(
 		multipartETag,
 		nil,
 		versionID,
+		umeta.SSEAlgorithm,
+		umeta.SSEKMSKeyID,
 	)
 	if err != nil {
 		return ObjectMetadata{}, err
@@ -1580,6 +1644,145 @@ func (s *Storage) ListParts(uploadID string) (uploadMeta, []PartInfo, error) {
 		return cmp.Compare(a.PartNumber, b.PartNumber)
 	})
 	return umeta, parts, nil
+}
+
+// putBucketConfigField reads bucket meta, applies set(), and writes it back.
+func (s *Storage) putBucketConfigField(bucket string, set func(*bucketMeta)) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.bucketExistsLocked(bucket) {
+		return ErrBucketNotFound
+	}
+	meta, err := s.readBucketMeta(bucket)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		meta = bucketMeta{}
+	}
+	set(&meta)
+	return s.writeBucketMeta(bucket, meta)
+}
+
+// getBucketConfigField reads bucket meta and extracts one field.
+func (s *Storage) getBucketConfigField(bucket string, get func(bucketMeta) string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.bucketExistsLocked(bucket) {
+		return "", ErrBucketNotFound
+	}
+	meta, err := s.readBucketMeta(bucket)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", nil
+		}
+		return "", err
+	}
+	return get(meta), nil
+}
+
+func (s *Storage) PutPublicAccessBlock(bucket, xmlBody string) error {
+	return s.putBucketConfigField(bucket, func(m *bucketMeta) { m.PublicAccessBlock = xmlBody })
+}
+
+func (s *Storage) GetPublicAccessBlock(bucket string) (string, error) {
+	return s.getBucketConfigField(bucket, func(m bucketMeta) string { return m.PublicAccessBlock })
+}
+
+func (s *Storage) DeletePublicAccessBlock(bucket string) error {
+	return s.putBucketConfigField(bucket, func(m *bucketMeta) { m.PublicAccessBlock = "" })
+}
+
+func (s *Storage) PutBucketEncryption(bucket, xmlBody string) error {
+	return s.putBucketConfigField(bucket, func(m *bucketMeta) { m.Encryption = xmlBody })
+}
+
+func (s *Storage) GetBucketEncryption(bucket string) (string, error) {
+	return s.getBucketConfigField(bucket, func(m bucketMeta) string { return m.Encryption })
+}
+
+func (s *Storage) DeleteBucketEncryption(bucket string) error {
+	return s.putBucketConfigField(bucket, func(m *bucketMeta) { m.Encryption = "" })
+}
+
+func (s *Storage) PutBucketOwnershipControls(bucket, xmlBody string) error {
+	return s.putBucketConfigField(bucket, func(m *bucketMeta) { m.OwnershipControls = xmlBody })
+}
+
+func (s *Storage) GetBucketOwnershipControls(bucket string) (string, error) {
+	return s.getBucketConfigField(bucket, func(m bucketMeta) string { return m.OwnershipControls })
+}
+
+func (s *Storage) DeleteBucketOwnershipControls(bucket string) error {
+	return s.putBucketConfigField(bucket, func(m *bucketMeta) { m.OwnershipControls = "" })
+}
+
+func (s *Storage) PutBucketNotification(bucket, xmlBody string) error {
+	return s.putBucketConfigField(bucket, func(m *bucketMeta) { m.Notification = xmlBody })
+}
+
+func (s *Storage) GetBucketNotification(bucket string) (string, error) {
+	return s.getBucketConfigField(bucket, func(m bucketMeta) string { return m.Notification })
+}
+
+func (s *Storage) PutBucketLifecycle(bucket, xmlBody string) error {
+	return s.putBucketConfigField(bucket, func(m *bucketMeta) { m.Lifecycle = xmlBody })
+}
+
+func (s *Storage) GetBucketLifecycle(bucket string) (string, error) {
+	return s.getBucketConfigField(bucket, func(m bucketMeta) string { return m.Lifecycle })
+}
+
+func (s *Storage) DeleteBucketLifecycle(bucket string) error {
+	return s.putBucketConfigField(bucket, func(m *bucketMeta) { m.Lifecycle = "" })
+}
+
+func (s *Storage) PutBucketWebsite(bucket, xmlBody string) error {
+	return s.putBucketConfigField(bucket, func(m *bucketMeta) { m.Website = xmlBody })
+}
+
+func (s *Storage) GetBucketWebsite(bucket string) (string, error) {
+	return s.getBucketConfigField(bucket, func(m bucketMeta) string { return m.Website })
+}
+
+func (s *Storage) DeleteBucketWebsite(bucket string) error {
+	return s.putBucketConfigField(bucket, func(m *bucketMeta) { m.Website = "" })
+}
+
+func (s *Storage) PutBucketLogging(bucket, xmlBody string) error {
+	return s.putBucketConfigField(bucket, func(m *bucketMeta) { m.Logging = xmlBody })
+}
+
+func (s *Storage) GetBucketLogging(bucket string) (string, error) {
+	return s.getBucketConfigField(bucket, func(m bucketMeta) string { return m.Logging })
+}
+
+func (s *Storage) PutBucketAccelerate(bucket, xmlBody string) error {
+	return s.putBucketConfigField(bucket, func(m *bucketMeta) { m.Accelerate = xmlBody })
+}
+
+func (s *Storage) GetBucketAccelerate(bucket string) (string, error) {
+	return s.getBucketConfigField(bucket, func(m bucketMeta) string { return m.Accelerate })
+}
+
+func (s *Storage) PutBucketReplication(bucket, xmlBody string) error {
+	return s.putBucketConfigField(bucket, func(m *bucketMeta) { m.Replication = xmlBody })
+}
+
+func (s *Storage) GetBucketReplication(bucket string) (string, error) {
+	return s.getBucketConfigField(bucket, func(m bucketMeta) string { return m.Replication })
+}
+
+func (s *Storage) DeleteBucketReplication(bucket string) error {
+	return s.putBucketConfigField(bucket, func(m *bucketMeta) { m.Replication = "" })
+}
+
+func (s *Storage) PutBucketRequestPayment(bucket, xmlBody string) error {
+	return s.putBucketConfigField(bucket, func(m *bucketMeta) { m.RequestPayment = xmlBody })
+}
+
+func (s *Storage) GetBucketRequestPayment(bucket string) (string, error) {
+	return s.getBucketConfigField(bucket, func(m bucketMeta) string { return m.RequestPayment })
 }
 
 // removeUploadDir removes all files in uploadDir and then the directory itself.

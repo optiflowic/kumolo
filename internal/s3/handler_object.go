@@ -3,6 +3,7 @@ package s3
 import (
 	"encoding/xml"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -72,6 +73,8 @@ func (ro *Router) handleCopyObject(
 			userMetadata = map[string]string{}
 		}
 	}
+	sseAlgorithm := r.Header.Get(amzSSE)
+	sseKMSKeyID := r.Header.Get(amzSSEKMSKeyID)
 	meta, err := ro.storage.CopyObject(
 		srcBucket,
 		srcKey,
@@ -80,6 +83,8 @@ func (ro *Router) handleCopyObject(
 		dstKey,
 		contentType,
 		userMetadata,
+		sseAlgorithm,
+		sseKMSKeyID,
 	)
 	if err != nil {
 		switch {
@@ -135,10 +140,21 @@ func (ro *Router) handleCopyObject(
 	if meta.VersionID != "" {
 		w.Header().Set(amzVersionID, meta.VersionID)
 	}
+	setSSEHeaders(w, meta)
 	writeXML(w, http.StatusOK, copyObjectResult{
 		ETag:         meta.ETag,
 		LastModified: meta.LastModified,
 	})
+}
+
+// setSSEHeaders writes SSE response headers derived from object metadata.
+func setSSEHeaders(w http.ResponseWriter, meta ObjectMetadata) {
+	if meta.SSEAlgorithm != "" {
+		w.Header().Set(amzSSE, meta.SSEAlgorithm)
+	}
+	if meta.SSEKMSKeyID != "" {
+		w.Header().Set(amzSSEKMSKeyID, meta.SSEKMSKeyID)
+	}
 }
 
 func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket, key string) {
@@ -147,7 +163,17 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 		contentType = "application/octet-stream"
 	}
 	userMetadata := extractUserMetadata(r.Header)
-	meta, err := ro.storage.PutObject(bucket, key, r.Body, contentType, userMetadata)
+	sseAlgorithm := r.Header.Get(amzSSE)
+	sseKMSKeyID := r.Header.Get(amzSSEKMSKeyID)
+	meta, err := ro.storage.PutObject(
+		bucket,
+		key,
+		r.Body,
+		contentType,
+		userMetadata,
+		sseAlgorithm,
+		sseKMSKeyID,
+	)
 	if err != nil {
 		if errors.Is(err, ErrBucketNotFound) {
 			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
@@ -182,6 +208,7 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 	if meta.VersionID != "" {
 		w.Header().Set(amzVersionID, meta.VersionID)
 	}
+	setSSEHeaders(w, meta)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -331,6 +358,7 @@ func (ro *Router) handleHeadObject(w http.ResponseWriter, r *http.Request, bucke
 	for k, v := range meta.UserMetadata {
 		w.Header().Set(amzMetaPrefix+k, v)
 	}
+	setSSEHeaders(w, meta)
 	// tagging count is best-effort; errors are intentionally ignored so that a
 	// missing or unreadable tags file never prevents a successful object response.
 	if tags, err := ro.storage.GetObjectTagging(bucket, key); err == nil && len(tags) > 0 {
@@ -573,6 +601,7 @@ func (ro *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 	for k, v := range meta.UserMetadata {
 		w.Header().Set(amzMetaPrefix+k, v)
 	}
+	setSSEHeaders(w, meta)
 	// tagging count is best-effort; errors are intentionally ignored so that a
 	// missing or unreadable tags file never prevents a successful object response.
 	if tags, err := ro.storage.GetObjectTagging(bucket, key); err == nil && len(tags) > 0 {
@@ -758,6 +787,80 @@ func (ro *Router) handleGetObjectTagging(
 		xmlTags[i] = xmlTag(t)
 	}
 	writeXML(w, http.StatusOK, xmlTagging{TagSet: xmlTags})
+}
+
+// handleRestoreObject handles RestoreObject (#95).
+// Returns 202 Accepted on first restore request, 200 OK if restore was already initiated.
+func (ro *Router) handleRestoreObject(w http.ResponseWriter, r *http.Request, bucket, key string) {
+	_, _ = io.Copy(io.Discard, r.Body)
+	if !ro.storage.BucketExists(bucket) {
+		slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			"bucket not found",
+			"bucket",
+			bucket,
+		)
+		writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+			"The specified bucket does not exist.")
+		return
+	}
+	meta, err := ro.storage.HeadObject(bucket, key)
+	if err != nil {
+		if errors.Is(err, ErrObjectNotFound) {
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"object not found",
+				"bucket",
+				bucket,
+				"key",
+				key,
+			)
+			writeError(w, r, http.StatusNotFound, "NoSuchKey",
+				"The specified key does not exist.")
+			return
+		}
+		slog.Error( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			"failed to head object for restore",
+			"bucket",
+			bucket,
+			"key",
+			key,
+			"err",
+			err,
+		)
+		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	if meta.RestoreInitiated {
+		slog.Info( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			"restore already initiated",
+			"bucket",
+			bucket,
+			"key",
+			key,
+		)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if err := ro.storage.SetObjectRestoreInitiated(bucket, key); err != nil {
+		slog.Error( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			"failed to set restore initiated",
+			"bucket",
+			bucket,
+			"key",
+			key,
+			"err",
+			err,
+		)
+		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	slog.Info( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+		"restore object accepted",
+		"bucket",
+		bucket,
+		"key",
+		key,
+	)
+	w.WriteHeader(http.StatusAccepted)
 }
 
 func (ro *Router) handleDeleteObjectTagging(

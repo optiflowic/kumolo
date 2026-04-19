@@ -23,6 +23,8 @@ const (
 	amzTaggingCount = "X-Amz-Tagging-Count"
 	amzVersionID    = "X-Amz-Version-Id"
 	amzDeleteMarker = "X-Amz-Delete-Marker"
+	amzSSE          = "X-Amz-Server-Side-Encryption"
+	amzSSEKMSKeyID  = "X-Amz-Server-Side-Encryption-Aws-Kms-Key-Id"
 )
 
 // Router handles S3 API requests using path-style URLs: /<bucket>/<key>
@@ -36,6 +38,16 @@ type Router struct {
 		bucketVersioningStore
 		bucketCORSStore
 		bucketPolicyStore
+		bucketPublicAccessBlockStore
+		bucketEncryptionStore
+		bucketOwnershipControlsStore
+		bucketNotificationStore
+		bucketLifecycleStore
+		bucketWebsiteStore
+		bucketLoggingStore
+		bucketAccelerateStore
+		bucketReplicationStore
+		bucketRequestPaymentStore
 	}
 	now func() time.Time // injectable for testing; defaults to time.Now
 }
@@ -133,6 +145,28 @@ func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, bucket str
 			ro.handlePutBucketTagging(w, r, bucket)
 		case q.Has("versioning"):
 			ro.handlePutBucketVersioning(w, r, bucket)
+		case q.Has("publicAccessBlock"):
+			ro.handlePutPublicAccessBlock(w, r, bucket)
+		case q.Has("encryption"):
+			ro.handlePutBucketEncryption(w, r, bucket)
+		case q.Has("ownershipControls"):
+			ro.handlePutBucketOwnershipControls(w, r, bucket)
+		case q.Has("notification"):
+			ro.handlePutBucketNotification(w, r, bucket)
+		case q.Has("lifecycle"):
+			ro.handlePutBucketLifecycle(w, r, bucket)
+		case q.Has("website"):
+			ro.handlePutBucketWebsite(w, r, bucket)
+		case q.Has("logging"):
+			ro.handlePutBucketLogging(w, r, bucket)
+		case q.Has("accelerate"):
+			ro.handlePutBucketAccelerate(w, r, bucket)
+		case q.Has("replication"):
+			ro.handlePutBucketReplication(w, r, bucket)
+		case q.Has("requestPayment"):
+			ro.handlePutBucketRequestPayment(w, r, bucket)
+		case q.Has("acl"):
+			ro.handlePutBucketACL(w, r, bucket)
 		default:
 			ro.handleCreateBucket(w, r, bucket)
 		}
@@ -144,6 +178,18 @@ func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, bucket str
 			ro.handleDeleteBucketPolicy(w, r, bucket)
 		case q.Has("tagging"):
 			ro.handleDeleteBucketTagging(w, r, bucket)
+		case q.Has("publicAccessBlock"):
+			ro.handleDeletePublicAccessBlock(w, r, bucket)
+		case q.Has("encryption"):
+			ro.handleDeleteBucketEncryption(w, r, bucket)
+		case q.Has("ownershipControls"):
+			ro.handleDeleteBucketOwnershipControls(w, r, bucket)
+		case q.Has("lifecycle"):
+			ro.handleDeleteBucketLifecycle(w, r, bucket)
+		case q.Has("website"):
+			ro.handleDeleteBucketWebsite(w, r, bucket)
+		case q.Has("replication"):
+			ro.handleDeleteBucketReplication(w, r, bucket)
 		default:
 			ro.handleDeleteBucket(w, r, bucket)
 		}
@@ -165,6 +211,28 @@ func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, bucket str
 			ro.handleGetBucketLocation(w, r, bucket)
 		case q.Has("uploads"):
 			ro.handleListMultipartUploads(w, r, bucket)
+		case q.Has("publicAccessBlock"):
+			ro.handleGetPublicAccessBlock(w, r, bucket)
+		case q.Has("encryption"):
+			ro.handleGetBucketEncryption(w, r, bucket)
+		case q.Has("ownershipControls"):
+			ro.handleGetBucketOwnershipControls(w, r, bucket)
+		case q.Has("notification"):
+			ro.handleGetBucketNotification(w, r, bucket)
+		case q.Has("lifecycle"):
+			ro.handleGetBucketLifecycle(w, r, bucket)
+		case q.Has("website"):
+			ro.handleGetBucketWebsite(w, r, bucket)
+		case q.Has("logging"):
+			ro.handleGetBucketLogging(w, r, bucket)
+		case q.Has("accelerate"):
+			ro.handleGetBucketAccelerate(w, r, bucket)
+		case q.Has("replication"):
+			ro.handleGetBucketReplication(w, r, bucket)
+		case q.Has("requestPayment"):
+			ro.handleGetBucketRequestPayment(w, r, bucket)
+		case q.Has("acl"):
+			ro.handleGetBucketACL(w, r, bucket)
 		case q.Get("list-type") == "2":
 			ro.handleListObjectsV2(w, r, bucket)
 		default:
@@ -461,6 +529,8 @@ func (ro *Router) routeObject(w http.ResponseWriter, r *http.Request, bucket, ke
 			ro.handleCreateMultipartUpload(w, r, bucket, key)
 		case q.Has("uploadId"):
 			ro.handleCompleteMultipartUpload(w, r, bucket, key)
+		case q.Has("restore"):
+			ro.handleRestoreObject(w, r, bucket, key)
 		default:
 			writeNotImplemented(w, r)
 		}
@@ -472,6 +542,8 @@ func (ro *Router) routeObject(w http.ResponseWriter, r *http.Request, bucket, ke
 			ro.handleUploadPart(w, r, bucket, key)
 		case r.Header.Get(amzCopySource) != "":
 			ro.handleCopyObject(w, r, bucket, key)
+		case q.Has("acl"):
+			ro.handlePutObjectACL(w, r, bucket, key)
 		default:
 			ro.handlePutObject(w, r, bucket, key)
 		}
@@ -481,6 +553,8 @@ func (ro *Router) routeObject(w http.ResponseWriter, r *http.Request, bucket, ke
 			ro.handleGetObjectTagging(w, r, bucket, key)
 		case q.Has("uploadId"):
 			ro.handleListParts(w, r, bucket, key)
+		case q.Has("acl"):
+			ro.handleGetObjectACL(w, r, bucket, key)
 		default:
 			ro.handleGetObject(w, r, bucket, key)
 		}

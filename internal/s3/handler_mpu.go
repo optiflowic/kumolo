@@ -17,7 +17,15 @@ func (ro *Router) handleCreateMultipartUpload(
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
-	uploadID, err := ro.storage.CreateMultipartUpload(bucket, key, contentType)
+	sseAlgorithm := r.Header.Get(amzSSE)
+	sseKMSKeyID := r.Header.Get(amzSSEKMSKeyID)
+	uploadID, err := ro.storage.CreateMultipartUpload(
+		bucket,
+		key,
+		contentType,
+		sseAlgorithm,
+		sseKMSKeyID,
+	)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrBucketNotFound):
@@ -236,6 +244,7 @@ func (ro *Router) handleCompleteMultipartUpload(
 		"uploadId",
 		uploadID,
 	)
+	setSSEHeaders(w, meta)
 	writeXML(w, http.StatusOK, completeMultipartUploadResult{
 		Location: "/" + bucket + "/" + key,
 		Bucket:   bucket,
