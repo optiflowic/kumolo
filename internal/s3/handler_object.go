@@ -789,8 +789,8 @@ func (ro *Router) handleGetObjectTagging(
 	writeXML(w, http.StatusOK, xmlTagging{TagSet: xmlTags})
 }
 
-// handleRestoreObject is a stub for RestoreObject (#95).
-// It accepts the request and returns 202 Accepted without actually restoring.
+// handleRestoreObject handles RestoreObject (#95).
+// Returns 202 Accepted on first restore request, 200 OK if restore was already initiated.
 func (ro *Router) handleRestoreObject(w http.ResponseWriter, r *http.Request, bucket, key string) {
 	_, _ = io.Copy(io.Discard, r.Body)
 	if !ro.storage.BucketExists(bucket) {
@@ -803,7 +803,8 @@ func (ro *Router) handleRestoreObject(w http.ResponseWriter, r *http.Request, bu
 			"The specified bucket does not exist.")
 		return
 	}
-	if _, err := ro.storage.HeadObject(bucket, key); err != nil {
+	meta, err := ro.storage.HeadObject(bucket, key)
+	if err != nil {
 		if errors.Is(err, ErrObjectNotFound) {
 			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
 				"object not found",
@@ -828,8 +829,32 @@ func (ro *Router) handleRestoreObject(w http.ResponseWriter, r *http.Request, bu
 		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
+	if meta.RestoreInitiated {
+		slog.Info( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			"restore already initiated",
+			"bucket",
+			bucket,
+			"key",
+			key,
+		)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if err := ro.storage.SetObjectRestoreInitiated(bucket, key); err != nil {
+		slog.Error( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			"failed to set restore initiated",
+			"bucket",
+			bucket,
+			"key",
+			key,
+			"err",
+			err,
+		)
+		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
 	slog.Info( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-		"restore object accepted (stub)",
+		"restore object accepted",
 		"bucket",
 		bucket,
 		"key",

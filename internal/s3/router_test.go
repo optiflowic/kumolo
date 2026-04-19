@@ -235,8 +235,9 @@ type mockStore struct {
 	copyObjectErr               error
 	deleteObjectErr             error
 	deleteObjectVersionErr      error
-	headObjectMeta              ObjectMetadata
-	headObjectErr               error
+	headObjectMeta                  ObjectMetadata
+	headObjectErr                   error
+	setObjectRestoreInitiatedErr    error
 	listObjectsObjs             []ObjectInfo
 	listObjectsErr              error
 	listObjectVersionsErr       error
@@ -359,6 +360,9 @@ func (m *mockStore) HeadObject(_ string, _ string) (ObjectMetadata, error) {
 }
 func (m *mockStore) HeadObjectVersion(_ string, _ string, _ string) (ObjectMetadata, error) {
 	return m.headObjectMeta, m.headObjectErr
+}
+func (m *mockStore) SetObjectRestoreInitiated(_ string, _ string) error {
+	return m.setObjectRestoreInitiatedErr
 }
 func (m *mockStore) ListObjects(_ string) ([]ObjectInfo, error) {
 	return m.listObjectsObjs, m.listObjectsErr
@@ -4927,6 +4931,30 @@ func TestRestoreObject(t *testing.T) {
 		ro := newRouterWithMock(
 			&mockStore{bucketExists: true, headObjectErr: errors.New("disk fail")},
 		)
+		req := httptest.NewRequest(http.MethodPost, "/my-bucket/obj.txt?restore",
+			strings.NewReader(`<RestoreRequest/>`))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+
+	t.Run("POST returns 200 when restore already initiated", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			bucketExists:   true,
+			headObjectMeta: ObjectMetadata{RestoreInitiated: true},
+		})
+		req := httptest.NewRequest(http.MethodPost, "/my-bucket/obj.txt?restore",
+			strings.NewReader(`<RestoreRequest/>`))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("POST returns 500 when SetObjectRestoreInitiated fails", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			bucketExists:                 true,
+			setObjectRestoreInitiatedErr: errors.New("write fail"),
+		})
 		req := httptest.NewRequest(http.MethodPost, "/my-bucket/obj.txt?restore",
 			strings.NewReader(`<RestoreRequest/>`))
 		w := httptest.NewRecorder()

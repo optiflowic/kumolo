@@ -4972,3 +4972,34 @@ func TestVersioningErrorPaths(t *testing.T) {
 		},
 	)
 }
+
+func TestSetObjectRestoreInitiated(t *testing.T) {
+	setup := func(t *testing.T) (*Storage, string) {
+		t.Helper()
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("bucket", "us-east-1"))
+		_, err := s.PutObject("bucket", "obj.txt", strings.NewReader("data"), "text/plain", nil, "", "")
+		require.NoError(t, err)
+		return s, "bucket"
+	}
+
+	t.Run("marks restore initiated and is visible via HeadObject", func(t *testing.T) {
+		s, bucket := setup(t)
+		require.NoError(t, s.SetObjectRestoreInitiated(bucket, "obj.txt"))
+		meta, err := s.HeadObject(bucket, "obj.txt")
+		require.NoError(t, err)
+		assert.True(t, meta.RestoreInitiated)
+	})
+
+	t.Run("returns ErrBucketNotFound for missing bucket", func(t *testing.T) {
+		s := newTestStorage(t)
+		err := s.SetObjectRestoreInitiated("no-bucket", "obj.txt")
+		assert.ErrorIs(t, err, ErrBucketNotFound)
+	})
+
+	t.Run("returns ErrObjectNotFound for missing object", func(t *testing.T) {
+		s, bucket := setup(t)
+		err := s.SetObjectRestoreInitiated(bucket, "missing.txt")
+		assert.ErrorIs(t, err, ErrObjectNotFound)
+	})
+}

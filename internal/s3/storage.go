@@ -820,6 +820,26 @@ func (s *Storage) HeadObject(bucket, key string) (ObjectMetadata, error) {
 	return meta, nil
 }
 
+// SetObjectRestoreInitiated marks an object as having a restore request in progress.
+// Subsequent calls to handleRestoreObject will detect this and return 200 instead of 202.
+func (s *Storage) SetObjectRestoreInitiated(bucket, key string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.bucketExistsLocked(bucket) {
+		return ErrBucketNotFound
+	}
+	objPath := filepath.Join(bucket, key)
+	meta, err := s.readMeta(objPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return ErrObjectNotFound
+		}
+		return err
+	}
+	meta.RestoreInitiated = true
+	return s.writeMeta(objPath, meta)
+}
+
 func (s *Storage) ListObjects(bucket string) ([]ObjectInfo, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

@@ -38,6 +38,7 @@ type objectStore interface {
 	HeadObjectVersion(bucket, key, versionID string) (ObjectMetadata, error)
 	ListObjects(bucket string) ([]ObjectInfo, error)
 	ListObjectVersions(bucket string) ([]VersionInfo, []DeleteMarkerInfo, error)
+	SetObjectRestoreInitiated(bucket, key string) error
 }
 
 // multipartStore is the subset of Storage used by the Router for multipart upload operations.
