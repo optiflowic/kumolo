@@ -3396,10 +3396,36 @@ func TestCORSHelpers(t *testing.T) {
 			{"wildcard star matches any", []string{"*"}, "http://example.com", true},
 			{"exact match", []string{"http://example.com"}, "http://example.com", true},
 			{"no match", []string{"http://other.com"}, "http://example.com", false},
-			{"subdomain wildcard", []string{"http://*.example.com"}, "http://foo.example.com", true},
-			{"subdomain wildcard no match", []string{"http://*.example.com"}, "http://example.com", false},
-			{"multiple patterns first matches", []string{"http://a.com", "http://b.com"}, "http://a.com", true},
-			{"multiple patterns second matches", []string{"http://a.com", "http://b.com"}, "http://b.com", true},
+			{
+				"subdomain wildcard",
+				[]string{"http://*.example.com"},
+				"http://foo.example.com",
+				true,
+			},
+			{
+				"subdomain wildcard no match",
+				[]string{"http://*.example.com"},
+				"http://example.com",
+				false,
+			},
+			{
+				"subdomain wildcard rejects empty label",
+				[]string{"http://*.example.com"},
+				"http://.example.com",
+				false,
+			},
+			{
+				"multiple patterns first matches",
+				[]string{"http://a.com", "http://b.com"},
+				"http://a.com",
+				true,
+			},
+			{
+				"multiple patterns second matches",
+				[]string{"http://a.com", "http://b.com"},
+				"http://b.com",
+				true,
+			},
 			{"empty patterns", []string{}, "http://example.com", false},
 		}
 		for _, tt := range tests {
@@ -3438,8 +3464,18 @@ func TestCORSHelpers(t *testing.T) {
 			{"empty requested always matches", []string{"Content-Type"}, "", true},
 			{"wildcard allowed matches any", []string{"*"}, "X-Custom-Header", true},
 			{"exact match case insensitive", []string{"Content-Type"}, "content-type", true},
-			{"multiple requested all match", []string{"content-type", "x-amz-meta-foo"}, "content-type, x-amz-meta-foo", true},
-			{"one unmatched header fails", []string{"content-type"}, "content-type, x-custom", false},
+			{
+				"multiple requested all match",
+				[]string{"content-type", "x-amz-meta-foo"},
+				"content-type, x-amz-meta-foo",
+				true,
+			},
+			{
+				"one unmatched header fails",
+				[]string{"content-type"},
+				"content-type, x-custom",
+				false,
+			},
 			{"empty allowed rejects any header", []string{}, "content-type", false},
 		}
 		for _, tt := range tests {
@@ -3501,12 +3537,12 @@ func TestCORSPreflight(t *testing.T) {
 		assert.NotEmpty(t, w.Header().Get("Access-Control-Allow-Headers"))
 	})
 
-	t.Run("returns 400 when Origin header is missing", func(t *testing.T) {
+	t.Run("returns 403 when Origin header is missing", func(t *testing.T) {
 		ro := newRouterWithMock(&mockStore{getBucketCorsRules: rules})
 		req := httptest.NewRequest(http.MethodOptions, "/my-bucket/key", nil)
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Equal(t, http.StatusForbidden, w.Code)
 	})
 
 	t.Run("returns 403 when no CORS config", func(t *testing.T) {
@@ -3563,6 +3599,38 @@ func TestCORSPreflight(t *testing.T) {
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
+
+	t.Run(
+		"returns 403 when Origin present but Access-Control-Request-Method absent",
+		func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{getBucketCorsRules: rules})
+			req := httptest.NewRequest(http.MethodOptions, "/my-bucket/key", nil)
+			req.Header.Set("Origin", "http://example.com")
+			// No Access-Control-Request-Method header → empty string won't match any AllowedMethod
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusForbidden, w.Code)
+		},
+	)
+
+	t.Run("returns 403 when Origin absent", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{getBucketCorsRules: rules})
+		req := httptest.NewRequest(http.MethodOptions, "/my-bucket/key", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusForbidden, w.Code)
+	})
+
+	t.Run("returns 404 when bucket does not exist", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{getBucketCorsErr: ErrBucketNotFound})
+		req := httptest.NewRequest(http.MethodOptions, "/no-such-bucket/key", nil)
+		req.Header.Set("Origin", "http://example.com")
+		req.Header.Set("Access-Control-Request-Method", "GET")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchBucket")
+	})
 }
 
 func TestCORSSimpleRequest(t *testing.T) {
@@ -3571,10 +3639,18 @@ func TestCORSSimpleRequest(t *testing.T) {
 		t.Helper()
 		ro := newTestRouter(t)
 		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
-		putObj := httptest.NewRequest(http.MethodPut, "/my-bucket/key.txt", strings.NewReader("hello"))
+		putObj := httptest.NewRequest(
+			http.MethodPut,
+			"/my-bucket/key.txt",
+			strings.NewReader("hello"),
+		)
 		putObj.Header.Set("Content-Type", "text/plain")
 		ro.ServeHTTP(httptest.NewRecorder(), putObj)
-		putCORS := httptest.NewRequest(http.MethodPut, "/my-bucket?cors", strings.NewReader(corsBody))
+		putCORS := httptest.NewRequest(
+			http.MethodPut,
+			"/my-bucket?cors",
+			strings.NewReader(corsBody),
+		)
 		ro.ServeHTTP(httptest.NewRecorder(), putCORS)
 		return ro
 	}
@@ -3638,7 +3714,11 @@ func TestCORSSimpleRequest(t *testing.T) {
 	t.Run("GET with no CORS config gets no CORS headers", func(t *testing.T) {
 		ro := newTestRouter(t)
 		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
-		putObj := httptest.NewRequest(http.MethodPut, "/my-bucket/key.txt", strings.NewReader("hello"))
+		putObj := httptest.NewRequest(
+			http.MethodPut,
+			"/my-bucket/key.txt",
+			strings.NewReader("hello"),
+		)
 		putObj.Header.Set("Content-Type", "text/plain")
 		ro.ServeHTTP(httptest.NewRecorder(), putObj)
 		req := httptest.NewRequest(http.MethodGet, "/my-bucket/key.txt", nil)
