@@ -134,7 +134,20 @@ func (ro *Router) routeRoot(w http.ResponseWriter, r *http.Request) {
 
 func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, bucket string) {
 	q := r.URL.Query()
+	// Inject CORS headers only for data-access operations, not for bucket management
+	// sub-resources (which are typically called by server-side code, not browsers).
+	isMgmtSubresource := slices.ContainsFunc([]string{
+		"cors", "policy", "tagging", "versioning", "publicAccessBlock",
+		"encryption", "ownershipControls", "notification", "lifecycle",
+		"website", "logging", "accelerate", "replication", "requestPayment",
+	}, q.Has)
+	if r.Method != http.MethodOptions && !isMgmtSubresource {
+		ro.injectCORSHeaders(w, r, bucket)
+	}
 	switch r.Method {
+	case http.MethodOptions:
+		ro.handleCORSPreflight(w, r, bucket)
+		return
 	case http.MethodPut:
 		switch {
 		case q.Has("cors"):
@@ -522,7 +535,13 @@ func (ro *Router) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 
 func (ro *Router) routeObject(w http.ResponseWriter, r *http.Request, bucket, key string) {
 	q := r.URL.Query()
+	if r.Method != http.MethodOptions {
+		ro.injectCORSHeaders(w, r, bucket)
+	}
 	switch r.Method {
+	case http.MethodOptions:
+		ro.handleCORSPreflight(w, r, bucket)
+		return
 	case http.MethodPost:
 		switch {
 		case q.Has("uploads"):
@@ -913,6 +932,200 @@ func (ro *Router) handleDeleteBucketCors(w http.ResponseWriter, r *http.Request,
 		bucket,
 	)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// corsMatchOrigin reports whether origin matches any of the given patterns.
+// Each pattern may contain at most one '*' wildcard character.
+func corsMatchOrigin(patterns []string, origin string) bool {
+	for _, p := range patterns {
+		if p == "*" || corsWildcardMatch(p, origin) {
+			return true
+		}
+	}
+	return false
+}
+
+// corsWildcardMatch matches s against pattern where pattern may contain one '*'.
+// The '*' must match at least one character (empty match is not allowed).
+func corsWildcardMatch(pattern, s string) bool {
+	idx := strings.Index(pattern, "*")
+	if idx < 0 {
+		return pattern == s
+	}
+	prefix, suffix := pattern[:idx], pattern[idx+1:]
+	return len(s) >= len(prefix)+len(suffix)+1 &&
+		strings.HasPrefix(s, prefix) &&
+		strings.HasSuffix(s, suffix)
+}
+
+// corsMatchMethod reports whether method is in the allowed list (case-insensitive).
+func corsMatchMethod(allowed []string, method string) bool {
+	for _, m := range allowed {
+		if strings.EqualFold(m, method) {
+			return true
+		}
+	}
+	return false
+}
+
+// corsMatchRequestedHeaders reports whether every header in the comma-separated
+// requestedHeaders string is covered by allowed (supports "*" wildcard).
+func corsMatchRequestedHeaders(allowed []string, requestedHeaders string) bool {
+	if requestedHeaders == "" {
+		return true
+	}
+	for _, a := range allowed {
+		if a == "*" {
+			return true
+		}
+	}
+	for _, rh := range strings.Split(requestedHeaders, ",") {
+		rh = strings.TrimSpace(strings.ToLower(rh))
+		if rh == "" {
+			continue
+		}
+		found := false
+		for _, a := range allowed {
+			if strings.EqualFold(a, rh) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+// findMatchingCORSRule returns the first rule whose origin, method, and header
+// constraints all match. requestedHeaders may be empty for non-preflight checks;
+// when empty, header matching is intentionally skipped because actual (non-preflight)
+// requests do not send Access-Control-Request-Headers and AWS does not enforce
+// AllowedHeaders on simple responses.
+func findMatchingCORSRule(rules []CORSRule, origin, method, requestedHeaders string) *CORSRule {
+	for i := range rules {
+		rule := &rules[i]
+		if !corsMatchOrigin(rule.AllowedOrigins, origin) {
+			continue
+		}
+		if !corsMatchMethod(rule.AllowedMethods, method) {
+			continue
+		}
+		if requestedHeaders != "" &&
+			!corsMatchRequestedHeaders(rule.AllowedHeaders, requestedHeaders) {
+			continue
+		}
+		return rule
+	}
+	return nil
+}
+
+const corsAccessDeniedMsg = "CORSResponse: This CORS request is not allowed. This is usually because the " +
+	"evaluation of Origin, request method / Access-Control-Request-Method or " +
+	"Access-Control-Request-Headers are not whitelisted by the resource's CORS spec."
+
+// handleCORSPreflight processes an HTTP OPTIONS preflight request for bucket/object endpoints.
+func (ro *Router) handleCORSPreflight(w http.ResponseWriter, r *http.Request, bucket string) {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		writeError(w, r, http.StatusForbidden, "AccessForbidden", corsAccessDeniedMsg)
+		return
+	}
+	requestMethod := r.Header.Get("Access-Control-Request-Method")
+	requestHeaders := r.Header.Get("Access-Control-Request-Headers")
+
+	rules, err := ro.storage.GetBucketCors(bucket)
+	if err != nil {
+		if errors.Is(err, ErrBucketNotFound) {
+			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"cors preflight: bucket not found",
+				"bucket",
+				bucket,
+			)
+			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+				"The specified bucket does not exist.")
+			return
+		}
+		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			"cors preflight: no cors configuration",
+			"bucket",
+			bucket,
+		)
+		writeError(w, r, http.StatusForbidden, "AccessForbidden", corsAccessDeniedMsg)
+		return
+	}
+
+	rule := findMatchingCORSRule(rules, origin, requestMethod, requestHeaders)
+	if rule == nil {
+		slog.Debug( // #nosec G706 -- bucket/origin come from request; log injection risk accepted for a local dev emulator
+			"cors preflight: no matching rule",
+			"bucket",
+			bucket,
+			"origin",
+			origin,
+			"method",
+			requestMethod,
+		)
+		writeError(w, r, http.StatusForbidden, "AccessForbidden", corsAccessDeniedMsg)
+		return
+	}
+
+	h := w.Header()
+	// Literal "*" entry in AllowedOrigins → respond with wildcard (not the echoed origin).
+	// A pattern like "http://*.example.com" is matched earlier but is not the literal "*",
+	// so we echo back the actual origin value in that case.
+	if slices.Contains(rule.AllowedOrigins, "*") {
+		h.Set("Access-Control-Allow-Origin", "*")
+	} else {
+		h.Set("Access-Control-Allow-Origin", origin)
+		h.Set("Vary", "Origin, Access-Control-Request-Headers")
+	}
+	h.Set("Access-Control-Allow-Methods", strings.Join(rule.AllowedMethods, ", "))
+	if len(rule.AllowedHeaders) > 0 {
+		h.Set("Access-Control-Allow-Headers", strings.Join(rule.AllowedHeaders, ", "))
+	}
+	if rule.MaxAgeSeconds > 0 {
+		h.Set("Access-Control-Max-Age", strconv.Itoa(rule.MaxAgeSeconds))
+	}
+	slog.Debug( // #nosec G706 -- bucket/origin come from request; log injection risk accepted for a local dev emulator
+		"cors preflight: allowed",
+		"bucket",
+		bucket,
+		"origin",
+		origin,
+		"method",
+		requestMethod,
+	)
+	w.WriteHeader(http.StatusOK)
+}
+
+// injectCORSHeaders adds CORS response headers when the request carries an Origin
+// header and the bucket has a matching CORS rule. Called for all non-OPTIONS requests.
+func (ro *Router) injectCORSHeaders(w http.ResponseWriter, r *http.Request, bucket string) {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return
+	}
+	rules, err := ro.storage.GetBucketCors(bucket)
+	if err != nil {
+		return
+	}
+	rule := findMatchingCORSRule(rules, origin, r.Method, "")
+	if rule == nil {
+		return
+	}
+	h := w.Header()
+	// Literal "*" entry → wildcard response; wildcard pattern match → echo origin.
+	if slices.Contains(rule.AllowedOrigins, "*") {
+		h.Set("Access-Control-Allow-Origin", "*")
+	} else {
+		h.Set("Access-Control-Allow-Origin", origin)
+		h.Set("Vary", "Origin")
+	}
+	if len(rule.ExposeHeaders) > 0 {
+		h.Set("Access-Control-Expose-Headers", strings.Join(rule.ExposeHeaders, ", "))
+	}
 }
 
 func (ro *Router) handlePutBucketPolicy(w http.ResponseWriter, r *http.Request, bucket string) {
