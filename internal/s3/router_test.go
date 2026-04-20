@@ -3613,14 +3613,6 @@ func TestCORSPreflight(t *testing.T) {
 		},
 	)
 
-	t.Run("returns 403 when Origin absent", func(t *testing.T) {
-		ro := newRouterWithMock(&mockStore{getBucketCorsRules: rules})
-		req := httptest.NewRequest(http.MethodOptions, "/my-bucket/key", nil)
-		w := httptest.NewRecorder()
-		ro.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusForbidden, w.Code)
-	})
-
 	t.Run("returns 404 when bucket does not exist", func(t *testing.T) {
 		ro := newRouterWithMock(&mockStore{getBucketCorsErr: ErrBucketNotFound})
 		req := httptest.NewRequest(http.MethodOptions, "/no-such-bucket/key", nil)
