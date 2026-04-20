@@ -557,6 +557,8 @@ func (ro *Router) routeObject(w http.ResponseWriter, r *http.Request, bucket, ke
 		switch {
 		case q.Has("tagging"):
 			ro.handlePutObjectTagging(w, r, bucket, key)
+		case q.Has("partNumber") && q.Has("uploadId") && r.Header.Get(amzCopySource) != "":
+			ro.handleUploadPartCopy(w, r, bucket, key)
 		case q.Has("partNumber") && q.Has("uploadId"):
 			ro.handleUploadPart(w, r, bucket, key)
 		case r.Header.Get(amzCopySource) != "":

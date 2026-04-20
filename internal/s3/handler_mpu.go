@@ -5,7 +5,9 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 )
 
 func (ro *Router) handleCreateMultipartUpload(
@@ -138,6 +140,136 @@ func (ro *Router) handleUploadPart(w http.ResponseWriter, r *http.Request, bucke
 	)
 	w.Header().Set("ETag", etag)
 	w.WriteHeader(http.StatusOK)
+}
+
+func (ro *Router) handleUploadPartCopy(w http.ResponseWriter, r *http.Request, bucket, key string) {
+	q := r.URL.Query()
+	uploadID := q.Get("uploadId")
+	if uploadID == "" {
+		writeError(w, r, http.StatusBadRequest, "InvalidArgument", "uploadId is required.")
+		return
+	}
+	partNumberStr := q.Get("partNumber")
+	partNumber, err := strconv.Atoi(partNumberStr)
+	if err != nil || partNumber < 1 || partNumber > 10000 {
+		writeError(
+			w,
+			r,
+			http.StatusBadRequest,
+			"InvalidArgument",
+			"partNumber must be an integer between 1 and 10000.",
+		)
+		return
+	}
+
+	rawCopySource, err := url.PathUnescape(r.Header.Get(amzCopySource))
+	if err != nil {
+		writeError(w, r, http.StatusBadRequest, "InvalidArgument", "x-amz-copy-source is invalid.")
+		return
+	}
+	var srcVersionID string
+	copySource := rawCopySource
+	if idx := strings.IndexByte(rawCopySource, '?'); idx != -1 {
+		copySource = rawCopySource[:idx]
+		if qs, qErr := url.ParseQuery(rawCopySource[idx+1:]); qErr == nil {
+			srcVersionID = qs.Get("versionId")
+		}
+	}
+	srcBucket, srcKey := parsePath(copySource)
+	if srcBucket == "" || srcKey == "" {
+		writeError(w, r, http.StatusBadRequest, "InvalidArgument",
+			"x-amz-copy-source must be in the form /<bucket>/<key>.")
+		return
+	}
+
+	var byteRange *ByteRange
+	if rangeHdr := r.Header.Get("x-amz-copy-source-range"); rangeHdr != "" {
+		br, parseErr := parseCopySourceRange(rangeHdr)
+		if parseErr != nil {
+			writeError(w, r, http.StatusBadRequest, "InvalidArgument",
+				"x-amz-copy-source-range value must be of the form bytes=first-last where first and last are byte offsets.")
+			return
+		}
+		byteRange = br
+	}
+
+	etag, lastModified, err := ro.storage.UploadPartCopy(
+		uploadID, partNumber, srcBucket, srcKey, srcVersionID, byteRange,
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrUploadNotFound):
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"upload not found",
+				"uploadId",
+				uploadID,
+			)
+			writeError(w, r, http.StatusNotFound, "NoSuchUpload",
+				"The specified upload does not exist.")
+		case errors.Is(err, ErrObjectNotFound):
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"source object not found",
+				"srcBucket",
+				srcBucket,
+				"srcKey",
+				srcKey,
+			)
+			writeError(w, r, http.StatusNotFound, "NoSuchKey",
+				"The specified key does not exist.")
+		default:
+			slog.Error( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"failed to upload part copy",
+				"bucket",
+				bucket,
+				"key",
+				key,
+				"uploadId",
+				uploadID,
+				"partNumber",
+				partNumber,
+				"err",
+				err,
+			)
+			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+	slog.Info( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+		"part copy uploaded",
+		"bucket",
+		bucket,
+		"key",
+		key,
+		"uploadId",
+		uploadID,
+		"partNumber",
+		partNumber,
+	)
+	writeXML(w, http.StatusOK, copyPartResult{
+		ETag:         etag,
+		LastModified: lastModified,
+	})
+}
+
+// parseCopySourceRange parses a "bytes=first-last" range header value.
+func parseCopySourceRange(s string) (*ByteRange, error) {
+	const prefix = "bytes="
+	if !strings.HasPrefix(s, prefix) {
+		return nil, errors.New("invalid range")
+	}
+	parts := strings.SplitN(s[len(prefix):], "-", 2)
+	if len(parts) != 2 {
+		return nil, errors.New("invalid range")
+	}
+	start, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || start < 0 {
+		return nil, errors.New("invalid range start")
+	}
+	end, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil || end < start {
+		return nil, errors.New("invalid range end")
+	}
+	return &ByteRange{Start: start, End: end}, nil
 }
 
 func (ro *Router) handleCompleteMultipartUpload(

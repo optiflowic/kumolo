@@ -5011,3 +5011,114 @@ func TestSetObjectRestoreInitiated(t *testing.T) {
 		assert.ErrorIs(t, err, ErrObjectNotFound)
 	})
 }
+
+func TestUploadPartCopy(t *testing.T) {
+	setup := func(t *testing.T) (*Storage, string) {
+		t.Helper()
+		s, _ := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("src-bucket", ""))
+		require.NoError(t, s.CreateBucket("dst-bucket", ""))
+		_, err := s.PutObject("src-bucket", "source.txt", strings.NewReader("hello world"), "text/plain", nil, "", "")
+		require.NoError(t, err)
+		uploadID, err := s.CreateMultipartUpload("dst-bucket", "dest.txt", "text/plain", "", "")
+		require.NoError(t, err)
+		return s, uploadID
+	}
+
+	t.Run("copies full source object as part", func(t *testing.T) {
+		s, uploadID := setup(t)
+		etag, lastModified, err := s.UploadPartCopy(uploadID, 1, "src-bucket", "source.txt", "", nil)
+		require.NoError(t, err)
+		assert.NotEmpty(t, etag)
+		assert.False(t, lastModified.IsZero())
+
+		meta, err := s.CompleteMultipartUpload(uploadID, []CompletePart{{PartNumber: 1, ETag: etag}})
+		require.NoError(t, err)
+
+		f, _, err := s.GetObject("dst-bucket", "dest.txt")
+		require.NoError(t, err)
+		defer func() { _ = f.Close() }()
+		data, err := io.ReadAll(f)
+		require.NoError(t, err)
+		assert.Equal(t, "hello world", string(data))
+		assert.Contains(t, meta.ETag, "-1")
+	})
+
+	t.Run("copies byte range of source as part", func(t *testing.T) {
+		s, uploadID := setup(t)
+		etag, _, err := s.UploadPartCopy(uploadID, 1, "src-bucket", "source.txt", "", &ByteRange{Start: 0, End: 4})
+		require.NoError(t, err)
+		assert.NotEmpty(t, etag)
+
+		meta, err := s.CompleteMultipartUpload(uploadID, []CompletePart{{PartNumber: 1, ETag: etag}})
+		require.NoError(t, err)
+
+		f, _, err := s.GetObject("dst-bucket", "dest.txt")
+		require.NoError(t, err)
+		defer func() { _ = f.Close() }()
+		data, err := io.ReadAll(f)
+		require.NoError(t, err)
+		assert.Equal(t, "hello", string(data))
+		_ = meta
+	})
+
+	t.Run("copies middle byte range of source as part", func(t *testing.T) {
+		s, uploadID := setup(t)
+		etag, _, err := s.UploadPartCopy(uploadID, 1, "src-bucket", "source.txt", "", &ByteRange{Start: 6, End: 10})
+		require.NoError(t, err)
+
+		_, err = s.CompleteMultipartUpload(uploadID, []CompletePart{{PartNumber: 1, ETag: etag}})
+		require.NoError(t, err)
+
+		f, _, err := s.GetObject("dst-bucket", "dest.txt")
+		require.NoError(t, err)
+		defer func() { _ = f.Close() }()
+		data, err := io.ReadAll(f)
+		require.NoError(t, err)
+		assert.Equal(t, "world", string(data))
+	})
+
+	t.Run("returns ErrUploadNotFound for nonexistent upload", func(t *testing.T) {
+		s, _ := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("src-bucket", ""))
+		_, err := s.PutObject("src-bucket", "obj.txt", strings.NewReader("data"), "text/plain", nil, "", "")
+		require.NoError(t, err)
+		_, _, err = s.UploadPartCopy("nonexistent-upload", 1, "src-bucket", "obj.txt", "", nil)
+		assert.ErrorIs(t, err, ErrUploadNotFound)
+	})
+
+	t.Run("returns ErrObjectNotFound for nonexistent source object", func(t *testing.T) {
+		s, uploadID := setup(t)
+		_, _, err := s.UploadPartCopy(uploadID, 1, "src-bucket", "missing.txt", "", nil)
+		assert.ErrorIs(t, err, ErrObjectNotFound)
+	})
+
+	t.Run("returns ErrObjectNotFound for nonexistent source bucket", func(t *testing.T) {
+		s, uploadID := setup(t)
+		_, _, err := s.UploadPartCopy(uploadID, 1, "no-such-bucket", "obj.txt", "", nil)
+		assert.ErrorIs(t, err, ErrObjectNotFound)
+	})
+
+	t.Run("copies versioned source object", func(t *testing.T) {
+		s, uploadID := setup(t)
+		require.NoError(t, s.PutBucketVersioning("src-bucket", "Enabled"))
+
+		meta1, err := s.PutObject("src-bucket", "ver.txt", strings.NewReader("version-one"), "text/plain", nil, "", "")
+		require.NoError(t, err)
+		_, err = s.PutObject("src-bucket", "ver.txt", strings.NewReader("version-two"), "text/plain", nil, "", "")
+		require.NoError(t, err)
+
+		etag, _, err := s.UploadPartCopy(uploadID, 1, "src-bucket", "ver.txt", meta1.VersionID, nil)
+		require.NoError(t, err)
+
+		_, err = s.CompleteMultipartUpload(uploadID, []CompletePart{{PartNumber: 1, ETag: etag}})
+		require.NoError(t, err)
+
+		f, _, err := s.GetObject("dst-bucket", "dest.txt")
+		require.NoError(t, err)
+		defer func() { _ = f.Close() }()
+		data, err := io.ReadAll(f)
+		require.NoError(t, err)
+		assert.Equal(t, "version-one", string(data))
+	})
+}

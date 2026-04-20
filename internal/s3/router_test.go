@@ -245,6 +245,9 @@ type mockStore struct {
 	createMultipartUploadErr     error
 	uploadPartETag               string
 	uploadPartErr                error
+	uploadPartCopyETag           string
+	uploadPartCopyLastModified   time.Time
+	uploadPartCopyErr            error
 	completeMultipartUploadMeta  ObjectMetadata
 	completeMultipartUploadErr   error
 	abortMultipartUploadErr      error
@@ -375,6 +378,9 @@ func (m *mockStore) CreateMultipartUpload(_, _, _, _, _ string) (string, error) 
 }
 func (m *mockStore) UploadPart(_ string, _ int, _ io.Reader) (string, error) {
 	return m.uploadPartETag, m.uploadPartErr
+}
+func (m *mockStore) UploadPartCopy(_ string, _ int, _, _, _ string, _ *ByteRange) (string, time.Time, error) {
+	return m.uploadPartCopyETag, m.uploadPartCopyLastModified, m.uploadPartCopyErr
 }
 func (m *mockStore) CompleteMultipartUpload(_ string, _ []CompletePart) (ObjectMetadata, error) {
 	return m.completeMultipartUploadMeta, m.completeMultipartUploadErr
@@ -2815,6 +2821,172 @@ func TestRouterListParts(t *testing.T) {
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+}
+
+func TestRouterUploadPartCopy(t *testing.T) {
+	setup := func(t *testing.T) (*Router, string, string) {
+		t.Helper()
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/src-bucket", nil))
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/dst-bucket", nil))
+		putReq := httptest.NewRequest(http.MethodPut, "/src-bucket/source.txt", strings.NewReader("hello world"))
+		putReq.Header.Set("Content-Type", "text/plain")
+		ro.ServeHTTP(httptest.NewRecorder(), putReq)
+
+		initReq := httptest.NewRequest(http.MethodPost, "/dst-bucket/dest.txt?uploads", nil)
+		initW := httptest.NewRecorder()
+		ro.ServeHTTP(initW, initReq)
+		require.Equal(t, http.StatusOK, initW.Code)
+		var initResult struct {
+			UploadID string `xml:"UploadId"`
+		}
+		require.NoError(t, xml.Unmarshal(initW.Body.Bytes(), &initResult))
+		return ro, initResult.UploadID, "/dst-bucket/dest.txt"
+	}
+
+	t.Run("copies full source object as part and returns CopyPartResult", func(t *testing.T) {
+		ro, uploadID, path := setup(t)
+		req := httptest.NewRequest(
+			http.MethodPut,
+			path+"?partNumber=1&uploadId="+uploadID,
+			nil,
+		)
+		req.Header.Set("x-amz-copy-source", "/src-bucket/source.txt")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), "CopyPartResult")
+		assert.Contains(t, w.Body.String(), "ETag")
+		assert.Contains(t, w.Body.String(), "LastModified")
+	})
+
+	t.Run("copies byte range of source as part", func(t *testing.T) {
+		ro, uploadID, path := setup(t)
+		req := httptest.NewRequest(
+			http.MethodPut,
+			path+"?partNumber=1&uploadId="+uploadID,
+			nil,
+		)
+		req.Header.Set("x-amz-copy-source", "/src-bucket/source.txt")
+		req.Header.Set("x-amz-copy-source-range", "bytes=0-4")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), "CopyPartResult")
+	})
+
+	t.Run("part copy integrates with complete multipart upload", func(t *testing.T) {
+		ro, uploadID, path := setup(t)
+		req := httptest.NewRequest(
+			http.MethodPut,
+			path+"?partNumber=1&uploadId="+uploadID,
+			nil,
+		)
+		req.Header.Set("x-amz-copy-source", "/src-bucket/source.txt")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		var copyResult copyPartResult
+		require.NoError(t, xml.Unmarshal(w.Body.Bytes(), &copyResult))
+
+		completeBody, err := xml.Marshal(completeMultipartUploadRequest{
+			Parts: []xmlCompletePart{{PartNumber: 1, ETag: copyResult.ETag}},
+		})
+		require.NoError(t, err)
+		completeReq := httptest.NewRequest(
+			http.MethodPost,
+			path+"?uploadId="+uploadID,
+			strings.NewReader(string(completeBody)),
+		)
+		completeW := httptest.NewRecorder()
+		ro.ServeHTTP(completeW, completeReq)
+		require.Equal(t, http.StatusOK, completeW.Code)
+
+		getReq := httptest.NewRequest(http.MethodGet, path, nil)
+		getW := httptest.NewRecorder()
+		ro.ServeHTTP(getW, getReq)
+		assert.Equal(t, http.StatusOK, getW.Code)
+		assert.Equal(t, "hello world", getW.Body.String())
+	})
+
+	t.Run("returns 404 when upload does not exist", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/src-bucket", nil))
+		putReq := httptest.NewRequest(http.MethodPut, "/src-bucket/obj.txt", strings.NewReader("data"))
+		ro.ServeHTTP(httptest.NewRecorder(), putReq)
+		req := httptest.NewRequest(http.MethodPut, "/dst-bucket/dest.txt?partNumber=1&uploadId=nonexistent", nil)
+		req.Header.Set("x-amz-copy-source", "/src-bucket/obj.txt")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchUpload")
+	})
+
+	t.Run("returns 404 when source object does not exist", func(t *testing.T) {
+		ro, uploadID, path := setup(t)
+		req := httptest.NewRequest(
+			http.MethodPut,
+			path+"?partNumber=1&uploadId="+uploadID,
+			nil,
+		)
+		req.Header.Set("x-amz-copy-source", "/src-bucket/nonexistent.txt")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchKey")
+	})
+
+	t.Run("returns 400 for invalid partNumber", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{})
+		req := httptest.NewRequest(http.MethodPut, "/bucket/key?partNumber=0&uploadId=abc", nil)
+		req.Header.Set("x-amz-copy-source", "/src/obj.txt")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidArgument")
+	})
+
+	t.Run("returns 400 for missing uploadId", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{})
+		req := httptest.NewRequest(http.MethodPut, "/bucket/key?partNumber=1&uploadId=", nil)
+		req.Header.Set("x-amz-copy-source", "/src/obj.txt")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidArgument")
+	})
+
+	t.Run("returns 400 for invalid x-amz-copy-source-range", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{})
+		req := httptest.NewRequest(http.MethodPut, "/bucket/key?partNumber=1&uploadId=abc", nil)
+		req.Header.Set("x-amz-copy-source", "/src/obj.txt")
+		req.Header.Set("x-amz-copy-source-range", "invalid-range")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidArgument")
+	})
+
+	t.Run("returns 400 for invalid x-amz-copy-source", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{})
+		req := httptest.NewRequest(http.MethodPut, "/bucket/key?partNumber=1&uploadId=abc", nil)
+		req.Header.Set("x-amz-copy-source", "no-slash-no-key")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidArgument")
+	})
+
+	t.Run("returns 500 on storage error", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{uploadPartCopyErr: errors.New("disk failure")})
+		req := httptest.NewRequest(http.MethodPut, "/bucket/key?partNumber=1&uploadId=abc", nil)
+		req.Header.Set("x-amz-copy-source", "/src-bucket/obj.txt")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
 }
