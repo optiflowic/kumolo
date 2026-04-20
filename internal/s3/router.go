@@ -136,11 +136,11 @@ func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, bucket str
 	q := r.URL.Query()
 	// Inject CORS headers only for data-access operations, not for bucket management
 	// sub-resources (which are typically called by server-side code, not browsers).
-	isMgmtSubresource := q.Has("cors") || q.Has("policy") || q.Has("tagging") ||
-		q.Has("versioning") || q.Has("publicAccessBlock") || q.Has("encryption") ||
-		q.Has("ownershipControls") || q.Has("notification") || q.Has("lifecycle") ||
-		q.Has("website") || q.Has("logging") || q.Has("accelerate") ||
-		q.Has("replication") || q.Has("requestPayment")
+	isMgmtSubresource := slices.ContainsFunc([]string{
+		"cors", "policy", "tagging", "versioning", "publicAccessBlock",
+		"encryption", "ownershipControls", "notification", "lifecycle",
+		"website", "logging", "accelerate", "replication", "requestPayment",
+	}, q.Has)
 	if r.Method != http.MethodOptions && !isMgmtSubresource {
 		ro.injectCORSHeaders(w, r, bucket)
 	}
