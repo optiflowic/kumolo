@@ -275,7 +275,8 @@ func parseCopySourceRange(s string) (*ByteRange, error) {
 		return nil, errors.New("invalid range")
 	}
 	start, err := strconv.ParseInt(parts[0], 10, 64)
-	if err != nil || start < 0 {
+	if err != nil ||
+		start < 0 { // start < 0 is untestable: a leading '-' in the value causes SplitN to produce an empty parts[0], so ParseInt always errors first
 		return nil, errors.New("invalid range start")
 	}
 	end, err := strconv.ParseInt(parts[1], 10, 64)

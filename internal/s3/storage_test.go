@@ -5176,4 +5176,47 @@ func TestUploadPartCopy(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "version-one", string(data))
 	})
+
+	t.Run("copies current version when versionId matches current object", func(t *testing.T) {
+		s, uploadID := setup(t)
+		require.NoError(t, s.PutBucketVersioning("src-bucket", "Enabled"))
+
+		meta, err := s.PutObject(
+			"src-bucket", "cur.txt", strings.NewReader("current"), "text/plain", nil, "", "",
+		)
+		require.NoError(t, err)
+		require.NotEmpty(t, meta.VersionID)
+
+		// meta.VersionID is the current version — exercises the cm.VersionID == srcVersionID branch.
+		etag, _, err := s.UploadPartCopy(uploadID, 1, "src-bucket", "cur.txt", meta.VersionID, nil)
+		require.NoError(t, err)
+
+		_, err = s.CompleteMultipartUpload(uploadID, []CompletePart{{PartNumber: 1, ETag: etag}})
+		require.NoError(t, err)
+
+		f, _, err := s.GetObject("dst-bucket", "dest.txt")
+		require.NoError(t, err)
+		defer func() { _ = f.Close() }()
+		d, err := io.ReadAll(f)
+		require.NoError(t, err)
+		assert.Equal(t, "current", string(d))
+	})
+
+	t.Run("returns ErrObjectNotFound for versioned delete marker", func(t *testing.T) {
+		s, uploadID := setup(t)
+		require.NoError(t, s.PutBucketVersioning("src-bucket", "Enabled"))
+
+		_, err := s.PutObject(
+			"src-bucket", "del.txt", strings.NewReader("data"), "text/plain", nil, "", "",
+		)
+		require.NoError(t, err)
+
+		// DeleteObjectVersioned creates a delete marker and returns its versionID.
+		dmVersionID, _, err := s.DeleteObjectVersioned("src-bucket", "del.txt")
+		require.NoError(t, err)
+		require.NotEmpty(t, dmVersionID)
+
+		_, _, err = s.UploadPartCopy(uploadID, 1, "src-bucket", "del.txt", dmVersionID, nil)
+		assert.ErrorIs(t, err, ErrObjectNotFound)
+	})
 }

@@ -3018,6 +3018,62 @@ func TestRouterUploadPartCopy(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "NoSuchBucket")
 	})
 
+	t.Run("returns 400 for invalid percent-encoding in copy source", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{})
+		req := httptest.NewRequest(http.MethodPut, "/bucket/key?partNumber=1&uploadId=abc", nil)
+		req.Header.Set("x-amz-copy-source", "/bucket/%ZZ")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidArgument")
+	})
+
+	t.Run("parses versionId from copy source query string", func(t *testing.T) {
+		ro, uploadID, path := setup(t)
+		// Enable versioning on src-bucket and capture the first version's ID.
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(
+				http.MethodPut,
+				"/src-bucket?versioning",
+				strings.NewReader(
+					`<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`,
+				),
+			),
+		)
+		putReq := httptest.NewRequest(
+			http.MethodPut,
+			"/src-bucket/ver.txt",
+			strings.NewReader("v1"),
+		)
+		putReq.Header.Set("Content-Type", "text/plain")
+		putW := httptest.NewRecorder()
+		ro.ServeHTTP(putW, putReq)
+		require.Equal(t, http.StatusOK, putW.Code)
+		v1ID := putW.Header().Get("x-amz-version-id")
+		require.NotEmpty(t, v1ID)
+
+		// Overwrite so the current version is v2.
+		putReq2 := httptest.NewRequest(
+			http.MethodPut,
+			"/src-bucket/ver.txt",
+			strings.NewReader("v2"),
+		)
+		ro.ServeHTTP(httptest.NewRecorder(), putReq2)
+
+		// UploadPartCopy referencing v1 via ?versionId= in copy source.
+		req := httptest.NewRequest(
+			http.MethodPut,
+			path+"?partNumber=1&uploadId="+uploadID,
+			nil,
+		)
+		req.Header.Set("x-amz-copy-source", "/src-bucket/ver.txt?versionId="+v1ID)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), "CopyPartResult")
+	})
+
 	t.Run("returns 500 on storage error", func(t *testing.T) {
 		ro := newRouterWithMock(&mockStore{uploadPartCopyErr: errors.New("disk failure")})
 		req := httptest.NewRequest(http.MethodPut, "/bucket/key?partNumber=1&uploadId=abc", nil)
@@ -3026,6 +3082,63 @@ func TestRouterUploadPartCopy(t *testing.T) {
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
+}
+
+func TestParseCopySourceRange(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+		want    *ByteRange
+	}{
+		{
+			name:  "valid full range",
+			input: "bytes=0-99",
+			want:  &ByteRange{Start: 0, End: 99},
+		},
+		{
+			name:  "valid single byte",
+			input: "bytes=5-5",
+			want:  &ByteRange{Start: 5, End: 5},
+		},
+		{
+			name:    "missing bytes= prefix",
+			input:   "0-99",
+			wantErr: true,
+		},
+		{
+			name:    "no dash (missing end)",
+			input:   "bytes=100",
+			wantErr: true,
+		},
+		{
+			name:    "non-numeric start",
+			input:   "bytes=abc-99",
+			wantErr: true,
+		},
+		{
+			name:    "end less than start",
+			input:   "bytes=10-5",
+			wantErr: true,
+		},
+		{
+			name:    "non-numeric end",
+			input:   "bytes=0-abc",
+			wantErr: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseCopySourceRange(tc.input)
+			if tc.wantErr {
+				assert.Error(t, err)
+				assert.Nil(t, got)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, got)
+			}
+		})
+	}
 }
 
 func TestObjectTaggingHandlers(t *testing.T) {

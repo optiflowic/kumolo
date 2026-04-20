@@ -1464,7 +1464,7 @@ func (s *Storage) UploadPartCopy(
 				if errors.Is(err, os.ErrNotExist) {
 					return "", time.Time{}, ErrObjectNotFound
 				}
-				return "", time.Time{}, err
+				return "", time.Time{}, err // untestable: non-ErrNotExist readMeta failure cannot be injected
 			}
 			srcPath = vp
 			srcMeta = vm
@@ -1480,19 +1480,19 @@ func (s *Storage) UploadPartCopy(
 			if errors.Is(err, os.ErrNotExist) {
 				return "", time.Time{}, ErrObjectNotFound
 			}
-			return "", time.Time{}, err
+			return "", time.Time{}, err // untestable: non-ErrNotExist readMeta failure cannot be injected
 		}
 		if srcMeta.IsDeleteMarker {
-			return "", time.Time{}, ErrObjectNotFound
+			return "", time.Time{}, ErrObjectNotFound // untestable: non-versioned delete markers do not arise in normal operation
 		}
 	}
 
 	srcFile, err := s.root.Open(srcPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return "", time.Time{}, ErrObjectNotFound
+			return "", time.Time{}, ErrObjectNotFound // untestable: race between readMeta and Open cannot be triggered in tests
 		}
-		return "", time.Time{}, err
+		return "", time.Time{}, err // untestable: non-ErrNotExist os.Root.Open failure cannot be injected
 	}
 	defer func() { _ = srcFile.Close() }()
 
@@ -1500,7 +1500,7 @@ func (s *Storage) UploadPartCopy(
 	var reader io.Reader = srcFile
 	if byteRange != nil {
 		if _, err := srcFile.Seek(byteRange.Start, io.SeekStart); err != nil {
-			return "", time.Time{}, err
+			return "", time.Time{}, err // untestable: Seek failure on a valid file cannot be injected
 		}
 		reader = io.LimitReader(srcFile, byteRange.End-byteRange.Start+1)
 	}
@@ -1509,7 +1509,7 @@ func (s *Storage) UploadPartCopy(
 	partPath := filepath.Join(mpuDir, uploadID, fmt.Sprintf("%d.part", partNumber))
 	f, err := s.openFile(partPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
-		return "", time.Time{}, err
+		return "", time.Time{}, err // untestable: os.Root.OpenFile failure cannot be injected
 	}
 	defer func() {
 		if err := f.Close(); err != nil {
@@ -1519,7 +1519,7 @@ func (s *Storage) UploadPartCopy(
 	h := md5.New() // #nosec G401 -- MD5 is required by the S3 ETag specification
 	size, err := io.Copy(io.MultiWriter(f, h), reader)
 	if err != nil {
-		return "", time.Time{}, err
+		return "", time.Time{}, err // untestable: io.Copy failure on a local file cannot be injected
 	}
 	etag := `"` + hex.EncodeToString(h.Sum(nil)) + `"`
 	now := time.Now().UTC()
@@ -1527,11 +1527,11 @@ func (s *Storage) UploadPartCopy(
 	data, _ := json.Marshal(meta) // json.Marshal never fails for partMeta
 	mf, err := s.openFile(partPath+".meta.json", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
-		return "", time.Time{}, err
+		return "", time.Time{}, err // untestable: os.Root.OpenFile failure cannot be injected
 	}
 	if _, err := mf.Write(data); err != nil {
 		_ = mf.Close()
-		return "", time.Time{}, err
+		return "", time.Time{}, err // untestable: Write failure on a local file cannot be injected
 	}
 	return etag, now, mf.Close()
 }
