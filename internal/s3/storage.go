@@ -1444,6 +1444,10 @@ func (s *Storage) UploadPartCopy(
 		return "", time.Time{}, err
 	}
 
+	if !s.bucketExistsLocked(srcBucket) {
+		return "", time.Time{}, ErrBucketNotFound
+	}
+
 	// Resolve source object path and metadata.
 	var srcPath string
 	var srcMeta ObjectMetadata

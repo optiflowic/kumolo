@@ -186,8 +186,13 @@ func (ro *Router) handleUploadPartCopy(w http.ResponseWriter, r *http.Request, b
 	if rangeHdr := r.Header.Get("x-amz-copy-source-range"); rangeHdr != "" {
 		br, parseErr := parseCopySourceRange(rangeHdr)
 		if parseErr != nil {
-			writeError(w, r, http.StatusBadRequest, "InvalidArgument",
-				"x-amz-copy-source-range value must be of the form bytes=first-last where first and last are byte offsets.")
+			writeError(
+				w,
+				r,
+				http.StatusBadRequest,
+				"InvalidArgument",
+				"x-amz-copy-source-range value must be of the form bytes=first-last where first and last are byte offsets.",
+			)
 			return
 		}
 		byteRange = br
@@ -206,6 +211,14 @@ func (ro *Router) handleUploadPartCopy(w http.ResponseWriter, r *http.Request, b
 			)
 			writeError(w, r, http.StatusNotFound, "NoSuchUpload",
 				"The specified upload does not exist.")
+		case errors.Is(err, ErrBucketNotFound):
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"source bucket not found",
+				"srcBucket",
+				srcBucket,
+			)
+			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+				"The specified bucket does not exist.")
 		case errors.Is(err, ErrObjectNotFound):
 			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
 				"source object not found",

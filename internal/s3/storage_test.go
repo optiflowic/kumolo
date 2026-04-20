@@ -5018,7 +5018,15 @@ func TestUploadPartCopy(t *testing.T) {
 		s, _ := newTestStorageWithRoot(t)
 		require.NoError(t, s.CreateBucket("src-bucket", ""))
 		require.NoError(t, s.CreateBucket("dst-bucket", ""))
-		_, err := s.PutObject("src-bucket", "source.txt", strings.NewReader("hello world"), "text/plain", nil, "", "")
+		_, err := s.PutObject(
+			"src-bucket",
+			"source.txt",
+			strings.NewReader("hello world"),
+			"text/plain",
+			nil,
+			"",
+			"",
+		)
 		require.NoError(t, err)
 		uploadID, err := s.CreateMultipartUpload("dst-bucket", "dest.txt", "text/plain", "", "")
 		require.NoError(t, err)
@@ -5027,12 +5035,22 @@ func TestUploadPartCopy(t *testing.T) {
 
 	t.Run("copies full source object as part", func(t *testing.T) {
 		s, uploadID := setup(t)
-		etag, lastModified, err := s.UploadPartCopy(uploadID, 1, "src-bucket", "source.txt", "", nil)
+		etag, lastModified, err := s.UploadPartCopy(
+			uploadID,
+			1,
+			"src-bucket",
+			"source.txt",
+			"",
+			nil,
+		)
 		require.NoError(t, err)
 		assert.NotEmpty(t, etag)
 		assert.False(t, lastModified.IsZero())
 
-		meta, err := s.CompleteMultipartUpload(uploadID, []CompletePart{{PartNumber: 1, ETag: etag}})
+		meta, err := s.CompleteMultipartUpload(
+			uploadID,
+			[]CompletePart{{PartNumber: 1, ETag: etag}},
+		)
 		require.NoError(t, err)
 
 		f, _, err := s.GetObject("dst-bucket", "dest.txt")
@@ -5046,11 +5064,18 @@ func TestUploadPartCopy(t *testing.T) {
 
 	t.Run("copies byte range of source as part", func(t *testing.T) {
 		s, uploadID := setup(t)
-		etag, _, err := s.UploadPartCopy(uploadID, 1, "src-bucket", "source.txt", "", &ByteRange{Start: 0, End: 4})
+		etag, _, err := s.UploadPartCopy(
+			uploadID,
+			1,
+			"src-bucket",
+			"source.txt",
+			"",
+			&ByteRange{Start: 0, End: 4},
+		)
 		require.NoError(t, err)
 		assert.NotEmpty(t, etag)
 
-		meta, err := s.CompleteMultipartUpload(uploadID, []CompletePart{{PartNumber: 1, ETag: etag}})
+		_, err = s.CompleteMultipartUpload(uploadID, []CompletePart{{PartNumber: 1, ETag: etag}})
 		require.NoError(t, err)
 
 		f, _, err := s.GetObject("dst-bucket", "dest.txt")
@@ -5059,12 +5084,18 @@ func TestUploadPartCopy(t *testing.T) {
 		data, err := io.ReadAll(f)
 		require.NoError(t, err)
 		assert.Equal(t, "hello", string(data))
-		_ = meta
 	})
 
 	t.Run("copies middle byte range of source as part", func(t *testing.T) {
 		s, uploadID := setup(t)
-		etag, _, err := s.UploadPartCopy(uploadID, 1, "src-bucket", "source.txt", "", &ByteRange{Start: 6, End: 10})
+		etag, _, err := s.UploadPartCopy(
+			uploadID,
+			1,
+			"src-bucket",
+			"source.txt",
+			"",
+			&ByteRange{Start: 6, End: 10},
+		)
 		require.NoError(t, err)
 
 		_, err = s.CompleteMultipartUpload(uploadID, []CompletePart{{PartNumber: 1, ETag: etag}})
@@ -5081,7 +5112,15 @@ func TestUploadPartCopy(t *testing.T) {
 	t.Run("returns ErrUploadNotFound for nonexistent upload", func(t *testing.T) {
 		s, _ := newTestStorageWithRoot(t)
 		require.NoError(t, s.CreateBucket("src-bucket", ""))
-		_, err := s.PutObject("src-bucket", "obj.txt", strings.NewReader("data"), "text/plain", nil, "", "")
+		_, err := s.PutObject(
+			"src-bucket",
+			"obj.txt",
+			strings.NewReader("data"),
+			"text/plain",
+			nil,
+			"",
+			"",
+		)
 		require.NoError(t, err)
 		_, _, err = s.UploadPartCopy("nonexistent-upload", 1, "src-bucket", "obj.txt", "", nil)
 		assert.ErrorIs(t, err, ErrUploadNotFound)
@@ -5093,19 +5132,35 @@ func TestUploadPartCopy(t *testing.T) {
 		assert.ErrorIs(t, err, ErrObjectNotFound)
 	})
 
-	t.Run("returns ErrObjectNotFound for nonexistent source bucket", func(t *testing.T) {
+	t.Run("returns ErrBucketNotFound for nonexistent source bucket", func(t *testing.T) {
 		s, uploadID := setup(t)
 		_, _, err := s.UploadPartCopy(uploadID, 1, "no-such-bucket", "obj.txt", "", nil)
-		assert.ErrorIs(t, err, ErrObjectNotFound)
+		assert.ErrorIs(t, err, ErrBucketNotFound)
 	})
 
 	t.Run("copies versioned source object", func(t *testing.T) {
 		s, uploadID := setup(t)
 		require.NoError(t, s.PutBucketVersioning("src-bucket", "Enabled"))
 
-		meta1, err := s.PutObject("src-bucket", "ver.txt", strings.NewReader("version-one"), "text/plain", nil, "", "")
+		meta1, err := s.PutObject(
+			"src-bucket",
+			"ver.txt",
+			strings.NewReader("version-one"),
+			"text/plain",
+			nil,
+			"",
+			"",
+		)
 		require.NoError(t, err)
-		_, err = s.PutObject("src-bucket", "ver.txt", strings.NewReader("version-two"), "text/plain", nil, "", "")
+		_, err = s.PutObject(
+			"src-bucket",
+			"ver.txt",
+			strings.NewReader("version-two"),
+			"text/plain",
+			nil,
+			"",
+			"",
+		)
 		require.NoError(t, err)
 
 		etag, _, err := s.UploadPartCopy(uploadID, 1, "src-bucket", "ver.txt", meta1.VersionID, nil)

@@ -48,7 +48,12 @@ type multipartStore interface {
 		bucket, key, contentType, sseAlgorithm, sseKMSKeyID string,
 	) (uploadID string, err error)
 	UploadPart(uploadID string, partNumber int, r io.Reader) (etag string, err error)
-	UploadPartCopy(uploadID string, partNumber int, srcBucket, srcKey, srcVersionID string, byteRange *ByteRange) (etag string, lastModified time.Time, err error)
+	UploadPartCopy(
+		uploadID string,
+		partNumber int,
+		srcBucket, srcKey, srcVersionID string,
+		byteRange *ByteRange,
+	) (etag string, lastModified time.Time, err error)
 	CompleteMultipartUpload(uploadID string, parts []CompletePart) (ObjectMetadata, error)
 	AbortMultipartUpload(uploadID string) error
 	ListMultipartUploads(bucket string) ([]MultipartUploadInfo, error)

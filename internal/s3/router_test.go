@@ -379,7 +379,13 @@ func (m *mockStore) CreateMultipartUpload(_, _, _, _, _ string) (string, error) 
 func (m *mockStore) UploadPart(_ string, _ int, _ io.Reader) (string, error) {
 	return m.uploadPartETag, m.uploadPartErr
 }
-func (m *mockStore) UploadPartCopy(_ string, _ int, _, _, _ string, _ *ByteRange) (string, time.Time, error) {
+
+func (m *mockStore) UploadPartCopy(
+	_ string,
+	_ int,
+	_, _, _ string,
+	_ *ByteRange,
+) (string, time.Time, error) {
 	return m.uploadPartCopyETag, m.uploadPartCopyLastModified, m.uploadPartCopyErr
 }
 func (m *mockStore) CompleteMultipartUpload(_ string, _ []CompletePart) (ObjectMetadata, error) {
@@ -2829,9 +2835,19 @@ func TestRouterUploadPartCopy(t *testing.T) {
 	setup := func(t *testing.T) (*Router, string, string) {
 		t.Helper()
 		ro := newTestRouter(t)
-		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/src-bucket", nil))
-		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/dst-bucket", nil))
-		putReq := httptest.NewRequest(http.MethodPut, "/src-bucket/source.txt", strings.NewReader("hello world"))
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/src-bucket", nil),
+		)
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/dst-bucket", nil),
+		)
+		putReq := httptest.NewRequest(
+			http.MethodPut,
+			"/src-bucket/source.txt",
+			strings.NewReader("hello world"),
+		)
 		putReq.Header.Set("Content-Type", "text/plain")
 		ro.ServeHTTP(httptest.NewRecorder(), putReq)
 
@@ -2915,10 +2931,21 @@ func TestRouterUploadPartCopy(t *testing.T) {
 
 	t.Run("returns 404 when upload does not exist", func(t *testing.T) {
 		ro := newTestRouter(t)
-		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/src-bucket", nil))
-		putReq := httptest.NewRequest(http.MethodPut, "/src-bucket/obj.txt", strings.NewReader("data"))
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/src-bucket", nil),
+		)
+		putReq := httptest.NewRequest(
+			http.MethodPut,
+			"/src-bucket/obj.txt",
+			strings.NewReader("data"),
+		)
 		ro.ServeHTTP(httptest.NewRecorder(), putReq)
-		req := httptest.NewRequest(http.MethodPut, "/dst-bucket/dest.txt?partNumber=1&uploadId=nonexistent", nil)
+		req := httptest.NewRequest(
+			http.MethodPut,
+			"/dst-bucket/dest.txt?partNumber=1&uploadId=nonexistent",
+			nil,
+		)
 		req.Header.Set("x-amz-copy-source", "/src-bucket/obj.txt")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
@@ -2979,6 +3006,16 @@ func TestRouterUploadPartCopy(t *testing.T) {
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assert.Contains(t, w.Body.String(), "InvalidArgument")
+	})
+
+	t.Run("returns 404 when source bucket does not exist", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{uploadPartCopyErr: ErrBucketNotFound})
+		req := httptest.NewRequest(http.MethodPut, "/bucket/key?partNumber=1&uploadId=abc", nil)
+		req.Header.Set("x-amz-copy-source", "/no-such-bucket/obj.txt")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchBucket")
 	})
 
 	t.Run("returns 500 on storage error", func(t *testing.T) {
