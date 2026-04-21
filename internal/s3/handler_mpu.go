@@ -299,10 +299,10 @@ func (ro *Router) handleUploadPartCopy(w http.ResponseWriter, r *http.Request, b
 
 // hasCopySourceConditions reports whether any x-amz-copy-source-if-* header is present.
 func hasCopySourceConditions(r *http.Request) bool {
-	return r.Header.Get("x-amz-copy-source-if-match") != "" ||
-		r.Header.Get("x-amz-copy-source-if-none-match") != "" ||
-		r.Header.Get("x-amz-copy-source-if-modified-since") != "" ||
-		r.Header.Get("x-amz-copy-source-if-unmodified-since") != ""
+	return r.Header.Get(amzCopySourceIfMatch) != "" ||
+		r.Header.Get(amzCopySourceIfNoneMatch) != "" ||
+		r.Header.Get(amzCopySourceIfModifiedSince) != "" ||
+		r.Header.Get(amzCopySourceIfUnmodifiedSince) != ""
 }
 
 // checkCopySourceConditions evaluates x-amz-copy-source-if-* headers against
@@ -310,21 +310,21 @@ func hasCopySourceConditions(r *http.Request) bool {
 // Precedence: if-match takes precedence over if-unmodified-since;
 // if-none-match takes precedence over if-modified-since.
 func checkCopySourceConditions(r *http.Request, meta ObjectMetadata) bool {
-	if im := r.Header.Get("x-amz-copy-source-if-match"); im != "" {
+	if im := r.Header.Get(amzCopySourceIfMatch); im != "" {
 		if !etagListContains(im, meta.ETag) {
 			return false
 		}
-	} else if ius := r.Header.Get("x-amz-copy-source-if-unmodified-since"); ius != "" {
+	} else if ius := r.Header.Get(amzCopySourceIfUnmodifiedSince); ius != "" {
 		if t, parseErr := http.ParseTime(ius); parseErr == nil &&
 			meta.LastModified.Truncate(time.Second).After(t) {
 			return false
 		}
 	}
-	if inm := r.Header.Get("x-amz-copy-source-if-none-match"); inm != "" {
+	if inm := r.Header.Get(amzCopySourceIfNoneMatch); inm != "" {
 		if etagListContains(inm, meta.ETag) {
 			return false
 		}
-	} else if ims := r.Header.Get("x-amz-copy-source-if-modified-since"); ims != "" {
+	} else if ims := r.Header.Get(amzCopySourceIfModifiedSince); ims != "" {
 		if t, parseErr := http.ParseTime(ims); parseErr == nil &&
 			!meta.LastModified.Truncate(time.Second).After(t) {
 			return false
