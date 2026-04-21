@@ -3258,6 +3258,39 @@ func TestRouterUploadPartCopy(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
 
+	t.Run("returns 412 when x-amz-copy-source-if-modified-since fails", func(t *testing.T) {
+		ro, uploadID, path := setup(t)
+		// Use a time in the future: object has not been modified since then → 412.
+		req := httptest.NewRequest(
+			http.MethodPut,
+			path+"?partNumber=1&uploadId="+uploadID,
+			nil,
+		)
+		req.Header.Set("x-amz-copy-source", "/src-bucket/source.txt")
+		req.Header.Set("x-amz-copy-source-if-modified-since",
+			time.Now().Add(24*time.Hour).UTC().Format(http.TimeFormat))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusPreconditionFailed, w.Code)
+		assert.Contains(t, w.Body.String(), "PreconditionFailed")
+	})
+
+	t.Run("returns 200 when x-amz-copy-source-if-unmodified-since succeeds", func(t *testing.T) {
+		ro, uploadID, path := setup(t)
+		// Use a time in the future: object has not been modified since then → condition passes.
+		req := httptest.NewRequest(
+			http.MethodPut,
+			path+"?partNumber=1&uploadId="+uploadID,
+			nil,
+		)
+		req.Header.Set("x-amz-copy-source", "/src-bucket/source.txt")
+		req.Header.Set("x-amz-copy-source-if-unmodified-since",
+			time.Now().Add(24*time.Hour).UTC().Format(http.TimeFormat))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
 	t.Run("accepts x-amz-copy-source without leading slash", func(t *testing.T) {
 		ro, uploadID, path := setup(t)
 		req := httptest.NewRequest(
