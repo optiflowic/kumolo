@@ -172,9 +172,18 @@ func (ro *Router) handleUploadPartCopy(w http.ResponseWriter, r *http.Request, b
 	copySource := rawCopySource
 	if idx := strings.IndexByte(rawCopySource, '?'); idx != -1 {
 		copySource = rawCopySource[:idx]
-		if qs, qErr := url.ParseQuery(rawCopySource[idx+1:]); qErr == nil {
-			srcVersionID = qs.Get("versionId")
+		qs, qErr := url.ParseQuery(rawCopySource[idx+1:])
+		if qErr != nil {
+			writeError(
+				w,
+				r,
+				http.StatusBadRequest,
+				"InvalidArgument",
+				"x-amz-copy-source query string is invalid.",
+			)
+			return
 		}
+		srcVersionID = qs.Get("versionId")
 	}
 	srcBucket, srcKey := parsePath(copySource)
 	if srcBucket == "" || srcKey == "" {
@@ -208,6 +217,20 @@ func (ro *Router) handleUploadPartCopy(w http.ResponseWriter, r *http.Request, b
 		} else {
 			srcMeta, headErr = ro.storage.HeadObject(srcBucket, srcKey)
 		}
+		if headErr != nil && !errors.Is(headErr, ErrObjectNotFound) {
+			slog.Error( // #nosec G706 -- srcBucket/srcKey come from header; log injection risk accepted for a local dev emulator
+				"failed to head source object for precondition check",
+				"srcBucket",
+				srcBucket,
+				"srcKey",
+				srcKey,
+				"err",
+				headErr,
+			)
+			writeError(w, r, http.StatusInternalServerError, "InternalError",
+				"We encountered an internal error. Please try again.")
+			return
+		}
 		if headErr == nil && !checkCopySourceConditions(r, srcMeta) {
 			slog.Debug( // #nosec G706 -- srcBucket/srcKey come from header; log injection risk accepted for a local dev emulator
 				"copy source precondition failed",
@@ -220,7 +243,7 @@ func (ro *Router) handleUploadPartCopy(w http.ResponseWriter, r *http.Request, b
 				"At least one of the pre-conditions you specified did not hold")
 			return
 		}
-		// headErr != nil: let UploadPartCopy return the canonical error (NoSuchKey, etc.).
+		// headErr is ErrObjectNotFound: let UploadPartCopy return the canonical NoSuchKey error.
 	}
 
 	etag, lastModified, copySourceVersionID, err := ro.storage.UploadPartCopy(

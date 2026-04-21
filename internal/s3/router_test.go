@@ -389,6 +389,7 @@ func (m *mockStore) UploadPartCopy(
 ) (string, time.Time, string, error) {
 	return m.uploadPartCopyETag, m.uploadPartCopyLastModified, m.uploadPartCopySourceVersionID, m.uploadPartCopyErr
 }
+
 func (m *mockStore) CompleteMultipartUpload(_ string, _ []CompletePart) (ObjectMetadata, error) {
 	return m.completeMultipartUploadMeta, m.completeMultipartUploadErr
 }
