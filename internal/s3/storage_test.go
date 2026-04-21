@@ -5070,7 +5070,7 @@ func TestUploadPartCopy(t *testing.T) {
 			"src-bucket",
 			"source.txt",
 			"",
-			&ByteRange{Start: 0, End: 4},
+			&byteRange{Start: 0, End: 4},
 		)
 		require.NoError(t, err)
 		assert.NotEmpty(t, etag)
@@ -5094,7 +5094,7 @@ func TestUploadPartCopy(t *testing.T) {
 			"src-bucket",
 			"source.txt",
 			"",
-			&ByteRange{Start: 6, End: 10},
+			&byteRange{Start: 6, End: 10},
 		)
 		require.NoError(t, err)
 

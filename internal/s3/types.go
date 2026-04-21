@@ -307,8 +307,8 @@ type xmlCORSRule struct {
 	MaxAgeSeconds  int      `xml:"MaxAgeSeconds,omitempty"`
 }
 
-// ByteRange represents an inclusive byte range [Start, End] for UploadPartCopy.
-type ByteRange struct {
+// byteRange represents an inclusive byte range [Start, End] for UploadPartCopy.
+type byteRange struct {
 	Start int64
 	End   int64
 }

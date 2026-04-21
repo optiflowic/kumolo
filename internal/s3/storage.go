@@ -1431,7 +1431,7 @@ func (s *Storage) UploadPartCopy(
 	uploadID string,
 	partNumber int,
 	srcBucket, srcKey, srcVersionID string,
-	byteRange *ByteRange,
+	br *byteRange,
 ) (string, time.Time, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1458,6 +1458,9 @@ func (s *Storage) UploadPartCopy(
 			srcPath = curPath
 			srcMeta = cm
 		} else {
+			if err != nil && !errors.Is(err, os.ErrNotExist) {
+				return "", time.Time{}, err
+			}
 			vp := verPath(srcBucket, srcKey, srcVersionID)
 			vm, err := s.readMeta(vp)
 			if err != nil {
@@ -1498,11 +1501,11 @@ func (s *Storage) UploadPartCopy(
 
 	// Apply byte range if specified.
 	var reader io.Reader = srcFile
-	if byteRange != nil {
-		if _, err := srcFile.Seek(byteRange.Start, io.SeekStart); err != nil {
+	if br != nil {
+		if _, err := srcFile.Seek(br.Start, io.SeekStart); err != nil {
 			return "", time.Time{}, err // untestable: Seek failure on a valid file cannot be injected
 		}
-		reader = io.LimitReader(srcFile, byteRange.End-byteRange.Start+1)
+		reader = io.LimitReader(srcFile, br.End-br.Start+1)
 	}
 
 	// Write the part file.

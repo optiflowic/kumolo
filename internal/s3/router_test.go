@@ -384,7 +384,7 @@ func (m *mockStore) UploadPartCopy(
 	_ string,
 	_ int,
 	_, _, _ string,
-	_ *ByteRange,
+	_ *byteRange,
 ) (string, time.Time, error) {
 	return m.uploadPartCopyETag, m.uploadPartCopyLastModified, m.uploadPartCopyErr
 }
@@ -2935,6 +2935,10 @@ func TestRouterUploadPartCopy(t *testing.T) {
 			httptest.NewRecorder(),
 			httptest.NewRequest(http.MethodPut, "/src-bucket", nil),
 		)
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/dst-bucket", nil),
+		)
 		putReq := httptest.NewRequest(
 			http.MethodPut,
 			"/src-bucket/obj.txt",
@@ -2985,6 +2989,15 @@ func TestRouterUploadPartCopy(t *testing.T) {
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assert.Contains(t, w.Body.String(), "InvalidArgument")
+	})
+
+	t.Run("routes to UploadPart when x-amz-copy-source is absent", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{uploadPartETag: `"abc"`})
+		req := httptest.NewRequest(http.MethodPut, "/bucket/key?partNumber=1&uploadId=abc", strings.NewReader("data"))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, `"abc"`, w.Header().Get("ETag"))
 	})
 
 	t.Run("returns 400 for invalid x-amz-copy-source-range", func(t *testing.T) {
@@ -3089,17 +3102,17 @@ func TestParseCopySourceRange(t *testing.T) {
 		name    string
 		input   string
 		wantErr bool
-		want    *ByteRange
+		want    *byteRange
 	}{
 		{
 			name:  "valid full range",
 			input: "bytes=0-99",
-			want:  &ByteRange{Start: 0, End: 99},
+			want:  &byteRange{Start: 0, End: 99},
 		},
 		{
 			name:  "valid single byte",
 			input: "bytes=5-5",
-			want:  &ByteRange{Start: 5, End: 5},
+			want:  &byteRange{Start: 5, End: 5},
 		},
 		{
 			name:    "missing bytes= prefix",

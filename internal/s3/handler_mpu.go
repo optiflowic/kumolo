@@ -182,9 +182,10 @@ func (ro *Router) handleUploadPartCopy(w http.ResponseWriter, r *http.Request, b
 		return
 	}
 
-	var byteRange *ByteRange
+	var br *byteRange
 	if rangeHdr := r.Header.Get("x-amz-copy-source-range"); rangeHdr != "" {
-		br, parseErr := parseCopySourceRange(rangeHdr)
+		var parseErr error
+		br, parseErr = parseCopySourceRange(rangeHdr)
 		if parseErr != nil {
 			writeError(
 				w,
@@ -195,68 +196,50 @@ func (ro *Router) handleUploadPartCopy(w http.ResponseWriter, r *http.Request, b
 			)
 			return
 		}
-		byteRange = br
 	}
 
 	etag, lastModified, err := ro.storage.UploadPartCopy(
-		uploadID, partNumber, srcBucket, srcKey, srcVersionID, byteRange,
+		uploadID, partNumber, srcBucket, srcKey, srcVersionID, br,
 	)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrUploadNotFound):
-			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-				"upload not found",
-				"uploadId",
-				uploadID,
-			)
+			slog.Debug( // #nosec G706 -- uploadId comes from URL query; log injection risk accepted for a local dev emulator
+				"upload not found", "uploadId", uploadID)
 			writeError(w, r, http.StatusNotFound, "NoSuchUpload",
 				"The specified upload does not exist.")
 		case errors.Is(err, ErrBucketNotFound):
-			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-				"source bucket not found",
-				"srcBucket",
-				srcBucket,
-			)
+			slog.Debug( // #nosec G706 -- srcBucket comes from header; log injection risk accepted for a local dev emulator
+				"source bucket not found", "srcBucket", srcBucket)
 			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 				"The specified bucket does not exist.")
 		case errors.Is(err, ErrObjectNotFound):
-			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-				"source object not found",
-				"srcBucket",
-				srcBucket,
-				"srcKey",
-				srcKey,
-			)
+			slog.Debug( // #nosec G706 -- srcBucket/srcKey come from header; log injection risk accepted for a local dev emulator
+				"source object not found", "srcBucket", srcBucket, "srcKey", srcKey)
 			writeError(w, r, http.StatusNotFound, "NoSuchKey",
 				"The specified key does not exist.")
 		default:
 			slog.Error( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
 				"failed to upload part copy",
-				"bucket",
-				bucket,
-				"key",
-				key,
-				"uploadId",
-				uploadID,
-				"partNumber",
-				partNumber,
-				"err",
-				err,
+				"bucket", bucket,
+				"key", key,
+				"uploadId", uploadID,
+				"partNumber", partNumber,
+				"err", err,
 			)
-			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+			writeError(w, r, http.StatusInternalServerError, "InternalError",
+				"We encountered an internal error. Please try again.")
 		}
 		return
 	}
-	slog.Info( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+	slog.Info( // #nosec G706 -- bucket/key/srcBucket/srcKey come from URL path/header; log injection risk accepted for a local dev emulator
 		"part copy uploaded",
-		"bucket",
-		bucket,
-		"key",
-		key,
-		"uploadId",
-		uploadID,
-		"partNumber",
-		partNumber,
+		"bucket", bucket,
+		"key", key,
+		"uploadId", uploadID,
+		"partNumber", partNumber,
+		"srcBucket", srcBucket,
+		"srcKey", srcKey,
 	)
 	writeXML(w, http.StatusOK, copyPartResult{
 		ETag:         etag,
@@ -265,7 +248,7 @@ func (ro *Router) handleUploadPartCopy(w http.ResponseWriter, r *http.Request, b
 }
 
 // parseCopySourceRange parses a "bytes=first-last" range header value.
-func parseCopySourceRange(s string) (*ByteRange, error) {
+func parseCopySourceRange(s string) (*byteRange, error) {
 	const prefix = "bytes="
 	if !strings.HasPrefix(s, prefix) {
 		return nil, errors.New("invalid range")
@@ -283,7 +266,7 @@ func parseCopySourceRange(s string) (*ByteRange, error) {
 	if err != nil || end < start {
 		return nil, errors.New("invalid range end")
 	}
-	return &ByteRange{Start: start, End: end}, nil
+	return &byteRange{Start: start, End: end}, nil
 }
 
 func (ro *Router) handleCompleteMultipartUpload(
