@@ -53,7 +53,7 @@ type multipartStore interface {
 		partNumber int,
 		srcBucket, srcKey, srcVersionID string,
 		br *byteRange,
-	) (etag string, lastModified time.Time, err error)
+	) (etag string, lastModified time.Time, copySourceVersionID string, err error)
 	CompleteMultipartUpload(uploadID string, parts []CompletePart) (ObjectMetadata, error)
 	AbortMultipartUpload(uploadID string) error
 	ListMultipartUploads(bucket string) ([]MultipartUploadInfo, error)

@@ -5035,7 +5035,7 @@ func TestUploadPartCopy(t *testing.T) {
 
 	t.Run("copies full source object as part", func(t *testing.T) {
 		s, uploadID := setup(t)
-		etag, lastModified, err := s.UploadPartCopy(
+		etag, lastModified, _, err := s.UploadPartCopy(
 			uploadID,
 			1,
 			"src-bucket",
@@ -5064,7 +5064,7 @@ func TestUploadPartCopy(t *testing.T) {
 
 	t.Run("copies byte range of source as part", func(t *testing.T) {
 		s, uploadID := setup(t)
-		etag, _, err := s.UploadPartCopy(
+		etag, _, _, err := s.UploadPartCopy(
 			uploadID,
 			1,
 			"src-bucket",
@@ -5088,7 +5088,7 @@ func TestUploadPartCopy(t *testing.T) {
 
 	t.Run("copies middle byte range of source as part", func(t *testing.T) {
 		s, uploadID := setup(t)
-		etag, _, err := s.UploadPartCopy(
+		etag, _, _, err := s.UploadPartCopy(
 			uploadID,
 			1,
 			"src-bucket",
@@ -5122,19 +5122,19 @@ func TestUploadPartCopy(t *testing.T) {
 			"",
 		)
 		require.NoError(t, err)
-		_, _, err = s.UploadPartCopy("nonexistent-upload", 1, "src-bucket", "obj.txt", "", nil)
+		_, _, _, err = s.UploadPartCopy("nonexistent-upload", 1, "src-bucket", "obj.txt", "", nil)
 		assert.ErrorIs(t, err, ErrUploadNotFound)
 	})
 
 	t.Run("returns ErrObjectNotFound for nonexistent source object", func(t *testing.T) {
 		s, uploadID := setup(t)
-		_, _, err := s.UploadPartCopy(uploadID, 1, "src-bucket", "missing.txt", "", nil)
+		_, _, _, err := s.UploadPartCopy(uploadID, 1, "src-bucket", "missing.txt", "", nil)
 		assert.ErrorIs(t, err, ErrObjectNotFound)
 	})
 
 	t.Run("returns ErrBucketNotFound for nonexistent source bucket", func(t *testing.T) {
 		s, uploadID := setup(t)
-		_, _, err := s.UploadPartCopy(uploadID, 1, "no-such-bucket", "obj.txt", "", nil)
+		_, _, _, err := s.UploadPartCopy(uploadID, 1, "no-such-bucket", "obj.txt", "", nil)
 		assert.ErrorIs(t, err, ErrBucketNotFound)
 	})
 
@@ -5163,7 +5163,14 @@ func TestUploadPartCopy(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		etag, _, err := s.UploadPartCopy(uploadID, 1, "src-bucket", "ver.txt", meta1.VersionID, nil)
+		etag, _, _, err := s.UploadPartCopy(
+			uploadID,
+			1,
+			"src-bucket",
+			"ver.txt",
+			meta1.VersionID,
+			nil,
+		)
 		require.NoError(t, err)
 
 		_, err = s.CompleteMultipartUpload(uploadID, []CompletePart{{PartNumber: 1, ETag: etag}})
@@ -5188,7 +5195,14 @@ func TestUploadPartCopy(t *testing.T) {
 		require.NotEmpty(t, meta.VersionID)
 
 		// meta.VersionID is the current version — exercises the cm.VersionID == srcVersionID branch.
-		etag, _, err := s.UploadPartCopy(uploadID, 1, "src-bucket", "cur.txt", meta.VersionID, nil)
+		etag, _, _, err := s.UploadPartCopy(
+			uploadID,
+			1,
+			"src-bucket",
+			"cur.txt",
+			meta.VersionID,
+			nil,
+		)
 		require.NoError(t, err)
 
 		_, err = s.CompleteMultipartUpload(uploadID, []CompletePart{{PartNumber: 1, ETag: etag}})
@@ -5216,7 +5230,42 @@ func TestUploadPartCopy(t *testing.T) {
 		require.NoError(t, err)
 		require.NotEmpty(t, dmVersionID)
 
-		_, _, err = s.UploadPartCopy(uploadID, 1, "src-bucket", "del.txt", dmVersionID, nil)
+		_, _, _, err = s.UploadPartCopy(uploadID, 1, "src-bucket", "del.txt", dmVersionID, nil)
 		assert.ErrorIs(t, err, ErrObjectNotFound)
+	})
+
+	t.Run("returns copySourceVersionID for versioned source", func(t *testing.T) {
+		s, uploadID := setup(t)
+		require.NoError(t, s.PutBucketVersioning("src-bucket", "Enabled"))
+		meta, err := s.PutObject(
+			"src-bucket", "ver.txt", strings.NewReader("v1"), "text/plain", nil, "", "",
+		)
+		require.NoError(t, err)
+		require.NotEmpty(t, meta.VersionID)
+
+		_, _, copySourceVersionID, err := s.UploadPartCopy(
+			uploadID,
+			1,
+			"src-bucket",
+			"ver.txt",
+			"",
+			nil,
+		)
+		require.NoError(t, err)
+		assert.Equal(t, meta.VersionID, copySourceVersionID)
+	})
+
+	t.Run("returns empty copySourceVersionID for unversioned source", func(t *testing.T) {
+		s, uploadID := setup(t)
+		_, _, copySourceVersionID, err := s.UploadPartCopy(
+			uploadID,
+			1,
+			"src-bucket",
+			"source.txt",
+			"",
+			nil,
+		)
+		require.NoError(t, err)
+		assert.Empty(t, copySourceVersionID)
 	})
 }
