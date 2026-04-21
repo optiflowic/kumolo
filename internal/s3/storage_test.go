@@ -5010,6 +5010,19 @@ func TestSetObjectRestoreInitiated(t *testing.T) {
 		err := s.SetObjectRestoreInitiated(bucket, "missing.txt")
 		assert.ErrorIs(t, err, ErrObjectNotFound)
 	})
+
+	t.Run("returns error when metadata is corrupt", func(t *testing.T) {
+		s, rootPath := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("bucket", ""))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(rootPath, "bucket", "obj.txt.meta.json"),
+			[]byte("not valid json"),
+			0o600,
+		))
+		err := s.SetObjectRestoreInitiated("bucket", "obj.txt")
+		assert.Error(t, err)
+		assert.NotErrorIs(t, err, ErrObjectNotFound)
+	})
 }
 
 func TestUploadPartCopy(t *testing.T) {
@@ -5268,4 +5281,90 @@ func TestUploadPartCopy(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, copySourceVersionID)
 	})
+
+	t.Run("returns ErrObjectNotFound when versionId does not exist in archive", func(t *testing.T) {
+		s, uploadID := setup(t)
+		require.NoError(t, s.PutBucketVersioning("src-bucket", "Enabled"))
+		_, err := s.PutObject(
+			"src-bucket", "ver.txt", strings.NewReader("v1"), "text/plain", nil, "", "",
+		)
+		require.NoError(t, err)
+
+		_, _, _, err = s.UploadPartCopy(
+			uploadID,
+			1,
+			"src-bucket",
+			"ver.txt",
+			"nonexistent-version-id",
+			nil,
+		)
+		assert.ErrorIs(t, err, ErrObjectNotFound)
+	})
+
+	t.Run(
+		"returns error when current object meta is corrupt and versionId is set",
+		func(t *testing.T) {
+			s, rootPath := newTestStorageWithRoot(t)
+			require.NoError(t, s.CreateBucket("src-bucket", ""))
+			require.NoError(t, s.CreateBucket("dst-bucket", ""))
+			require.NoError(t, s.PutBucketVersioning("src-bucket", "Enabled"))
+			meta1, err := s.PutObject(
+				"src-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "",
+			)
+			require.NoError(t, err)
+			// Put a second version so v1 is archived and a current object file exists.
+			_, err = s.PutObject(
+				"src-bucket", "obj.txt", strings.NewReader("v2"), "text/plain", nil, "", "",
+			)
+			require.NoError(t, err)
+			uploadID, err := s.CreateMultipartUpload("dst-bucket", "obj.txt", "text/plain", "", "")
+			require.NoError(t, err)
+
+			// Corrupt the current object's meta so readMeta returns a non-ErrNotExist error.
+			require.NoError(t, os.WriteFile(
+				filepath.Join(rootPath, "src-bucket", "obj.txt.meta.json"),
+				[]byte("not valid json"),
+				0o600,
+			))
+
+			// The handler tries to read the current meta, gets a json error (not ErrNotExist),
+			// and returns it immediately without falling through to the archive lookup.
+			_, _, _, err = s.UploadPartCopy(
+				uploadID,
+				1,
+				"src-bucket",
+				"obj.txt",
+				meta1.VersionID,
+				nil,
+			)
+			assert.Error(t, err)
+			assert.NotErrorIs(t, err, ErrObjectNotFound)
+		},
+	)
+
+	t.Run(
+		"returns error when upload.json stat fails with non-ErrNotExist error",
+		func(t *testing.T) {
+			if os.Getuid() == 0 {
+				t.Skip("skipping: cannot test permission errors as root")
+			}
+			s, rootPath := newTestStorageWithRoot(t)
+			require.NoError(t, s.CreateBucket("src-bucket", ""))
+			require.NoError(t, s.CreateBucket("dst-bucket", ""))
+			_, err := s.PutObject(
+				"src-bucket", "obj.txt", strings.NewReader("data"), "text/plain", nil, "", "",
+			)
+			require.NoError(t, err)
+			uploadID, err := s.CreateMultipartUpload("dst-bucket", "obj.txt", "text/plain", "", "")
+			require.NoError(t, err)
+
+			uploadDir := filepath.Join(rootPath, ".mpu", uploadID)
+			require.NoError(t, os.Chmod(uploadDir, 0))
+			t.Cleanup(func() { _ = os.Chmod(uploadDir, 0o750) })
+
+			_, _, _, err = s.UploadPartCopy(uploadID, 1, "src-bucket", "obj.txt", "", nil)
+			assert.Error(t, err)
+			assert.NotErrorIs(t, err, ErrUploadNotFound)
+		},
+	)
 }

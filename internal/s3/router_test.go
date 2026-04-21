@@ -3305,6 +3305,60 @@ func TestRouterUploadPartCopy(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Contains(t, w.Body.String(), "CopyPartResult")
 	})
+
+	t.Run(
+		"evaluates precondition via HeadObjectVersion when copy source includes versionId",
+		func(t *testing.T) {
+			ro, uploadID, path := setup(t)
+			// Enable versioning and put a versioned object.
+			ro.ServeHTTP(
+				httptest.NewRecorder(),
+				httptest.NewRequest(
+					http.MethodPut,
+					"/src-bucket?versioning",
+					strings.NewReader(
+						`<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`,
+					),
+				),
+			)
+			putReq := httptest.NewRequest(
+				http.MethodPut,
+				"/src-bucket/versioned.txt",
+				strings.NewReader("versioned content"),
+			)
+			putReq.Header.Set("Content-Type", "text/plain")
+			putW := httptest.NewRecorder()
+			ro.ServeHTTP(putW, putReq)
+			require.Equal(t, http.StatusOK, putW.Code)
+			vID := putW.Header().Get("x-amz-version-id")
+			require.NotEmpty(t, vID)
+
+			// Fetch the ETag of the versioned object.
+			headReq := httptest.NewRequest(
+				http.MethodHead,
+				"/src-bucket/versioned.txt?versionId="+vID,
+				nil,
+			)
+			headW := httptest.NewRecorder()
+			ro.ServeHTTP(headW, headReq)
+			require.Equal(t, http.StatusOK, headW.Code)
+			srcETag := headW.Header().Get("ETag")
+			require.NotEmpty(t, srcETag)
+
+			// UploadPartCopy with ?versionId= AND a matching if-match header → 200.
+			req := httptest.NewRequest(
+				http.MethodPut,
+				path+"?partNumber=1&uploadId="+uploadID,
+				nil,
+			)
+			req.Header.Set("x-amz-copy-source", "/src-bucket/versioned.txt?versionId="+vID)
+			req.Header.Set("x-amz-copy-source-if-match", srcETag)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Contains(t, w.Body.String(), "CopyPartResult")
+		},
+	)
 }
 
 func TestParseCopySourceRange(t *testing.T) {
@@ -4022,6 +4076,12 @@ func TestCORSHelpers(t *testing.T) {
 				false,
 			},
 			{"empty allowed rejects any header", []string{}, "content-type", false},
+			{
+				"empty token after split is skipped",
+				[]string{"content-type"},
+				"content-type, , ",
+				true,
+			},
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
