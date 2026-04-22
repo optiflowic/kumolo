@@ -2973,6 +2973,27 @@ func TestRouterUploadPartCopy(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "NoSuchKey")
 	})
 
+	t.Run(
+		"returns 404 NoSuchKey when precondition header set but source does not exist",
+		func(t *testing.T) {
+			// When hasCopySourceConditions is true but HeadObject returns ErrObjectNotFound,
+			// the precondition check is skipped and UploadPartCopy returns NoSuchKey (404),
+			// not PreconditionFailed (412).
+			ro, uploadID, path := setup(t)
+			req := httptest.NewRequest(
+				http.MethodPut,
+				path+"?partNumber=1&uploadId="+uploadID,
+				nil,
+			)
+			req.Header.Set("x-amz-copy-source", "/src-bucket/nonexistent.txt")
+			req.Header.Set("x-amz-copy-source-if-match", `"some-etag"`)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusNotFound, w.Code)
+			assert.Contains(t, w.Body.String(), "NoSuchKey")
+		},
+	)
+
 	t.Run("returns 400 for invalid partNumber", func(t *testing.T) {
 		ro := newRouterWithMock(&mockStore{})
 		req := httptest.NewRequest(http.MethodPut, "/bucket/key?partNumber=0&uploadId=abc", nil)
@@ -3047,6 +3068,20 @@ func TestRouterUploadPartCopy(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "InvalidArgument")
 	})
 
+	t.Run(
+		"returns 400 for invalid percent-encoding in copy source query string",
+		func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{})
+			req := httptest.NewRequest(http.MethodPut, "/bucket/key?partNumber=1&uploadId=abc", nil)
+			// %ZZ is invalid percent-encoding in the query string (versionId param).
+			req.Header.Set("x-amz-copy-source", "/bucket/key?versionId=%ZZ")
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Contains(t, w.Body.String(), "InvalidArgument")
+		},
+	)
+
 	t.Run("parses versionId from copy source query string", func(t *testing.T) {
 		ro, uploadID, path := setup(t)
 		// Enable versioning on src-bucket and capture the first version's ID.
@@ -3100,6 +3135,17 @@ func TestRouterUploadPartCopy(t *testing.T) {
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+
+	t.Run("returns 500 when HeadObject fails during precondition check", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{headObjectErr: errors.New("disk failure")})
+		req := httptest.NewRequest(http.MethodPut, "/bucket/key?partNumber=1&uploadId=abc", nil)
+		req.Header.Set("x-amz-copy-source", "/src-bucket/obj.txt")
+		req.Header.Set("x-amz-copy-source-if-match", `"some-etag"`)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assert.Contains(t, w.Body.String(), "InternalError")
 	})
 
 	t.Run("sets x-amz-copy-source-version-id header when source has version", func(t *testing.T) {
