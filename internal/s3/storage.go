@@ -1434,7 +1434,7 @@ func (s *Storage) UploadPartCopy(
 	partNumber int,
 	srcBucket, srcKey, srcVersionID string,
 	br *byteRange,
-) (etag string, lastModified time.Time, copySourceVersionID string, err error) {
+) (string, time.Time, string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
