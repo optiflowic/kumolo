@@ -366,9 +366,10 @@ func parseCopySourceRange(s string) (*byteRange, error) {
 	if len(parts) != 2 {
 		return nil, errors.New("invalid range")
 	}
+	// A negative start is unreachable: a leading '-' causes SplitN to produce an
+	// empty parts[0], so ParseInt always errors before start < 0 could be true.
 	start, err := strconv.ParseInt(parts[0], 10, 64)
-	if err != nil ||
-		start < 0 { // start < 0 is untestable: a leading '-' in the value causes SplitN to produce an empty parts[0], so ParseInt always errors first
+	if err != nil {
 		return nil, errors.New("invalid range start")
 	}
 	end, err := strconv.ParseInt(parts[1], 10, 64)
