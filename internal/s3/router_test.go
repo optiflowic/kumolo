@@ -3073,8 +3073,9 @@ func TestRouterUploadPartCopy(t *testing.T) {
 		func(t *testing.T) {
 			ro := newRouterWithMock(&mockStore{})
 			req := httptest.NewRequest(http.MethodPut, "/bucket/key?partNumber=1&uploadId=abc", nil)
-			// %ZZ is invalid percent-encoding in the query string (versionId param).
-			req.Header.Set("x-amz-copy-source", "/bucket/key?versionId=%ZZ")
+			// %25 decodes to '%' via PathUnescape, leaving '%ZZ' in the query string.
+			// url.ParseQuery then sees '%ZZ' as an invalid escape and returns an error.
+			req.Header.Set("x-amz-copy-source", "/bucket/key?versionId=%25ZZ")
 			w := httptest.NewRecorder()
 			ro.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusBadRequest, w.Code)
