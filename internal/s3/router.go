@@ -32,6 +32,9 @@ const (
 	amzSSEKMSKeyID                 = "X-Amz-Server-Side-Encryption-Aws-Kms-Key-Id"
 	amzMetadataDirective           = "X-Amz-Metadata-Directive"
 	amzCopySourceRange             = "X-Amz-Copy-Source-Range"
+
+	presignedURLMaxExpiry = 7 * 24 * 60 * 60 // 604800 seconds; AWS S3 maximum
+	maxPartNumber         = 10000            // AWS S3 maximum part number
 )
 
 // Router handles S3 API requests using path-style URLs: /<bucket>/<key>
@@ -106,7 +109,7 @@ func checkPresigned(r *http.Request, now time.Time) (int, string, string) {
 	}
 
 	expires, err := strconv.ParseInt(amzExpires, 10, 64)
-	if err != nil || expires < 1 || expires > 604800 {
+	if err != nil || expires < 1 || expires > presignedURLMaxExpiry {
 		return http.StatusBadRequest,
 			"AuthorizationQueryParametersError",
 			"X-Amz-Expires must be between 1 and 604800 seconds."

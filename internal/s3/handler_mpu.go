@@ -84,7 +84,7 @@ func (ro *Router) handleUploadPart(w http.ResponseWriter, r *http.Request, bucke
 	}
 	partNumberStr := q.Get("partNumber")
 	partNumber, err := strconv.Atoi(partNumberStr)
-	if err != nil || partNumber < 1 || partNumber > 10000 {
+	if err != nil || partNumber < 1 || partNumber > maxPartNumber {
 		writeError(
 			w,
 			r,
@@ -152,7 +152,7 @@ func (ro *Router) handleUploadPartCopy(w http.ResponseWriter, r *http.Request, b
 	}
 	partNumberStr := q.Get("partNumber")
 	partNumber, err := strconv.Atoi(partNumberStr)
-	if err != nil || partNumber < 1 || partNumber > 10000 {
+	if err != nil || partNumber < 1 || partNumber > maxPartNumber {
 		writeError(
 			w,
 			r,
