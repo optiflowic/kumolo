@@ -617,6 +617,35 @@ func (ro *Router) handleDeleteBucketReplication(
 	)
 }
 
+// --- ObjectLockConfiguration (#93) ---
+
+func (ro *Router) handlePutObjectLockConfiguration(
+	w http.ResponseWriter,
+	r *http.Request,
+	bucket string,
+) {
+	ro.handlePutBucketRawXML(
+		w,
+		r,
+		bucket,
+		"object lock configuration",
+		ro.storage.PutBucketObjectLock,
+	)
+}
+
+func (ro *Router) handleGetObjectLockConfiguration(
+	w http.ResponseWriter,
+	r *http.Request,
+	bucket string,
+) {
+	ro.handleGetBucketRawXML(w, r, bucket, "object lock configuration",
+		ro.storage.GetBucketObjectLock,
+		"ObjectLockConfigurationNotFoundError",
+		"Object Lock configuration does not exist for this bucket.",
+		"",
+	)
+}
+
 // --- RequestPayment (#92) ---
 
 const defaultRequestPaymentResponse = `<RequestPaymentConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">` +

@@ -58,6 +58,9 @@ type Router struct {
 		bucketAccelerateStore
 		bucketReplicationStore
 		bucketRequestPaymentStore
+		bucketObjectLockStore
+		objectRetentionStore
+		objectLegalHoldStore
 	}
 	now func() time.Time // injectable for testing; defaults to time.Now
 }
@@ -150,6 +153,7 @@ func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, bucket str
 		"cors", "policy", "tagging", "versioning", "publicAccessBlock",
 		"encryption", "ownershipControls", "notification", "lifecycle",
 		"website", "logging", "accelerate", "replication", "requestPayment",
+		"object-lock",
 	}, q.Has)
 	if r.Method != http.MethodOptions && !isMgmtSubresource {
 		ro.injectCORSHeaders(w, r, bucket)
@@ -188,6 +192,8 @@ func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, bucket str
 			ro.handlePutBucketReplication(w, r, bucket)
 		case q.Has("requestPayment"):
 			ro.handlePutBucketRequestPayment(w, r, bucket)
+		case q.Has("object-lock"):
+			ro.handlePutObjectLockConfiguration(w, r, bucket)
 		case q.Has("acl"):
 			ro.handlePutBucketACL(w, r, bucket)
 		default:
@@ -254,6 +260,8 @@ func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, bucket str
 			ro.handleGetBucketReplication(w, r, bucket)
 		case q.Has("requestPayment"):
 			ro.handleGetBucketRequestPayment(w, r, bucket)
+		case q.Has("object-lock"):
+			ro.handleGetObjectLockConfiguration(w, r, bucket)
 		case q.Has("acl"):
 			ro.handleGetBucketACL(w, r, bucket)
 		case q.Get("list-type") == "2":
@@ -567,6 +575,10 @@ func (ro *Router) routeObject(w http.ResponseWriter, r *http.Request, bucket, ke
 		switch {
 		case q.Has("tagging"):
 			ro.handlePutObjectTagging(w, r, bucket, key)
+		case q.Has("retention"):
+			ro.handlePutObjectRetention(w, r, bucket, key)
+		case q.Has("legal-hold"):
+			ro.handlePutObjectLegalHold(w, r, bucket, key)
 		case q.Has("partNumber") && q.Has("uploadId") && r.Header.Get(amzCopySource) != "":
 			ro.handleUploadPartCopy(w, r, bucket, key)
 		case q.Has("partNumber") && q.Has("uploadId"):
@@ -582,6 +594,10 @@ func (ro *Router) routeObject(w http.ResponseWriter, r *http.Request, bucket, ke
 		switch {
 		case q.Has("tagging"):
 			ro.handleGetObjectTagging(w, r, bucket, key)
+		case q.Has("retention"):
+			ro.handleGetObjectRetention(w, r, bucket, key)
+		case q.Has("legal-hold"):
+			ro.handleGetObjectLegalHold(w, r, bucket, key)
 		case q.Has("uploadId"):
 			ro.handleListParts(w, r, bucket, key)
 		case q.Has("acl"):

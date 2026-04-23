@@ -159,3 +159,21 @@ type bucketRequestPaymentStore interface {
 	PutBucketRequestPayment(bucket, xmlBody string) error
 	GetBucketRequestPayment(bucket string) (string, error)
 }
+
+// bucketObjectLockStore handles bucket-level Object Lock configuration.
+type bucketObjectLockStore interface {
+	PutBucketObjectLock(bucket, xmlBody string) error
+	GetBucketObjectLock(bucket string) (string, error)
+}
+
+// objectRetentionStore handles per-object retention settings.
+type objectRetentionStore interface {
+	PutObjectRetention(bucket, key, versionID string, retention ObjectRetention) error
+	GetObjectRetention(bucket, key, versionID string) (ObjectRetention, error)
+}
+
+// objectLegalHoldStore handles per-object legal hold settings.
+type objectLegalHoldStore interface {
+	PutObjectLegalHold(bucket, key, versionID, status string) error
+	GetObjectLegalHold(bucket, key, versionID string) (string, error)
+}

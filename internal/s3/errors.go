@@ -17,6 +17,8 @@ var (
 	ErrInvalidPartOrder    = errors.New("parts not in ascending order")
 	ErrNoCORSConfiguration = errors.New("no CORS configuration")
 	ErrNoBucketPolicy      = errors.New("no bucket policy")
+	ErrNoObjectRetention   = errors.New("no object retention")
+	ErrNoObjectLegalHold   = errors.New("no object legal hold")
 )
 
 // DeleteMarkerError is returned when a get/head operation resolves to a delete marker.
