@@ -14,7 +14,7 @@ func (ro *Router) handlePutObjectRetention(
 ) {
 	var req xmlObjectRetention
 	if err := xml.NewDecoder(r.Body).Decode(&req); err != nil {
-		slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+		slog.Debug( // #nosec G706 -- bucket/key from URL path; log injection risk accepted for local dev emulator
 			"malformed retention XML",
 			"bucket",
 			bucket,
@@ -26,7 +26,7 @@ func (ro *Router) handlePutObjectRetention(
 		return
 	}
 	if req.Mode != "GOVERNANCE" && req.Mode != "COMPLIANCE" {
-		slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+		slog.Debug( // #nosec G706 -- bucket/key/mode from URL path/body; log injection risk accepted for local dev emulator
 			"invalid retention mode",
 			"bucket",
 			bucket,
@@ -48,7 +48,7 @@ func (ro *Router) handlePutObjectRetention(
 		writeObjectLockError(w, r, bucket, key, "put object retention", err)
 		return
 	}
-	slog.Info( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+	slog.Info( // #nosec G706 -- bucket/key from URL path; log injection risk accepted for local dev emulator
 		"object retention updated",
 		"bucket",
 		bucket,
@@ -67,7 +67,7 @@ func (ro *Router) handleGetObjectRetention(
 	retention, err := ro.storage.GetObjectRetention(bucket, key, versionID)
 	if err != nil {
 		if errors.Is(err, ErrNoObjectRetention) {
-			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			slog.Debug( // #nosec G706 -- bucket/key from URL path; log injection risk accepted for local dev emulator
 				"no object retention",
 				"bucket",
 				bucket,
@@ -81,7 +81,7 @@ func (ro *Router) handleGetObjectRetention(
 		writeObjectLockError(w, r, bucket, key, "get object retention", err)
 		return
 	}
-	slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+	slog.Debug( // #nosec G706 -- bucket/key from URL path; log injection risk accepted for local dev emulator
 		"get object retention",
 		"bucket",
 		bucket,
@@ -101,7 +101,7 @@ func (ro *Router) handlePutObjectLegalHold(
 ) {
 	var req xmlObjectLegalHold
 	if err := xml.NewDecoder(r.Body).Decode(&req); err != nil {
-		slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+		slog.Debug( // #nosec G706 -- bucket/key from URL path; log injection risk accepted for local dev emulator
 			"malformed legal hold XML",
 			"bucket",
 			bucket,
@@ -113,7 +113,7 @@ func (ro *Router) handlePutObjectLegalHold(
 		return
 	}
 	if req.Status != "ON" && req.Status != "OFF" {
-		slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+		slog.Debug( // #nosec G706 -- bucket/key/status from URL path/body; log injection risk accepted for local dev emulator
 			"invalid legal hold status",
 			"bucket",
 			bucket,
@@ -131,7 +131,7 @@ func (ro *Router) handlePutObjectLegalHold(
 		writeObjectLockError(w, r, bucket, key, "put object legal hold", err)
 		return
 	}
-	slog.Info( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+	slog.Info( // #nosec G706 -- bucket/key from URL path; log injection risk accepted for local dev emulator
 		"object legal hold updated",
 		"bucket",
 		bucket,
@@ -150,7 +150,7 @@ func (ro *Router) handleGetObjectLegalHold(
 	status, err := ro.storage.GetObjectLegalHold(bucket, key, versionID)
 	if err != nil {
 		if errors.Is(err, ErrNoObjectLegalHold) {
-			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			slog.Debug( // #nosec G706 -- bucket/key from URL path; log injection risk accepted for local dev emulator
 				"no object legal hold",
 				"bucket",
 				bucket,
@@ -164,7 +164,7 @@ func (ro *Router) handleGetObjectLegalHold(
 		writeObjectLockError(w, r, bucket, key, "get object legal hold", err)
 		return
 	}
-	slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+	slog.Debug( // #nosec G706 -- bucket/key from URL path; log injection risk accepted for local dev emulator
 		"get object legal hold",
 		"bucket",
 		bucket,
@@ -185,7 +185,7 @@ func writeObjectLockError(
 	var dme *DeleteMarkerError
 	switch {
 	case errors.Is(err, ErrBucketNotFound):
-		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+		slog.Debug( // #nosec G706 -- bucket from URL path; log injection risk accepted for local dev emulator
 			"bucket not found",
 			"bucket",
 			bucket,
@@ -193,7 +193,7 @@ func writeObjectLockError(
 		writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 			"The specified bucket does not exist.")
 	case errors.Is(err, ErrObjectNotFound):
-		slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+		slog.Debug( // #nosec G706 -- bucket/key from URL path; log injection risk accepted for local dev emulator
 			"object not found",
 			"bucket",
 			bucket,
@@ -203,7 +203,7 @@ func writeObjectLockError(
 		writeError(w, r, http.StatusNotFound, "NoSuchKey",
 			"The specified key does not exist.")
 	case errors.As(err, &dme):
-		slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+		slog.Debug( // #nosec G706 -- bucket/key from URL path; log injection risk accepted for local dev emulator
 			"object is a delete marker",
 			"bucket",
 			bucket,
@@ -213,7 +213,7 @@ func writeObjectLockError(
 		writeError(w, r, http.StatusMethodNotAllowed, "MethodNotAllowed",
 			"The specified method is not allowed against this resource type.")
 	default:
-		slog.Error( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+		slog.Error( // #nosec G706 -- bucket/key from URL path; log injection risk accepted for local dev emulator
 			"failed to "+op,
 			"bucket",
 			bucket,

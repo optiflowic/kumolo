@@ -329,7 +329,7 @@ type byteRange struct {
 // xmlObjectRetention is the XML representation for GetObjectRetention /
 // PutObjectRetention request and response bodies.
 type xmlObjectRetention struct {
-	XMLName         xml.Name  `xml:"Retention"`
+	XMLName         xml.Name  `xml:"http://s3.amazonaws.com/doc/2006-03-01/ Retention"`
 	Mode            string    `xml:"Mode"`
 	RetainUntilDate time.Time `xml:"RetainUntilDate"`
 }
@@ -337,6 +337,6 @@ type xmlObjectRetention struct {
 // xmlObjectLegalHold is the XML representation for GetObjectLegalHold /
 // PutObjectLegalHold request and response bodies.
 type xmlObjectLegalHold struct {
-	XMLName xml.Name `xml:"LegalHold"`
+	XMLName xml.Name `xml:"http://s3.amazonaws.com/doc/2006-03-01/ LegalHold"`
 	Status  string   `xml:"Status"`
 }

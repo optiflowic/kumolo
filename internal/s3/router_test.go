@@ -538,6 +538,12 @@ func newRouterWithMock(store *mockStore) *Router {
 	return &Router{storage: store, now: time.Now}
 }
 
+func newMockStore(fields func(m *mockStore)) *mockStore {
+	m := &mockStore{}
+	fields(m)
+	return m
+}
+
 func TestRouterHandlerErrors(t *testing.T) {
 	t.Run("ListBuckets returns 500 on storage error", func(t *testing.T) {
 		ro := newRouterWithMock(&mockStore{listBucketsErr: errors.New("disk failure")})
@@ -6071,29 +6077,16 @@ func TestSSEResponseHeaders(t *testing.T) {
 func TestObjectLockConfigHandlers(t *testing.T) {
 	const validXML = `<ObjectLockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ObjectLockEnabled>Enabled</ObjectLockEnabled></ObjectLockConfiguration>`
 
-	ms := func(fields func(m *mockStore)) *mockStore {
-		m := &mockStore{}
-		fields(m)
-		return m
-	}
-
 	t.Run("PUT returns 200 on valid XML", func(t *testing.T) {
 		ro := newTestRouter(t)
-		req := httptest.NewRequest(http.MethodPut, "/b?object-lock", strings.NewReader(validXML))
-		require.Equal(t, http.StatusNotFound, func() int {
-			w := httptest.NewRecorder()
-			ro.ServeHTTP(w, req)
-			return w.Code
-		}())
-		// Create bucket and retry.
 		putReq := httptest.NewRequest(http.MethodPut, "/b", nil)
 		putW := httptest.NewRecorder()
 		ro.ServeHTTP(putW, putReq)
 		require.Equal(t, http.StatusOK, putW.Code)
 
-		req2 := httptest.NewRequest(http.MethodPut, "/b?object-lock", strings.NewReader(validXML))
+		req := httptest.NewRequest(http.MethodPut, "/b?object-lock", strings.NewReader(validXML))
 		w := httptest.NewRecorder()
-		ro.ServeHTTP(w, req2)
+		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
 
@@ -6108,7 +6101,7 @@ func TestObjectLockConfigHandlers(t *testing.T) {
 
 	t.Run("PUT returns 404 on bucket not found", func(t *testing.T) {
 		ro := newRouterWithMock(
-			ms(func(m *mockStore) { m.putBucketObjectLockErr = ErrBucketNotFound }),
+			newMockStore(func(m *mockStore) { m.putBucketObjectLockErr = ErrBucketNotFound }),
 		)
 		req := httptest.NewRequest(http.MethodPut, "/b?object-lock", strings.NewReader(validXML))
 		w := httptest.NewRecorder()
@@ -6118,7 +6111,7 @@ func TestObjectLockConfigHandlers(t *testing.T) {
 	})
 
 	t.Run("PUT returns 500 on storage error", func(t *testing.T) {
-		ro := newRouterWithMock(ms(func(m *mockStore) {
+		ro := newRouterWithMock(newMockStore(func(m *mockStore) {
 			m.putBucketObjectLockErr = errors.New("disk full")
 		}))
 		req := httptest.NewRequest(http.MethodPut, "/b?object-lock", strings.NewReader(validXML))
@@ -6128,7 +6121,7 @@ func TestObjectLockConfigHandlers(t *testing.T) {
 	})
 
 	t.Run("GET returns stored configuration", func(t *testing.T) {
-		ro := newRouterWithMock(ms(func(m *mockStore) {
+		ro := newRouterWithMock(newMockStore(func(m *mockStore) {
 			m.getBucketObjectLockResult = validXML
 		}))
 		req := httptest.NewRequest(http.MethodGet, "/b?object-lock", nil)
@@ -6149,7 +6142,7 @@ func TestObjectLockConfigHandlers(t *testing.T) {
 
 	t.Run("GET returns 404 on bucket not found", func(t *testing.T) {
 		ro := newRouterWithMock(
-			ms(func(m *mockStore) { m.getBucketObjectLockErr = ErrBucketNotFound }),
+			newMockStore(func(m *mockStore) { m.getBucketObjectLockErr = ErrBucketNotFound }),
 		)
 		req := httptest.NewRequest(http.MethodGet, "/b?object-lock", nil)
 		w := httptest.NewRecorder()
@@ -6159,7 +6152,7 @@ func TestObjectLockConfigHandlers(t *testing.T) {
 	})
 
 	t.Run("GET returns 500 on storage error", func(t *testing.T) {
-		ro := newRouterWithMock(ms(func(m *mockStore) {
+		ro := newRouterWithMock(newMockStore(func(m *mockStore) {
 			m.getBucketObjectLockErr = errors.New("disk full")
 		}))
 		req := httptest.NewRequest(http.MethodGet, "/b?object-lock", nil)
@@ -6171,12 +6164,6 @@ func TestObjectLockConfigHandlers(t *testing.T) {
 
 func TestObjectRetentionHandlers(t *testing.T) {
 	const validBody = `<Retention xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Mode>GOVERNANCE</Mode><RetainUntilDate>2030-01-01T00:00:00Z</RetainUntilDate></Retention>`
-
-	ms := func(fields func(m *mockStore)) *mockStore {
-		m := &mockStore{}
-		fields(m)
-		return m
-	}
 
 	t.Run("PUT/GET roundtrip via real storage", func(t *testing.T) {
 		ro := newTestRouter(t)
@@ -6218,7 +6205,7 @@ func TestObjectRetentionHandlers(t *testing.T) {
 
 	t.Run("PUT returns 400 on invalid mode", func(t *testing.T) {
 		ro := newRouterWithMock(&mockStore{})
-		body := `<Retention><Mode>INVALID</Mode><RetainUntilDate>2030-01-01T00:00:00Z</RetainUntilDate></Retention>`
+		body := `<Retention xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Mode>INVALID</Mode><RetainUntilDate>2030-01-01T00:00:00Z</RetainUntilDate></Retention>`
 		req := httptest.NewRequest(http.MethodPut, "/b/k?retention", strings.NewReader(body))
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
@@ -6228,7 +6215,7 @@ func TestObjectRetentionHandlers(t *testing.T) {
 
 	t.Run("PUT returns 404 on bucket not found", func(t *testing.T) {
 		ro := newRouterWithMock(
-			ms(func(m *mockStore) { m.putObjectRetentionErr = ErrBucketNotFound }),
+			newMockStore(func(m *mockStore) { m.putObjectRetentionErr = ErrBucketNotFound }),
 		)
 		req := httptest.NewRequest(http.MethodPut, "/b/k?retention", strings.NewReader(validBody))
 		w := httptest.NewRecorder()
@@ -6239,7 +6226,7 @@ func TestObjectRetentionHandlers(t *testing.T) {
 
 	t.Run("PUT returns 404 on object not found", func(t *testing.T) {
 		ro := newRouterWithMock(
-			ms(func(m *mockStore) { m.putObjectRetentionErr = ErrObjectNotFound }),
+			newMockStore(func(m *mockStore) { m.putObjectRetentionErr = ErrObjectNotFound }),
 		)
 		req := httptest.NewRequest(http.MethodPut, "/b/k?retention", strings.NewReader(validBody))
 		w := httptest.NewRecorder()
@@ -6249,7 +6236,7 @@ func TestObjectRetentionHandlers(t *testing.T) {
 	})
 
 	t.Run("PUT returns 405 for delete marker", func(t *testing.T) {
-		ro := newRouterWithMock(ms(func(m *mockStore) {
+		ro := newRouterWithMock(newMockStore(func(m *mockStore) {
 			m.putObjectRetentionErr = &DeleteMarkerError{VersionID: "vid"}
 		}))
 		req := httptest.NewRequest(http.MethodPut, "/b/k?retention", strings.NewReader(validBody))
@@ -6259,7 +6246,7 @@ func TestObjectRetentionHandlers(t *testing.T) {
 	})
 
 	t.Run("PUT returns 500 on storage error", func(t *testing.T) {
-		ro := newRouterWithMock(ms(func(m *mockStore) {
+		ro := newRouterWithMock(newMockStore(func(m *mockStore) {
 			m.putObjectRetentionErr = errors.New("disk full")
 		}))
 		req := httptest.NewRequest(http.MethodPut, "/b/k?retention", strings.NewReader(validBody))
@@ -6270,7 +6257,7 @@ func TestObjectRetentionHandlers(t *testing.T) {
 
 	t.Run("GET returns 404 when retention not set", func(t *testing.T) {
 		ro := newRouterWithMock(
-			ms(func(m *mockStore) { m.getObjectRetentionErr = ErrNoObjectRetention }),
+			newMockStore(func(m *mockStore) { m.getObjectRetentionErr = ErrNoObjectRetention }),
 		)
 		req := httptest.NewRequest(http.MethodGet, "/b/k?retention", nil)
 		w := httptest.NewRecorder()
@@ -6281,7 +6268,7 @@ func TestObjectRetentionHandlers(t *testing.T) {
 
 	t.Run("GET returns 404 on bucket not found", func(t *testing.T) {
 		ro := newRouterWithMock(
-			ms(func(m *mockStore) { m.getObjectRetentionErr = ErrBucketNotFound }),
+			newMockStore(func(m *mockStore) { m.getObjectRetentionErr = ErrBucketNotFound }),
 		)
 		req := httptest.NewRequest(http.MethodGet, "/b/k?retention", nil)
 		w := httptest.NewRecorder()
@@ -6292,7 +6279,7 @@ func TestObjectRetentionHandlers(t *testing.T) {
 
 	t.Run("GET returns 404 on object not found", func(t *testing.T) {
 		ro := newRouterWithMock(
-			ms(func(m *mockStore) { m.getObjectRetentionErr = ErrObjectNotFound }),
+			newMockStore(func(m *mockStore) { m.getObjectRetentionErr = ErrObjectNotFound }),
 		)
 		req := httptest.NewRequest(http.MethodGet, "/b/k?retention", nil)
 		w := httptest.NewRecorder()
@@ -6302,7 +6289,7 @@ func TestObjectRetentionHandlers(t *testing.T) {
 	})
 
 	t.Run("GET returns 405 for delete marker", func(t *testing.T) {
-		ro := newRouterWithMock(ms(func(m *mockStore) {
+		ro := newRouterWithMock(newMockStore(func(m *mockStore) {
 			m.getObjectRetentionErr = &DeleteMarkerError{VersionID: "vid"}
 		}))
 		req := httptest.NewRequest(http.MethodGet, "/b/k?retention", nil)
@@ -6312,7 +6299,7 @@ func TestObjectRetentionHandlers(t *testing.T) {
 	})
 
 	t.Run("GET returns 500 on storage error", func(t *testing.T) {
-		ro := newRouterWithMock(ms(func(m *mockStore) {
+		ro := newRouterWithMock(newMockStore(func(m *mockStore) {
 			m.getObjectRetentionErr = errors.New("disk full")
 		}))
 		req := httptest.NewRequest(http.MethodGet, "/b/k?retention", nil)
@@ -6344,12 +6331,6 @@ func TestObjectRetentionHandlers(t *testing.T) {
 
 func TestObjectLegalHoldHandlers(t *testing.T) {
 	const validBody = `<LegalHold xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Status>ON</Status></LegalHold>`
-
-	ms := func(fields func(m *mockStore)) *mockStore {
-		m := &mockStore{}
-		fields(m)
-		return m
-	}
 
 	t.Run("PUT/GET roundtrip via real storage", func(t *testing.T) {
 		ro := newTestRouter(t)
@@ -6387,7 +6368,7 @@ func TestObjectLegalHoldHandlers(t *testing.T) {
 
 	t.Run("PUT returns 400 on invalid status", func(t *testing.T) {
 		ro := newRouterWithMock(&mockStore{})
-		body := `<LegalHold><Status>INVALID</Status></LegalHold>`
+		body := `<LegalHold xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Status>INVALID</Status></LegalHold>`
 		req := httptest.NewRequest(http.MethodPut, "/b/k?legal-hold", strings.NewReader(body))
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
@@ -6397,7 +6378,7 @@ func TestObjectLegalHoldHandlers(t *testing.T) {
 
 	t.Run("PUT returns 404 on bucket not found", func(t *testing.T) {
 		ro := newRouterWithMock(
-			ms(func(m *mockStore) { m.putObjectLegalHoldErr = ErrBucketNotFound }),
+			newMockStore(func(m *mockStore) { m.putObjectLegalHoldErr = ErrBucketNotFound }),
 		)
 		req := httptest.NewRequest(http.MethodPut, "/b/k?legal-hold", strings.NewReader(validBody))
 		w := httptest.NewRecorder()
@@ -6408,7 +6389,7 @@ func TestObjectLegalHoldHandlers(t *testing.T) {
 
 	t.Run("PUT returns 404 on object not found", func(t *testing.T) {
 		ro := newRouterWithMock(
-			ms(func(m *mockStore) { m.putObjectLegalHoldErr = ErrObjectNotFound }),
+			newMockStore(func(m *mockStore) { m.putObjectLegalHoldErr = ErrObjectNotFound }),
 		)
 		req := httptest.NewRequest(http.MethodPut, "/b/k?legal-hold", strings.NewReader(validBody))
 		w := httptest.NewRecorder()
@@ -6418,7 +6399,7 @@ func TestObjectLegalHoldHandlers(t *testing.T) {
 	})
 
 	t.Run("PUT returns 405 for delete marker", func(t *testing.T) {
-		ro := newRouterWithMock(ms(func(m *mockStore) {
+		ro := newRouterWithMock(newMockStore(func(m *mockStore) {
 			m.putObjectLegalHoldErr = &DeleteMarkerError{VersionID: "vid"}
 		}))
 		req := httptest.NewRequest(http.MethodPut, "/b/k?legal-hold", strings.NewReader(validBody))
@@ -6428,7 +6409,7 @@ func TestObjectLegalHoldHandlers(t *testing.T) {
 	})
 
 	t.Run("PUT returns 500 on storage error", func(t *testing.T) {
-		ro := newRouterWithMock(ms(func(m *mockStore) {
+		ro := newRouterWithMock(newMockStore(func(m *mockStore) {
 			m.putObjectLegalHoldErr = errors.New("disk full")
 		}))
 		req := httptest.NewRequest(http.MethodPut, "/b/k?legal-hold", strings.NewReader(validBody))
@@ -6439,7 +6420,7 @@ func TestObjectLegalHoldHandlers(t *testing.T) {
 
 	t.Run("GET returns 404 when legal hold not set", func(t *testing.T) {
 		ro := newRouterWithMock(
-			ms(func(m *mockStore) { m.getObjectLegalHoldErr = ErrNoObjectLegalHold }),
+			newMockStore(func(m *mockStore) { m.getObjectLegalHoldErr = ErrNoObjectLegalHold }),
 		)
 		req := httptest.NewRequest(http.MethodGet, "/b/k?legal-hold", nil)
 		w := httptest.NewRecorder()
@@ -6450,7 +6431,7 @@ func TestObjectLegalHoldHandlers(t *testing.T) {
 
 	t.Run("GET returns 404 on bucket not found", func(t *testing.T) {
 		ro := newRouterWithMock(
-			ms(func(m *mockStore) { m.getObjectLegalHoldErr = ErrBucketNotFound }),
+			newMockStore(func(m *mockStore) { m.getObjectLegalHoldErr = ErrBucketNotFound }),
 		)
 		req := httptest.NewRequest(http.MethodGet, "/b/k?legal-hold", nil)
 		w := httptest.NewRecorder()
@@ -6461,7 +6442,7 @@ func TestObjectLegalHoldHandlers(t *testing.T) {
 
 	t.Run("GET returns 404 on object not found", func(t *testing.T) {
 		ro := newRouterWithMock(
-			ms(func(m *mockStore) { m.getObjectLegalHoldErr = ErrObjectNotFound }),
+			newMockStore(func(m *mockStore) { m.getObjectLegalHoldErr = ErrObjectNotFound }),
 		)
 		req := httptest.NewRequest(http.MethodGet, "/b/k?legal-hold", nil)
 		w := httptest.NewRecorder()
@@ -6471,7 +6452,7 @@ func TestObjectLegalHoldHandlers(t *testing.T) {
 	})
 
 	t.Run("GET returns 405 for delete marker", func(t *testing.T) {
-		ro := newRouterWithMock(ms(func(m *mockStore) {
+		ro := newRouterWithMock(newMockStore(func(m *mockStore) {
 			m.getObjectLegalHoldErr = &DeleteMarkerError{VersionID: "vid"}
 		}))
 		req := httptest.NewRequest(http.MethodGet, "/b/k?legal-hold", nil)
@@ -6481,7 +6462,7 @@ func TestObjectLegalHoldHandlers(t *testing.T) {
 	})
 
 	t.Run("GET returns 500 on storage error", func(t *testing.T) {
-		ro := newRouterWithMock(ms(func(m *mockStore) {
+		ro := newRouterWithMock(newMockStore(func(m *mockStore) {
 			m.getObjectLegalHoldErr = errors.New("disk full")
 		}))
 		req := httptest.NewRequest(http.MethodGet, "/b/k?legal-hold", nil)
