@@ -193,7 +193,7 @@ func (ro *Router) handleUploadPartCopy(w http.ResponseWriter, r *http.Request, b
 	}
 
 	var br *byteRange
-	if rangeHdr := r.Header.Get("x-amz-copy-source-range"); rangeHdr != "" {
+	if rangeHdr := r.Header.Get(amzCopySourceRange); rangeHdr != "" {
 		var parseErr error
 		br, parseErr = parseCopySourceRange(rangeHdr)
 		if parseErr != nil {

@@ -30,6 +30,8 @@ const (
 	amzDeleteMarker                = "X-Amz-Delete-Marker"
 	amzSSE                         = "X-Amz-Server-Side-Encryption"
 	amzSSEKMSKeyID                 = "X-Amz-Server-Side-Encryption-Aws-Kms-Key-Id"
+	amzMetadataDirective           = "X-Amz-Metadata-Directive"
+	amzCopySourceRange             = "X-Amz-Copy-Source-Range"
 )
 
 // Router handles S3 API requests using path-style URLs: /<bucket>/<key>
