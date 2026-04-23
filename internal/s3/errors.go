@@ -19,6 +19,7 @@ var (
 	ErrNoBucketPolicy      = errors.New("no bucket policy")
 	ErrNoObjectRetention   = errors.New("no object retention")
 	ErrNoObjectLegalHold   = errors.New("no object legal hold")
+	ErrObjectLocked        = errors.New("object is protected by Object Lock")
 )
 
 // DeleteMarkerError is returned when a get/head operation resolves to a delete marker.

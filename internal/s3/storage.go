@@ -422,13 +422,44 @@ func (s *Storage) CopyObject(
 	)
 }
 
-func (s *Storage) DeleteObject(bucket, key string) error {
+// checkObjectLockLocked returns ErrObjectLocked if the object at objPath is
+// protected by an active LegalHold or a Retention period that prevents deletion.
+// bypassGovernance allows skipping GOVERNANCE-mode retention only.
+// Caller must hold at least a read lock.
+func (s *Storage) checkObjectLockLocked(objPath string, bypassGovernance bool) error {
+	meta, err := s.readMeta(objPath)
+	if err != nil {
+		// Object doesn't exist or metadata unreadable — let the caller handle it.
+		return nil
+	}
+	if meta.LegalHold != nil && meta.LegalHold.Status == "ON" {
+		return ErrObjectLocked
+	}
+	if meta.Retention != nil {
+		if time.Now().UTC().Before(meta.Retention.RetainUntilDate) {
+			if meta.Retention.Mode == "COMPLIANCE" {
+				return ErrObjectLocked
+			}
+			// GOVERNANCE mode: blocked unless caller holds bypass privilege.
+			if !bypassGovernance {
+				return ErrObjectLocked
+			}
+		}
+	}
+	return nil
+}
+
+func (s *Storage) DeleteObject(bucket, key string, bypassGovernance bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.bucketExistsLocked(bucket) {
 		return ErrBucketNotFound
 	}
-	return s.deleteObjectFilesLocked(filepath.Join(bucket, key))
+	objPath := filepath.Join(bucket, key)
+	if err := s.checkObjectLockLocked(objPath, bypassGovernance); err != nil {
+		return err
+	}
+	return s.deleteObjectFilesLocked(objPath)
 }
 
 // deleteObjectFilesLocked removes the body, metadata, and tags for an object.
@@ -466,7 +497,10 @@ func (s *Storage) deleteObjectFilesLocked(objPath string) error {
 // If versioning is disabled: removes the object normally (same as DeleteObject).
 // Returns the versionID of the created delete marker (or "") and whether a
 // delete marker was created.
-func (s *Storage) DeleteObjectVersioned(bucket, key string) (string, bool, error) {
+func (s *Storage) DeleteObjectVersioned(
+	bucket, key string,
+	bypassGovernance bool,
+) (string, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.bucketExistsLocked(bucket) {
@@ -481,6 +515,9 @@ func (s *Storage) DeleteObjectVersioned(bucket, key string) (string, bool, error
 	objPath := filepath.Join(bucket, key)
 
 	if !enabled {
+		if err := s.checkObjectLockLocked(objPath, bypassGovernance); err != nil {
+			return "", false, err
+		}
 		if err := s.deleteObjectFilesLocked(objPath); err != nil {
 			if errors.Is(err, ErrObjectNotFound) {
 				return "", false, nil // S3 returns 204 for non-existent objects
@@ -522,7 +559,10 @@ func (s *Storage) DeleteObjectVersioned(bucket, key string) (string, bool, error
 
 // DeleteObjectVersion permanently deletes a specific version (or delete marker) by versionID.
 // Returns whether the deleted entry was a delete marker.
-func (s *Storage) DeleteObjectVersion(bucket, key, versionID string) (bool, error) {
+func (s *Storage) DeleteObjectVersion(
+	bucket, key, versionID string,
+	bypassGovernance bool,
+) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.bucketExistsLocked(bucket) {
@@ -533,6 +573,11 @@ func (s *Storage) DeleteObjectVersion(bucket, key, versionID string) (bool, erro
 
 	// Check if it's the current version.
 	if cm, err := s.readMeta(objPath); err == nil && cm.VersionID == versionID {
+		if !cm.IsDeleteMarker {
+			if err := s.checkObjectLockLocked(objPath, bypassGovernance); err != nil {
+				return false, err
+			}
+		}
 		isMarker := cm.IsDeleteMarker
 		if err := s.deleteObjectFilesLocked(objPath); err != nil &&
 			!errors.Is(err, ErrObjectNotFound) {
@@ -549,6 +594,11 @@ func (s *Storage) DeleteObjectVersion(bucket, key, versionID string) (bool, erro
 			return false, ErrObjectNotFound
 		}
 		return false, err
+	}
+	if !vm.IsDeleteMarker {
+		if err := s.checkObjectLockLocked(vp, bypassGovernance); err != nil {
+			return false, err
+		}
 	}
 	isMarker := vm.IsDeleteMarker
 	if err := s.removeFile(vp); err != nil && !errors.Is(err, os.ErrNotExist) {

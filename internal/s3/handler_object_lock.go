@@ -39,6 +39,18 @@ func (ro *Router) handlePutObjectRetention(
 			"Mode must be GOVERNANCE or COMPLIANCE.")
 		return
 	}
+	if !req.RetainUntilDate.After(ro.now()) {
+		slog.Debug( // #nosec G706 -- bucket/key from URL path; log injection risk accepted for local dev emulator
+			"retention date must be in the future",
+			"bucket",
+			bucket,
+			"key",
+			key,
+		)
+		writeError(w, r, http.StatusBadRequest, "InvalidArgument",
+			"The retain until date must be in the future.")
+		return
+	}
 	versionID := r.URL.Query().Get("versionId")
 	retention := ObjectRetention{
 		Mode:            req.Mode,

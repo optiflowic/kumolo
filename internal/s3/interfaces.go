@@ -32,9 +32,15 @@ type objectStore interface {
 		userMetadata map[string]string,
 		sseAlgorithm, sseKMSKeyID string,
 	) (ObjectMetadata, error)
-	DeleteObject(bucket, key string) error
-	DeleteObjectVersioned(bucket, key string) (versionID string, isDeleteMarker bool, err error)
-	DeleteObjectVersion(bucket, key, versionID string) (isDeleteMarker bool, err error)
+	DeleteObject(bucket, key string, bypassGovernance bool) error
+	DeleteObjectVersioned(
+		bucket, key string,
+		bypassGovernance bool,
+	) (versionID string, isDeleteMarker bool, err error)
+	DeleteObjectVersion(
+		bucket, key, versionID string,
+		bypassGovernance bool,
+	) (isDeleteMarker bool, err error)
 	HeadObject(bucket, key string) (ObjectMetadata, error)
 	HeadObjectVersion(bucket, key, versionID string) (ObjectMetadata, error)
 	ListObjects(bucket string) ([]ObjectInfo, error)

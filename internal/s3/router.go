@@ -1563,23 +1563,39 @@ func (ro *Router) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 			"The XML you provided was not well-formed.")
 		return
 	}
+	bypassGovernance := r.Header.Get("x-amz-bypass-governance-retention") == "true"
 	result := deleteObjectsResult{}
 	for _, obj := range req.Objects {
-		if err := ro.storage.DeleteObject(bucket, obj.Key); err != nil &&
-			!errors.Is(err, ErrObjectNotFound) {
-			slog.Error( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-				"failed to delete object",
-				"bucket",
-				bucket,
-				"key",
-				obj.Key,
-				"err",
-				err,
-			)
+		err := ro.storage.DeleteObject(bucket, obj.Key, bypassGovernance)
+		if err != nil && !errors.Is(err, ErrObjectNotFound) {
+			var code, message string
+			if errors.Is(err, ErrObjectLocked) {
+				slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+					"delete rejected: object locked",
+					"bucket",
+					bucket,
+					"key",
+					obj.Key,
+				)
+				code = "AccessDenied"
+				message = "Access Denied because the object is protected by Object Lock."
+			} else {
+				slog.Error( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+					"failed to delete object",
+					"bucket",
+					bucket,
+					"key",
+					obj.Key,
+					"err",
+					err,
+				)
+				code = "InternalError"
+				message = err.Error()
+			}
 			result.Errors = append(result.Errors, xmlDeleteError{
 				Key:     obj.Key,
-				Code:    "InternalError",
-				Message: err.Error(),
+				Code:    code,
+				Message: message,
 			})
 			continue
 		}
