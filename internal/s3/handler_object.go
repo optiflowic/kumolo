@@ -61,7 +61,7 @@ func (ro *Router) handleCopyObject(
 		contentType  string
 		userMetadata map[string]string
 	)
-	if strings.ToUpper(r.Header.Get("x-amz-metadata-directive")) == "REPLACE" {
+	if strings.ToUpper(r.Header.Get(amzMetadataDirective)) == "REPLACE" {
 		contentType = r.Header.Get("Content-Type")
 		if contentType == "" {
 			contentType = "application/octet-stream"

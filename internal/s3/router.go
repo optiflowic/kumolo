@@ -18,13 +18,23 @@ import (
 )
 
 const (
-	amzCopySource   = "X-Amz-Copy-Source"
-	amzMetaPrefix   = "X-Amz-Meta-"
-	amzTaggingCount = "X-Amz-Tagging-Count"
-	amzVersionID    = "X-Amz-Version-Id"
-	amzDeleteMarker = "X-Amz-Delete-Marker"
-	amzSSE          = "X-Amz-Server-Side-Encryption"
-	amzSSEKMSKeyID  = "X-Amz-Server-Side-Encryption-Aws-Kms-Key-Id"
+	amzCopySource                  = "X-Amz-Copy-Source"
+	amzCopySourceVersionID         = "X-Amz-Copy-Source-Version-Id"
+	amzCopySourceIfMatch           = "X-Amz-Copy-Source-If-Match"
+	amzCopySourceIfNoneMatch       = "X-Amz-Copy-Source-If-None-Match"
+	amzCopySourceIfModifiedSince   = "X-Amz-Copy-Source-If-Modified-Since"
+	amzCopySourceIfUnmodifiedSince = "X-Amz-Copy-Source-If-Unmodified-Since"
+	amzMetaPrefix                  = "X-Amz-Meta-"
+	amzTaggingCount                = "X-Amz-Tagging-Count"
+	amzVersionID                   = "X-Amz-Version-Id"
+	amzDeleteMarker                = "X-Amz-Delete-Marker"
+	amzSSE                         = "X-Amz-Server-Side-Encryption"
+	amzSSEKMSKeyID                 = "X-Amz-Server-Side-Encryption-Aws-Kms-Key-Id"
+	amzMetadataDirective           = "X-Amz-Metadata-Directive"
+	amzCopySourceRange             = "X-Amz-Copy-Source-Range"
+
+	presignedURLMaxExpiry = 7 * 24 * 60 * 60 // 604800 seconds; AWS S3 maximum
+	maxPartNumber         = 10000            // AWS S3 maximum part number
 )
 
 // Router handles S3 API requests using path-style URLs: /<bucket>/<key>
@@ -99,7 +109,7 @@ func checkPresigned(r *http.Request, now time.Time) (int, string, string) {
 	}
 
 	expires, err := strconv.ParseInt(amzExpires, 10, 64)
-	if err != nil || expires < 1 || expires > 604800 {
+	if err != nil || expires < 1 || expires > presignedURLMaxExpiry {
 		return http.StatusBadRequest,
 			"AuthorizationQueryParametersError",
 			"X-Amz-Expires must be between 1 and 604800 seconds."
@@ -557,6 +567,8 @@ func (ro *Router) routeObject(w http.ResponseWriter, r *http.Request, bucket, ke
 		switch {
 		case q.Has("tagging"):
 			ro.handlePutObjectTagging(w, r, bucket, key)
+		case q.Has("partNumber") && q.Has("uploadId") && r.Header.Get(amzCopySource) != "":
+			ro.handleUploadPartCopy(w, r, bucket, key)
 		case q.Has("partNumber") && q.Has("uploadId"):
 			ro.handleUploadPart(w, r, bucket, key)
 		case r.Header.Get(amzCopySource) != "":

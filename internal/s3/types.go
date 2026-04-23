@@ -156,6 +156,12 @@ type copyObjectResult struct {
 	LastModified time.Time `xml:"LastModified"`
 }
 
+type copyPartResult struct {
+	XMLName      xml.Name  `xml:"CopyPartResult"`
+	ETag         string    `xml:"ETag"`
+	LastModified time.Time `xml:"LastModified"`
+}
+
 type initiateMultipartUploadResult struct {
 	XMLName  xml.Name `xml:"InitiateMultipartUploadResult"`
 	Bucket   string   `xml:"Bucket"`
@@ -299,4 +305,10 @@ type xmlCORSRule struct {
 	AllowedHeaders []string `xml:"AllowedHeader,omitempty"`
 	ExposeHeaders  []string `xml:"ExposeHeader,omitempty"`
 	MaxAgeSeconds  int      `xml:"MaxAgeSeconds,omitempty"`
+}
+
+// byteRange represents an inclusive byte range [Start, End] for UploadPartCopy.
+type byteRange struct {
+	Start int64
+	End   int64
 }
