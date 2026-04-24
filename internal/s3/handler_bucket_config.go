@@ -671,10 +671,21 @@ func (ro *Router) handlePutObjectLockConfiguration(
 				"The specified bucket does not exist.")
 		case errors.Is(err, ErrInvalidBucketState):
 			slog.Debug("versioning not enabled for object lock", "bucket", bucket) // #nosec G706
-			writeError(w, r, http.StatusBadRequest, "InvalidBucketState",
-				"Object Lock configuration cannot be enabled on a bucket that does not have versioning enabled.")
+			writeError(
+				w,
+				r,
+				http.StatusBadRequest,
+				"InvalidBucketState",
+				"Object Lock configuration cannot be enabled on a bucket that does not have versioning enabled.",
+			)
 		default:
-			slog.Error("failed to put object lock configuration", "bucket", bucket, "err", err) // #nosec G706
+			slog.Error(
+				"failed to put object lock configuration",
+				"bucket",
+				bucket,
+				"err",
+				err,
+			) // #nosec G706
 			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		}
 		return

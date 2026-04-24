@@ -350,8 +350,8 @@ func (m *mockStore) ListBuckets() ([]BucketInfo, error) { return nil, m.listBuck
 func (m *mockStore) CreateBucket(_ string, _ string, _ bool) error {
 	return m.createBucketErr
 }
-func (m *mockStore) DeleteBucket(_ string) error           { return m.deleteBucketErr }
-func (m *mockStore) BucketExists(_ string) bool            { return m.bucketExists }
+func (m *mockStore) DeleteBucket(_ string) error { return m.deleteBucketErr }
+func (m *mockStore) BucketExists(_ string) bool  { return m.bucketExists }
 func (m *mockStore) GetBucketRegion(_ string) (string, error) {
 	return m.getBucketRegionStr, m.getBucketRegionErr
 }
@@ -688,7 +688,11 @@ func TestRouterPutObject(t *testing.T) {
 		createReq.Header.Set("x-amz-object-lock-enabled", "true")
 		ro.ServeHTTP(httptest.NewRecorder(), createReq)
 
-		putReq := httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", strings.NewReader("data"))
+		putReq := httptest.NewRequest(
+			http.MethodPut,
+			"/my-bucket/obj.txt",
+			strings.NewReader("data"),
+		)
 		putReq.Header.Set(amzObjectLockMode, "GOVERNANCE")
 		putReq.Header.Set(amzObjectLockRetainUntilDate, "2099-01-01T00:00:00Z")
 		putReq.Header.Set(amzObjectLockLegalHold, "ON")
@@ -711,7 +715,11 @@ func TestRouterPutObject(t *testing.T) {
 		ro := newTestRouter(t)
 		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
 
-		putReq := httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", strings.NewReader("data"))
+		putReq := httptest.NewRequest(
+			http.MethodPut,
+			"/my-bucket/obj.txt",
+			strings.NewReader("data"),
+		)
 		putReq.Header.Set(amzObjectLockMode, "INVALID")
 		putReq.Header.Set(amzObjectLockRetainUntilDate, "2099-01-01T00:00:00Z")
 		w := httptest.NewRecorder()
@@ -724,7 +732,11 @@ func TestRouterPutObject(t *testing.T) {
 		ro := newTestRouter(t)
 		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
 
-		putReq := httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", strings.NewReader("data"))
+		putReq := httptest.NewRequest(
+			http.MethodPut,
+			"/my-bucket/obj.txt",
+			strings.NewReader("data"),
+		)
 		putReq.Header.Set(amzObjectLockMode, "GOVERNANCE")
 		putReq.Header.Set(amzObjectLockRetainUntilDate, "not-a-date")
 		w := httptest.NewRecorder()
@@ -737,7 +749,11 @@ func TestRouterPutObject(t *testing.T) {
 		ro := newTestRouter(t)
 		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
 
-		putReq := httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", strings.NewReader("data"))
+		putReq := httptest.NewRequest(
+			http.MethodPut,
+			"/my-bucket/obj.txt",
+			strings.NewReader("data"),
+		)
 		putReq.Header.Set(amzObjectLockLegalHold, "MAYBE")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, putReq)
@@ -1910,7 +1926,10 @@ func TestRouterCopyObject(t *testing.T) {
 		ro.ServeHTTP(httptest.NewRecorder(), createReq)
 
 		// Create src bucket and put source object.
-		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/src-bucket", nil))
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/src-bucket", nil),
+		)
 		ro.ServeHTTP(
 			httptest.NewRecorder(),
 			httptest.NewRequest(http.MethodPut, "/src-bucket/orig.txt", strings.NewReader("hello")),
@@ -6247,8 +6266,13 @@ func TestObjectLockConfigHandlers(t *testing.T) {
 		require.Equal(t, http.StatusOK, putW.Code)
 
 		// Enable versioning (required for Object Lock).
-		verReq := httptest.NewRequest(http.MethodPut, "/b?versioning",
-			strings.NewReader(`<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`))
+		verReq := httptest.NewRequest(
+			http.MethodPut,
+			"/b?versioning",
+			strings.NewReader(
+				`<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`,
+			),
+		)
 		ro.ServeHTTP(httptest.NewRecorder(), verReq)
 
 		req := httptest.NewRequest(http.MethodPut, "/b?object-lock", strings.NewReader(validXML))
