@@ -32,6 +32,7 @@ const (
 	amzSSEKMSKeyID                 = "X-Amz-Server-Side-Encryption-Aws-Kms-Key-Id"
 	amzMetadataDirective           = "X-Amz-Metadata-Directive"
 	amzCopySourceRange             = "X-Amz-Copy-Source-Range"
+	amzBypassGovernanceRetention   = "X-Amz-Bypass-Governance-Retention" // #nosec G101 -- HTTP header name, not a credential
 
 	presignedURLMaxExpiry = 7 * 24 * 60 * 60 // 604800 seconds; AWS S3 maximum
 	maxPartNumber         = 10000            // AWS S3 maximum part number
@@ -1563,7 +1564,7 @@ func (ro *Router) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 			"The XML you provided was not well-formed.")
 		return
 	}
-	bypassGovernance := r.Header.Get("x-amz-bypass-governance-retention") == "true"
+	bypassGovernance := r.Header.Get(amzBypassGovernanceRetention) == "true"
 	result := deleteObjectsResult{}
 	for _, obj := range req.Objects {
 		err := ro.storage.DeleteObject(bucket, obj.Key, bypassGovernance)

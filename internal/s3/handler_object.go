@@ -380,7 +380,7 @@ func (ro *Router) handleHeadObject(w http.ResponseWriter, r *http.Request, bucke
 }
 
 func (ro *Router) handleDeleteObject(w http.ResponseWriter, r *http.Request, bucket, key string) {
-	bypassGovernance := r.Header.Get("x-amz-bypass-governance-retention") == "true"
+	bypassGovernance := r.Header.Get(amzBypassGovernanceRetention) == "true"
 
 	if versionID := r.URL.Query().Get("versionId"); versionID != "" {
 		// Permanently delete a specific version.
