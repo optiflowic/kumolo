@@ -656,13 +656,31 @@ func (ro *Router) handlePutObjectLockConfiguration(
 	r *http.Request,
 	bucket string,
 ) {
-	ro.handlePutBucketRawXML(
-		w,
-		r,
-		bucket,
-		"object lock configuration",
-		ro.storage.PutBucketObjectLock,
-	)
+	body, err := io.ReadAll(r.Body)
+	if err != nil || !isWellFormedXML(body) {
+		slog.Debug("object lock configuration malformed XML", "bucket", bucket) // #nosec G706
+		writeError(w, r, http.StatusBadRequest, "MalformedXML",
+			"The XML you provided was not well-formed.")
+		return
+	}
+	if err := ro.storage.PutBucketObjectLock(bucket, stripXMLDecl(string(body))); err != nil {
+		switch {
+		case errors.Is(err, ErrBucketNotFound):
+			slog.Debug("bucket not found", "bucket", bucket) // #nosec G706
+			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+				"The specified bucket does not exist.")
+		case errors.Is(err, ErrInvalidBucketState):
+			slog.Debug("versioning not enabled for object lock", "bucket", bucket) // #nosec G706
+			writeError(w, r, http.StatusBadRequest, "InvalidBucketState",
+				"Object Lock configuration cannot be enabled on a bucket that does not have versioning enabled.")
+		default:
+			slog.Error("failed to put object lock configuration", "bucket", bucket, "err", err) // #nosec G706
+			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+	slog.Info("object lock configuration updated", "bucket", bucket) // #nosec G706
+	w.WriteHeader(http.StatusOK)
 }
 
 func (ro *Router) handleGetObjectLockConfiguration(
