@@ -15,6 +15,17 @@ type CORSRule struct {
 	MaxAgeSeconds  int      `json:"maxAgeSeconds,omitempty"`
 }
 
+// ObjectRetention holds WORM retention settings for an object version.
+type ObjectRetention struct {
+	Mode            string    `json:"mode"` // GOVERNANCE or COMPLIANCE
+	RetainUntilDate time.Time `json:"retainUntilDate"`
+}
+
+// ObjectLegalHold holds legal hold status for an object version.
+type ObjectLegalHold struct {
+	Status string `json:"status"` // ON or OFF
+}
+
 // ObjectMetadata is stored as a sidecar .meta.json file alongside each object.
 type ObjectMetadata struct {
 	ContentType      string            `json:"contentType"`
@@ -27,6 +38,8 @@ type ObjectMetadata struct {
 	SSEAlgorithm     string            `json:"sseAlgorithm,omitempty"`
 	SSEKMSKeyID      string            `json:"sseKmsKeyId,omitempty"`
 	RestoreInitiated bool              `json:"restoreInitiated,omitempty"`
+	Retention        *ObjectRetention  `json:"retention,omitempty"`
+	LegalHold        *ObjectLegalHold  `json:"legalHold,omitempty"`
 }
 
 // VersionInfo represents a non-delete-marker version of an object in a versioned bucket.
@@ -311,4 +324,19 @@ type xmlCORSRule struct {
 type byteRange struct {
 	Start int64
 	End   int64
+}
+
+// xmlObjectRetention is the XML representation for GetObjectRetention /
+// PutObjectRetention request and response bodies.
+type xmlObjectRetention struct {
+	XMLName         xml.Name  `xml:"http://s3.amazonaws.com/doc/2006-03-01/ Retention"`
+	Mode            string    `xml:"Mode"`
+	RetainUntilDate time.Time `xml:"RetainUntilDate"`
+}
+
+// xmlObjectLegalHold is the XML representation for GetObjectLegalHold /
+// PutObjectLegalHold request and response bodies.
+type xmlObjectLegalHold struct {
+	XMLName xml.Name `xml:"http://s3.amazonaws.com/doc/2006-03-01/ LegalHold"`
+	Status  string   `xml:"Status"`
 }

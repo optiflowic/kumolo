@@ -313,6 +313,16 @@ type mockStore struct {
 	putBucketRequestPaymentErr       error
 	getBucketRequestPaymentResult    string
 	getBucketRequestPaymentErr       error
+
+	putBucketObjectLockErr    error
+	getBucketObjectLockResult string
+	getBucketObjectLockErr    error
+	putObjectRetentionErr     error
+	getObjectRetentionResult  ObjectRetention
+	getObjectRetentionErr     error
+	putObjectLegalHoldErr     error
+	getObjectLegalHoldResult  string
+	getObjectLegalHoldErr     error
 }
 
 func (m *mockStore) ListBuckets() ([]BucketInfo, error)    { return nil, m.listBucketsErr }
@@ -352,11 +362,11 @@ func (m *mockStore) CopyObject(
 ) (ObjectMetadata, error) {
 	return m.copyObjectMeta, m.copyObjectErr
 }
-func (m *mockStore) DeleteObject(_ string, _ string) error { return m.deleteObjectErr }
-func (m *mockStore) DeleteObjectVersioned(_ string, _ string) (string, bool, error) {
+func (m *mockStore) DeleteObject(_ string, _ string, _ bool) error { return m.deleteObjectErr }
+func (m *mockStore) DeleteObjectVersioned(_ string, _ string, _ bool) (string, bool, error) {
 	return "", false, m.deleteObjectErr
 }
-func (m *mockStore) DeleteObjectVersion(_ string, _ string, _ string) (bool, error) {
+func (m *mockStore) DeleteObjectVersion(_ string, _ string, _ string, _ bool) (bool, error) {
 	return false, m.deleteObjectVersionErr
 }
 func (m *mockStore) HeadObject(_ string, _ string) (ObjectMetadata, error) {
@@ -507,8 +517,31 @@ func (m *mockStore) GetBucketRequestPayment(_ string) (string, error) {
 	return m.getBucketRequestPaymentResult, m.getBucketRequestPaymentErr
 }
 
+func (m *mockStore) PutBucketObjectLock(_, _ string) error { return m.putBucketObjectLockErr }
+func (m *mockStore) GetBucketObjectLock(_ string) (string, error) {
+	return m.getBucketObjectLockResult, m.getBucketObjectLockErr
+}
+
+func (m *mockStore) PutObjectRetention(_, _, _ string, _ ObjectRetention) error {
+	return m.putObjectRetentionErr
+}
+func (m *mockStore) GetObjectRetention(_, _, _ string) (ObjectRetention, error) {
+	return m.getObjectRetentionResult, m.getObjectRetentionErr
+}
+
+func (m *mockStore) PutObjectLegalHold(_, _, _, _ string) error { return m.putObjectLegalHoldErr }
+func (m *mockStore) GetObjectLegalHold(_, _, _ string) (string, error) {
+	return m.getObjectLegalHoldResult, m.getObjectLegalHoldErr
+}
+
 func newRouterWithMock(store *mockStore) *Router {
 	return &Router{storage: store, now: time.Now}
+}
+
+func newMockStore(fields func(m *mockStore)) *mockStore {
+	m := &mockStore{}
+	fields(m)
+	return m
 }
 
 func TestRouterHandlerErrors(t *testing.T) {
@@ -987,6 +1020,15 @@ func TestRouterDeleteObject(t *testing.T) {
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+
+	t.Run("returns 403 when object is locked", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{deleteObjectErr: ErrObjectLocked})
+		req := httptest.NewRequest(http.MethodDelete, "/my-bucket/obj.txt", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusForbidden, w.Code)
+		assert.Contains(t, w.Body.String(), "AccessDenied")
 	})
 }
 
@@ -2555,6 +2597,25 @@ func TestRouterDeleteObjects(t *testing.T) {
 		body := w.Body.String()
 		assert.Contains(t, body, "<Error>")
 		assert.Contains(t, body, "InternalError")
+	})
+
+	t.Run("returns AccessDenied error element for locked object", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			bucketExists:    true,
+			deleteObjectErr: ErrObjectLocked,
+		})
+		req := httptest.NewRequest(
+			http.MethodPost,
+			"/my-bucket?delete",
+			strings.NewReader(`<Delete><Object><Key>a.txt</Key></Object></Delete>`),
+		)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		body := w.Body.String()
+		assert.Contains(t, body, "<Error>")
+		assert.Contains(t, body, "AccessDenied")
 	})
 }
 
@@ -4846,6 +4907,21 @@ func TestRouterDeleteObjectVersioned(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "InternalError")
 	})
 
+	t.Run("delete with versionId returns 403 when object is locked", func(t *testing.T) {
+		ro := newRouterWithMock(
+			&mockStore{deleteObjectVersionErr: ErrObjectLocked},
+		)
+		req := httptest.NewRequest(
+			http.MethodDelete,
+			"/my-bucket/obj.txt?versionId=abc123",
+			nil,
+		)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusForbidden, w.Code)
+		assert.Contains(t, w.Body.String(), "AccessDenied")
+	})
+
 	t.Run(
 		"delete with versionId sets x-amz-delete-marker when target is a delete marker",
 		func(t *testing.T) {
@@ -5115,6 +5191,7 @@ func TestBucketConfigHandlers(t *testing.T) {
 		for _, q := range []string{
 			"publicAccessBlock", "encryption", "ownershipControls", "notification",
 			"lifecycle", "website", "logging", "accelerate", "replication", "requestPayment", "acl",
+			"object-lock",
 		} {
 			q := q
 			t.Run(q, func(t *testing.T) {
@@ -5131,6 +5208,7 @@ func TestBucketConfigHandlers(t *testing.T) {
 		for _, q := range []string{
 			"publicAccessBlock", "encryption", "ownershipControls", "notification",
 			"lifecycle", "website", "logging", "accelerate", "replication", "requestPayment",
+			"object-lock",
 		} {
 			q := q
 			t.Run(q, func(t *testing.T) {
@@ -6037,4 +6115,599 @@ func TestSSEResponseHeaders(t *testing.T) {
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, "AES256", w.Header().Get(amzSSE))
 	})
+}
+
+func TestObjectLockConfigHandlers(t *testing.T) {
+	const validXML = `<ObjectLockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ObjectLockEnabled>Enabled</ObjectLockEnabled></ObjectLockConfiguration>`
+
+	t.Run("PUT returns 200 on valid XML", func(t *testing.T) {
+		ro := newTestRouter(t)
+		putReq := httptest.NewRequest(http.MethodPut, "/b", nil)
+		putW := httptest.NewRecorder()
+		ro.ServeHTTP(putW, putReq)
+		require.Equal(t, http.StatusOK, putW.Code)
+
+		req := httptest.NewRequest(http.MethodPut, "/b?object-lock", strings.NewReader(validXML))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("PUT returns 400 on malformed XML", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{})
+		req := httptest.NewRequest(http.MethodPut, "/b?object-lock", strings.NewReader("not-xml"))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "MalformedXML")
+	})
+
+	t.Run("PUT returns 404 on bucket not found", func(t *testing.T) {
+		ro := newRouterWithMock(
+			newMockStore(func(m *mockStore) { m.putBucketObjectLockErr = ErrBucketNotFound }),
+		)
+		req := httptest.NewRequest(http.MethodPut, "/b?object-lock", strings.NewReader(validXML))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchBucket")
+	})
+
+	t.Run("PUT returns 500 on storage error", func(t *testing.T) {
+		ro := newRouterWithMock(newMockStore(func(m *mockStore) {
+			m.putBucketObjectLockErr = errors.New("disk full")
+		}))
+		req := httptest.NewRequest(http.MethodPut, "/b?object-lock", strings.NewReader(validXML))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+
+	t.Run("GET returns stored configuration", func(t *testing.T) {
+		ro := newRouterWithMock(newMockStore(func(m *mockStore) {
+			m.getBucketObjectLockResult = validXML
+		}))
+		req := httptest.NewRequest(http.MethodGet, "/b?object-lock", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), "ObjectLockEnabled")
+	})
+
+	t.Run("GET returns 404 when not configured", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{})
+		req := httptest.NewRequest(http.MethodGet, "/b?object-lock", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "ObjectLockConfigurationNotFoundError")
+	})
+
+	t.Run("GET returns 404 on bucket not found", func(t *testing.T) {
+		ro := newRouterWithMock(
+			newMockStore(func(m *mockStore) { m.getBucketObjectLockErr = ErrBucketNotFound }),
+		)
+		req := httptest.NewRequest(http.MethodGet, "/b?object-lock", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchBucket")
+	})
+
+	t.Run("GET returns 500 on storage error", func(t *testing.T) {
+		ro := newRouterWithMock(newMockStore(func(m *mockStore) {
+			m.getBucketObjectLockErr = errors.New("disk full")
+		}))
+		req := httptest.NewRequest(http.MethodGet, "/b?object-lock", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+}
+
+func TestObjectRetentionHandlers(t *testing.T) {
+	const validBody = `<Retention xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Mode>GOVERNANCE</Mode><RetainUntilDate>2030-01-01T00:00:00Z</RetainUntilDate></Retention>`
+
+	t.Run("PUT/GET roundtrip via real storage", func(t *testing.T) {
+		ro := newTestRouter(t)
+		// Create bucket and object.
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/b", nil))
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/b/obj.txt", strings.NewReader("data")),
+		)
+
+		// PUT retention.
+		putW := httptest.NewRecorder()
+		ro.ServeHTTP(
+			putW,
+			httptest.NewRequest(
+				http.MethodPut,
+				"/b/obj.txt?retention",
+				strings.NewReader(validBody),
+			),
+		)
+		assert.Equal(t, http.StatusOK, putW.Code)
+
+		// GET retention.
+		getW := httptest.NewRecorder()
+		ro.ServeHTTP(getW, httptest.NewRequest(http.MethodGet, "/b/obj.txt?retention", nil))
+		assert.Equal(t, http.StatusOK, getW.Code)
+		assert.Contains(t, getW.Body.String(), "GOVERNANCE")
+		assert.Contains(t, getW.Body.String(), "2030-01-01")
+	})
+
+	t.Run("PUT returns 400 on malformed XML", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{})
+		req := httptest.NewRequest(http.MethodPut, "/b/k?retention", strings.NewReader("not-xml"))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "MalformedXML")
+	})
+
+	t.Run("PUT returns 400 on invalid mode", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{})
+		body := `<Retention xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Mode>INVALID</Mode><RetainUntilDate>2030-01-01T00:00:00Z</RetainUntilDate></Retention>`
+		req := httptest.NewRequest(http.MethodPut, "/b/k?retention", strings.NewReader(body))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidArgument")
+	})
+
+	t.Run("PUT returns 400 when RetainUntilDate is in the past", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{})
+		ro.now = func() time.Time { return time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC) }
+		body := `<Retention xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Mode>GOVERNANCE</Mode><RetainUntilDate>2020-01-01T00:00:00Z</RetainUntilDate></Retention>`
+		req := httptest.NewRequest(http.MethodPut, "/b/k?retention", strings.NewReader(body))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidArgument")
+	})
+
+	t.Run("PUT returns 404 on bucket not found", func(t *testing.T) {
+		ro := newRouterWithMock(
+			newMockStore(func(m *mockStore) { m.putObjectRetentionErr = ErrBucketNotFound }),
+		)
+		req := httptest.NewRequest(http.MethodPut, "/b/k?retention", strings.NewReader(validBody))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchBucket")
+	})
+
+	t.Run("PUT returns 404 on object not found", func(t *testing.T) {
+		ro := newRouterWithMock(
+			newMockStore(func(m *mockStore) { m.putObjectRetentionErr = ErrObjectNotFound }),
+		)
+		req := httptest.NewRequest(http.MethodPut, "/b/k?retention", strings.NewReader(validBody))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchKey")
+	})
+
+	t.Run("PUT returns 405 for delete marker", func(t *testing.T) {
+		ro := newRouterWithMock(newMockStore(func(m *mockStore) {
+			m.putObjectRetentionErr = &DeleteMarkerError{VersionID: "vid"}
+		}))
+		req := httptest.NewRequest(http.MethodPut, "/b/k?retention", strings.NewReader(validBody))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+	})
+
+	t.Run("PUT returns 500 on storage error", func(t *testing.T) {
+		ro := newRouterWithMock(newMockStore(func(m *mockStore) {
+			m.putObjectRetentionErr = errors.New("disk full")
+		}))
+		req := httptest.NewRequest(http.MethodPut, "/b/k?retention", strings.NewReader(validBody))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+
+	t.Run("GET returns 404 when retention not set", func(t *testing.T) {
+		ro := newRouterWithMock(
+			newMockStore(func(m *mockStore) { m.getObjectRetentionErr = ErrNoObjectRetention }),
+		)
+		req := httptest.NewRequest(http.MethodGet, "/b/k?retention", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchObjectLockConfiguration")
+	})
+
+	t.Run("GET returns 404 on bucket not found", func(t *testing.T) {
+		ro := newRouterWithMock(
+			newMockStore(func(m *mockStore) { m.getObjectRetentionErr = ErrBucketNotFound }),
+		)
+		req := httptest.NewRequest(http.MethodGet, "/b/k?retention", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchBucket")
+	})
+
+	t.Run("GET returns 404 on object not found", func(t *testing.T) {
+		ro := newRouterWithMock(
+			newMockStore(func(m *mockStore) { m.getObjectRetentionErr = ErrObjectNotFound }),
+		)
+		req := httptest.NewRequest(http.MethodGet, "/b/k?retention", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchKey")
+	})
+
+	t.Run("GET returns 405 for delete marker", func(t *testing.T) {
+		ro := newRouterWithMock(newMockStore(func(m *mockStore) {
+			m.getObjectRetentionErr = &DeleteMarkerError{VersionID: "vid"}
+		}))
+		req := httptest.NewRequest(http.MethodGet, "/b/k?retention", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+	})
+
+	t.Run("GET returns 500 on storage error", func(t *testing.T) {
+		ro := newRouterWithMock(newMockStore(func(m *mockStore) {
+			m.getObjectRetentionErr = errors.New("disk full")
+		}))
+		req := httptest.NewRequest(http.MethodGet, "/b/k?retention", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+
+	t.Run("PUT passes versionId to storage", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/b", nil))
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/b/obj.txt", strings.NewReader("data")),
+		)
+		putW := httptest.NewRecorder()
+		ro.ServeHTTP(
+			putW,
+			httptest.NewRequest(
+				http.MethodPut,
+				"/b/obj.txt?retention&versionId=nonexistent",
+				strings.NewReader(validBody),
+			),
+		)
+		// nonexistent versionId → 404
+		assert.Equal(t, http.StatusNotFound, putW.Code)
+	})
+}
+
+func TestObjectLegalHoldHandlers(t *testing.T) {
+	const validBody = `<LegalHold xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Status>ON</Status></LegalHold>`
+
+	t.Run("PUT/GET roundtrip via real storage", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/b", nil))
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/b/obj.txt", strings.NewReader("data")),
+		)
+
+		putW := httptest.NewRecorder()
+		ro.ServeHTTP(
+			putW,
+			httptest.NewRequest(
+				http.MethodPut,
+				"/b/obj.txt?legal-hold",
+				strings.NewReader(validBody),
+			),
+		)
+		assert.Equal(t, http.StatusOK, putW.Code)
+
+		getW := httptest.NewRecorder()
+		ro.ServeHTTP(getW, httptest.NewRequest(http.MethodGet, "/b/obj.txt?legal-hold", nil))
+		assert.Equal(t, http.StatusOK, getW.Code)
+		assert.Contains(t, getW.Body.String(), "ON")
+	})
+
+	t.Run("PUT returns 400 on malformed XML", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{})
+		req := httptest.NewRequest(http.MethodPut, "/b/k?legal-hold", strings.NewReader("not-xml"))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "MalformedXML")
+	})
+
+	t.Run("PUT returns 400 on invalid status", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{})
+		body := `<LegalHold xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Status>INVALID</Status></LegalHold>`
+		req := httptest.NewRequest(http.MethodPut, "/b/k?legal-hold", strings.NewReader(body))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidArgument")
+	})
+
+	t.Run("PUT returns 404 on bucket not found", func(t *testing.T) {
+		ro := newRouterWithMock(
+			newMockStore(func(m *mockStore) { m.putObjectLegalHoldErr = ErrBucketNotFound }),
+		)
+		req := httptest.NewRequest(http.MethodPut, "/b/k?legal-hold", strings.NewReader(validBody))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchBucket")
+	})
+
+	t.Run("PUT returns 404 on object not found", func(t *testing.T) {
+		ro := newRouterWithMock(
+			newMockStore(func(m *mockStore) { m.putObjectLegalHoldErr = ErrObjectNotFound }),
+		)
+		req := httptest.NewRequest(http.MethodPut, "/b/k?legal-hold", strings.NewReader(validBody))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchKey")
+	})
+
+	t.Run("PUT returns 405 for delete marker", func(t *testing.T) {
+		ro := newRouterWithMock(newMockStore(func(m *mockStore) {
+			m.putObjectLegalHoldErr = &DeleteMarkerError{VersionID: "vid"}
+		}))
+		req := httptest.NewRequest(http.MethodPut, "/b/k?legal-hold", strings.NewReader(validBody))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+	})
+
+	t.Run("PUT returns 500 on storage error", func(t *testing.T) {
+		ro := newRouterWithMock(newMockStore(func(m *mockStore) {
+			m.putObjectLegalHoldErr = errors.New("disk full")
+		}))
+		req := httptest.NewRequest(http.MethodPut, "/b/k?legal-hold", strings.NewReader(validBody))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+
+	t.Run("GET returns 404 when legal hold not set", func(t *testing.T) {
+		ro := newRouterWithMock(
+			newMockStore(func(m *mockStore) { m.getObjectLegalHoldErr = ErrNoObjectLegalHold }),
+		)
+		req := httptest.NewRequest(http.MethodGet, "/b/k?legal-hold", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchObjectLockConfiguration")
+	})
+
+	t.Run("GET returns 404 on bucket not found", func(t *testing.T) {
+		ro := newRouterWithMock(
+			newMockStore(func(m *mockStore) { m.getObjectLegalHoldErr = ErrBucketNotFound }),
+		)
+		req := httptest.NewRequest(http.MethodGet, "/b/k?legal-hold", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchBucket")
+	})
+
+	t.Run("GET returns 404 on object not found", func(t *testing.T) {
+		ro := newRouterWithMock(
+			newMockStore(func(m *mockStore) { m.getObjectLegalHoldErr = ErrObjectNotFound }),
+		)
+		req := httptest.NewRequest(http.MethodGet, "/b/k?legal-hold", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchKey")
+	})
+
+	t.Run("GET returns 405 for delete marker", func(t *testing.T) {
+		ro := newRouterWithMock(newMockStore(func(m *mockStore) {
+			m.getObjectLegalHoldErr = &DeleteMarkerError{VersionID: "vid"}
+		}))
+		req := httptest.NewRequest(http.MethodGet, "/b/k?legal-hold", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+	})
+
+	t.Run("GET returns 500 on storage error", func(t *testing.T) {
+		ro := newRouterWithMock(newMockStore(func(m *mockStore) {
+			m.getObjectLegalHoldErr = errors.New("disk full")
+		}))
+		req := httptest.NewRequest(http.MethodGet, "/b/k?legal-hold", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+}
+
+func TestObjectLockDeleteEnforcement(t *testing.T) {
+	const (
+		bucket          = "my-bucket"
+		key             = "obj.txt"
+		futureRetention = `<Retention xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Mode>COMPLIANCE</Mode><RetainUntilDate>2099-01-01T00:00:00Z</RetainUntilDate></Retention>`
+		govRetention    = `<Retention xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Mode>GOVERNANCE</Mode><RetainUntilDate>2099-01-01T00:00:00Z</RetainUntilDate></Retention>`
+		legalHoldOn     = `<LegalHold xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Status>ON</Status></LegalHold>`
+		legalHoldOff    = `<LegalHold xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Status>OFF</Status></LegalHold>`
+	)
+
+	setup := func(t *testing.T) *Router {
+		t.Helper()
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/"+bucket, nil))
+		ro.ServeHTTP(httptest.NewRecorder(), putRequest("/"+bucket+"/"+key, "data"))
+		return ro
+	}
+
+	t.Run("DELETE blocked by legal hold ON", func(t *testing.T) {
+		ro := setup(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(
+			http.MethodPut, "/"+bucket+"/"+key+"?legal-hold", strings.NewReader(legalHoldOn),
+		))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/"+bucket+"/"+key, nil))
+		assert.Equal(t, http.StatusForbidden, w.Code)
+		assert.Contains(t, w.Body.String(), "AccessDenied")
+	})
+
+	t.Run("DELETE allowed after legal hold cleared", func(t *testing.T) {
+		ro := setup(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(
+			http.MethodPut, "/"+bucket+"/"+key+"?legal-hold", strings.NewReader(legalHoldOn),
+		))
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(
+			http.MethodPut, "/"+bucket+"/"+key+"?legal-hold", strings.NewReader(legalHoldOff),
+		))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/"+bucket+"/"+key, nil))
+		assert.Equal(t, http.StatusNoContent, w.Code)
+	})
+
+	t.Run("DELETE blocked by COMPLIANCE retention", func(t *testing.T) {
+		ro := setup(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(
+			http.MethodPut, "/"+bucket+"/"+key+"?retention", strings.NewReader(futureRetention),
+		))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/"+bucket+"/"+key, nil))
+		assert.Equal(t, http.StatusForbidden, w.Code)
+		assert.Contains(t, w.Body.String(), "AccessDenied")
+	})
+
+	t.Run("DELETE blocked by COMPLIANCE retention even with bypass header", func(t *testing.T) {
+		ro := setup(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(
+			http.MethodPut, "/"+bucket+"/"+key+"?retention", strings.NewReader(futureRetention),
+		))
+		req := httptest.NewRequest(http.MethodDelete, "/"+bucket+"/"+key, nil)
+		req.Header.Set("x-amz-bypass-governance-retention", "true")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusForbidden, w.Code)
+		assert.Contains(t, w.Body.String(), "AccessDenied")
+	})
+
+	t.Run("DELETE blocked by GOVERNANCE retention without bypass header", func(t *testing.T) {
+		ro := setup(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(
+			http.MethodPut, "/"+bucket+"/"+key+"?retention", strings.NewReader(govRetention),
+		))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/"+bucket+"/"+key, nil))
+		assert.Equal(t, http.StatusForbidden, w.Code)
+		assert.Contains(t, w.Body.String(), "AccessDenied")
+	})
+
+	t.Run("DELETE allowed for GOVERNANCE with bypass header", func(t *testing.T) {
+		ro := setup(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(
+			http.MethodPut, "/"+bucket+"/"+key+"?retention", strings.NewReader(govRetention),
+		))
+		req := httptest.NewRequest(http.MethodDelete, "/"+bucket+"/"+key, nil)
+		req.Header.Set("x-amz-bypass-governance-retention", "true")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNoContent, w.Code)
+	})
+
+	t.Run("DELETE with versionId blocked by legal hold on specific version", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/"+bucket, nil))
+		require.NoError(t, ro.storage.(*Storage).PutBucketVersioning(bucket, "Enabled"))
+		putW := httptest.NewRecorder()
+		ro.ServeHTTP(putW, putRequest("/"+bucket+"/"+key, "data"))
+		vid := putW.Header().Get(amzVersionID)
+		require.NotEmpty(t, vid)
+
+		// Set legal hold on the specific version.
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(
+			http.MethodPut,
+			"/"+bucket+"/"+key+"?legal-hold&versionId="+vid,
+			strings.NewReader(legalHoldOn),
+		))
+
+		req := httptest.NewRequest(http.MethodDelete, "/"+bucket+"/"+key+"?versionId="+vid, nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusForbidden, w.Code)
+		assert.Contains(t, w.Body.String(), "AccessDenied")
+	})
+
+	t.Run(
+		"DELETE with versionId blocked by COMPLIANCE retention on specific version",
+		func(t *testing.T) {
+			ro := newTestRouter(t)
+			ro.ServeHTTP(
+				httptest.NewRecorder(),
+				httptest.NewRequest(http.MethodPut, "/"+bucket, nil),
+			)
+			require.NoError(t, ro.storage.(*Storage).PutBucketVersioning(bucket, "Enabled"))
+			putW := httptest.NewRecorder()
+			ro.ServeHTTP(putW, putRequest("/"+bucket+"/"+key, "data"))
+			vid := putW.Header().Get(amzVersionID)
+			require.NotEmpty(t, vid)
+
+			complianceRetention := `<Retention xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Mode>COMPLIANCE</Mode><RetainUntilDate>2099-01-01T00:00:00Z</RetainUntilDate></Retention>`
+			ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(
+				http.MethodPut,
+				"/"+bucket+"/"+key+"?retention&versionId="+vid,
+				strings.NewReader(complianceRetention),
+			))
+
+			req := httptest.NewRequest(http.MethodDelete, "/"+bucket+"/"+key+"?versionId="+vid, nil)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusForbidden, w.Code)
+			assert.Contains(t, w.Body.String(), "AccessDenied")
+		},
+	)
+
+	t.Run("DELETE with versionId allowed for GOVERNANCE with bypass header", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/"+bucket, nil))
+		require.NoError(t, ro.storage.(*Storage).PutBucketVersioning(bucket, "Enabled"))
+		putW := httptest.NewRecorder()
+		ro.ServeHTTP(putW, putRequest("/"+bucket+"/"+key, "data"))
+		vid := putW.Header().Get(amzVersionID)
+		require.NotEmpty(t, vid)
+
+		governanceRetention := `<Retention xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Mode>GOVERNANCE</Mode><RetainUntilDate>2099-01-01T00:00:00Z</RetainUntilDate></Retention>`
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(
+			http.MethodPut,
+			"/"+bucket+"/"+key+"?retention&versionId="+vid,
+			strings.NewReader(governanceRetention),
+		))
+
+		req := httptest.NewRequest(http.MethodDelete, "/"+bucket+"/"+key+"?versionId="+vid, nil)
+		req.Header.Set("x-amz-bypass-governance-retention", "true")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNoContent, w.Code)
+	})
+
+	t.Run(
+		"DeleteObjects blocked by legal hold returns AccessDenied in error element",
+		func(t *testing.T) {
+			ro := setup(t)
+			ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(
+				http.MethodPut, "/"+bucket+"/"+key+"?legal-hold", strings.NewReader(legalHoldOn),
+			))
+			req := httptest.NewRequest(
+				http.MethodPost,
+				"/"+bucket+"?delete",
+				strings.NewReader(`<Delete><Object><Key>`+key+`</Key></Object></Delete>`),
+			)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			require.Equal(t, http.StatusOK, w.Code)
+			body := w.Body.String()
+			assert.Contains(t, body, "<Error>")
+			assert.Contains(t, body, "AccessDenied")
+		},
+	)
 }

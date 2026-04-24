@@ -36,6 +36,7 @@ type bucketMeta struct {
 	Accelerate        string     `json:"accelerate,omitempty"`
 	Replication       string     `json:"replication,omitempty"`
 	RequestPayment    string     `json:"requestPayment,omitempty"`
+	ObjectLock        string     `json:"objectLock,omitempty"`
 }
 
 // Storage is a filesystem-backed S3 backend. os.Root scopes all access to the
@@ -48,6 +49,7 @@ type Storage struct {
 	readAll    func(r io.Reader) ([]byte, error)
 	randRead   func(b []byte) (int, error)
 	listDirFn  func(name string) ([]os.DirEntry, error)
+	now        func() time.Time // injectable for testing; defaults to time.Now
 }
 
 // NewStorage roots the storage at dataDir/s3, creating the directory if needed.
@@ -76,6 +78,7 @@ func newStorage(dataDir string, openRoot func(string) (*os.Root, error)) (*Stora
 	}
 	s.readAll = io.ReadAll
 	s.randRead = rand.Read
+	s.now = time.Now
 	s.listDirFn = func(name string) ([]os.DirEntry, error) {
 		f, err := s.root.Open(name)
 		if err != nil {
@@ -421,13 +424,44 @@ func (s *Storage) CopyObject(
 	)
 }
 
-func (s *Storage) DeleteObject(bucket, key string) error {
+// checkObjectLockLocked returns ErrObjectLocked if the object at objPath is
+// protected by an active LegalHold or a Retention period that prevents deletion.
+// bypassGovernance allows skipping GOVERNANCE-mode retention only.
+// Caller must hold at least a read lock.
+func (s *Storage) checkObjectLockLocked(objPath string, bypassGovernance bool) error {
+	meta, err := s.readMeta(objPath)
+	if err != nil {
+		// Object doesn't exist or metadata unreadable — let the caller handle it.
+		return nil
+	}
+	if meta.LegalHold != nil && meta.LegalHold.Status == "ON" {
+		return ErrObjectLocked
+	}
+	if meta.Retention != nil {
+		if s.now().UTC().Before(meta.Retention.RetainUntilDate) {
+			if meta.Retention.Mode == "COMPLIANCE" {
+				return ErrObjectLocked
+			}
+			// GOVERNANCE mode: blocked unless caller holds bypass privilege.
+			if !bypassGovernance {
+				return ErrObjectLocked
+			}
+		}
+	}
+	return nil
+}
+
+func (s *Storage) DeleteObject(bucket, key string, bypassGovernance bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.bucketExistsLocked(bucket) {
 		return ErrBucketNotFound
 	}
-	return s.deleteObjectFilesLocked(filepath.Join(bucket, key))
+	objPath := filepath.Join(bucket, key)
+	if err := s.checkObjectLockLocked(objPath, bypassGovernance); err != nil {
+		return err
+	}
+	return s.deleteObjectFilesLocked(objPath)
 }
 
 // deleteObjectFilesLocked removes the body, metadata, and tags for an object.
@@ -465,7 +499,10 @@ func (s *Storage) deleteObjectFilesLocked(objPath string) error {
 // If versioning is disabled: removes the object normally (same as DeleteObject).
 // Returns the versionID of the created delete marker (or "") and whether a
 // delete marker was created.
-func (s *Storage) DeleteObjectVersioned(bucket, key string) (string, bool, error) {
+func (s *Storage) DeleteObjectVersioned(
+	bucket, key string,
+	bypassGovernance bool,
+) (string, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.bucketExistsLocked(bucket) {
@@ -480,6 +517,9 @@ func (s *Storage) DeleteObjectVersioned(bucket, key string) (string, bool, error
 	objPath := filepath.Join(bucket, key)
 
 	if !enabled {
+		if err := s.checkObjectLockLocked(objPath, bypassGovernance); err != nil {
+			return "", false, err
+		}
 		if err := s.deleteObjectFilesLocked(objPath); err != nil {
 			if errors.Is(err, ErrObjectNotFound) {
 				return "", false, nil // S3 returns 204 for non-existent objects
@@ -521,7 +561,10 @@ func (s *Storage) DeleteObjectVersioned(bucket, key string) (string, bool, error
 
 // DeleteObjectVersion permanently deletes a specific version (or delete marker) by versionID.
 // Returns whether the deleted entry was a delete marker.
-func (s *Storage) DeleteObjectVersion(bucket, key, versionID string) (bool, error) {
+func (s *Storage) DeleteObjectVersion(
+	bucket, key, versionID string,
+	bypassGovernance bool,
+) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.bucketExistsLocked(bucket) {
@@ -532,6 +575,11 @@ func (s *Storage) DeleteObjectVersion(bucket, key, versionID string) (bool, erro
 
 	// Check if it's the current version.
 	if cm, err := s.readMeta(objPath); err == nil && cm.VersionID == versionID {
+		if !cm.IsDeleteMarker {
+			if err := s.checkObjectLockLocked(objPath, bypassGovernance); err != nil {
+				return false, err
+			}
+		}
 		isMarker := cm.IsDeleteMarker
 		if err := s.deleteObjectFilesLocked(objPath); err != nil &&
 			!errors.Is(err, ErrObjectNotFound) {
@@ -548,6 +596,11 @@ func (s *Storage) DeleteObjectVersion(bucket, key, versionID string) (bool, erro
 			return false, ErrObjectNotFound
 		}
 		return false, err
+	}
+	if !vm.IsDeleteMarker {
+		if err := s.checkObjectLockLocked(vp, bypassGovernance); err != nil {
+			return false, err
+		}
 	}
 	isMarker := vm.IsDeleteMarker
 	if err := s.removeFile(vp); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -1899,6 +1952,118 @@ func (s *Storage) PutBucketRequestPayment(bucket, xmlBody string) error {
 
 func (s *Storage) GetBucketRequestPayment(bucket string) (string, error) {
 	return s.getBucketConfigField(bucket, func(m bucketMeta) string { return m.RequestPayment })
+}
+
+func (s *Storage) PutBucketObjectLock(bucket, xmlBody string) error {
+	return s.putBucketConfigField(bucket, func(m *bucketMeta) { m.ObjectLock = xmlBody })
+}
+
+func (s *Storage) GetBucketObjectLock(bucket string) (string, error) {
+	return s.getBucketConfigField(bucket, func(m bucketMeta) string { return m.ObjectLock })
+}
+
+// resolveObjectMetaLocked returns the metafile path and metadata for
+// (bucket, key, versionID). If versionID is empty, resolves to the current
+// version. Caller must hold at least a read lock.
+func (s *Storage) resolveObjectMetaLocked(
+	bucket, key, versionID string,
+) (string, ObjectMetadata, error) {
+	objPath := filepath.Join(bucket, key)
+	if versionID == "" {
+		meta, err := s.readMeta(objPath)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return "", ObjectMetadata{}, ErrObjectNotFound
+			}
+			return "", ObjectMetadata{}, err // untestable: non-ErrNotExist readMeta failure cannot be injected
+		}
+		if meta.IsDeleteMarker {
+			return "", ObjectMetadata{}, &DeleteMarkerError{VersionID: meta.VersionID}
+		}
+		return objPath, meta, nil
+	}
+	// versionID specified: check current version first, then archived.
+	if cm, err := s.readMeta(objPath); err == nil && cm.VersionID == versionID {
+		if cm.IsDeleteMarker {
+			return "", ObjectMetadata{}, &DeleteMarkerError{VersionID: versionID}
+		}
+		return objPath, cm, nil
+	}
+	vp := verPath(bucket, key, versionID)
+	vm, err := s.readMeta(vp)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", ObjectMetadata{}, ErrObjectNotFound
+		}
+		return "", ObjectMetadata{}, err // untestable: non-ErrNotExist readMeta failure cannot be injected
+	}
+	if vm.IsDeleteMarker {
+		return "", ObjectMetadata{}, &DeleteMarkerError{VersionID: versionID}
+	}
+	return vp, vm, nil
+}
+
+func (s *Storage) PutObjectRetention(
+	bucket, key, versionID string,
+	retention ObjectRetention,
+) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.bucketExistsLocked(bucket) {
+		return ErrBucketNotFound
+	}
+	path, meta, err := s.resolveObjectMetaLocked(bucket, key, versionID)
+	if err != nil {
+		return err
+	}
+	meta.Retention = &retention
+	return s.writeMeta(path, meta)
+}
+
+func (s *Storage) GetObjectRetention(bucket, key, versionID string) (ObjectRetention, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.bucketExistsLocked(bucket) {
+		return ObjectRetention{}, ErrBucketNotFound
+	}
+	_, meta, err := s.resolveObjectMetaLocked(bucket, key, versionID)
+	if err != nil {
+		return ObjectRetention{}, err
+	}
+	if meta.Retention == nil {
+		return ObjectRetention{}, ErrNoObjectRetention
+	}
+	return *meta.Retention, nil
+}
+
+func (s *Storage) PutObjectLegalHold(bucket, key, versionID, status string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.bucketExistsLocked(bucket) {
+		return ErrBucketNotFound
+	}
+	path, meta, err := s.resolveObjectMetaLocked(bucket, key, versionID)
+	if err != nil {
+		return err
+	}
+	meta.LegalHold = &ObjectLegalHold{Status: status}
+	return s.writeMeta(path, meta)
+}
+
+func (s *Storage) GetObjectLegalHold(bucket, key, versionID string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.bucketExistsLocked(bucket) {
+		return "", ErrBucketNotFound
+	}
+	_, meta, err := s.resolveObjectMetaLocked(bucket, key, versionID)
+	if err != nil {
+		return "", err
+	}
+	if meta.LegalHold == nil {
+		return "", ErrNoObjectLegalHold
+	}
+	return meta.LegalHold.Status, nil
 }
 
 // removeUploadDir removes all files in uploadDir and then the directory itself.

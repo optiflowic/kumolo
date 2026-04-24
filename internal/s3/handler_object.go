@@ -380,9 +380,11 @@ func (ro *Router) handleHeadObject(w http.ResponseWriter, r *http.Request, bucke
 }
 
 func (ro *Router) handleDeleteObject(w http.ResponseWriter, r *http.Request, bucket, key string) {
+	bypassGovernance := r.Header.Get(amzBypassGovernanceRetention) == "true"
+
 	if versionID := r.URL.Query().Get("versionId"); versionID != "" {
 		// Permanently delete a specific version.
-		isMarker, err := ro.storage.DeleteObjectVersion(bucket, key, versionID)
+		isMarker, err := ro.storage.DeleteObjectVersion(bucket, key, versionID, bypassGovernance)
 		switch {
 		case err == nil:
 			slog.Info( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
@@ -399,6 +401,18 @@ func (ro *Router) handleDeleteObject(w http.ResponseWriter, r *http.Request, buc
 				w.Header().Set(amzDeleteMarker, "true")
 			}
 			w.WriteHeader(http.StatusNoContent)
+		case errors.Is(err, ErrObjectLocked):
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"delete rejected: object locked",
+				"bucket",
+				bucket,
+				"key",
+				key,
+				"versionId",
+				versionID,
+			)
+			writeError(w, r, http.StatusForbidden, "AccessDenied",
+				"Access Denied because the object is protected by Object Lock.")
 		case errors.Is(err, ErrObjectNotFound):
 			w.WriteHeader(http.StatusNoContent)
 		case errors.Is(err, ErrBucketNotFound):
@@ -427,7 +441,7 @@ func (ro *Router) handleDeleteObject(w http.ResponseWriter, r *http.Request, buc
 	}
 
 	// Versioning-aware delete (may create a delete marker).
-	versionID, isMarker, err := ro.storage.DeleteObjectVersioned(bucket, key)
+	versionID, isMarker, err := ro.storage.DeleteObjectVersioned(bucket, key, bypassGovernance)
 	switch {
 	case err == nil:
 		slog.Info( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
@@ -444,6 +458,16 @@ func (ro *Router) handleDeleteObject(w http.ResponseWriter, r *http.Request, buc
 			w.Header().Set(amzDeleteMarker, "true")
 		}
 		w.WriteHeader(http.StatusNoContent)
+	case errors.Is(err, ErrObjectLocked):
+		slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			"delete rejected: object locked",
+			"bucket",
+			bucket,
+			"key",
+			key,
+		)
+		writeError(w, r, http.StatusForbidden, "AccessDenied",
+			"Access Denied because the object is protected by Object Lock.")
 	case errors.Is(err, ErrBucketNotFound):
 		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
 			"bucket not found",

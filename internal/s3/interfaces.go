@@ -32,9 +32,15 @@ type objectStore interface {
 		userMetadata map[string]string,
 		sseAlgorithm, sseKMSKeyID string,
 	) (ObjectMetadata, error)
-	DeleteObject(bucket, key string) error
-	DeleteObjectVersioned(bucket, key string) (versionID string, isDeleteMarker bool, err error)
-	DeleteObjectVersion(bucket, key, versionID string) (isDeleteMarker bool, err error)
+	DeleteObject(bucket, key string, bypassGovernance bool) error
+	DeleteObjectVersioned(
+		bucket, key string,
+		bypassGovernance bool,
+	) (versionID string, isDeleteMarker bool, err error)
+	DeleteObjectVersion(
+		bucket, key, versionID string,
+		bypassGovernance bool,
+	) (isDeleteMarker bool, err error)
 	HeadObject(bucket, key string) (ObjectMetadata, error)
 	HeadObjectVersion(bucket, key, versionID string) (ObjectMetadata, error)
 	ListObjects(bucket string) ([]ObjectInfo, error)
@@ -158,4 +164,22 @@ type bucketReplicationStore interface {
 type bucketRequestPaymentStore interface {
 	PutBucketRequestPayment(bucket, xmlBody string) error
 	GetBucketRequestPayment(bucket string) (string, error)
+}
+
+// bucketObjectLockStore handles bucket-level Object Lock configuration.
+type bucketObjectLockStore interface {
+	PutBucketObjectLock(bucket, xmlBody string) error
+	GetBucketObjectLock(bucket string) (string, error)
+}
+
+// objectRetentionStore handles per-object retention settings.
+type objectRetentionStore interface {
+	PutObjectRetention(bucket, key, versionID string, retention ObjectRetention) error
+	GetObjectRetention(bucket, key, versionID string) (ObjectRetention, error)
+}
+
+// objectLegalHoldStore handles per-object legal hold settings.
+type objectLegalHoldStore interface {
+	PutObjectLegalHold(bucket, key, versionID, status string) error
+	GetObjectLegalHold(bucket, key, versionID string) (string, error)
 }

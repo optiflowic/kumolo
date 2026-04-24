@@ -32,6 +32,7 @@ const (
 	amzSSEKMSKeyID                 = "X-Amz-Server-Side-Encryption-Aws-Kms-Key-Id"
 	amzMetadataDirective           = "X-Amz-Metadata-Directive"
 	amzCopySourceRange             = "X-Amz-Copy-Source-Range"
+	amzBypassGovernanceRetention   = "X-Amz-Bypass-Governance-Retention" // #nosec G101 -- HTTP header name, not a credential
 
 	presignedURLMaxExpiry = 7 * 24 * 60 * 60 // 604800 seconds; AWS S3 maximum
 	maxPartNumber         = 10000            // AWS S3 maximum part number
@@ -58,6 +59,9 @@ type Router struct {
 		bucketAccelerateStore
 		bucketReplicationStore
 		bucketRequestPaymentStore
+		bucketObjectLockStore
+		objectRetentionStore
+		objectLegalHoldStore
 	}
 	now func() time.Time // injectable for testing; defaults to time.Now
 }
@@ -150,6 +154,7 @@ func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, bucket str
 		"cors", "policy", "tagging", "versioning", "publicAccessBlock",
 		"encryption", "ownershipControls", "notification", "lifecycle",
 		"website", "logging", "accelerate", "replication", "requestPayment",
+		"object-lock",
 	}, q.Has)
 	if r.Method != http.MethodOptions && !isMgmtSubresource {
 		ro.injectCORSHeaders(w, r, bucket)
@@ -188,6 +193,8 @@ func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, bucket str
 			ro.handlePutBucketReplication(w, r, bucket)
 		case q.Has("requestPayment"):
 			ro.handlePutBucketRequestPayment(w, r, bucket)
+		case q.Has("object-lock"):
+			ro.handlePutObjectLockConfiguration(w, r, bucket)
 		case q.Has("acl"):
 			ro.handlePutBucketACL(w, r, bucket)
 		default:
@@ -254,6 +261,8 @@ func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, bucket str
 			ro.handleGetBucketReplication(w, r, bucket)
 		case q.Has("requestPayment"):
 			ro.handleGetBucketRequestPayment(w, r, bucket)
+		case q.Has("object-lock"):
+			ro.handleGetObjectLockConfiguration(w, r, bucket)
 		case q.Has("acl"):
 			ro.handleGetBucketACL(w, r, bucket)
 		case q.Get("list-type") == "2":
@@ -567,6 +576,10 @@ func (ro *Router) routeObject(w http.ResponseWriter, r *http.Request, bucket, ke
 		switch {
 		case q.Has("tagging"):
 			ro.handlePutObjectTagging(w, r, bucket, key)
+		case q.Has("retention"):
+			ro.handlePutObjectRetention(w, r, bucket, key)
+		case q.Has("legal-hold"):
+			ro.handlePutObjectLegalHold(w, r, bucket, key)
 		case q.Has("partNumber") && q.Has("uploadId") && r.Header.Get(amzCopySource) != "":
 			ro.handleUploadPartCopy(w, r, bucket, key)
 		case q.Has("partNumber") && q.Has("uploadId"):
@@ -582,6 +595,10 @@ func (ro *Router) routeObject(w http.ResponseWriter, r *http.Request, bucket, ke
 		switch {
 		case q.Has("tagging"):
 			ro.handleGetObjectTagging(w, r, bucket, key)
+		case q.Has("retention"):
+			ro.handleGetObjectRetention(w, r, bucket, key)
+		case q.Has("legal-hold"):
+			ro.handleGetObjectLegalHold(w, r, bucket, key)
 		case q.Has("uploadId"):
 			ro.handleListParts(w, r, bucket, key)
 		case q.Has("acl"):
@@ -1547,23 +1564,39 @@ func (ro *Router) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 			"The XML you provided was not well-formed.")
 		return
 	}
+	bypassGovernance := r.Header.Get(amzBypassGovernanceRetention) == "true"
 	result := deleteObjectsResult{}
 	for _, obj := range req.Objects {
-		if err := ro.storage.DeleteObject(bucket, obj.Key); err != nil &&
-			!errors.Is(err, ErrObjectNotFound) {
-			slog.Error( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-				"failed to delete object",
-				"bucket",
-				bucket,
-				"key",
-				obj.Key,
-				"err",
-				err,
-			)
+		err := ro.storage.DeleteObject(bucket, obj.Key, bypassGovernance)
+		if err != nil && !errors.Is(err, ErrObjectNotFound) {
+			var code, message string
+			if errors.Is(err, ErrObjectLocked) {
+				slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+					"delete rejected: object locked",
+					"bucket",
+					bucket,
+					"key",
+					obj.Key,
+				)
+				code = "AccessDenied"
+				message = "Access Denied because the object is protected by Object Lock."
+			} else {
+				slog.Error( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+					"failed to delete object",
+					"bucket",
+					bucket,
+					"key",
+					obj.Key,
+					"err",
+					err,
+				)
+				code = "InternalError"
+				message = err.Error()
+			}
 			result.Errors = append(result.Errors, xmlDeleteError{
 				Key:     obj.Key,
-				Code:    "InternalError",
-				Message: err.Error(),
+				Code:    code,
+				Message: message,
 			})
 			continue
 		}

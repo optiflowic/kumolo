@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1095,7 +1096,7 @@ func TestDeleteObject(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		require.NoError(t, s.DeleteObject("my-bucket", "obj.txt"))
+		require.NoError(t, s.DeleteObject("my-bucket", "obj.txt", false))
 
 		_, _, err = s.GetObject("my-bucket", "obj.txt")
 		assert.ErrorIs(t, err, ErrObjectNotFound)
@@ -1104,12 +1105,12 @@ func TestDeleteObject(t *testing.T) {
 	t.Run("returns ErrObjectNotFound when object does not exist", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateBucket("my-bucket", ""))
-		assert.ErrorIs(t, s.DeleteObject("my-bucket", "missing.txt"), ErrObjectNotFound)
+		assert.ErrorIs(t, s.DeleteObject("my-bucket", "missing.txt", false), ErrObjectNotFound)
 	})
 
 	t.Run("returns ErrBucketNotFound when bucket does not exist", func(t *testing.T) {
 		s := newTestStorage(t)
-		assert.ErrorIs(t, s.DeleteObject("no-bucket", "obj.txt"), ErrBucketNotFound)
+		assert.ErrorIs(t, s.DeleteObject("no-bucket", "obj.txt", false), ErrBucketNotFound)
 	})
 
 	t.Run("returns error when object removal fails", func(t *testing.T) {
@@ -1120,7 +1121,7 @@ func TestDeleteObject(t *testing.T) {
 			os.MkdirAll(filepath.Join(rootPath, "my-bucket", "dir-obj", "child"), 0o750),
 		)
 
-		err := s.DeleteObject("my-bucket", "dir-obj")
+		err := s.DeleteObject("my-bucket", "dir-obj", false)
 		assert.Error(t, err)
 		assert.NotErrorIs(t, err, ErrObjectNotFound)
 	})
@@ -1145,7 +1146,7 @@ func TestDeleteObject(t *testing.T) {
 			0o750,
 		))
 
-		assert.NoError(t, s.DeleteObject("my-bucket", "obj.txt"))
+		assert.NoError(t, s.DeleteObject("my-bucket", "obj.txt", false))
 	})
 
 	t.Run("logs warning when tags removal fails but still succeeds", func(t *testing.T) {
@@ -1172,7 +1173,7 @@ func TestDeleteObject(t *testing.T) {
 			0o750,
 		))
 
-		assert.NoError(t, s.DeleteObject("my-bucket", "obj.txt"))
+		assert.NoError(t, s.DeleteObject("my-bucket", "obj.txt", false))
 	})
 
 	t.Run("deletes tags file when object is deleted", func(t *testing.T) {
@@ -1193,7 +1194,7 @@ func TestDeleteObject(t *testing.T) {
 			s.PutObjectTagging("my-bucket", "obj.txt", []Tag{{Key: "k", Value: "v"}}),
 		)
 
-		require.NoError(t, s.DeleteObject("my-bucket", "obj.txt"))
+		require.NoError(t, s.DeleteObject("my-bucket", "obj.txt", false))
 
 		_, statErr := os.Stat(filepath.Join(rootPath, "my-bucket", "obj.txt.tags.json"))
 		assert.True(t, os.IsNotExist(statErr), "tags file should be removed with the object")
@@ -1216,7 +1217,7 @@ func TestDeleteObject(t *testing.T) {
 			t,
 			s.PutObjectTagging("my-bucket", "obj.txt", []Tag{{Key: "k", Value: "v"}}),
 		)
-		require.NoError(t, s.DeleteObject("my-bucket", "obj.txt"))
+		require.NoError(t, s.DeleteObject("my-bucket", "obj.txt", false))
 
 		assert.NoError(t, s.DeleteBucket("my-bucket"))
 	})
@@ -3033,6 +3034,11 @@ func TestBucketConfigStorage(t *testing.T) {
 			func(s *Storage, b, x string) error { return s.PutBucketRequestPayment(b, x) },
 			func(s *Storage, b string) (string, error) { return s.GetBucketRequestPayment(b) },
 		},
+		{
+			"ObjectLock",
+			func(s *Storage, b, x string) error { return s.PutBucketObjectLock(b, x) },
+			func(s *Storage, b string) (string, error) { return s.GetBucketObjectLock(b) },
+		},
 	}
 
 	for _, c := range getOnlyConfigs {
@@ -3263,7 +3269,7 @@ func TestVersioning(t *testing.T) {
 			)
 			require.NoError(t, err)
 
-			vid, isMarker, err := s.DeleteObjectVersioned(bucket, "obj.txt")
+			vid, isMarker, err := s.DeleteObjectVersioned(bucket, "obj.txt", false)
 			require.NoError(t, err)
 			assert.True(t, isMarker)
 			assert.NotEmpty(t, vid)
@@ -3289,7 +3295,7 @@ func TestVersioning(t *testing.T) {
 			)
 			require.NoError(t, err)
 
-			vid, isMarker, err := s.DeleteObjectVersioned("plain-bucket", "obj.txt")
+			vid, isMarker, err := s.DeleteObjectVersioned("plain-bucket", "obj.txt", false)
 			require.NoError(t, err)
 			assert.Empty(t, vid)
 			assert.False(t, isMarker)
@@ -3314,7 +3320,7 @@ func TestVersioning(t *testing.T) {
 		_, err = s.PutObject(bucket, "obj.txt", strings.NewReader("v2"), "text/plain", nil, "", "")
 		require.NoError(t, err)
 
-		isMarker, err := s.DeleteObjectVersion(bucket, "obj.txt", m1.VersionID)
+		isMarker, err := s.DeleteObjectVersion(bucket, "obj.txt", m1.VersionID, false)
 		require.NoError(t, err)
 		assert.False(t, isMarker)
 
@@ -3337,7 +3343,7 @@ func TestVersioning(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		isMarker, err := s.DeleteObjectVersion(bucket, "obj.txt", m2.VersionID)
+		isMarker, err := s.DeleteObjectVersion(bucket, "obj.txt", m2.VersionID, false)
 		require.NoError(t, err)
 		assert.False(t, isMarker)
 	})
@@ -3357,7 +3363,7 @@ func TestVersioning(t *testing.T) {
 			)
 			require.NoError(t, err)
 
-			_, err = s.DeleteObjectVersion(bucket, "obj.txt", "deadbeefdeadbeef")
+			_, err = s.DeleteObjectVersion(bucket, "obj.txt", "deadbeefdeadbeef", false)
 			assert.ErrorIs(t, err, ErrObjectNotFound)
 		},
 	)
@@ -3366,10 +3372,10 @@ func TestVersioning(t *testing.T) {
 		s, bucket := setup(t)
 		_, err := s.PutObject(bucket, "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "")
 		require.NoError(t, err)
-		markerVID, _, err := s.DeleteObjectVersioned(bucket, "obj.txt")
+		markerVID, _, err := s.DeleteObjectVersioned(bucket, "obj.txt", false)
 		require.NoError(t, err)
 
-		isMarker, err := s.DeleteObjectVersion(bucket, "obj.txt", markerVID)
+		isMarker, err := s.DeleteObjectVersion(bucket, "obj.txt", markerVID, false)
 		require.NoError(t, err)
 		assert.True(t, isMarker)
 	})
@@ -3396,7 +3402,7 @@ func TestVersioning(t *testing.T) {
 			"",
 		)
 		require.NoError(t, err)
-		markerVID, _, err := s.DeleteObjectVersioned(bucket, "obj.txt")
+		markerVID, _, err := s.DeleteObjectVersioned(bucket, "obj.txt", false)
 		require.NoError(t, err)
 
 		versions, deleteMarkers, err := s.ListObjectVersions(bucket)
@@ -3455,7 +3461,7 @@ func TestVersioning(t *testing.T) {
 				"",
 			)
 			require.NoError(t, err)
-			_, _, err = s.DeleteObjectVersioned(bucket, "obj.txt")
+			_, _, err = s.DeleteObjectVersioned(bucket, "obj.txt", false)
 			require.NoError(t, err)
 
 			_, _, err = s.GetObject(bucket, "obj.txt")
@@ -3478,7 +3484,7 @@ func TestVersioning(t *testing.T) {
 				"",
 			)
 			require.NoError(t, err)
-			_, _, err = s.DeleteObjectVersioned(bucket, "obj.txt")
+			_, _, err = s.DeleteObjectVersioned(bucket, "obj.txt", false)
 			require.NoError(t, err)
 
 			_, err = s.HeadObject(bucket, "obj.txt")
@@ -3491,7 +3497,7 @@ func TestVersioning(t *testing.T) {
 		s, bucket := setup(t)
 		_, err := s.PutObject(bucket, "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "")
 		require.NoError(t, err)
-		_, _, err = s.DeleteObjectVersioned(bucket, "obj.txt")
+		_, _, err = s.DeleteObjectVersioned(bucket, "obj.txt", false)
 		require.NoError(t, err)
 
 		objects, err := s.ListObjects(bucket)
@@ -3713,7 +3719,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 				nil, "", "",
 			)
 			require.NoError(t, err)
-			markerVID, _, err := s.DeleteObjectVersioned("my-bucket", "obj.txt")
+			markerVID, _, err := s.DeleteObjectVersioned("my-bucket", "obj.txt", false)
 			require.NoError(t, err)
 
 			// Accessing a delete marker directly should return DeleteMarkerError.
@@ -3763,7 +3769,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 			"",
 		)
 		require.NoError(t, err)
-		markerVID, _, err := s.DeleteObjectVersioned("my-bucket", "obj.txt")
+		markerVID, _, err := s.DeleteObjectVersioned("my-bucket", "obj.txt", false)
 		require.NoError(t, err)
 
 		_, err = s.HeadObjectVersion("my-bucket", "obj.txt", markerVID)
@@ -3774,13 +3780,13 @@ func TestVersioningErrorPaths(t *testing.T) {
 
 	t.Run("DeleteObjectVersioned returns ErrBucketNotFound", func(t *testing.T) {
 		s, _ := newTestStorageWithRoot(t)
-		_, _, err := s.DeleteObjectVersioned("no-bucket", "obj.txt")
+		_, _, err := s.DeleteObjectVersioned("no-bucket", "obj.txt", false)
 		assert.ErrorIs(t, err, ErrBucketNotFound)
 	})
 
 	t.Run("DeleteObjectVersion returns ErrBucketNotFound", func(t *testing.T) {
 		s, _ := newTestStorageWithRoot(t)
-		_, err := s.DeleteObjectVersion("no-bucket", "obj.txt", "abc123")
+		_, err := s.DeleteObjectVersion("no-bucket", "obj.txt", "abc123", false)
 		assert.ErrorIs(t, err, ErrBucketNotFound)
 	})
 
@@ -3847,7 +3853,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 		)
 		require.NoError(t, err)
 		s.randRead = func(b []byte) (int, error) { return 0, errors.New("rand failure") }
-		_, _, err = s.DeleteObjectVersioned("my-bucket", "obj.txt")
+		_, _, err = s.DeleteObjectVersioned("my-bucket", "obj.txt", false)
 		assert.Error(t, err)
 	})
 
@@ -4085,7 +4091,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 				}
 				return orig(name, flag, perm)
 			}
-			_, _, err = s.DeleteObjectVersioned("my-bucket", "obj.txt")
+			_, _, err = s.DeleteObjectVersioned("my-bucket", "obj.txt", false)
 			assert.Error(t, err)
 		},
 	)
@@ -4112,7 +4118,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 				}
 				return orig(name, flag, perm)
 			}
-			_, _, err = s.DeleteObjectVersioned("my-bucket", "obj.txt")
+			_, _, err = s.DeleteObjectVersioned("my-bucket", "obj.txt", false)
 			assert.Error(t, err)
 		},
 	)
@@ -4294,7 +4300,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 			_, err = f.Write([]byte("not-json"))
 			require.NoError(t, err)
 			require.NoError(t, f.Close())
-			_, err = s.DeleteObjectVersion("my-bucket", "obj.txt", m1.VersionID)
+			_, err = s.DeleteObjectVersion("my-bucket", "obj.txt", m1.VersionID, false)
 			assert.Error(t, err)
 		},
 	)
@@ -4331,7 +4337,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 				}
 				return orig(name)
 			}
-			_, err = s.DeleteObjectVersion("my-bucket", "obj.txt", m1.VersionID)
+			_, err = s.DeleteObjectVersion("my-bucket", "obj.txt", m1.VersionID, false)
 			assert.Error(t, err)
 		},
 	)
@@ -4368,7 +4374,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 				}
 				return orig(name)
 			}
-			isMarker, err := s.DeleteObjectVersion("my-bucket", "obj.txt", m1.VersionID)
+			isMarker, err := s.DeleteObjectVersion("my-bucket", "obj.txt", m1.VersionID, false)
 			require.NoError(t, err)
 			assert.False(t, isMarker)
 		},
@@ -4407,7 +4413,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 			)
 			require.NoError(t, err)
 			// Delete creates a delete marker as current.
-			markerVID, _, err := s.DeleteObjectVersioned("my-bucket", "obj.txt")
+			markerVID, _, err := s.DeleteObjectVersioned("my-bucket", "obj.txt", false)
 			require.NoError(t, err)
 			// Put again — delete marker gets archived.
 			_, err = s.PutObject(
@@ -4484,7 +4490,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 				"my-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "",
 			)
 			require.NoError(t, err)
-			markerVID, _, err := s.DeleteObjectVersioned("my-bucket", "obj.txt")
+			markerVID, _, err := s.DeleteObjectVersioned("my-bucket", "obj.txt", false)
 			require.NoError(t, err)
 			// Put v2 — archives the delete marker.
 			_, err = s.PutObject(
@@ -4529,7 +4535,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 				"my-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "",
 			)
 			require.NoError(t, err)
-			markerVID, _, err := s.DeleteObjectVersioned("my-bucket", "obj.txt")
+			markerVID, _, err := s.DeleteObjectVersioned("my-bucket", "obj.txt", false)
 			require.NoError(t, err)
 			require.NoError(t, s.CreateBucket("dst-bucket", ""))
 
@@ -4554,7 +4560,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, f.Close())
 
-			_, _, err = s.DeleteObjectVersioned("my-bucket", "obj.txt")
+			_, _, err = s.DeleteObjectVersioned("my-bucket", "obj.txt", false)
 			assert.Error(t, err)
 		},
 	)
@@ -4577,7 +4583,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 				}
 				return orig(name, flag, perm)
 			}
-			_, _, err = s.DeleteObjectVersioned("my-bucket", "obj.txt")
+			_, _, err = s.DeleteObjectVersioned("my-bucket", "obj.txt", false)
 			assert.Error(t, err)
 		},
 	)
@@ -4604,7 +4610,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 				}
 				return wc, nil
 			}
-			_, _, err = s.DeleteObjectVersioned("my-bucket", "obj.txt")
+			_, _, err = s.DeleteObjectVersioned("my-bucket", "obj.txt", false)
 			assert.Error(t, err)
 		},
 	)
@@ -4815,7 +4821,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 			)
 			require.NoError(t, err)
 			// Delete the object — current version becomes a delete marker.
-			_, _, err = s.DeleteObjectVersioned("src-bucket", "obj.txt")
+			_, _, err = s.DeleteObjectVersioned("src-bucket", "obj.txt", false)
 			require.NoError(t, err)
 			require.NoError(t, s.CreateBucket("dst-bucket", ""))
 
@@ -5239,7 +5245,7 @@ func TestUploadPartCopy(t *testing.T) {
 		require.NoError(t, err)
 
 		// DeleteObjectVersioned creates a delete marker and returns its versionID.
-		dmVersionID, _, err := s.DeleteObjectVersioned("src-bucket", "del.txt")
+		dmVersionID, _, err := s.DeleteObjectVersioned("src-bucket", "del.txt", false)
 		require.NoError(t, err)
 		require.NotEmpty(t, dmVersionID)
 
@@ -5367,4 +5373,320 @@ func TestUploadPartCopy(t *testing.T) {
 			assert.NotErrorIs(t, err, ErrUploadNotFound)
 		},
 	)
+}
+
+func TestObjectRetention(t *testing.T) {
+	retention := ObjectRetention{
+		Mode:            "GOVERNANCE",
+		RetainUntilDate: time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC),
+	}
+
+	setup := func(t *testing.T) (*Storage, string, string) {
+		t.Helper()
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("b", ""))
+		_, err := s.PutObject("b", "obj.txt", strings.NewReader("data"), "text/plain", nil, "", "")
+		require.NoError(t, err)
+		return s, "b", "obj.txt"
+	}
+
+	t.Run("Put/Get roundtrip", func(t *testing.T) {
+		s, bucket, key := setup(t)
+		require.NoError(t, s.PutObjectRetention(bucket, key, "", retention))
+		got, err := s.GetObjectRetention(bucket, key, "")
+		require.NoError(t, err)
+		assert.Equal(t, retention.Mode, got.Mode)
+		assert.True(t, retention.RetainUntilDate.Equal(got.RetainUntilDate))
+	})
+
+	t.Run("Get returns ErrNoObjectRetention when not set", func(t *testing.T) {
+		s, bucket, key := setup(t)
+		_, err := s.GetObjectRetention(bucket, key, "")
+		assert.ErrorIs(t, err, ErrNoObjectRetention)
+	})
+
+	t.Run("Put overwrites existing retention", func(t *testing.T) {
+		s, bucket, key := setup(t)
+		require.NoError(t, s.PutObjectRetention(bucket, key, "", retention))
+		updated := ObjectRetention{
+			Mode:            "COMPLIANCE",
+			RetainUntilDate: time.Date(2035, 6, 1, 0, 0, 0, 0, time.UTC),
+		}
+		require.NoError(t, s.PutObjectRetention(bucket, key, "", updated))
+		got, err := s.GetObjectRetention(bucket, key, "")
+		require.NoError(t, err)
+		assert.Equal(t, "COMPLIANCE", got.Mode)
+	})
+
+	t.Run("Put returns ErrBucketNotFound for missing bucket", func(t *testing.T) {
+		s := newTestStorage(t)
+		assert.ErrorIs(
+			t,
+			s.PutObjectRetention("no-bucket", "obj.txt", "", retention),
+			ErrBucketNotFound,
+		)
+	})
+
+	t.Run("Get returns ErrBucketNotFound for missing bucket", func(t *testing.T) {
+		s := newTestStorage(t)
+		_, err := s.GetObjectRetention("no-bucket", "obj.txt", "")
+		assert.ErrorIs(t, err, ErrBucketNotFound)
+	})
+
+	t.Run("Put returns ErrObjectNotFound for missing object", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("b", ""))
+		assert.ErrorIs(
+			t,
+			s.PutObjectRetention("b", "missing.txt", "", retention),
+			ErrObjectNotFound,
+		)
+	})
+
+	t.Run("Get returns ErrObjectNotFound for missing object", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("b", ""))
+		_, err := s.GetObjectRetention("b", "missing.txt", "")
+		assert.ErrorIs(t, err, ErrObjectNotFound)
+	})
+
+	t.Run("Put/Get by versionId on versioned bucket", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("b", ""))
+		require.NoError(t, s.PutBucketVersioning("b", "Enabled"))
+		m1, err := s.PutObject("b", "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "")
+		require.NoError(t, err)
+		m2, err := s.PutObject("b", "obj.txt", strings.NewReader("v2"), "text/plain", nil, "", "")
+		require.NoError(t, err)
+
+		// Set retention only on v1 (archived).
+		require.NoError(t, s.PutObjectRetention("b", "obj.txt", m1.VersionID, retention))
+
+		got1, err := s.GetObjectRetention("b", "obj.txt", m1.VersionID)
+		require.NoError(t, err)
+		assert.Equal(t, retention.Mode, got1.Mode)
+
+		// v2 (current) should have no retention.
+		_, err = s.GetObjectRetention("b", "obj.txt", m2.VersionID)
+		assert.ErrorIs(t, err, ErrNoObjectRetention)
+	})
+
+	t.Run("Put returns DeleteMarkerError for delete marker", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("b", ""))
+		require.NoError(t, s.PutBucketVersioning("b", "Enabled"))
+		_, err := s.PutObject("b", "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "")
+		require.NoError(t, err)
+		markerVID, _, err := s.DeleteObjectVersioned("b", "obj.txt", false)
+		require.NoError(t, err)
+
+		err = s.PutObjectRetention("b", "obj.txt", markerVID, retention)
+		var dme *DeleteMarkerError
+		assert.ErrorAs(t, err, &dme)
+	})
+
+	t.Run("Get returns DeleteMarkerError for delete marker", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("b", ""))
+		require.NoError(t, s.PutBucketVersioning("b", "Enabled"))
+		_, err := s.PutObject("b", "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "")
+		require.NoError(t, err)
+		markerVID, _, err := s.DeleteObjectVersioned("b", "obj.txt", false)
+		require.NoError(t, err)
+
+		_, err = s.GetObjectRetention("b", "obj.txt", markerVID)
+		var dme *DeleteMarkerError
+		assert.ErrorAs(t, err, &dme)
+	})
+
+	t.Run(
+		"Put returns DeleteMarkerError when current is delete marker and no versionId",
+		func(t *testing.T) {
+			s := newTestStorage(t)
+			require.NoError(t, s.CreateBucket("b", ""))
+			require.NoError(t, s.PutBucketVersioning("b", "Enabled"))
+			_, err := s.PutObject(
+				"b",
+				"obj.txt",
+				strings.NewReader("v1"),
+				"text/plain",
+				nil,
+				"",
+				"",
+			)
+			require.NoError(t, err)
+			_, _, err = s.DeleteObjectVersioned("b", "obj.txt", false)
+			require.NoError(t, err)
+
+			err = s.PutObjectRetention("b", "obj.txt", "", retention)
+			var dme *DeleteMarkerError
+			assert.ErrorAs(t, err, &dme)
+		},
+	)
+
+	t.Run(
+		"Get returns DeleteMarkerError when current is delete marker and no versionId",
+		func(t *testing.T) {
+			s := newTestStorage(t)
+			require.NoError(t, s.CreateBucket("b", ""))
+			require.NoError(t, s.PutBucketVersioning("b", "Enabled"))
+			_, err := s.PutObject(
+				"b",
+				"obj.txt",
+				strings.NewReader("v1"),
+				"text/plain",
+				nil,
+				"",
+				"",
+			)
+			require.NoError(t, err)
+			_, _, err = s.DeleteObjectVersioned("b", "obj.txt", false)
+			require.NoError(t, err)
+
+			_, err = s.GetObjectRetention("b", "obj.txt", "")
+			var dme *DeleteMarkerError
+			assert.ErrorAs(t, err, &dme)
+		},
+	)
+
+	t.Run("Put returns DeleteMarkerError for archived delete marker", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("b", ""))
+		require.NoError(t, s.PutBucketVersioning("b", "Enabled"))
+		_, err := s.PutObject("b", "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "")
+		require.NoError(t, err)
+		markerVID, _, err := s.DeleteObjectVersioned("b", "obj.txt", false)
+		require.NoError(t, err)
+		// Put v2 — archives the delete marker.
+		_, err = s.PutObject("b", "obj.txt", strings.NewReader("v2"), "text/plain", nil, "", "")
+		require.NoError(t, err)
+
+		err = s.PutObjectRetention("b", "obj.txt", markerVID, retention)
+		var dme *DeleteMarkerError
+		assert.ErrorAs(t, err, &dme)
+	})
+
+	t.Run("Get returns DeleteMarkerError for archived delete marker", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("b", ""))
+		require.NoError(t, s.PutBucketVersioning("b", "Enabled"))
+		_, err := s.PutObject("b", "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "")
+		require.NoError(t, err)
+		markerVID, _, err := s.DeleteObjectVersioned("b", "obj.txt", false)
+		require.NoError(t, err)
+		// Put v2 — archives the delete marker.
+		_, err = s.PutObject("b", "obj.txt", strings.NewReader("v2"), "text/plain", nil, "", "")
+		require.NoError(t, err)
+
+		_, err = s.GetObjectRetention("b", "obj.txt", markerVID)
+		var dme *DeleteMarkerError
+		assert.ErrorAs(t, err, &dme)
+	})
+}
+
+func TestObjectLegalHold(t *testing.T) {
+	setup := func(t *testing.T) (*Storage, string, string) {
+		t.Helper()
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("b", ""))
+		_, err := s.PutObject("b", "obj.txt", strings.NewReader("data"), "text/plain", nil, "", "")
+		require.NoError(t, err)
+		return s, "b", "obj.txt"
+	}
+
+	t.Run("Put/Get roundtrip ON", func(t *testing.T) {
+		s, bucket, key := setup(t)
+		require.NoError(t, s.PutObjectLegalHold(bucket, key, "", "ON"))
+		got, err := s.GetObjectLegalHold(bucket, key, "")
+		require.NoError(t, err)
+		assert.Equal(t, "ON", got)
+	})
+
+	t.Run("Put/Get roundtrip OFF", func(t *testing.T) {
+		s, bucket, key := setup(t)
+		require.NoError(t, s.PutObjectLegalHold(bucket, key, "", "ON"))
+		require.NoError(t, s.PutObjectLegalHold(bucket, key, "", "OFF"))
+		got, err := s.GetObjectLegalHold(bucket, key, "")
+		require.NoError(t, err)
+		assert.Equal(t, "OFF", got)
+	})
+
+	t.Run("Get returns ErrNoObjectLegalHold when not set", func(t *testing.T) {
+		s, bucket, key := setup(t)
+		_, err := s.GetObjectLegalHold(bucket, key, "")
+		assert.ErrorIs(t, err, ErrNoObjectLegalHold)
+	})
+
+	t.Run("Put returns ErrBucketNotFound for missing bucket", func(t *testing.T) {
+		s := newTestStorage(t)
+		assert.ErrorIs(t, s.PutObjectLegalHold("no-bucket", "obj.txt", "", "ON"), ErrBucketNotFound)
+	})
+
+	t.Run("Get returns ErrBucketNotFound for missing bucket", func(t *testing.T) {
+		s := newTestStorage(t)
+		_, err := s.GetObjectLegalHold("no-bucket", "obj.txt", "")
+		assert.ErrorIs(t, err, ErrBucketNotFound)
+	})
+
+	t.Run("Put returns ErrObjectNotFound for missing object", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("b", ""))
+		assert.ErrorIs(t, s.PutObjectLegalHold("b", "missing.txt", "", "ON"), ErrObjectNotFound)
+	})
+
+	t.Run("Get returns ErrObjectNotFound for missing object", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("b", ""))
+		_, err := s.GetObjectLegalHold("b", "missing.txt", "")
+		assert.ErrorIs(t, err, ErrObjectNotFound)
+	})
+
+	t.Run("Put/Get by versionId on versioned bucket", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("b", ""))
+		require.NoError(t, s.PutBucketVersioning("b", "Enabled"))
+		m1, err := s.PutObject("b", "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "")
+		require.NoError(t, err)
+		m2, err := s.PutObject("b", "obj.txt", strings.NewReader("v2"), "text/plain", nil, "", "")
+		require.NoError(t, err)
+
+		// Set legal hold only on v1 (archived).
+		require.NoError(t, s.PutObjectLegalHold("b", "obj.txt", m1.VersionID, "ON"))
+
+		got1, err := s.GetObjectLegalHold("b", "obj.txt", m1.VersionID)
+		require.NoError(t, err)
+		assert.Equal(t, "ON", got1)
+
+		// v2 (current) should have no legal hold.
+		_, err = s.GetObjectLegalHold("b", "obj.txt", m2.VersionID)
+		assert.ErrorIs(t, err, ErrNoObjectLegalHold)
+	})
+
+	t.Run("Put returns DeleteMarkerError for delete marker", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("b", ""))
+		require.NoError(t, s.PutBucketVersioning("b", "Enabled"))
+		_, err := s.PutObject("b", "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "")
+		require.NoError(t, err)
+		markerVID, _, err := s.DeleteObjectVersioned("b", "obj.txt", false)
+		require.NoError(t, err)
+
+		err = s.PutObjectLegalHold("b", "obj.txt", markerVID, "ON")
+		var dme *DeleteMarkerError
+		assert.ErrorAs(t, err, &dme)
+	})
+
+	t.Run("Get returns DeleteMarkerError for delete marker", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("b", ""))
+		require.NoError(t, s.PutBucketVersioning("b", "Enabled"))
+		_, err := s.PutObject("b", "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "")
+		require.NoError(t, err)
+		markerVID, _, err := s.DeleteObjectVersioned("b", "obj.txt", false)
+		require.NoError(t, err)
+
+		_, err = s.GetObjectLegalHold("b", "obj.txt", markerVID)
+		var dme *DeleteMarkerError
+		assert.ErrorAs(t, err, &dme)
+	})
 }
