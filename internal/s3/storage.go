@@ -49,6 +49,7 @@ type Storage struct {
 	readAll    func(r io.Reader) ([]byte, error)
 	randRead   func(b []byte) (int, error)
 	listDirFn  func(name string) ([]os.DirEntry, error)
+	now        func() time.Time // injectable for testing; defaults to time.Now
 }
 
 // NewStorage roots the storage at dataDir/s3, creating the directory if needed.
@@ -77,6 +78,7 @@ func newStorage(dataDir string, openRoot func(string) (*os.Root, error)) (*Stora
 	}
 	s.readAll = io.ReadAll
 	s.randRead = rand.Read
+	s.now = time.Now
 	s.listDirFn = func(name string) ([]os.DirEntry, error) {
 		f, err := s.root.Open(name)
 		if err != nil {
@@ -436,7 +438,7 @@ func (s *Storage) checkObjectLockLocked(objPath string, bypassGovernance bool) e
 		return ErrObjectLocked
 	}
 	if meta.Retention != nil {
-		if time.Now().UTC().Before(meta.Retention.RetainUntilDate) {
+		if s.now().UTC().Before(meta.Retention.RetainUntilDate) {
 			if meta.Retention.Mode == "COMPLIANCE" {
 				return ErrObjectLocked
 			}

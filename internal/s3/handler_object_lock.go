@@ -87,7 +87,7 @@ func (ro *Router) handleGetObjectRetention(
 				key,
 			)
 			writeError(w, r, http.StatusNotFound, "NoSuchObjectLockConfiguration",
-				"The specified object does not have a ObjectLock configuration.")
+				"The specified object does not have an ObjectLock configuration.")
 			return
 		}
 		writeObjectLockError(w, r, bucket, key, "get object retention", err)
@@ -170,7 +170,7 @@ func (ro *Router) handleGetObjectLegalHold(
 				key,
 			)
 			writeError(w, r, http.StatusNotFound, "NoSuchObjectLockConfiguration",
-				"The specified object does not have a ObjectLock configuration.")
+				"The specified object does not have an ObjectLock configuration.")
 			return
 		}
 		writeObjectLockError(w, r, bucket, key, "get object legal hold", err)
