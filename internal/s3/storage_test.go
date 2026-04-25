@@ -720,6 +720,25 @@ func TestCopyObject(t *testing.T) {
 		assert.Equal(t, "hello", string(data))
 	})
 
+	t.Run("same-key copy applies retention and legal-hold from headers", func(t *testing.T) {
+		s, _ := setup(t)
+		retention := &ObjectRetention{
+			Mode:            "GOVERNANCE",
+			RetainUntilDate: time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC),
+		}
+		legalHold := &ObjectLegalHold{Status: "ON"}
+		meta, err := s.CopyObject(
+			"src-bucket", "orig.txt", "",
+			"src-bucket", "orig.txt", "",
+			nil, "", "", retention, legalHold,
+		)
+		require.NoError(t, err)
+		require.NotNil(t, meta.Retention)
+		assert.Equal(t, "GOVERNANCE", meta.Retention.Mode)
+		require.NotNil(t, meta.LegalHold)
+		assert.Equal(t, "ON", meta.LegalHold.Status)
+	})
+
 	t.Run("returns error when same-key copy meta write fails", func(t *testing.T) {
 		s, rootPath := setup(t)
 		metaPath := filepath.Join(rootPath, "src-bucket", "orig.txt.meta.json")
@@ -3589,6 +3608,31 @@ func TestVersioning(t *testing.T) {
 		_, _, err = s.GetObjectVersion(bucket, "obj.txt", m1.VersionID)
 		assert.ErrorIs(t, err, ErrObjectNotFound)
 	})
+
+	t.Run(
+		"DeleteObjectVersion returns ErrObjectLocked for archived version under COMPLIANCE retention",
+		func(t *testing.T) {
+			s, bucket := setup(t)
+			retention := &ObjectRetention{
+				Mode:            "COMPLIANCE",
+				RetainUntilDate: time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC),
+			}
+			m1, err := s.PutObject(
+				bucket, "obj.txt", strings.NewReader("v1"), "text/plain",
+				nil, "", "", retention, nil,
+			)
+			require.NoError(t, err)
+			// Put v2 so v1 becomes an archived version.
+			_, err = s.PutObject(
+				bucket, "obj.txt", strings.NewReader("v2"), "text/plain",
+				nil, "", "", nil, nil,
+			)
+			require.NoError(t, err)
+
+			_, err = s.DeleteObjectVersion(bucket, "obj.txt", m1.VersionID, false)
+			assert.ErrorIs(t, err, ErrObjectLocked)
+		},
+	)
 
 	t.Run("DeleteObjectVersion on current version removes it", func(t *testing.T) {
 		s, bucket := setup(t)

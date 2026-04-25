@@ -1953,6 +1953,30 @@ func TestRouterCopyObject(t *testing.T) {
 		},
 	)
 
+	t.Run("invalid Object Lock mode header on CopyObject returns 400", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/src-bucket", nil),
+		)
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/src-bucket/orig.txt", strings.NewReader("hello")),
+		)
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/dst-bucket", nil),
+		)
+
+		copyReq := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
+		copyReq.Header.Set("X-Amz-Copy-Source", "/src-bucket/orig.txt")
+		// Only mode without retain-until-date → parseObjectLockHeaders returns !ok.
+		copyReq.Header.Set(amzObjectLockMode, "GOVERNANCE")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, copyReq)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
 	t.Run("Object Lock headers on CopyObject are stored", func(t *testing.T) {
 		ro := newTestRouter(t)
 		// Create dst bucket with Object Lock enabled.
