@@ -33,6 +33,7 @@ const (
 	amzMetadataDirective           = "X-Amz-Metadata-Directive"
 	amzCopySourceRange             = "X-Amz-Copy-Source-Range"
 	amzBypassGovernanceRetention   = "X-Amz-Bypass-Governance-Retention" // #nosec G101 -- HTTP header name, not a credential
+	amzObjectLockEnabled           = "X-Amz-Object-Lock-Enabled"
 	amzObjectLockMode              = "X-Amz-Object-Lock-Mode"
 	amzObjectLockRetainUntilDate   = "X-Amz-Object-Lock-Retain-Until-Date"
 	amzObjectLockLegalHold         = "X-Amz-Object-Lock-Legal-Hold"
@@ -1425,7 +1426,7 @@ func (ro *Router) handleListBuckets(w http.ResponseWriter, r *http.Request) {
 
 func (ro *Router) handleCreateBucket(w http.ResponseWriter, r *http.Request, bucket string) {
 	region := ParseSigV4(r).Region
-	objectLockEnabled := strings.EqualFold(r.Header.Get("x-amz-object-lock-enabled"), "true")
+	objectLockEnabled := strings.EqualFold(r.Header.Get(amzObjectLockEnabled), "true")
 	if err := ro.storage.CreateBucket(bucket, region, objectLockEnabled); err != nil {
 		if errors.Is(err, os.ErrExist) {
 			slog.Debug( // #nosec G706 -- bucket name is validated by S3 naming rules before reaching this point
