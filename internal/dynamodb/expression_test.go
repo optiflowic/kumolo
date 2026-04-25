@@ -98,6 +98,28 @@ func TestEvalFilterExpr(t *testing.T) {
 		{"missing name ref", "#missing = :alice", false, true},
 		// Invalid expression
 		{"invalid expr", "#n !! :alice", false, true},
+		// AND/OR left-side error propagation
+		{"and left error", "#missing = :alice AND name = :alice", false, true},
+		{"or left error", "#missing = :alice OR name = :alice", false, true},
+		// BETWEEN resolve errors
+		{"between attr error", "#missing BETWEEN :twenty AND :forty", false, true},
+		{"between lo error", "#a BETWEEN :missing AND :forty", false, true},
+		{"between hi error", "#a BETWEEN :twenty AND :missing", false, true},
+		// begins_with resolve errors and edge cases
+		{"begins_with path error", "begins_with(#missing, :al)", false, true},
+		{"begins_with prefix error", "begins_with(#n, :missing)", false, true},
+		{"begins_with non-map path", "begins_with(nonExistent, :al)", false, false},
+		// contains resolve errors and edge cases
+		{"contains path error", "contains(#missing, :admin)", false, true},
+		{"contains val error", "contains(#tags, :missing)", false, true},
+		{"contains non-map path", "contains(nonExistent, :admin)", false, false},
+		{"contains string non-string search", "contains(#n, :thirty)", false, false},
+		{"contains non-string non-list attr", "contains(#a, :admin)", false, false},
+		// parseOperand nameRef and plain ident paths
+		{"operand as name ref", "name = #n", true, false},
+		{"operand as plain attr", "name = age", false, false},
+		// cmpCondNode: dynamoValueCmp type mismatch → false, no error
+		{"lt type mismatch no error", "name < :thirty", false, false},
 	}
 
 	for _, tc := range tests {
@@ -160,6 +182,14 @@ func TestApplyFilterExpression(t *testing.T) {
 
 	t.Run("invalid expression returns error", func(t *testing.T) {
 		_, err := applyFilterExpression(items, "#a !! :val", nil, nil)
+		require.Error(t, err)
+	})
+
+	t.Run("eval error during filtering returns error", func(t *testing.T) {
+		_, err := applyFilterExpression(items, "#undefined = :active",
+			map[string]string{},
+			map[string]any{":active": map[string]any{"S": "active"}},
+		)
 		require.Error(t, err)
 	})
 }
@@ -329,4 +359,118 @@ func TestHandleQueryWithFilterExpression(t *testing.T) {
 			assert.Equal(t, float64(tc.wantScanned), resp["ScannedCount"])
 		})
 	}
+
+	t.Run("invalid FilterExpression returns 400", func(t *testing.T) {
+		ro := setup(t)
+		w := dynamo(t, ro, "Query", `{
+			"TableName":"orders",
+			"KeyConditionExpression":"userId = :uid",
+			"FilterExpression":"#s !! :val",
+			"ExpressionAttributeNames":{"#s":"status"},
+			"ExpressionAttributeValues":{":uid":{"S":"u1"},":val":{"S":"x"}}
+		}`)
+		assert.Equal(t, 400, w.Code)
+		assertErrorType(t, w, "ValidationException")
+	})
+}
+
+func TestParseFilterExprErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		expr string
+	}{
+		// tokenizeExpr errors
+		{"empty name ref", "#"},
+		{"empty val ref", ":"},
+		// trailing token after valid expression
+		{"trailing token", "name = :val )"},
+		// parseComparison: no operator after attr path
+		{"comparison no operator", "name name"},
+		// parseComparison: BETWEEN missing AND
+		{"between without and", "age BETWEEN :lo :hi"},
+		// parsePrimary: paren errors
+		{"paren no close", "(name = :val"},
+		{"paren inner error", "(attribute_exists"},
+		// parseNot: error in primary
+		{"not inner error", "NOT attribute_exists"},
+		// parseOr/parseAnd: error in right operand
+		{"or right error", "name = :val OR attribute_exists"},
+		{"and right error", "name = :val AND attribute_exists"},
+		// parseAttrPath: non-path token
+		{"attr path got val ref", "attribute_exists(:val)"},
+		// parseOperand: non-operand token
+		{"operand got paren", "begins_with(name, ("},
+		// parseAttrExistsFunc: missing lparen
+		{"attr exists no lparen", "attribute_exists #n"},
+		// parseAttrExistsFunc: missing rparen
+		{"attr exists no rparen", "attribute_exists(name"},
+		// parseBeginsWithFunc: missing lparen
+		{"begins_with no lparen", "begins_with name, :val)"},
+		// parseBeginsWithFunc: attr path is a val ref
+		{"begins_with attr path error", "begins_with(:val, :al)"},
+		// parseBeginsWithFunc: missing comma
+		{"begins_with no comma", "begins_with(name :val)"},
+		// parseBeginsWithFunc: bad operand after comma
+		{"begins_with operand error", "begins_with(name, ("},
+		// parseBeginsWithFunc: missing rparen
+		{"begins_with no rparen", "begins_with(name, :val"},
+		// parseContainsFunc: missing lparen
+		{"contains no lparen", "contains name, :val)"},
+		// parseContainsFunc: attr path is a val ref
+		{"contains attr path error", "contains(:val, :al)"},
+		// parseContainsFunc: missing comma
+		{"contains no comma", "contains(name :val)"},
+		// parseContainsFunc: bad operand after comma
+		{"contains operand error", "contains(name, ("},
+		// parseContainsFunc: missing rparen
+		{"contains no rparen", "contains(name, :val"},
+		// parseComparison: attr path error (val ref where attr path expected)
+		{"comparison attr path error", ":val = :alice"},
+		// parseComparison: BETWEEN lo/hi operand errors
+		{"between lo operand error", "age BETWEEN ( AND :hi"},
+		{"between hi operand error", "age BETWEEN :lo AND ("},
+		// parseComparison: right operand error
+		{"comparison right operand error", "age = ("},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parseFilterExpr(tc.expr)
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestExprNodesDirect(t *testing.T) {
+	item := map[string]any{
+		"name": map[string]any{"S": "Alice"},
+		"age":  map[string]any{"N": "30"},
+	}
+	names := map[string]string{"#n": "name"}
+	values := map[string]any{":alice": map[string]any{"S": "Alice"}}
+
+	t.Run("valRefOperand attrName returns empty string and false", func(t *testing.T) {
+		op := valRefOperand{":alice"}
+		got, ok := op.attrName(names)
+		assert.Equal(t, "", got)
+		assert.False(t, ok)
+	})
+
+	t.Run("attrExistsCondNode with non-path operand returns error", func(t *testing.T) {
+		node := attrExistsCondNode{operand: valRefOperand{":alice"}, negate: false}
+		_, err := node.eval(item, names, values)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "attribute_exists")
+	})
+
+	t.Run("cmpCondNode unknown operator returns error", func(t *testing.T) {
+		node := cmpCondNode{
+			left:  plainOperand{"name"},
+			op:    "???",
+			right: valRefOperand{":alice"},
+		}
+		_, err := node.eval(item, names, values)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unknown operator")
+	})
 }
