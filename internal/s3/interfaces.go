@@ -9,7 +9,7 @@ import (
 // bucketStore is the subset of Storage used by the Router for bucket operations.
 type bucketStore interface {
 	ListBuckets() ([]BucketInfo, error)
-	CreateBucket(bucket, region string) error
+	CreateBucket(bucket, region string, objectLockEnabled bool) error
 	DeleteBucket(bucket string) error
 	BucketExists(bucket string) bool
 	GetBucketRegion(bucket string) (string, error)
@@ -23,6 +23,8 @@ type objectStore interface {
 		contentType string,
 		userMetadata map[string]string,
 		sseAlgorithm, sseKMSKeyID string,
+		retention *ObjectRetention,
+		legalHold *ObjectLegalHold,
 	) (ObjectMetadata, error)
 	GetObject(bucket, key string) (*os.File, ObjectMetadata, error)
 	GetObjectVersion(bucket, key, versionID string) (*os.File, ObjectMetadata, error)
@@ -31,6 +33,8 @@ type objectStore interface {
 		contentType string,
 		userMetadata map[string]string,
 		sseAlgorithm, sseKMSKeyID string,
+		retention *ObjectRetention,
+		legalHold *ObjectLegalHold,
 	) (ObjectMetadata, error)
 	DeleteObject(bucket, key string, bypassGovernance bool) error
 	DeleteObjectVersioned(
@@ -52,6 +56,8 @@ type objectStore interface {
 type multipartStore interface {
 	CreateMultipartUpload(
 		bucket, key, contentType, sseAlgorithm, sseKMSKeyID string,
+		retention *ObjectRetention,
+		legalHold *ObjectLegalHold,
 	) (uploadID string, err error)
 	UploadPart(uploadID string, partNumber int, r io.Reader) (etag string, err error)
 	UploadPartCopy(

@@ -75,6 +75,10 @@ func (ro *Router) handleCopyObject(
 	}
 	sseAlgorithm := r.Header.Get(amzSSE)
 	sseKMSKeyID := r.Header.Get(amzSSEKMSKeyID)
+	retention, legalHold, ok := parseObjectLockHeaders(w, r)
+	if !ok {
+		return
+	}
 	meta, err := ro.storage.CopyObject(
 		srcBucket,
 		srcKey,
@@ -85,6 +89,8 @@ func (ro *Router) handleCopyObject(
 		userMetadata,
 		sseAlgorithm,
 		sseKMSKeyID,
+		retention,
+		legalHold,
 	)
 	if err != nil {
 		switch {
@@ -165,6 +171,10 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 	userMetadata := extractUserMetadata(r.Header)
 	sseAlgorithm := r.Header.Get(amzSSE)
 	sseKMSKeyID := r.Header.Get(amzSSEKMSKeyID)
+	retention, legalHold, ok := parseObjectLockHeaders(w, r)
+	if !ok {
+		return
+	}
 	meta, err := ro.storage.PutObject(
 		bucket,
 		key,
@@ -173,6 +183,8 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 		userMetadata,
 		sseAlgorithm,
 		sseKMSKeyID,
+		retention,
+		legalHold,
 	)
 	if err != nil {
 		if errors.Is(err, ErrBucketNotFound) {
@@ -934,4 +946,53 @@ func (ro *Router) handleDeleteObjectTagging(
 		key,
 	)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// parseObjectLockHeaders reads x-amz-object-lock-* request headers and returns
+// the parsed retention and legal hold values. Returns false and writes an error
+// response if any header value is invalid. Either or both pointers may be nil
+// when the corresponding header is absent.
+func parseObjectLockHeaders(
+	w http.ResponseWriter,
+	r *http.Request,
+) (retention *ObjectRetention, legalHold *ObjectLegalHold, ok bool) {
+	modeStr := r.Header.Get(amzObjectLockMode)
+	dateStr := r.Header.Get(amzObjectLockRetainUntilDate)
+	holdStr := r.Header.Get(amzObjectLockLegalHold)
+
+	if modeStr != "" || dateStr != "" {
+		if modeStr == "" || dateStr == "" {
+			writeError(
+				w,
+				r,
+				http.StatusBadRequest,
+				"InvalidArgument",
+				"Both x-amz-object-lock-mode and x-amz-object-lock-retain-until-date must be supplied together.",
+			)
+			return nil, nil, false
+		}
+		if modeStr != "GOVERNANCE" && modeStr != "COMPLIANCE" {
+			writeError(w, r, http.StatusBadRequest, "InvalidArgument",
+				"x-amz-object-lock-mode must be GOVERNANCE or COMPLIANCE.")
+			return nil, nil, false
+		}
+		retainUntil, err := time.Parse(time.RFC3339Nano, dateStr)
+		if err != nil {
+			writeError(w, r, http.StatusBadRequest, "InvalidArgument",
+				"x-amz-object-lock-retain-until-date must be an RFC3339 timestamp.")
+			return nil, nil, false
+		}
+		retention = &ObjectRetention{Mode: modeStr, RetainUntilDate: retainUntil}
+	}
+
+	if holdStr != "" {
+		if holdStr != "ON" && holdStr != "OFF" {
+			writeError(w, r, http.StatusBadRequest, "InvalidArgument",
+				"x-amz-object-lock-legal-hold must be ON or OFF.")
+			return nil, nil, false
+		}
+		legalHold = &ObjectLegalHold{Status: holdStr}
+	}
+
+	return retention, legalHold, true
 }

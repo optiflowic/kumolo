@@ -90,13 +90,18 @@ func newStorage(dataDir string, openRoot func(string) (*os.Root, error)) (*Stora
 	return s, nil
 }
 
-func (s *Storage) CreateBucket(bucket, region string) error {
+func (s *Storage) CreateBucket(bucket, region string, objectLockEnabled bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.root.Mkdir(bucket, 0o750); err != nil {
 		return err
 	}
-	if err := s.writeBucketMeta(bucket, bucketMeta{Region: region}); err != nil {
+	meta := bucketMeta{Region: region}
+	if objectLockEnabled {
+		meta.VersioningStatus = "Enabled"
+		meta.ObjectLock = `<ObjectLockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ObjectLockEnabled>Enabled</ObjectLockEnabled></ObjectLockConfiguration>`
+	}
+	if err := s.writeBucketMeta(bucket, meta); err != nil {
 		if removeErr := s.root.Remove(bucket); removeErr != nil {
 			slog.Warn(
 				"failed to clean up bucket after meta write failure",
@@ -178,6 +183,8 @@ func (s *Storage) PutObject(
 	contentType string,
 	userMetadata map[string]string,
 	sseAlgorithm, sseKMSKeyID string,
+	retention *ObjectRetention,
+	legalHold *ObjectLegalHold,
 ) (ObjectMetadata, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -215,6 +222,8 @@ func (s *Storage) PutObject(
 		versionID,
 		sseAlgorithm,
 		sseKMSKeyID,
+		retention,
+		legalHold,
 	)
 }
 
@@ -229,6 +238,8 @@ func (s *Storage) writeObject(
 	userMetadata map[string]string,
 	versionID string,
 	sseAlgorithm, sseKMSKeyID string,
+	retention *ObjectRetention,
+	legalHold *ObjectLegalHold,
 ) (retMeta ObjectMetadata, retErr error) {
 	f, err := s.openFile(objPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
@@ -263,6 +274,8 @@ func (s *Storage) writeObject(
 		VersionID:    versionID,
 		SSEAlgorithm: sseAlgorithm,
 		SSEKMSKeyID:  sseKMSKeyID,
+		Retention:    retention,
+		LegalHold:    legalHold,
 	}
 	if err := s.writeMeta(objPath, meta); err != nil {
 		if removeErr := s.removeFile(objPath); removeErr != nil &&
@@ -311,6 +324,8 @@ func (s *Storage) CopyObject(
 	contentType string,
 	userMetadata map[string]string,
 	sseAlgorithm, sseKMSKeyID string,
+	retention *ObjectRetention,
+	legalHold *ObjectLegalHold,
 ) (ObjectMetadata, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -394,6 +409,8 @@ func (s *Storage) CopyObject(
 		meta.UserMetadata = userMetadata
 		meta.SSEAlgorithm = sseAlgorithm
 		meta.SSEKMSKeyID = sseKMSKeyID
+		meta.Retention = retention
+		meta.LegalHold = legalHold
 		if err := s.writeMeta(dstPath, meta); err != nil {
 			return ObjectMetadata{}, err
 		}
@@ -421,6 +438,8 @@ func (s *Storage) CopyObject(
 		dstVersionID,
 		sseAlgorithm,
 		sseKMSKeyID,
+		retention,
+		legalHold,
 	)
 }
 
@@ -1365,12 +1384,14 @@ func (s *Storage) DeleteBucketPolicy(bucket string) error {
 
 // uploadMeta is stored as .mpu/<uploadID>/upload.json.
 type uploadMeta struct {
-	Bucket       string    `json:"bucket"`
-	Key          string    `json:"key"`
-	ContentType  string    `json:"contentType"`
-	Initiated    time.Time `json:"initiated"`
-	SSEAlgorithm string    `json:"sseAlgorithm,omitempty"`
-	SSEKMSKeyID  string    `json:"sseKmsKeyId,omitempty"`
+	Bucket       string           `json:"bucket"`
+	Key          string           `json:"key"`
+	ContentType  string           `json:"contentType"`
+	Initiated    time.Time        `json:"initiated"`
+	SSEAlgorithm string           `json:"sseAlgorithm,omitempty"`
+	SSEKMSKeyID  string           `json:"sseKmsKeyId,omitempty"`
+	Retention    *ObjectRetention `json:"retention,omitempty"`
+	LegalHold    *ObjectLegalHold `json:"legalHold,omitempty"`
 }
 
 // partMeta is stored as .mpu/<uploadID>/<partNumber>.part.meta.json.
@@ -1383,6 +1404,8 @@ const mpuDir = ".mpu"
 
 func (s *Storage) CreateMultipartUpload(
 	bucket, key, contentType, sseAlgorithm, sseKMSKeyID string,
+	retention *ObjectRetention,
+	legalHold *ObjectLegalHold,
 ) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1405,6 +1428,8 @@ func (s *Storage) CreateMultipartUpload(
 		Initiated:    time.Now().UTC(),
 		SSEAlgorithm: sseAlgorithm,
 		SSEKMSKeyID:  sseKMSKeyID,
+		Retention:    retention,
+		LegalHold:    legalHold,
 	}
 	data, _ := json.Marshal(meta) // json.Marshal never fails for uploadMeta
 	var uploadJSONWritten bool
@@ -1680,6 +1705,8 @@ func (s *Storage) CompleteMultipartUpload(
 		versionID,
 		umeta.SSEAlgorithm,
 		umeta.SSEKMSKeyID,
+		umeta.Retention,
+		umeta.LegalHold,
 	)
 	if err != nil {
 		return ObjectMetadata{}, err
@@ -1955,7 +1982,24 @@ func (s *Storage) GetBucketRequestPayment(bucket string) (string, error) {
 }
 
 func (s *Storage) PutBucketObjectLock(bucket, xmlBody string) error {
-	return s.putBucketConfigField(bucket, func(m *bucketMeta) { m.ObjectLock = xmlBody })
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.bucketExistsLocked(bucket) {
+		return ErrBucketNotFound
+	}
+	meta, err := s.readBucketMeta(bucket)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		slog.Error("bucket exists but metadata file is missing", "bucket", bucket) // #nosec G706
+		meta = bucketMeta{}
+	}
+	if meta.VersioningStatus != "Enabled" {
+		return ErrInvalidBucketState
+	}
+	meta.ObjectLock = xmlBody
+	return s.writeBucketMeta(bucket, meta)
 }
 
 func (s *Storage) GetBucketObjectLock(bucket string) (string, error) {

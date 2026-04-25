@@ -98,13 +98,13 @@ func TestNewStorage(t *testing.T) {
 func TestCreateBucket(t *testing.T) {
 	t.Run("creates bucket and reports it as existing", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		assert.True(t, s.BucketExists("my-bucket"))
 	})
 
 	t.Run("persists region", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("my-bucket", "ap-northeast-1"))
+		require.NoError(t, s.CreateBucket("my-bucket", "ap-northeast-1", false))
 		region, err := s.GetBucketRegion("my-bucket")
 		require.NoError(t, err)
 		assert.Equal(t, "ap-northeast-1", region)
@@ -115,7 +115,7 @@ func TestCreateBucket(t *testing.T) {
 		// Place a directory where the metadata file should be written to force a failure.
 		require.NoError(t, os.MkdirAll(filepath.Join(rootPath, "my-bucket.bucket.json"), 0o750))
 
-		err := s.CreateBucket("my-bucket", "us-west-2")
+		err := s.CreateBucket("my-bucket", "us-west-2", false)
 		assert.Error(t, err)
 		assert.False(t, s.BucketExists("my-bucket"))
 	})
@@ -131,7 +131,7 @@ func TestCreateBucket(t *testing.T) {
 				return nil, errors.New("simulated write failure")
 			}
 
-			err := s.CreateBucket("my-bucket", "us-west-2")
+			err := s.CreateBucket("my-bucket", "us-west-2", false)
 			assert.Error(t, err)
 		},
 	)
@@ -147,15 +147,29 @@ func TestCreateBucket(t *testing.T) {
 			return badCloseWriter{wc}, nil
 		}
 
-		err := s.CreateBucket("my-bucket", "ap-northeast-1")
+		err := s.CreateBucket("my-bucket", "ap-northeast-1", false)
 		assert.Error(t, err)
+	})
+
+	t.Run("objectLockEnabled enables versioning and stores ObjectLock XML", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("my-bucket", "", true))
+
+		status, err := s.GetBucketVersioning("my-bucket")
+		require.NoError(t, err)
+		assert.Equal(t, "Enabled", status)
+
+		lockXML, err := s.GetBucketObjectLock("my-bucket")
+		require.NoError(t, err)
+		assert.Contains(t, lockXML, "ObjectLockEnabled")
+		assert.Contains(t, lockXML, "Enabled")
 	})
 }
 
 func TestGetBucketRegion(t *testing.T) {
 	t.Run("returns region the bucket was created with", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("my-bucket", "eu-west-1"))
+		require.NoError(t, s.CreateBucket("my-bucket", "eu-west-1", false))
 		region, err := s.GetBucketRegion("my-bucket")
 		require.NoError(t, err)
 		assert.Equal(t, "eu-west-1", region)
@@ -163,7 +177,7 @@ func TestGetBucketRegion(t *testing.T) {
 
 	t.Run("returns empty string for bucket created without region", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		region, err := s.GetBucketRegion("my-bucket")
 		require.NoError(t, err)
 		assert.Equal(t, "", region)
@@ -177,7 +191,7 @@ func TestGetBucketRegion(t *testing.T) {
 
 	t.Run("returns empty string when meta file does not exist", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		require.NoError(t, os.Remove(filepath.Join(rootPath, "my-bucket.bucket.json")))
 
 		region, err := s.GetBucketRegion("my-bucket")
@@ -187,7 +201,7 @@ func TestGetBucketRegion(t *testing.T) {
 
 	t.Run("returns error when metadata is corrupt", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		require.NoError(t, os.WriteFile(
 			filepath.Join(rootPath, "my-bucket.bucket.json"),
 			[]byte("not-json"),
@@ -200,7 +214,7 @@ func TestGetBucketRegion(t *testing.T) {
 
 	t.Run("returns error when metadata read fails", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("my-bucket", "us-east-2"))
+		require.NoError(t, s.CreateBucket("my-bucket", "us-east-2", false))
 
 		s.readAll = func(io.Reader) ([]byte, error) {
 			return nil, errors.New("simulated read failure")
@@ -214,7 +228,7 @@ func TestGetBucketRegion(t *testing.T) {
 func TestDeleteBucket(t *testing.T) {
 	t.Run("deletes empty bucket successfully", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		require.NoError(t, s.DeleteBucket("my-bucket"))
 		assert.False(t, s.BucketExists("my-bucket"))
 	})
@@ -226,7 +240,7 @@ func TestDeleteBucket(t *testing.T) {
 
 	t.Run("returns ErrBucketNotEmpty when bucket has objects", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		_, err := s.PutObject(
 			"my-bucket",
 			"obj.txt",
@@ -235,6 +249,8 @@ func TestDeleteBucket(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 		assert.ErrorIs(t, s.DeleteBucket("my-bucket"), ErrBucketNotEmpty)
@@ -242,14 +258,14 @@ func TestDeleteBucket(t *testing.T) {
 
 	t.Run("removes bucket metadata on delete", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket", "ap-northeast-1"))
+		require.NoError(t, s.CreateBucket("my-bucket", "ap-northeast-1", false))
 		require.NoError(t, s.DeleteBucket("my-bucket"))
 		assert.NoFileExists(t, filepath.Join(rootPath, "my-bucket.bucket.json"))
 	})
 
 	t.Run("logs warning when metadata removal fails but still deletes bucket", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		// Replace the .bucket.json file with a non-empty directory so Remove fails.
 		metaPath := filepath.Join(rootPath, "my-bucket.bucket.json")
 		require.NoError(t, os.Remove(metaPath))
@@ -261,7 +277,7 @@ func TestDeleteBucket(t *testing.T) {
 
 	t.Run("returns error when directory listing fails", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		require.NoError(t, os.Chmod(filepath.Join(rootPath, "my-bucket"), 0o000))
 		t.Cleanup(
 			func() { _ = os.Chmod(filepath.Join(rootPath, "my-bucket"), 0o750) },
@@ -276,9 +292,9 @@ func TestDeleteBucket(t *testing.T) {
 func TestListBuckets(t *testing.T) {
 	t.Run("lists all buckets in lexicographic order", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("bucket-c", ""))
-		require.NoError(t, s.CreateBucket("bucket-a", ""))
-		require.NoError(t, s.CreateBucket("bucket-b", ""))
+		require.NoError(t, s.CreateBucket("bucket-c", "", false))
+		require.NoError(t, s.CreateBucket("bucket-a", "", false))
+		require.NoError(t, s.CreateBucket("bucket-b", "", false))
 
 		buckets, err := s.ListBuckets()
 		require.NoError(t, err)
@@ -301,7 +317,7 @@ func TestListBuckets(t *testing.T) {
 
 	t.Run("skips non-directory entries", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("bucket-a", ""))
+		require.NoError(t, s.CreateBucket("bucket-a", "", false))
 		require.NoError(
 			t,
 			os.WriteFile(filepath.Join(rootPath, "not-a-bucket"), []byte("x"), 0o600),
@@ -316,14 +332,14 @@ func TestListBuckets(t *testing.T) {
 func TestPutObject(t *testing.T) {
 	t.Run("stores object and returns metadata", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 
 		meta, err := s.PutObject(
 			"my-bucket",
 			"hello.txt",
 			strings.NewReader("hello world"),
 			"text/plain",
-			nil, "", "",
+			nil, "", "", nil, nil,
 		)
 		require.NoError(t, err)
 		assert.Equal(t, int64(11), meta.Size)
@@ -333,14 +349,14 @@ func TestPutObject(t *testing.T) {
 
 	t.Run("stores object with nested key", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 
 		_, err := s.PutObject(
 			"my-bucket",
 			"dir/sub/obj.txt",
 			strings.NewReader("data"),
 			"text/plain",
-			nil, "", "",
+			nil, "", "", nil, nil,
 		)
 		require.NoError(t, err)
 
@@ -360,13 +376,15 @@ func TestPutObject(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		assert.ErrorIs(t, err, ErrBucketNotFound)
 	})
 
 	t.Run("returns error when file cannot be opened", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		require.NoError(t, os.Chmod(filepath.Join(rootPath, "my-bucket"), 0o000))
 		t.Cleanup(
 			func() { _ = os.Chmod(filepath.Join(rootPath, "my-bucket"), 0o750) },
@@ -380,13 +398,15 @@ func TestPutObject(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		assert.Error(t, err)
 	})
 
 	t.Run("returns error when nested directory cannot be created", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		require.NoError(
 			t,
 			os.Chmod(filepath.Join(rootPath, "my-bucket"), 0o500),
@@ -400,22 +420,32 @@ func TestPutObject(t *testing.T) {
 			"nested/obj.txt",
 			strings.NewReader("data"),
 			"text/plain",
-			nil, "", "",
+			nil, "", "", nil, nil,
 		)
 		assert.Error(t, err)
 	})
 
 	t.Run("returns error when reader fails", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 
-		_, err := s.PutObject("my-bucket", "obj.txt", errReader{}, "text/plain", nil, "", "")
+		_, err := s.PutObject(
+			"my-bucket",
+			"obj.txt",
+			errReader{},
+			"text/plain",
+			nil,
+			"",
+			"",
+			nil,
+			nil,
+		)
 		assert.Error(t, err)
 	})
 
 	t.Run("cleans up object file when meta write fails", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		require.NoError(
 			t,
 			os.MkdirAll(filepath.Join(rootPath, "my-bucket", "obj.txt.meta.json"), 0o750),
@@ -429,6 +459,8 @@ func TestPutObject(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		assert.Error(t, err)
 		assert.NoFileExists(t, filepath.Join(rootPath, "my-bucket", "obj.txt"))
@@ -436,7 +468,7 @@ func TestPutObject(t *testing.T) {
 
 	t.Run("logs warning when cleanup remove also fails", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		require.NoError(
 			t,
 			os.MkdirAll(filepath.Join(rootPath, "my-bucket", "obj.txt.meta.json"), 0o750),
@@ -454,6 +486,8 @@ func TestPutObject(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		assert.Error(t, err)
 	})
@@ -462,7 +496,7 @@ func TestPutObject(t *testing.T) {
 		"returns close error when meta file close fails after successful write",
 		func(t *testing.T) {
 			s := newTestStorage(t)
-			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.CreateBucket("my-bucket", "", false))
 
 			// Wrap only the second openFile call (the meta file); the object file must
 			// close successfully so retErr is nil when the deferred meta-file Close fires.
@@ -485,7 +519,7 @@ func TestPutObject(t *testing.T) {
 				"obj.txt",
 				strings.NewReader("data"),
 				"text/plain",
-				nil, "", "",
+				nil, "", "", nil, nil,
 			)
 			assert.Error(t, err)
 		},
@@ -495,7 +529,7 @@ func TestPutObject(t *testing.T) {
 		"returns close error when object file close fails after successful write",
 		func(t *testing.T) {
 			s := newTestStorage(t)
-			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.CreateBucket("my-bucket", "", false))
 
 			// Wrap only the first openFile call (the object file); the meta file must
 			// close successfully so writeMeta returns nil, leaving retErr==nil when the
@@ -519,7 +553,7 @@ func TestPutObject(t *testing.T) {
 				"obj.txt",
 				strings.NewReader("data"),
 				"text/plain",
-				nil, "", "",
+				nil, "", "", nil, nil,
 			)
 			assert.Error(t, err)
 		},
@@ -527,7 +561,7 @@ func TestPutObject(t *testing.T) {
 
 	t.Run("stores and returns user metadata", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 
 		userMeta := map[string]string{"original-filename": "photo.jpg", "uploader": "user1"}
 		meta, err := s.PutObject(
@@ -538,6 +572,8 @@ func TestPutObject(t *testing.T) {
 			userMeta,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 		assert.Equal(t, userMeta, meta.UserMetadata)
@@ -549,9 +585,9 @@ func TestPutObject(t *testing.T) {
 
 	t.Run("SSE fields round-trip through PutObject", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("b", ""))
+		require.NoError(t, s.CreateBucket("b", "", false))
 		meta, err := s.PutObject("b", "k", strings.NewReader("x"), "text/plain", nil,
-			"aws:kms", "my-key-id")
+			"aws:kms", "my-key-id", nil, nil)
 		require.NoError(t, err)
 		assert.Equal(t, "aws:kms", meta.SSEAlgorithm)
 		assert.Equal(t, "my-key-id", meta.SSEKMSKeyID)
@@ -561,20 +597,49 @@ func TestPutObject(t *testing.T) {
 		assert.Equal(t, "aws:kms", got.SSEAlgorithm)
 		assert.Equal(t, "my-key-id", got.SSEKMSKeyID)
 	})
+
+	t.Run("retention and legal hold headers are stored in metadata", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(
+			t,
+			s.CreateBucket("my-bucket", "", true),
+		) // objectLockEnabled → versioning on
+		retention := &ObjectRetention{
+			Mode:            "GOVERNANCE",
+			RetainUntilDate: time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC),
+		}
+		legalHold := &ObjectLegalHold{Status: "ON"}
+		meta, err := s.PutObject(
+			"my-bucket", "obj.txt", strings.NewReader("data"), "text/plain", nil, "", "",
+			retention, legalHold,
+		)
+		require.NoError(t, err)
+		require.NotNil(t, meta.Retention)
+		assert.Equal(t, "GOVERNANCE", meta.Retention.Mode)
+		require.NotNil(t, meta.LegalHold)
+		assert.Equal(t, "ON", meta.LegalHold.Status)
+
+		got, err := s.HeadObject("my-bucket", "obj.txt")
+		require.NoError(t, err)
+		require.NotNil(t, got.Retention)
+		assert.Equal(t, "GOVERNANCE", got.Retention.Mode)
+		require.NotNil(t, got.LegalHold)
+		assert.Equal(t, "ON", got.LegalHold.Status)
+	})
 }
 
 func TestCopyObject(t *testing.T) {
 	setup := func(t *testing.T) (*Storage, string) {
 		t.Helper()
 		s, rootPath := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("src-bucket", ""))
-		require.NoError(t, s.CreateBucket("dst-bucket", ""))
+		require.NoError(t, s.CreateBucket("src-bucket", "", false))
+		require.NoError(t, s.CreateBucket("dst-bucket", "", false))
 		_, err := s.PutObject(
 			"src-bucket",
 			"orig.txt",
 			strings.NewReader("hello"),
 			"text/plain",
-			nil, "", "",
+			nil, "", "", nil, nil,
 		)
 		require.NoError(t, err)
 		return s, rootPath
@@ -592,6 +657,8 @@ func TestCopyObject(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 		f, _, err := s.GetObject("src-bucket", "copy.txt")
@@ -614,6 +681,8 @@ func TestCopyObject(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 		f, _, err := s.GetObject("dst-bucket", "copy.txt")
@@ -638,6 +707,8 @@ func TestCopyObject(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 		assert.Equal(t, origMeta.ETag, meta.ETag)
@@ -647,6 +718,25 @@ func TestCopyObject(t *testing.T) {
 		data, err := io.ReadAll(f)
 		require.NoError(t, err)
 		assert.Equal(t, "hello", string(data))
+	})
+
+	t.Run("same-key copy applies retention and legal-hold from headers", func(t *testing.T) {
+		s, _ := setup(t)
+		retention := &ObjectRetention{
+			Mode:            "GOVERNANCE",
+			RetainUntilDate: time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC),
+		}
+		legalHold := &ObjectLegalHold{Status: "ON"}
+		meta, err := s.CopyObject(
+			"src-bucket", "orig.txt", "",
+			"src-bucket", "orig.txt", "",
+			nil, "", "", retention, legalHold,
+		)
+		require.NoError(t, err)
+		require.NotNil(t, meta.Retention)
+		assert.Equal(t, "GOVERNANCE", meta.Retention.Mode)
+		require.NotNil(t, meta.LegalHold)
+		assert.Equal(t, "ON", meta.LegalHold.Status)
 	})
 
 	t.Run("returns error when same-key copy meta write fails", func(t *testing.T) {
@@ -669,6 +759,8 @@ func TestCopyObject(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		assert.Error(t, err)
 	})
@@ -684,7 +776,7 @@ func TestCopyObject(t *testing.T) {
 			"dst-bucket",
 			"copy.txt",
 			"",
-			nil, "", "",
+			nil, "", "", nil, nil,
 		)
 		require.NoError(t, err)
 		assert.True(t, !dstMeta.LastModified.Before(srcMeta.LastModified))
@@ -699,7 +791,7 @@ func TestCopyObject(t *testing.T) {
 			"dst-bucket",
 			"path/to/copy.txt",
 			"",
-			nil, "", "",
+			nil, "", "", nil, nil,
 		)
 		require.NoError(t, err)
 		_, _, err = s.GetObject("dst-bucket", "path/to/copy.txt")
@@ -724,6 +816,8 @@ func TestCopyObject(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		assert.Error(t, err)
 		assert.NotErrorIs(t, err, ErrObjectNotFound)
@@ -741,6 +835,8 @@ func TestCopyObject(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		assert.ErrorIs(t, err, ErrBucketNotFound)
 	})
@@ -757,6 +853,8 @@ func TestCopyObject(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		assert.ErrorIs(t, err, ErrObjectNotFound)
 	})
@@ -773,6 +871,8 @@ func TestCopyObject(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		assert.ErrorIs(t, err, ErrBucketNotFound)
 	})
@@ -792,7 +892,7 @@ func TestCopyObject(t *testing.T) {
 			"dst-bucket",
 			"nested/copy.txt",
 			"",
-			nil, "", "",
+			nil, "", "", nil, nil,
 		)
 		assert.Error(t, err)
 	})
@@ -811,6 +911,8 @@ func TestCopyObject(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		assert.ErrorIs(t, err, ErrObjectNotFound)
 	})
@@ -831,6 +933,8 @@ func TestCopyObject(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		assert.Error(t, err)
 		assert.NotErrorIs(t, err, ErrObjectNotFound)
@@ -838,8 +942,8 @@ func TestCopyObject(t *testing.T) {
 
 	t.Run("COPY directive inherits source user metadata", func(t *testing.T) {
 		s, _ := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("src-bucket", ""))
-		require.NoError(t, s.CreateBucket("dst-bucket", ""))
+		require.NoError(t, s.CreateBucket("src-bucket", "", false))
+		require.NoError(t, s.CreateBucket("dst-bucket", "", false))
 		srcMeta := map[string]string{"x": "1"}
 		_, err := s.PutObject(
 			"src-bucket",
@@ -849,6 +953,8 @@ func TestCopyObject(t *testing.T) {
 			srcMeta,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 
@@ -859,7 +965,7 @@ func TestCopyObject(t *testing.T) {
 			"dst-bucket",
 			"copy.txt",
 			"",
-			nil, "", "",
+			nil, "", "", nil, nil,
 		)
 		require.NoError(t, err)
 		assert.Equal(t, srcMeta, dstMeta.UserMetadata)
@@ -867,10 +973,10 @@ func TestCopyObject(t *testing.T) {
 
 	t.Run("REPLACE directive uses new user metadata", func(t *testing.T) {
 		s, _ := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("src-bucket", ""))
-		require.NoError(t, s.CreateBucket("dst-bucket", ""))
+		require.NoError(t, s.CreateBucket("src-bucket", "", false))
+		require.NoError(t, s.CreateBucket("dst-bucket", "", false))
 		_, err := s.PutObject("src-bucket", "orig.txt", strings.NewReader("hello"), "text/plain",
-			map[string]string{"x": "1"}, "", "")
+			map[string]string{"x": "1"}, "", "", nil, nil)
 		require.NoError(t, err)
 
 		newMeta := map[string]string{"y": "2"}
@@ -884,6 +990,8 @@ func TestCopyObject(t *testing.T) {
 			newMeta,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 		assert.Equal(t, newMeta, dstMeta.UserMetadata)
@@ -891,7 +999,7 @@ func TestCopyObject(t *testing.T) {
 
 	t.Run("same-key COPY directive inherits user metadata", func(t *testing.T) {
 		s, _ := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("src-bucket", ""))
+		require.NoError(t, s.CreateBucket("src-bucket", "", false))
 		srcMeta := map[string]string{"x": "1"}
 		_, err := s.PutObject(
 			"src-bucket",
@@ -901,6 +1009,8 @@ func TestCopyObject(t *testing.T) {
 			srcMeta,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 
@@ -911,7 +1021,7 @@ func TestCopyObject(t *testing.T) {
 			"src-bucket",
 			"orig.txt",
 			"",
-			nil, "", "",
+			nil, "", "", nil, nil,
 		)
 		require.NoError(t, err)
 		assert.Equal(t, srcMeta, dstMeta.UserMetadata)
@@ -919,9 +1029,9 @@ func TestCopyObject(t *testing.T) {
 
 	t.Run("same-key REPLACE directive uses new user metadata", func(t *testing.T) {
 		s, _ := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("src-bucket", ""))
+		require.NoError(t, s.CreateBucket("src-bucket", "", false))
 		_, err := s.PutObject("src-bucket", "orig.txt", strings.NewReader("hello"), "text/plain",
-			map[string]string{"x": "1"}, "", "")
+			map[string]string{"x": "1"}, "", "", nil, nil)
 		require.NoError(t, err)
 
 		newMeta := map[string]string{"y": "2"}
@@ -935,6 +1045,8 @@ func TestCopyObject(t *testing.T) {
 			newMeta,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 		assert.Equal(t, newMeta, dstMeta.UserMetadata)
@@ -942,14 +1054,14 @@ func TestCopyObject(t *testing.T) {
 
 	t.Run("REPLACE directive replaces content type", func(t *testing.T) {
 		s, _ := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("src-bucket", ""))
-		require.NoError(t, s.CreateBucket("dst-bucket", ""))
+		require.NoError(t, s.CreateBucket("src-bucket", "", false))
+		require.NoError(t, s.CreateBucket("dst-bucket", "", false))
 		_, err := s.PutObject(
 			"src-bucket",
 			"orig.txt",
 			strings.NewReader("hello"),
 			"text/plain",
-			nil, "", "",
+			nil, "", "", nil, nil,
 		)
 		require.NoError(t, err)
 
@@ -960,7 +1072,7 @@ func TestCopyObject(t *testing.T) {
 			"dst-bucket",
 			"copy.txt",
 			"application/json",
-			nil, "", "",
+			nil, "", "", nil, nil,
 		)
 		require.NoError(t, err)
 		assert.Equal(t, "application/json", dstMeta.ContentType)
@@ -968,14 +1080,14 @@ func TestCopyObject(t *testing.T) {
 
 	t.Run("COPY directive inherits content type", func(t *testing.T) {
 		s, _ := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("src-bucket", ""))
-		require.NoError(t, s.CreateBucket("dst-bucket", ""))
+		require.NoError(t, s.CreateBucket("src-bucket", "", false))
+		require.NoError(t, s.CreateBucket("dst-bucket", "", false))
 		_, err := s.PutObject(
 			"src-bucket",
 			"orig.txt",
 			strings.NewReader("hello"),
 			"text/plain",
-			nil, "", "",
+			nil, "", "", nil, nil,
 		)
 		require.NoError(t, err)
 
@@ -986,23 +1098,50 @@ func TestCopyObject(t *testing.T) {
 			"dst-bucket",
 			"copy.txt",
 			"",
-			nil, "", "",
+			nil, "", "", nil, nil,
 		)
 		require.NoError(t, err)
 		assert.Equal(t, "text/plain", dstMeta.ContentType)
+	})
+
+	t.Run("retention and legal hold are applied to the destination object", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("src-bucket", "", false))
+		require.NoError(
+			t,
+			s.CreateBucket("dst-bucket", "", true),
+		) // objectLockEnabled → versioning on
+		_, err := s.PutObject("src-bucket", "orig.txt", strings.NewReader("hello"), "text/plain",
+			nil, "", "", nil, nil)
+		require.NoError(t, err)
+
+		retention := &ObjectRetention{
+			Mode:            "COMPLIANCE",
+			RetainUntilDate: time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC),
+		}
+		legalHold := &ObjectLegalHold{Status: "ON"}
+		dstMeta, err := s.CopyObject(
+			"src-bucket", "orig.txt", "", "dst-bucket", "copy.txt", "", nil, "", "",
+			retention, legalHold,
+		)
+		require.NoError(t, err)
+		require.NotNil(t, dstMeta.Retention)
+		assert.Equal(t, "COMPLIANCE", dstMeta.Retention.Mode)
+		require.NotNil(t, dstMeta.LegalHold)
+		assert.Equal(t, "ON", dstMeta.LegalHold.Status)
 	})
 }
 
 func TestGetObject(t *testing.T) {
 	t.Run("returns file and metadata for existing object", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		meta, err := s.PutObject(
 			"my-bucket",
 			"hello.txt",
 			strings.NewReader("hello world"),
 			"text/plain",
-			nil, "", "",
+			nil, "", "", nil, nil,
 		)
 		require.NoError(t, err)
 
@@ -1014,7 +1153,7 @@ func TestGetObject(t *testing.T) {
 
 	t.Run("returns ErrObjectNotFound when object does not exist", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 
 		_, _, err := s.GetObject("my-bucket", "missing.txt")
 		assert.ErrorIs(t, err, ErrObjectNotFound)
@@ -1028,7 +1167,7 @@ func TestGetObject(t *testing.T) {
 
 	t.Run("returns error when metadata is corrupt", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		require.NoError(t, os.WriteFile(
 			filepath.Join(rootPath, "my-bucket", "obj.txt.meta.json"),
 			[]byte("not-json"),
@@ -1042,7 +1181,7 @@ func TestGetObject(t *testing.T) {
 
 	t.Run("returns error when data file is unreadable", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		_, err := s.PutObject(
 			"my-bucket",
 			"obj.txt",
@@ -1051,6 +1190,8 @@ func TestGetObject(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 
@@ -1065,7 +1206,7 @@ func TestGetObject(t *testing.T) {
 
 	t.Run("returns ErrObjectNotFound when meta exists but data file is gone", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 
 		meta := ObjectMetadata{ContentType: "text/plain", ETag: `"abc"`, Size: 3}
 		data, err := json.Marshal(meta)
@@ -1084,7 +1225,7 @@ func TestGetObject(t *testing.T) {
 func TestDeleteObject(t *testing.T) {
 	t.Run("deletes object and metadata successfully", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		_, err := s.PutObject(
 			"my-bucket",
 			"obj.txt",
@@ -1093,6 +1234,8 @@ func TestDeleteObject(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 
@@ -1104,7 +1247,7 @@ func TestDeleteObject(t *testing.T) {
 
 	t.Run("returns ErrObjectNotFound when object does not exist", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		assert.ErrorIs(t, s.DeleteObject("my-bucket", "missing.txt", false), ErrObjectNotFound)
 	})
 
@@ -1115,7 +1258,7 @@ func TestDeleteObject(t *testing.T) {
 
 	t.Run("returns error when object removal fails", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		require.NoError(
 			t,
 			os.MkdirAll(filepath.Join(rootPath, "my-bucket", "dir-obj", "child"), 0o750),
@@ -1128,7 +1271,7 @@ func TestDeleteObject(t *testing.T) {
 
 	t.Run("logs warning when metadata removal fails but still succeeds", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		_, err := s.PutObject(
 			"my-bucket",
 			"obj.txt",
@@ -1137,6 +1280,8 @@ func TestDeleteObject(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 
@@ -1151,7 +1296,7 @@ func TestDeleteObject(t *testing.T) {
 
 	t.Run("logs warning when tags removal fails but still succeeds", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		_, err := s.PutObject(
 			"my-bucket",
 			"obj.txt",
@@ -1160,6 +1305,8 @@ func TestDeleteObject(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 		require.NoError(
@@ -1178,7 +1325,7 @@ func TestDeleteObject(t *testing.T) {
 
 	t.Run("deletes tags file when object is deleted", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		_, err := s.PutObject(
 			"my-bucket",
 			"obj.txt",
@@ -1187,6 +1334,8 @@ func TestDeleteObject(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 		require.NoError(
@@ -1202,7 +1351,7 @@ func TestDeleteObject(t *testing.T) {
 
 	t.Run("DeleteBucket succeeds after deleting tagged object", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		_, err := s.PutObject(
 			"my-bucket",
 			"obj.txt",
@@ -1211,6 +1360,8 @@ func TestDeleteObject(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 		require.NoError(
@@ -1226,7 +1377,7 @@ func TestDeleteObject(t *testing.T) {
 func TestHeadObject(t *testing.T) {
 	t.Run("returns metadata for existing object", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		_, err := s.PutObject(
 			"my-bucket",
 			"obj.txt",
@@ -1235,6 +1386,8 @@ func TestHeadObject(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 
@@ -1245,7 +1398,7 @@ func TestHeadObject(t *testing.T) {
 
 	t.Run("returns ErrObjectNotFound when object does not exist", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		_, err := s.HeadObject("my-bucket", "missing.txt")
 		assert.ErrorIs(t, err, ErrObjectNotFound)
 	})
@@ -1258,7 +1411,7 @@ func TestHeadObject(t *testing.T) {
 
 	t.Run("returns error when metadata is corrupt", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		require.NoError(t, os.WriteFile(
 			filepath.Join(rootPath, "my-bucket", "obj.txt.meta.json"),
 			[]byte("not-json"),
@@ -1272,7 +1425,7 @@ func TestHeadObject(t *testing.T) {
 
 	t.Run("returns error when metadata read fails", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		_, err := s.PutObject(
 			"my-bucket",
 			"obj.txt",
@@ -1281,6 +1434,8 @@ func TestHeadObject(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 
@@ -1296,7 +1451,7 @@ func TestHeadObject(t *testing.T) {
 func TestListObjects(t *testing.T) {
 	t.Run("lists all objects in lexicographic order", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		_, err := s.PutObject(
 			"my-bucket",
 			"c.txt",
@@ -1305,6 +1460,8 @@ func TestListObjects(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 		_, err = s.PutObject(
@@ -1315,6 +1472,8 @@ func TestListObjects(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 		_, err = s.PutObject(
@@ -1325,6 +1484,8 @@ func TestListObjects(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 
@@ -1344,7 +1505,7 @@ func TestListObjects(t *testing.T) {
 
 	t.Run("skips orphan files without metadata", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		_, err := s.PutObject(
 			"my-bucket",
 			"real.txt",
@@ -1353,6 +1514,8 @@ func TestListObjects(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 		require.NoError(t, os.WriteFile(
@@ -1368,13 +1531,13 @@ func TestListObjects(t *testing.T) {
 
 	t.Run("returns error when subdirectory listing fails", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		_, err := s.PutObject(
 			"my-bucket",
 			"subdir/obj.txt",
 			strings.NewReader("data"),
 			"text/plain",
-			nil, "", "",
+			nil, "", "", nil, nil,
 		)
 		require.NoError(t, err)
 
@@ -1388,13 +1551,13 @@ func TestListObjects(t *testing.T) {
 
 	t.Run("includes .json objects in listing", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		_, err := s.PutObject(
 			"my-bucket",
 			"data.json",
 			strings.NewReader("{}"),
 			"application/json",
-			nil, "", "",
+			nil, "", "", nil, nil,
 		)
 		require.NoError(t, err)
 
@@ -1406,7 +1569,7 @@ func TestListObjects(t *testing.T) {
 
 	t.Run("does not list tags sidecar files as objects", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		_, err := s.PutObject(
 			"my-bucket",
 			"obj.txt",
@@ -1415,6 +1578,8 @@ func TestListObjects(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 		require.NoError(
@@ -1433,13 +1598,21 @@ func TestMultipartUpload(t *testing.T) {
 	setup := func(t *testing.T) (*Storage, string) {
 		t.Helper()
 		s, rootPath := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		return s, rootPath
 	}
 
 	t.Run("full lifecycle: create, upload parts, complete", func(t *testing.T) {
 		s, _ := setup(t)
-		uploadID, err := s.CreateMultipartUpload("my-bucket", "big.txt", "text/plain", "", "")
+		uploadID, err := s.CreateMultipartUpload(
+			"my-bucket",
+			"big.txt",
+			"text/plain",
+			"",
+			"",
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
 		assert.NotEmpty(t, uploadID)
 
@@ -1468,7 +1641,15 @@ func TestMultipartUpload(t *testing.T) {
 
 	t.Run("abort cleans up temp files", func(t *testing.T) {
 		s, rootPath := setup(t)
-		uploadID, err := s.CreateMultipartUpload("my-bucket", "big.txt", "text/plain", "", "")
+		uploadID, err := s.CreateMultipartUpload(
+			"my-bucket",
+			"big.txt",
+			"text/plain",
+			"",
+			"",
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
 		_, err = s.UploadPart(uploadID, 1, strings.NewReader("data"))
 		require.NoError(t, err)
@@ -1481,7 +1662,15 @@ func TestMultipartUpload(t *testing.T) {
 
 	t.Run("complete removes temp files", func(t *testing.T) {
 		s, rootPath := setup(t)
-		uploadID, err := s.CreateMultipartUpload("my-bucket", "big.txt", "text/plain", "", "")
+		uploadID, err := s.CreateMultipartUpload(
+			"my-bucket",
+			"big.txt",
+			"text/plain",
+			"",
+			"",
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
 		etag, err := s.UploadPart(uploadID, 1, strings.NewReader("data"))
 		require.NoError(t, err)
@@ -1494,7 +1683,7 @@ func TestMultipartUpload(t *testing.T) {
 
 	t.Run("create returns ErrBucketNotFound for missing bucket", func(t *testing.T) {
 		s, _ := setup(t)
-		_, err := s.CreateMultipartUpload("no-bucket", "key", "text/plain", "", "")
+		_, err := s.CreateMultipartUpload("no-bucket", "key", "text/plain", "", "", nil, nil)
 		assert.ErrorIs(t, err, ErrBucketNotFound)
 	})
 
@@ -1515,7 +1704,15 @@ func TestMultipartUpload(t *testing.T) {
 
 	t.Run("complete returns ErrInvalidPart for empty parts list", func(t *testing.T) {
 		s, _ := setup(t)
-		uploadID, err := s.CreateMultipartUpload("my-bucket", "big.txt", "text/plain", "", "")
+		uploadID, err := s.CreateMultipartUpload(
+			"my-bucket",
+			"big.txt",
+			"text/plain",
+			"",
+			"",
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
 		_, err = s.CompleteMultipartUpload(uploadID, []CompletePart{})
 		assert.ErrorIs(t, err, ErrInvalidPart)
@@ -1523,7 +1720,15 @@ func TestMultipartUpload(t *testing.T) {
 
 	t.Run("complete returns ErrInvalidPartOrder for non-ascending parts", func(t *testing.T) {
 		s, _ := setup(t)
-		uploadID, err := s.CreateMultipartUpload("my-bucket", "big.txt", "text/plain", "", "")
+		uploadID, err := s.CreateMultipartUpload(
+			"my-bucket",
+			"big.txt",
+			"text/plain",
+			"",
+			"",
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
 		etag1, err := s.UploadPart(uploadID, 1, strings.NewReader("a"))
 		require.NoError(t, err)
@@ -1538,7 +1743,15 @@ func TestMultipartUpload(t *testing.T) {
 
 	t.Run("complete returns ErrInvalidPart for wrong ETag", func(t *testing.T) {
 		s, _ := setup(t)
-		uploadID, err := s.CreateMultipartUpload("my-bucket", "big.txt", "text/plain", "", "")
+		uploadID, err := s.CreateMultipartUpload(
+			"my-bucket",
+			"big.txt",
+			"text/plain",
+			"",
+			"",
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
 		_, err = s.UploadPart(uploadID, 1, strings.NewReader("data"))
 		require.NoError(t, err)
@@ -1550,7 +1763,15 @@ func TestMultipartUpload(t *testing.T) {
 
 	t.Run("complete returns ErrInvalidPart for missing part on disk", func(t *testing.T) {
 		s, _ := setup(t)
-		uploadID, err := s.CreateMultipartUpload("my-bucket", "big.txt", "text/plain", "", "")
+		uploadID, err := s.CreateMultipartUpload(
+			"my-bucket",
+			"big.txt",
+			"text/plain",
+			"",
+			"",
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
 		_, err = s.CompleteMultipartUpload(uploadID, []CompletePart{
 			{PartNumber: 1, ETag: `"abc"`},
@@ -1566,7 +1787,7 @@ func TestMultipartUpload(t *testing.T) {
 
 	t.Run("ListBuckets does not expose .mpu directory", func(t *testing.T) {
 		s, _ := setup(t)
-		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "")
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "", nil, nil)
 		require.NoError(t, err)
 		_, err = s.UploadPart(uploadID, 1, strings.NewReader("data"))
 		require.NoError(t, err)
@@ -1580,7 +1801,7 @@ func TestMultipartUpload(t *testing.T) {
 
 	t.Run("ListObjects does not expose part files", func(t *testing.T) {
 		s, _ := setup(t)
-		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "")
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "", nil, nil)
 		require.NoError(t, err)
 		_, err = s.UploadPart(uploadID, 1, strings.NewReader("data"))
 		require.NoError(t, err)
@@ -1594,7 +1815,15 @@ func TestMultipartUpload(t *testing.T) {
 		"complete returns ErrBucketNotFound when bucket deleted before completion",
 		func(t *testing.T) {
 			s, _ := setup(t)
-			uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "")
+			uploadID, err := s.CreateMultipartUpload(
+				"my-bucket",
+				"key",
+				"text/plain",
+				"",
+				"",
+				nil,
+				nil,
+			)
 			require.NoError(t, err)
 			etag, err := s.UploadPart(uploadID, 1, strings.NewReader("data"))
 			require.NoError(t, err)
@@ -1618,6 +1847,8 @@ func TestMultipartUpload(t *testing.T) {
 			"text/plain",
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 		etag, err := s.UploadPart(uploadID, 1, strings.NewReader("data"))
@@ -1637,7 +1868,7 @@ func TestMultipartUpload(t *testing.T) {
 			}
 			return origOpenFile(name, flag, perm)
 		}
-		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "")
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "", nil, nil)
 		require.NoError(t, err)
 		_, err = s.UploadPart(uploadID, 1, strings.NewReader("data"))
 		assert.Error(t, err)
@@ -1652,7 +1883,7 @@ func TestMultipartUpload(t *testing.T) {
 			}
 			return origOpenFile(name, flag, perm)
 		}
-		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "")
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "", nil, nil)
 		require.NoError(t, err)
 		_, err = s.UploadPart(uploadID, 1, strings.NewReader("data"))
 		assert.Error(t, err)
@@ -1662,7 +1893,7 @@ func TestMultipartUpload(t *testing.T) {
 		s, rootPath := setup(t)
 		// Place a regular file at .mpu to block MkdirAll.
 		require.NoError(t, os.WriteFile(filepath.Join(rootPath, mpuDir), []byte{}, 0o600))
-		_, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "")
+		_, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "", nil, nil)
 		assert.Error(t, err)
 	})
 
@@ -1677,7 +1908,7 @@ func TestMultipartUpload(t *testing.T) {
 			}
 			return origOpenFile(name, flag, perm)
 		}
-		_, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "")
+		_, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "", nil, nil)
 		assert.Error(t, err)
 		assert.NoDirExists(t, capturedUploadDir)
 	})
@@ -1697,7 +1928,7 @@ func TestMultipartUpload(t *testing.T) {
 			}
 			return origOpenFile(name, flag, perm)
 		}
-		_, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "")
+		_, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "", nil, nil)
 		assert.Error(t, err)
 		assert.NoDirExists(t, capturedUploadDir)
 	})
@@ -1717,14 +1948,14 @@ func TestMultipartUpload(t *testing.T) {
 			}
 			return origOpenFile(name, flag, perm)
 		}
-		_, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "")
+		_, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "", nil, nil)
 		assert.Error(t, err)
 		assert.NoDirExists(t, capturedUploadDir)
 	})
 
 	t.Run("upload part returns error when io.Copy fails", func(t *testing.T) {
 		s, _ := setup(t)
-		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "")
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "", nil, nil)
 		require.NoError(t, err)
 		_, err = s.UploadPart(uploadID, 1, errReader{})
 		assert.Error(t, err)
@@ -1743,7 +1974,7 @@ func TestMultipartUpload(t *testing.T) {
 			}
 			return wc, nil
 		}
-		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "")
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "", nil, nil)
 		require.NoError(t, err)
 		// The close failure is logged as a warning; UploadPart still returns the ETag.
 		etag, err := s.UploadPart(uploadID, 1, strings.NewReader("data"))
@@ -1764,7 +1995,7 @@ func TestMultipartUpload(t *testing.T) {
 			}
 			return wc, nil
 		}
-		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "")
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "", nil, nil)
 		require.NoError(t, err)
 		_, err = s.UploadPart(uploadID, 1, strings.NewReader("data"))
 		assert.Error(t, err)
@@ -1772,7 +2003,7 @@ func TestMultipartUpload(t *testing.T) {
 
 	t.Run("complete returns error when readUploadMeta readAll fails", func(t *testing.T) {
 		s, _ := setup(t)
-		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "")
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "", nil, nil)
 		require.NoError(t, err)
 		s.readAll = func(_ io.Reader) ([]byte, error) { return nil, errors.New("read error") }
 		_, err = s.CompleteMultipartUpload(uploadID, []CompletePart{{PartNumber: 1, ETag: `"abc"`}})
@@ -1782,7 +2013,7 @@ func TestMultipartUpload(t *testing.T) {
 
 	t.Run("complete returns error when part meta is corrupt JSON", func(t *testing.T) {
 		s, rootPath := setup(t)
-		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "")
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "", nil, nil)
 		require.NoError(t, err)
 		_, err = s.UploadPart(uploadID, 1, strings.NewReader("data"))
 		require.NoError(t, err)
@@ -1798,7 +2029,7 @@ func TestMultipartUpload(t *testing.T) {
 
 	t.Run("complete returns error when part file is unreadable", func(t *testing.T) {
 		s, rootPath := setup(t)
-		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "")
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "", nil, nil)
 		require.NoError(t, err)
 		etag, err := s.UploadPart(uploadID, 1, strings.NewReader("data"))
 		require.NoError(t, err)
@@ -1811,7 +2042,7 @@ func TestMultipartUpload(t *testing.T) {
 
 	t.Run("complete returns error when meta write fails", func(t *testing.T) {
 		s, _ := setup(t)
-		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "")
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "", nil, nil)
 		require.NoError(t, err)
 		etag, err := s.UploadPart(uploadID, 1, strings.NewReader("data"))
 		require.NoError(t, err)
@@ -1828,7 +2059,7 @@ func TestMultipartUpload(t *testing.T) {
 
 	t.Run("abort returns error for non-ErrNotExist stat failure", func(t *testing.T) {
 		s, rootPath := setup(t)
-		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "")
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "", nil, nil)
 		require.NoError(t, err)
 		// Replace upload dir with a file to make Stat of upload.json fail with "not a directory".
 		uploadDir := filepath.Join(rootPath, mpuDir, uploadID)
@@ -1841,7 +2072,7 @@ func TestMultipartUpload(t *testing.T) {
 
 	t.Run("removeUploadDir returns error when entry removal fails", func(t *testing.T) {
 		s, rootPath := setup(t)
-		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "")
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "", nil, nil)
 		require.NoError(t, err)
 		// Create a subdirectory inside the upload dir; Remove on a non-empty dir fails.
 		subDir := filepath.Join(rootPath, mpuDir, uploadID, "subdir")
@@ -1855,7 +2086,15 @@ func TestMultipartUpload(t *testing.T) {
 		"readUploadMeta returns error when upload.json contains invalid JSON",
 		func(t *testing.T) {
 			s, rootPath := setup(t)
-			uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "")
+			uploadID, err := s.CreateMultipartUpload(
+				"my-bucket",
+				"key",
+				"text/plain",
+				"",
+				"",
+				nil,
+				nil,
+			)
 			require.NoError(t, err)
 			require.NoError(t, os.WriteFile(
 				filepath.Join(rootPath, mpuDir, uploadID, "upload.json"),
@@ -1873,7 +2112,7 @@ func TestMultipartUpload(t *testing.T) {
 
 	t.Run("readPartMeta returns error when readAll fails", func(t *testing.T) {
 		s, _ := setup(t)
-		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "")
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "", nil, nil)
 		require.NoError(t, err)
 		_, err = s.UploadPart(uploadID, 1, strings.NewReader("data"))
 		require.NoError(t, err)
@@ -1893,7 +2132,7 @@ func TestMultipartUpload(t *testing.T) {
 
 	t.Run("removeUploadDir returns error when readDir fails", func(t *testing.T) {
 		s, _ := setup(t)
-		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "")
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "", nil, nil)
 		require.NoError(t, err)
 		origListDir := s.listDirFn
 		s.listDirFn = func(name string) ([]os.DirEntry, error) {
@@ -1926,13 +2165,13 @@ func TestMultipartUpload(t *testing.T) {
 		s.randRead = func(_ []byte) (int, error) {
 			return 0, errors.New("entropy exhausted")
 		}
-		_, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "")
+		_, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "", nil, nil)
 		assert.Error(t, err)
 	})
 
 	t.Run("upload part returns error on non-ErrNotExist stat failure", func(t *testing.T) {
 		s, rootPath := setup(t)
-		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "")
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "", nil, nil)
 		require.NoError(t, err)
 		// Replace upload dir with a file so Stat of upload.json fails with ENOTDIR.
 		uploadDir := filepath.Join(rootPath, mpuDir, uploadID)
@@ -1945,7 +2184,15 @@ func TestMultipartUpload(t *testing.T) {
 
 	t.Run("complete returns error when MkdirAll fails for nested key", func(t *testing.T) {
 		s, rootPath := setup(t)
-		uploadID, err := s.CreateMultipartUpload("my-bucket", "a/b/big.txt", "text/plain", "", "")
+		uploadID, err := s.CreateMultipartUpload(
+			"my-bucket",
+			"a/b/big.txt",
+			"text/plain",
+			"",
+			"",
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
 		etag, err := s.UploadPart(uploadID, 1, strings.NewReader("data"))
 		require.NoError(t, err)
@@ -1957,7 +2204,15 @@ func TestMultipartUpload(t *testing.T) {
 
 	t.Run("complete returns error when writeObject fails", func(t *testing.T) {
 		s, _ := setup(t)
-		uploadID, err := s.CreateMultipartUpload("my-bucket", "key.txt", "text/plain", "", "")
+		uploadID, err := s.CreateMultipartUpload(
+			"my-bucket",
+			"key.txt",
+			"text/plain",
+			"",
+			"",
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
 		etag, err := s.UploadPart(uploadID, 1, strings.NewReader("data"))
 		require.NoError(t, err)
@@ -1975,7 +2230,7 @@ func TestMultipartUpload(t *testing.T) {
 
 	t.Run("complete logs warning when cleanup fails", func(t *testing.T) {
 		s, _ := setup(t)
-		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "")
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "", nil, nil)
 		require.NoError(t, err)
 		etag, err := s.UploadPart(uploadID, 1, strings.NewReader("data"))
 		require.NoError(t, err)
@@ -1995,7 +2250,15 @@ func TestMultipartUpload(t *testing.T) {
 		"complete closes already-opened files when a later part file cannot be opened",
 		func(t *testing.T) {
 			s, rootPath := setup(t)
-			uploadID, err := s.CreateMultipartUpload("my-bucket", "big.txt", "text/plain", "", "")
+			uploadID, err := s.CreateMultipartUpload(
+				"my-bucket",
+				"big.txt",
+				"text/plain",
+				"",
+				"",
+				nil,
+				nil,
+			)
 			require.NoError(t, err)
 			etag1, err := s.UploadPart(uploadID, 1, strings.NewReader("hello"))
 			require.NoError(t, err)
@@ -2034,7 +2297,7 @@ func TestMultipartUpload(t *testing.T) {
 				}
 				return origOpenFile(name, flag, perm)
 			}
-			_, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "")
+			_, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "", nil, nil)
 			assert.Error(t, err)
 		},
 	)
@@ -2081,7 +2344,7 @@ func TestMultipartUpload(t *testing.T) {
 
 	t.Run("ListMultipartUploads skips uploads with unreadable metadata", func(t *testing.T) {
 		s, _ := setup(t)
-		_, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "")
+		_, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "", nil, nil)
 		require.NoError(t, err)
 		s.readAll = func(r io.Reader) ([]byte, error) {
 			return nil, errors.New("read error")
@@ -2093,10 +2356,18 @@ func TestMultipartUpload(t *testing.T) {
 
 	t.Run("ListMultipartUploads filters uploads by bucket", func(t *testing.T) {
 		s, _ := setup(t)
-		require.NoError(t, s.CreateBucket("other-bucket", ""))
-		uploadID1, err := s.CreateMultipartUpload("my-bucket", "key1", "text/plain", "", "")
+		require.NoError(t, s.CreateBucket("other-bucket", "", false))
+		uploadID1, err := s.CreateMultipartUpload(
+			"my-bucket",
+			"key1",
+			"text/plain",
+			"",
+			"",
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
-		_, err = s.CreateMultipartUpload("other-bucket", "key2", "text/plain", "", "")
+		_, err = s.CreateMultipartUpload("other-bucket", "key2", "text/plain", "", "", nil, nil)
 		require.NoError(t, err)
 		uploads, err := s.ListMultipartUploads("my-bucket")
 		require.NoError(t, err)
@@ -2114,7 +2385,15 @@ func TestMultipartUpload(t *testing.T) {
 		"ListParts returns error when readUploadMeta fails with non-ErrNotExist",
 		func(t *testing.T) {
 			s, _ := setup(t)
-			uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "")
+			uploadID, err := s.CreateMultipartUpload(
+				"my-bucket",
+				"key",
+				"text/plain",
+				"",
+				"",
+				nil,
+				nil,
+			)
 			require.NoError(t, err)
 			s.readAll = func(_ io.Reader) ([]byte, error) {
 				return nil, errors.New("read error")
@@ -2127,7 +2406,7 @@ func TestMultipartUpload(t *testing.T) {
 
 	t.Run("ListParts returns error when readDir fails", func(t *testing.T) {
 		s, _ := setup(t)
-		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "")
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "", nil, nil)
 		require.NoError(t, err)
 		origListDir := s.listDirFn
 		s.listDirFn = func(name string) ([]os.DirEntry, error) {
@@ -2142,7 +2421,7 @@ func TestMultipartUpload(t *testing.T) {
 
 	t.Run("ListParts skips directory and non-meta entries", func(t *testing.T) {
 		s, rootPath := setup(t)
-		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "")
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "", nil, nil)
 		require.NoError(t, err)
 		uploadDir := filepath.Join(rootPath, mpuDir, uploadID)
 		// Add a regular file that doesn't match the part meta pattern.
@@ -2161,7 +2440,7 @@ func TestMultipartUpload(t *testing.T) {
 
 	t.Run("ListParts skips parts with unreadable metadata", func(t *testing.T) {
 		s, _ := setup(t)
-		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "")
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "", nil, nil)
 		require.NoError(t, err)
 		_, err = s.UploadPart(uploadID, 1, strings.NewReader("data"))
 		require.NoError(t, err)
@@ -2185,7 +2464,15 @@ func TestMultipartUpload(t *testing.T) {
 			s, _ := setup(t)
 			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
 
-			uploadID, err := s.CreateMultipartUpload("my-bucket", "big.txt", "text/plain", "", "")
+			uploadID, err := s.CreateMultipartUpload(
+				"my-bucket",
+				"big.txt",
+				"text/plain",
+				"",
+				"",
+				nil,
+				nil,
+			)
 			require.NoError(t, err)
 			etag1, err := s.UploadPart(uploadID, 1, strings.NewReader("hello "))
 			require.NoError(t, err)
@@ -2207,7 +2494,7 @@ func TestObjectTagging(t *testing.T) {
 	setup := func(t *testing.T) (*Storage, string) {
 		t.Helper()
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("bucket", "us-east-1"))
+		require.NoError(t, s.CreateBucket("bucket", "us-east-1", false))
 		_, err := s.PutObject(
 			"bucket",
 			"key.txt",
@@ -2216,6 +2503,8 @@ func TestObjectTagging(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 		return s, "bucket"
@@ -2360,7 +2649,7 @@ func TestBucketTagging(t *testing.T) {
 	setup := func(t *testing.T) (*Storage, string) {
 		t.Helper()
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("bucket", "us-east-1"))
+		require.NoError(t, s.CreateBucket("bucket", "us-east-1", false))
 		return s, "bucket"
 	}
 
@@ -2501,7 +2790,7 @@ func TestBucketCORS(t *testing.T) {
 		t.Helper()
 		s := newTestStorage(t)
 		bucket := "test-bucket"
-		require.NoError(t, s.CreateBucket(bucket, "us-east-1"))
+		require.NoError(t, s.CreateBucket(bucket, "us-east-1", false))
 		return s, bucket
 	}
 
@@ -2655,7 +2944,7 @@ func TestBucketVersioning(t *testing.T) {
 		t.Helper()
 		s := newTestStorage(t)
 		bucket := "test-bucket"
-		require.NoError(t, s.CreateBucket(bucket, "us-east-1"))
+		require.NoError(t, s.CreateBucket(bucket, "us-east-1", false))
 		return s, bucket
 	}
 
@@ -2764,7 +3053,7 @@ func TestBucketPolicy(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = s.Close() })
 		bucket := "test-bucket"
-		require.NoError(t, s.CreateBucket(bucket, "us-east-1"))
+		require.NoError(t, s.CreateBucket(bucket, "us-east-1", false))
 		return s, bucket
 	}
 
@@ -2910,7 +3199,7 @@ func TestBucketConfigStorage(t *testing.T) {
 		s, err := NewStorage(t.TempDir())
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = s.Close() })
-		require.NoError(t, s.CreateBucket("b", ""))
+		require.NoError(t, s.CreateBucket("b", "", false))
 		return s, "b"
 	}
 
@@ -3034,11 +3323,6 @@ func TestBucketConfigStorage(t *testing.T) {
 			func(s *Storage, b, x string) error { return s.PutBucketRequestPayment(b, x) },
 			func(s *Storage, b string) (string, error) { return s.GetBucketRequestPayment(b) },
 		},
-		{
-			"ObjectLock",
-			func(s *Storage, b, x string) error { return s.PutBucketObjectLock(b, x) },
-			func(s *Storage, b string) (string, error) { return s.GetBucketObjectLock(b) },
-		},
 	}
 
 	for _, c := range getOnlyConfigs {
@@ -3071,6 +3355,68 @@ func TestBucketConfigStorage(t *testing.T) {
 			})
 		})
 	}
+
+	// ObjectLock requires versioning to be enabled — tested separately.
+	t.Run("ObjectLock", func(t *testing.T) {
+		const lockXML = `<ObjectLockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ObjectLockEnabled>Enabled</ObjectLockEnabled></ObjectLockConfiguration>`
+
+		t.Run("Put/Get roundtrip with versioning enabled", func(t *testing.T) {
+			s, bucket := setup(t)
+			require.NoError(t, s.PutBucketVersioning(bucket, "Enabled"))
+			require.NoError(t, s.PutBucketObjectLock(bucket, lockXML))
+			got, err := s.GetBucketObjectLock(bucket)
+			require.NoError(t, err)
+			assert.Equal(t, lockXML, got)
+		})
+
+		t.Run("Put returns ErrInvalidBucketState when versioning not enabled", func(t *testing.T) {
+			s, bucket := setup(t)
+			assert.ErrorIs(t, s.PutBucketObjectLock(bucket, lockXML), ErrInvalidBucketState)
+		})
+
+		t.Run("Put returns ErrInvalidBucketState when versioning suspended", func(t *testing.T) {
+			s, bucket := setup(t)
+			require.NoError(t, s.PutBucketVersioning(bucket, "Suspended"))
+			assert.ErrorIs(t, s.PutBucketObjectLock(bucket, lockXML), ErrInvalidBucketState)
+		})
+
+		t.Run("Get returns empty string when not set", func(t *testing.T) {
+			s, bucket := setup(t)
+			got, err := s.GetBucketObjectLock(bucket)
+			require.NoError(t, err)
+			assert.Empty(t, got)
+		})
+
+		t.Run("Put returns ErrBucketNotFound for missing bucket", func(t *testing.T) {
+			s, _ := setup(t)
+			assert.ErrorIs(t, s.PutBucketObjectLock("no-bucket", lockXML), ErrBucketNotFound)
+		})
+
+		t.Run("Get returns ErrBucketNotFound for missing bucket", func(t *testing.T) {
+			s, _ := setup(t)
+			_, err := s.GetBucketObjectLock("no-bucket")
+			assert.ErrorIs(t, err, ErrBucketNotFound)
+		})
+
+		t.Run("Put returns ErrInvalidBucketState when bucket.json is missing", func(t *testing.T) {
+			// os.ErrNotExist from readBucketMeta → falls back to bucketMeta{} →
+			// VersioningStatus == "" → ErrInvalidBucketState.
+			s, bucket := setup(t)
+			require.NoError(t, s.root.Remove(bucket+".bucket.json"))
+			assert.ErrorIs(t, s.PutBucketObjectLock(bucket, lockXML), ErrInvalidBucketState)
+		})
+
+		t.Run(
+			"Put returns error when meta read fails with non-ErrNotExist error",
+			func(t *testing.T) {
+				s, bucket := setup(t)
+				s.readAll = func(r io.Reader) ([]byte, error) {
+					return nil, errors.New("read error")
+				}
+				assert.Error(t, s.PutBucketObjectLock(bucket, lockXML))
+			},
+		)
+	})
 
 	// Error path tests via injectable helpers (use PublicAccessBlock as representative).
 	t.Run("put error paths", func(t *testing.T) {
@@ -3128,7 +3474,7 @@ func TestVersioning(t *testing.T) {
 	setup := func(t *testing.T) (*Storage, string) {
 		t.Helper()
 		s, _ := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("versioned-bucket", "us-east-1"))
+		require.NoError(t, s.CreateBucket("versioned-bucket", "us-east-1", false))
 		require.NoError(t, s.PutBucketVersioning("versioned-bucket", "Enabled"))
 		return s, "versioned-bucket"
 	}
@@ -3143,6 +3489,8 @@ func TestVersioning(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 		assert.NotEmpty(t, meta.VersionID)
@@ -3158,6 +3506,8 @@ func TestVersioning(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 		m2, err := s.PutObject(
@@ -3168,6 +3518,8 @@ func TestVersioning(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 		assert.NotEqual(t, m1.VersionID, m2.VersionID)
@@ -3175,9 +3527,29 @@ func TestVersioning(t *testing.T) {
 
 	t.Run("GetObject without versionId returns latest version", func(t *testing.T) {
 		s, bucket := setup(t)
-		_, err := s.PutObject(bucket, "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "")
+		_, err := s.PutObject(
+			bucket,
+			"obj.txt",
+			strings.NewReader("v1"),
+			"text/plain",
+			nil,
+			"",
+			"",
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
-		_, err = s.PutObject(bucket, "obj.txt", strings.NewReader("v2"), "text/plain", nil, "", "")
+		_, err = s.PutObject(
+			bucket,
+			"obj.txt",
+			strings.NewReader("v2"),
+			"text/plain",
+			nil,
+			"",
+			"",
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
 
 		f, _, err := s.GetObject(bucket, "obj.txt")
@@ -3197,9 +3569,21 @@ func TestVersioning(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
-		_, err = s.PutObject(bucket, "obj.txt", strings.NewReader("v2"), "text/plain", nil, "", "")
+		_, err = s.PutObject(
+			bucket,
+			"obj.txt",
+			strings.NewReader("v2"),
+			"text/plain",
+			nil,
+			"",
+			"",
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
 
 		f, meta, err := s.GetObjectVersion(bucket, "obj.txt", m1.VersionID)
@@ -3212,7 +3596,17 @@ func TestVersioning(t *testing.T) {
 
 	t.Run("GetObjectVersion with current versionId returns current object", func(t *testing.T) {
 		s, bucket := setup(t)
-		_, err := s.PutObject(bucket, "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "")
+		_, err := s.PutObject(
+			bucket,
+			"obj.txt",
+			strings.NewReader("v1"),
+			"text/plain",
+			nil,
+			"",
+			"",
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
 		m2, err := s.PutObject(
 			bucket,
@@ -3222,6 +3616,8 @@ func TestVersioning(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 
@@ -3243,9 +3639,21 @@ func TestVersioning(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
-		_, err = s.PutObject(bucket, "obj.txt", strings.NewReader("v2"), "text/plain", nil, "", "")
+		_, err = s.PutObject(
+			bucket,
+			"obj.txt",
+			strings.NewReader("v2"),
+			"text/plain",
+			nil,
+			"",
+			"",
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
 
 		meta, err := s.HeadObjectVersion(bucket, "obj.txt", m1.VersionID)
@@ -3266,6 +3674,8 @@ func TestVersioning(t *testing.T) {
 				nil,
 				"",
 				"",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 
@@ -3285,13 +3695,13 @@ func TestVersioning(t *testing.T) {
 		"DeleteObjectVersioned on non-versioned bucket removes object normally",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("plain-bucket", ""))
+			require.NoError(t, s.CreateBucket("plain-bucket", "", false))
 			_, err := s.PutObject(
 				"plain-bucket",
 				"obj.txt",
 				strings.NewReader("data"),
 				"text/plain",
-				nil, "", "",
+				nil, "", "", nil, nil,
 			)
 			require.NoError(t, err)
 
@@ -3315,9 +3725,21 @@ func TestVersioning(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
-		_, err = s.PutObject(bucket, "obj.txt", strings.NewReader("v2"), "text/plain", nil, "", "")
+		_, err = s.PutObject(
+			bucket,
+			"obj.txt",
+			strings.NewReader("v2"),
+			"text/plain",
+			nil,
+			"",
+			"",
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
 
 		isMarker, err := s.DeleteObjectVersion(bucket, "obj.txt", m1.VersionID, false)
@@ -3328,9 +3750,44 @@ func TestVersioning(t *testing.T) {
 		assert.ErrorIs(t, err, ErrObjectNotFound)
 	})
 
+	t.Run(
+		"DeleteObjectVersion returns ErrObjectLocked for archived version under COMPLIANCE retention",
+		func(t *testing.T) {
+			s, bucket := setup(t)
+			retention := &ObjectRetention{
+				Mode:            "COMPLIANCE",
+				RetainUntilDate: time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC),
+			}
+			m1, err := s.PutObject(
+				bucket, "obj.txt", strings.NewReader("v1"), "text/plain",
+				nil, "", "", retention, nil,
+			)
+			require.NoError(t, err)
+			// Put v2 so v1 becomes an archived version.
+			_, err = s.PutObject(
+				bucket, "obj.txt", strings.NewReader("v2"), "text/plain",
+				nil, "", "", nil, nil,
+			)
+			require.NoError(t, err)
+
+			_, err = s.DeleteObjectVersion(bucket, "obj.txt", m1.VersionID, false)
+			assert.ErrorIs(t, err, ErrObjectLocked)
+		},
+	)
+
 	t.Run("DeleteObjectVersion on current version removes it", func(t *testing.T) {
 		s, bucket := setup(t)
-		_, err := s.PutObject(bucket, "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "")
+		_, err := s.PutObject(
+			bucket,
+			"obj.txt",
+			strings.NewReader("v1"),
+			"text/plain",
+			nil,
+			"",
+			"",
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
 		m2, err := s.PutObject(
 			bucket,
@@ -3340,6 +3797,8 @@ func TestVersioning(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 
@@ -3360,6 +3819,8 @@ func TestVersioning(t *testing.T) {
 				nil,
 				"",
 				"",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 
@@ -3370,7 +3831,17 @@ func TestVersioning(t *testing.T) {
 
 	t.Run("DeleteObjectVersion removes a delete marker", func(t *testing.T) {
 		s, bucket := setup(t)
-		_, err := s.PutObject(bucket, "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "")
+		_, err := s.PutObject(
+			bucket,
+			"obj.txt",
+			strings.NewReader("v1"),
+			"text/plain",
+			nil,
+			"",
+			"",
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
 		markerVID, _, err := s.DeleteObjectVersioned(bucket, "obj.txt", false)
 		require.NoError(t, err)
@@ -3390,6 +3861,8 @@ func TestVersioning(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 		m2, err := s.PutObject(
@@ -3400,6 +3873,8 @@ func TestVersioning(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 		markerVID, _, err := s.DeleteObjectVersioned(bucket, "obj.txt", false)
@@ -3423,13 +3898,13 @@ func TestVersioning(t *testing.T) {
 		"ListObjectVersions on non-versioned bucket returns objects with null versionId",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("plain-bucket", ""))
+			require.NoError(t, s.CreateBucket("plain-bucket", "", false))
 			_, err := s.PutObject(
 				"plain-bucket",
 				"obj.txt",
 				strings.NewReader("data"),
 				"text/plain",
-				nil, "", "",
+				nil, "", "", nil, nil,
 			)
 			require.NoError(t, err)
 
@@ -3459,6 +3934,8 @@ func TestVersioning(t *testing.T) {
 				nil,
 				"",
 				"",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 			_, _, err = s.DeleteObjectVersioned(bucket, "obj.txt", false)
@@ -3482,6 +3959,8 @@ func TestVersioning(t *testing.T) {
 				nil,
 				"",
 				"",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 			_, _, err = s.DeleteObjectVersioned(bucket, "obj.txt", false)
@@ -3495,7 +3974,17 @@ func TestVersioning(t *testing.T) {
 
 	t.Run("ListObjects does not show delete-marker objects", func(t *testing.T) {
 		s, bucket := setup(t)
-		_, err := s.PutObject(bucket, "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "")
+		_, err := s.PutObject(
+			bucket,
+			"obj.txt",
+			strings.NewReader("v1"),
+			"text/plain",
+			nil,
+			"",
+			"",
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
 		_, _, err = s.DeleteObjectVersioned(bucket, "obj.txt", false)
 		require.NoError(t, err)
@@ -3507,13 +3996,13 @@ func TestVersioning(t *testing.T) {
 
 	t.Run("CopyObject on versioned destination creates new version", func(t *testing.T) {
 		s, bucket := setup(t)
-		require.NoError(t, s.CreateBucket("src-bucket", ""))
+		require.NoError(t, s.CreateBucket("src-bucket", "", false))
 		_, err := s.PutObject(
 			"src-bucket",
 			"src.txt",
 			strings.NewReader("hello"),
 			"text/plain",
-			nil, "", "",
+			nil, "", "", nil, nil,
 		)
 		require.NoError(t, err)
 		m1, err := s.PutObject(
@@ -3524,10 +4013,24 @@ func TestVersioning(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 
-		m2, err := s.CopyObject("src-bucket", "src.txt", "", bucket, "dst.txt", "", nil, "", "")
+		m2, err := s.CopyObject(
+			"src-bucket",
+			"src.txt",
+			"",
+			bucket,
+			"dst.txt",
+			"",
+			nil,
+			"",
+			"",
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
 		assert.NotEqual(t, m1.VersionID, m2.VersionID)
 		assert.NotEmpty(t, m2.VersionID)
@@ -3543,12 +4046,24 @@ func TestVersioning(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
-		_, err = s.PutObject(bucket, "obj.txt", strings.NewReader("v2"), "text/plain", nil, "", "")
+		_, err = s.PutObject(
+			bucket,
+			"obj.txt",
+			strings.NewReader("v2"),
+			"text/plain",
+			nil,
+			"",
+			"",
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
 
-		require.NoError(t, s.CreateBucket("dst-bucket", ""))
+		require.NoError(t, s.CreateBucket("dst-bucket", "", false))
 		dstMeta, err := s.CopyObject(
 			bucket,
 			"obj.txt",
@@ -3556,7 +4071,7 @@ func TestVersioning(t *testing.T) {
 			"dst-bucket",
 			"copy.txt",
 			"",
-			nil, "", "",
+			nil, "", "", nil, nil,
 		)
 		require.NoError(t, err)
 		assert.Equal(t, m1.ETag, dstMeta.ETag)
@@ -3574,6 +4089,8 @@ func TestVersioning(t *testing.T) {
 				nil,
 				"",
 				"",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 			m2, err := s.PutObject(
@@ -3584,14 +4101,16 @@ func TestVersioning(t *testing.T) {
 				nil,
 				"",
 				"",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 
-			require.NoError(t, s.CreateBucket("dst-bucket", ""))
+			require.NoError(t, s.CreateBucket("dst-bucket", "", false))
 			// Pass m2.VersionID as srcVersionID; m2 is the current version.
 			dstMeta, err := s.CopyObject(
 				bucket, "obj.txt", m2.VersionID,
-				"dst-bucket", "copy.txt", "", nil, "", "",
+				"dst-bucket", "copy.txt", "", nil, "", "", nil, nil,
 			)
 			require.NoError(t, err)
 			assert.Equal(t, m2.ETag, dstMeta.ETag)
@@ -3610,6 +4129,8 @@ func TestVersioning(t *testing.T) {
 				nil,
 				"",
 				"",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 			_, err = s.PutObject(
@@ -3620,6 +4141,8 @@ func TestVersioning(t *testing.T) {
 				nil,
 				"",
 				"",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 			_, err = s.PutObject(
@@ -3630,6 +4153,8 @@ func TestVersioning(t *testing.T) {
 				nil,
 				"",
 				"",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 
@@ -3652,17 +4177,33 @@ func TestVersioning(t *testing.T) {
 		"archiveCurrentVersionLocked assigns versionId to pre-versioning object on re-put",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.CreateBucket("my-bucket", "", false))
 			// Put WITHOUT versioning — object has no VersionID.
 			_, err := s.PutObject(
-				"my-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "",
+				"my-bucket",
+				"obj.txt",
+				strings.NewReader("v1"),
+				"text/plain",
+				nil,
+				"",
+				"",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 			// Enable versioning after the fact.
 			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
 			// Second put archives the pre-versioning object (assigns it a versionId).
 			m2, err := s.PutObject(
-				"my-bucket", "obj.txt", strings.NewReader("v2"), "text/plain", nil, "", "",
+				"my-bucket",
+				"obj.txt",
+				strings.NewReader("v2"),
+				"text/plain",
+				nil,
+				"",
+				"",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 			assert.NotEmpty(t, m2.VersionID)
@@ -3688,7 +4229,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 
 	t.Run("GetObjectVersion returns ErrObjectNotFound for unknown versionId", func(t *testing.T) {
 		s, _ := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
 		_, err := s.PutObject(
 			"my-bucket",
@@ -3698,6 +4239,8 @@ func TestVersioningErrorPaths(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 
@@ -3709,14 +4252,14 @@ func TestVersioningErrorPaths(t *testing.T) {
 		"GetObjectVersion returns DeleteMarkerError for delete marker versionId",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.CreateBucket("my-bucket", "", false))
 			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
 			_, err := s.PutObject(
 				"my-bucket",
 				"obj.txt",
 				strings.NewReader("v1"),
 				"text/plain",
-				nil, "", "",
+				nil, "", "", nil, nil,
 			)
 			require.NoError(t, err)
 			markerVID, _, err := s.DeleteObjectVersioned("my-bucket", "obj.txt", false)
@@ -3738,7 +4281,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 
 	t.Run("HeadObjectVersion returns ErrObjectNotFound for unknown versionId", func(t *testing.T) {
 		s, _ := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
 		_, err := s.PutObject(
 			"my-bucket",
@@ -3748,6 +4291,8 @@ func TestVersioningErrorPaths(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 
@@ -3757,7 +4302,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 
 	t.Run("HeadObjectVersion returns DeleteMarkerError for delete marker", func(t *testing.T) {
 		s, _ := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
 		_, err := s.PutObject(
 			"my-bucket",
@@ -3767,6 +4312,8 @@ func TestVersioningErrorPaths(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 		markerVID, _, err := s.DeleteObjectVersioned("my-bucket", "obj.txt", false)
@@ -3792,7 +4339,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 
 	t.Run("PutObject returns error when newVersionID fails", func(t *testing.T) {
 		s, _ := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
 		s.randRead = func(b []byte) (int, error) { return 0, errors.New("rand failure") }
 		_, err := s.PutObject(
@@ -3803,6 +4350,8 @@ func TestVersioningErrorPaths(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		assert.Error(t, err)
 	})
@@ -3811,14 +4360,14 @@ func TestVersioningErrorPaths(t *testing.T) {
 		"archiveCurrentVersionLocked handles randRead failure for unversioned object",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.CreateBucket("my-bucket", "", false))
 			// Put object WITHOUT versioning first.
 			_, err := s.PutObject(
 				"my-bucket",
 				"obj.txt",
 				strings.NewReader("v1"),
 				"text/plain",
-				nil, "", "",
+				nil, "", "", nil, nil,
 			)
 			require.NoError(t, err)
 			// Enable versioning.
@@ -3833,6 +4382,8 @@ func TestVersioningErrorPaths(t *testing.T) {
 				nil,
 				"",
 				"",
+				nil,
+				nil,
 			)
 			assert.Error(t, err)
 		},
@@ -3840,7 +4391,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 
 	t.Run("DeleteObjectVersioned returns error when newVersionID fails", func(t *testing.T) {
 		s, _ := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
 		_, err := s.PutObject(
 			"my-bucket",
@@ -3850,6 +4401,8 @@ func TestVersioningErrorPaths(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 		s.randRead = func(b []byte) (int, error) { return 0, errors.New("rand failure") }
@@ -3859,7 +4412,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 
 	t.Run("archiveCurrentVersionLocked returns error when openFile fails", func(t *testing.T) {
 		s, _ := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
 		_, err := s.PutObject(
 			"my-bucket",
@@ -3869,6 +4422,8 @@ func TestVersioningErrorPaths(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 		// Fail on .ver writes.
@@ -3886,6 +4441,8 @@ func TestVersioningErrorPaths(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		assert.Error(t, err)
 	})
@@ -3894,14 +4451,14 @@ func TestVersioningErrorPaths(t *testing.T) {
 		"GetObjectVersion archived version ErrObjectNotFound when body missing",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.CreateBucket("my-bucket", "", false))
 			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
 			m1, err := s.PutObject(
 				"my-bucket",
 				"obj.txt",
 				strings.NewReader("v1"),
 				"text/plain",
-				nil, "", "",
+				nil, "", "", nil, nil,
 			)
 			require.NoError(t, err)
 			_, err = s.PutObject(
@@ -3912,6 +4469,8 @@ func TestVersioningErrorPaths(t *testing.T) {
 				nil,
 				"",
 				"",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 
@@ -3926,7 +4485,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 
 	t.Run("PutObject returns error when isVersioningEnabledLocked fails", func(t *testing.T) {
 		s, _ := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		// Corrupt bucket meta so JSON unmarshal fails inside isVersioningEnabledLocked.
 		f, err := s.root.OpenFile("my-bucket.bucket.json", os.O_WRONLY|os.O_TRUNC, 0o600)
 		require.NoError(t, err)
@@ -3941,6 +4500,8 @@ func TestVersioningErrorPaths(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		assert.Error(t, err)
 	})
@@ -3949,7 +4510,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 		"isVersioningEnabledLocked returns false when bucket meta file is missing",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.CreateBucket("my-bucket", "", false))
 			// Remove bucket meta; versioning should be treated as disabled.
 			require.NoError(t, s.root.Remove("my-bucket.bucket.json"))
 			_, err := s.PutObject(
@@ -3957,7 +4518,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 				"obj.txt",
 				strings.NewReader("v1"),
 				"text/plain",
-				nil, "", "",
+				nil, "", "", nil, nil,
 			)
 			require.NoError(t, err) // proceeds without versioning
 		},
@@ -3967,14 +4528,14 @@ func TestVersioningErrorPaths(t *testing.T) {
 		"archiveCurrentVersionLocked returns error when readMeta fails with non-ErrNotExist",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.CreateBucket("my-bucket", "", false))
 			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
 			_, err := s.PutObject(
 				"my-bucket",
 				"obj.txt",
 				strings.NewReader("v1"),
 				"text/plain",
-				nil, "", "",
+				nil, "", "", nil, nil,
 			)
 			require.NoError(t, err)
 			// Corrupt current version meta so readMeta in archiveCurrentVersionLocked fails.
@@ -3995,6 +4556,8 @@ func TestVersioningErrorPaths(t *testing.T) {
 				nil,
 				"",
 				"",
+				nil,
+				nil,
 			)
 			assert.Error(t, err)
 		},
@@ -4002,7 +4565,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 
 	t.Run("archiveCurrentVersionLocked returns error when io.Copy fails", func(t *testing.T) {
 		s, _ := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
 		_, err := s.PutObject(
 			"my-bucket",
@@ -4012,6 +4575,8 @@ func TestVersioningErrorPaths(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 		// Return a writer that fails on Write for the archived version body.
@@ -4030,6 +4595,8 @@ func TestVersioningErrorPaths(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		assert.Error(t, err)
 	})
@@ -4038,14 +4605,14 @@ func TestVersioningErrorPaths(t *testing.T) {
 		"archiveCurrentVersionLocked returns error when writeJSON fails for archived meta",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.CreateBucket("my-bucket", "", false))
 			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
 			_, err := s.PutObject(
 				"my-bucket",
 				"obj.txt",
 				strings.NewReader("v1"),
 				"text/plain",
-				nil, "", "",
+				nil, "", "", nil, nil,
 			)
 			require.NoError(t, err)
 			// Fail openFile only for .ver meta files; body copy must succeed first.
@@ -4064,6 +4631,8 @@ func TestVersioningErrorPaths(t *testing.T) {
 				nil,
 				"",
 				"",
+				nil,
+				nil,
 			)
 			assert.Error(t, err)
 		},
@@ -4073,14 +4642,14 @@ func TestVersioningErrorPaths(t *testing.T) {
 		"DeleteObjectVersioned returns error when openFile fails for delete marker body",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.CreateBucket("my-bucket", "", false))
 			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
 			_, err := s.PutObject(
 				"my-bucket",
 				"obj.txt",
 				strings.NewReader("v1"),
 				"text/plain",
-				nil, "", "",
+				nil, "", "", nil, nil,
 			)
 			require.NoError(t, err)
 			// Archiving must succeed (.ver path); fail only for the marker body file.
@@ -4100,14 +4669,14 @@ func TestVersioningErrorPaths(t *testing.T) {
 		"DeleteObjectVersioned returns error when writeMeta fails for delete marker",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.CreateBucket("my-bucket", "", false))
 			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
 			_, err := s.PutObject(
 				"my-bucket",
 				"obj.txt",
 				strings.NewReader("v1"),
 				"text/plain",
-				nil, "", "",
+				nil, "", "", nil, nil,
 			)
 			require.NoError(t, err)
 			// Fail openFile only for the marker's .meta.json (not inside .ver).
@@ -4127,14 +4696,14 @@ func TestVersioningErrorPaths(t *testing.T) {
 		"HeadObjectVersion returns error for corrupt archived version metadata",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.CreateBucket("my-bucket", "", false))
 			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
 			m1, err := s.PutObject(
 				"my-bucket",
 				"obj.txt",
 				strings.NewReader("v1"),
 				"text/plain",
-				nil, "", "",
+				nil, "", "", nil, nil,
 			)
 			require.NoError(t, err)
 			_, err = s.PutObject(
@@ -4145,6 +4714,8 @@ func TestVersioningErrorPaths(t *testing.T) {
 				nil,
 				"",
 				"",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 			// Overwrite archived v1 meta with invalid JSON.
@@ -4161,7 +4732,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 
 	t.Run("ListObjectVersions returns error when readDir fails for bucket", func(t *testing.T) {
 		s, _ := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("my-bucket", ""))
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		s.listDirFn = func(_ string) ([]os.DirEntry, error) {
 			return nil, errors.New("read error")
 		}
@@ -4173,14 +4744,14 @@ func TestVersioningErrorPaths(t *testing.T) {
 		"ListObjectVersions returns error when readDir fails for versioned subdir",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.CreateBucket("my-bucket", "", false))
 			// Use a nested key so collectVersionEntries recurses into a subdirectory.
 			_, err := s.PutObject(
 				"my-bucket",
 				"prefix/obj.txt",
 				strings.NewReader("v1"),
 				"text/plain",
-				nil, "", "",
+				nil, "", "", nil, nil,
 			)
 			require.NoError(t, err)
 			orig := s.listDirFn
@@ -4199,14 +4770,14 @@ func TestVersioningErrorPaths(t *testing.T) {
 		"ListObjectVersions returns error when readDir fails for .ver directory",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.CreateBucket("my-bucket", "", false))
 			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
 			_, err := s.PutObject(
 				"my-bucket",
 				"obj.txt",
 				strings.NewReader("v1"),
 				"text/plain",
-				nil, "", "",
+				nil, "", "", nil, nil,
 			)
 			require.NoError(t, err)
 			// Put v2 to create an archived entry under .ver.
@@ -4215,7 +4786,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 				"obj.txt",
 				strings.NewReader("v2"),
 				"text/plain",
-				nil, "", "",
+				nil, "", "", nil, nil,
 			)
 			require.NoError(t, err)
 			orig := s.listDirFn
@@ -4234,7 +4805,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 		"collectArchivedEntries returns error when recursive readDir fails",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.CreateBucket("my-bucket", "", false))
 			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
 			// Nested key creates a nested .ver tree: .ver/prefix/obj.txt/<versionId>
 			_, err := s.PutObject(
@@ -4242,7 +4813,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 				"prefix/obj.txt",
 				strings.NewReader("v1"),
 				"text/plain",
-				nil, "", "",
+				nil, "", "", nil, nil,
 			)
 			require.NoError(t, err)
 			_, err = s.PutObject(
@@ -4250,7 +4821,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 				"prefix/obj.txt",
 				strings.NewReader("v2"),
 				"text/plain",
-				nil, "", "",
+				nil, "", "", nil, nil,
 			)
 			require.NoError(t, err)
 			orig := s.listDirFn
@@ -4273,14 +4844,14 @@ func TestVersioningErrorPaths(t *testing.T) {
 		"DeleteObjectVersion returns error when archived version meta is corrupt",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.CreateBucket("my-bucket", "", false))
 			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
 			m1, err := s.PutObject(
 				"my-bucket",
 				"obj.txt",
 				strings.NewReader("v1"),
 				"text/plain",
-				nil, "", "",
+				nil, "", "", nil, nil,
 			)
 			require.NoError(t, err)
 			_, err = s.PutObject(
@@ -4291,6 +4862,8 @@ func TestVersioningErrorPaths(t *testing.T) {
 				nil,
 				"",
 				"",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 			// Corrupt archived v1 meta.
@@ -4309,14 +4882,14 @@ func TestVersioningErrorPaths(t *testing.T) {
 		"DeleteObjectVersion returns error when removeFile fails for archived version",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.CreateBucket("my-bucket", "", false))
 			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
 			m1, err := s.PutObject(
 				"my-bucket",
 				"obj.txt",
 				strings.NewReader("v1"),
 				"text/plain",
-				nil, "", "",
+				nil, "", "", nil, nil,
 			)
 			require.NoError(t, err)
 			_, err = s.PutObject(
@@ -4327,6 +4900,8 @@ func TestVersioningErrorPaths(t *testing.T) {
 				nil,
 				"",
 				"",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 			// Make removeFile fail for the archived version body.
@@ -4346,14 +4921,14 @@ func TestVersioningErrorPaths(t *testing.T) {
 		"DeleteObjectVersion warns and continues when archived version meta removal fails",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.CreateBucket("my-bucket", "", false))
 			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
 			m1, err := s.PutObject(
 				"my-bucket",
 				"obj.txt",
 				strings.NewReader("v1"),
 				"text/plain",
-				nil, "", "",
+				nil, "", "", nil, nil,
 			)
 			require.NoError(t, err)
 			_, err = s.PutObject(
@@ -4364,6 +4939,8 @@ func TestVersioningErrorPaths(t *testing.T) {
 				nil,
 				"",
 				"",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 			// Body removal succeeds but meta removal fails → slog.Warn, still returns nil.
@@ -4384,14 +4961,30 @@ func TestVersioningErrorPaths(t *testing.T) {
 		"GetObjectVersion returns ErrObjectNotFound when current version body is missing",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.CreateBucket("my-bucket", "", false))
 			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
 			_, err := s.PutObject(
-				"my-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "",
+				"my-bucket",
+				"obj.txt",
+				strings.NewReader("v1"),
+				"text/plain",
+				nil,
+				"",
+				"",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 			m2, err := s.PutObject(
-				"my-bucket", "obj.txt", strings.NewReader("v2"), "text/plain", nil, "", "",
+				"my-bucket",
+				"obj.txt",
+				strings.NewReader("v2"),
+				"text/plain",
+				nil,
+				"",
+				"",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 			// Remove the current version body but keep the meta file.
@@ -4406,10 +4999,18 @@ func TestVersioningErrorPaths(t *testing.T) {
 		"GetObjectVersion returns DeleteMarkerError for archived delete marker",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.CreateBucket("my-bucket", "", false))
 			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
 			_, err := s.PutObject(
-				"my-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "",
+				"my-bucket",
+				"obj.txt",
+				strings.NewReader("v1"),
+				"text/plain",
+				nil,
+				"",
+				"",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 			// Delete creates a delete marker as current.
@@ -4417,7 +5018,15 @@ func TestVersioningErrorPaths(t *testing.T) {
 			require.NoError(t, err)
 			// Put again — delete marker gets archived.
 			_, err = s.PutObject(
-				"my-bucket", "obj.txt", strings.NewReader("v2"), "text/plain", nil, "", "",
+				"my-bucket",
+				"obj.txt",
+				strings.NewReader("v2"),
+				"text/plain",
+				nil,
+				"",
+				"",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 
@@ -4433,14 +5042,30 @@ func TestVersioningErrorPaths(t *testing.T) {
 		"GetObjectVersion returns error for archived version with corrupt metadata",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.CreateBucket("my-bucket", "", false))
 			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
 			m1, err := s.PutObject(
-				"my-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "",
+				"my-bucket",
+				"obj.txt",
+				strings.NewReader("v1"),
+				"text/plain",
+				nil,
+				"",
+				"",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 			_, err = s.PutObject(
-				"my-bucket", "obj.txt", strings.NewReader("v2"), "text/plain", nil, "", "",
+				"my-bucket",
+				"obj.txt",
+				strings.NewReader("v2"),
+				"text/plain",
+				nil,
+				"",
+				"",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 			// Corrupt the archived v1 meta so readMeta returns a non-ErrNotExist error.
@@ -4461,14 +5086,30 @@ func TestVersioningErrorPaths(t *testing.T) {
 		"HeadObjectVersion returns metadata for current version when queried by its versionId",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.CreateBucket("my-bucket", "", false))
 			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
 			_, err := s.PutObject(
-				"my-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "",
+				"my-bucket",
+				"obj.txt",
+				strings.NewReader("v1"),
+				"text/plain",
+				nil,
+				"",
+				"",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 			m2, err := s.PutObject(
-				"my-bucket", "obj.txt", strings.NewReader("v2"), "text/plain", nil, "", "",
+				"my-bucket",
+				"obj.txt",
+				strings.NewReader("v2"),
+				"text/plain",
+				nil,
+				"",
+				"",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 
@@ -4484,17 +5125,33 @@ func TestVersioningErrorPaths(t *testing.T) {
 		"HeadObjectVersion returns DeleteMarkerError for archived delete marker",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.CreateBucket("my-bucket", "", false))
 			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
 			_, err := s.PutObject(
-				"my-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "",
+				"my-bucket",
+				"obj.txt",
+				strings.NewReader("v1"),
+				"text/plain",
+				nil,
+				"",
+				"",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 			markerVID, _, err := s.DeleteObjectVersioned("my-bucket", "obj.txt", false)
 			require.NoError(t, err)
 			// Put v2 — archives the delete marker.
 			_, err = s.PutObject(
-				"my-bucket", "obj.txt", strings.NewReader("v2"), "text/plain", nil, "", "",
+				"my-bucket",
+				"obj.txt",
+				strings.NewReader("v2"),
+				"text/plain",
+				nil,
+				"",
+				"",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 
@@ -4509,17 +5166,25 @@ func TestVersioningErrorPaths(t *testing.T) {
 		"CopyObject with srcVersionId not found in archived versions returns ErrObjectNotFound",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.CreateBucket("my-bucket", "", false))
 			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
 			_, err := s.PutObject(
-				"my-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "",
+				"my-bucket",
+				"obj.txt",
+				strings.NewReader("v1"),
+				"text/plain",
+				nil,
+				"",
+				"",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
-			require.NoError(t, s.CreateBucket("dst-bucket", ""))
+			require.NoError(t, s.CreateBucket("dst-bucket", "", false))
 
 			_, err = s.CopyObject(
 				"my-bucket", "obj.txt", "deadbeefdeadbeef",
-				"dst-bucket", "copy.txt", "", nil, "", "",
+				"dst-bucket", "copy.txt", "", nil, "", "", nil, nil,
 			)
 			assert.ErrorIs(t, err, ErrObjectNotFound)
 		},
@@ -4529,20 +5194,28 @@ func TestVersioningErrorPaths(t *testing.T) {
 		"CopyObject with srcVersionId pointing to delete marker returns ErrObjectNotFound",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.CreateBucket("my-bucket", "", false))
 			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
 			_, err := s.PutObject(
-				"my-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "",
+				"my-bucket",
+				"obj.txt",
+				strings.NewReader("v1"),
+				"text/plain",
+				nil,
+				"",
+				"",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 			markerVID, _, err := s.DeleteObjectVersioned("my-bucket", "obj.txt", false)
 			require.NoError(t, err)
-			require.NoError(t, s.CreateBucket("dst-bucket", ""))
+			require.NoError(t, s.CreateBucket("dst-bucket", "", false))
 
 			// Copying from the current delete marker should return ErrObjectNotFound.
 			_, err = s.CopyObject(
 				"my-bucket", "obj.txt", markerVID,
-				"dst-bucket", "copy.txt", "", nil, "", "",
+				"dst-bucket", "copy.txt", "", nil, "", "", nil, nil,
 			)
 			assert.ErrorIs(t, err, ErrObjectNotFound)
 		},
@@ -4552,7 +5225,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 		"DeleteObjectVersioned returns error when isVersioningEnabledLocked fails",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.CreateBucket("my-bucket", "", false))
 			// Corrupt bucket meta so isVersioningEnabledLocked fails.
 			f, err := s.root.OpenFile("my-bucket.bucket.json", os.O_WRONLY|os.O_TRUNC, 0o600)
 			require.NoError(t, err)
@@ -4569,10 +5242,18 @@ func TestVersioningErrorPaths(t *testing.T) {
 		"DeleteObjectVersioned returns error when archiveCurrentVersionLocked fails",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.CreateBucket("my-bucket", "", false))
 			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
 			_, err := s.PutObject(
-				"my-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "",
+				"my-bucket",
+				"obj.txt",
+				strings.NewReader("v1"),
+				"text/plain",
+				nil,
+				"",
+				"",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 			// Fail openFile for .ver paths so archiving fails.
@@ -4592,10 +5273,18 @@ func TestVersioningErrorPaths(t *testing.T) {
 		"DeleteObjectVersioned returns error when delete marker body Close fails",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.CreateBucket("my-bucket", "", false))
 			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
 			_, err := s.PutObject(
-				"my-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "",
+				"my-bucket",
+				"obj.txt",
+				strings.NewReader("v1"),
+				"text/plain",
+				nil,
+				"",
+				"",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 			// Archive must succeed (.ver); fail Close() only for the marker body.
@@ -4619,13 +5308,17 @@ func TestVersioningErrorPaths(t *testing.T) {
 		"collectVersionEntries skips objects with corrupt metadata",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.CreateBucket("my-bucket", "", false))
 			_, err := s.PutObject(
 				"my-bucket", "good.txt", strings.NewReader("data"), "text/plain", nil, "", "",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 			_, err = s.PutObject(
 				"my-bucket", "bad.txt", strings.NewReader("data"), "text/plain", nil, "", "",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 			// Corrupt bad.txt's metadata — ListObjectVersions should skip it.
@@ -4648,14 +5341,30 @@ func TestVersioningErrorPaths(t *testing.T) {
 		"collectArchivedEntries skips archived versions with corrupt metadata",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.CreateBucket("my-bucket", "", false))
 			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
 			m1, err := s.PutObject(
-				"my-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "",
+				"my-bucket",
+				"obj.txt",
+				strings.NewReader("v1"),
+				"text/plain",
+				nil,
+				"",
+				"",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 			_, err = s.PutObject(
-				"my-bucket", "obj.txt", strings.NewReader("v2"), "text/plain", nil, "", "",
+				"my-bucket",
+				"obj.txt",
+				strings.NewReader("v2"),
+				"text/plain",
+				nil,
+				"",
+				"",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 			// Corrupt the archived v1 meta — ListObjectVersions should skip it.
@@ -4677,17 +5386,33 @@ func TestVersioningErrorPaths(t *testing.T) {
 		"archiveCurrentVersionLocked is a no-op when body file is missing",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.CreateBucket("my-bucket", "", false))
 			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
 			_, err := s.PutObject(
-				"my-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "",
+				"my-bucket",
+				"obj.txt",
+				strings.NewReader("v1"),
+				"text/plain",
+				nil,
+				"",
+				"",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 			// Remove the body file, keeping the meta — simulates partial corruption.
 			require.NoError(t, s.root.Remove("my-bucket/obj.txt"))
 			// Second put triggers archiveCurrentVersionLocked; body is missing → no-op.
 			m2, err := s.PutObject(
-				"my-bucket", "obj.txt", strings.NewReader("v2"), "text/plain", nil, "", "",
+				"my-bucket",
+				"obj.txt",
+				strings.NewReader("v2"),
+				"text/plain",
+				nil,
+				"",
+				"",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 			assert.NotEmpty(t, m2.VersionID)
@@ -4698,10 +5423,18 @@ func TestVersioningErrorPaths(t *testing.T) {
 		"archiveCurrentVersionLocked returns error when dst.Close fails",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.CreateBucket("my-bucket", "", false))
 			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
 			_, err := s.PutObject(
-				"my-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "",
+				"my-bucket",
+				"obj.txt",
+				strings.NewReader("v1"),
+				"text/plain",
+				nil,
+				"",
+				"",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 			// Return a writer that succeeds on Write but fails on Close for archive body.
@@ -4724,6 +5457,8 @@ func TestVersioningErrorPaths(t *testing.T) {
 				nil,
 				"",
 				"",
+				nil,
+				nil,
 			)
 			assert.Error(t, err)
 		},
@@ -4733,8 +5468,16 @@ func TestVersioningErrorPaths(t *testing.T) {
 		"CompleteMultipartUpload returns error when isVersioningEnabledLocked fails",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("my-bucket", ""))
-			uploadID, err := s.CreateMultipartUpload("my-bucket", "big.txt", "text/plain", "", "")
+			require.NoError(t, s.CreateBucket("my-bucket", "", false))
+			uploadID, err := s.CreateMultipartUpload(
+				"my-bucket",
+				"big.txt",
+				"text/plain",
+				"",
+				"",
+				nil,
+				nil,
+			)
 			require.NoError(t, err)
 			etag, err := s.UploadPart(uploadID, 1, strings.NewReader("data"))
 			require.NoError(t, err)
@@ -4757,14 +5500,24 @@ func TestVersioningErrorPaths(t *testing.T) {
 		"CompleteMultipartUpload returns error when archiveCurrentVersionLocked fails",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.CreateBucket("my-bucket", "", false))
 			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
 			_, err := s.PutObject(
 				"my-bucket", "big.txt", strings.NewReader("existing"), "text/plain", nil, "", "",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 
-			uploadID, err := s.CreateMultipartUpload("my-bucket", "big.txt", "text/plain", "", "")
+			uploadID, err := s.CreateMultipartUpload(
+				"my-bucket",
+				"big.txt",
+				"text/plain",
+				"",
+				"",
+				nil,
+				nil,
+			)
 			require.NoError(t, err)
 			etag, err := s.UploadPart(uploadID, 1, strings.NewReader("data"))
 			require.NoError(t, err)
@@ -4788,15 +5541,25 @@ func TestVersioningErrorPaths(t *testing.T) {
 		"CompleteMultipartUpload returns error when newVersionID fails on versioned bucket",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.CreateBucket("my-bucket", "", false))
 			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
 			// Put v1 WITH versioning so it already has a VersionID; archive won't need randRead.
 			_, err := s.PutObject(
 				"my-bucket", "big.txt", strings.NewReader("existing"), "text/plain", nil, "", "",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 
-			uploadID, err := s.CreateMultipartUpload("my-bucket", "big.txt", "text/plain", "", "")
+			uploadID, err := s.CreateMultipartUpload(
+				"my-bucket",
+				"big.txt",
+				"text/plain",
+				"",
+				"",
+				nil,
+				nil,
+			)
 			require.NoError(t, err)
 			etag, err := s.UploadPart(uploadID, 1, strings.NewReader("data"))
 			require.NoError(t, err)
@@ -4814,16 +5577,18 @@ func TestVersioningErrorPaths(t *testing.T) {
 		"CopyObject without srcVersionId returns ErrObjectNotFound when source is delete marker",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("src-bucket", ""))
+			require.NoError(t, s.CreateBucket("src-bucket", "", false))
 			require.NoError(t, s.PutBucketVersioning("src-bucket", "Enabled"))
 			_, err := s.PutObject(
 				"src-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 			// Delete the object — current version becomes a delete marker.
 			_, _, err = s.DeleteObjectVersioned("src-bucket", "obj.txt", false)
 			require.NoError(t, err)
-			require.NoError(t, s.CreateBucket("dst-bucket", ""))
+			require.NoError(t, s.CreateBucket("dst-bucket", "", false))
 
 			// Copying without specifying a versionId should return ErrObjectNotFound
 			// because the current version is a delete marker.
@@ -4837,6 +5602,8 @@ func TestVersioningErrorPaths(t *testing.T) {
 				nil,
 				"",
 				"",
+				nil,
+				nil,
 			)
 			assert.ErrorIs(t, err, ErrObjectNotFound)
 		},
@@ -4846,14 +5613,30 @@ func TestVersioningErrorPaths(t *testing.T) {
 		"CopyObject with srcVersionId and corrupt archived version meta returns error",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("my-bucket", ""))
+			require.NoError(t, s.CreateBucket("my-bucket", "", false))
 			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
 			m1, err := s.PutObject(
-				"my-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "",
+				"my-bucket",
+				"obj.txt",
+				strings.NewReader("v1"),
+				"text/plain",
+				nil,
+				"",
+				"",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 			_, err = s.PutObject(
-				"my-bucket", "obj.txt", strings.NewReader("v2"), "text/plain", nil, "", "",
+				"my-bucket",
+				"obj.txt",
+				strings.NewReader("v2"),
+				"text/plain",
+				nil,
+				"",
+				"",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 			// Corrupt the archived v1 meta.
@@ -4863,11 +5646,11 @@ func TestVersioningErrorPaths(t *testing.T) {
 			_, err = f.Write([]byte("not-json"))
 			require.NoError(t, err)
 			require.NoError(t, f.Close())
-			require.NoError(t, s.CreateBucket("dst-bucket", ""))
+			require.NoError(t, s.CreateBucket("dst-bucket", "", false))
 
 			_, err = s.CopyObject(
 				"my-bucket", "obj.txt", m1.VersionID,
-				"dst-bucket", "copy.txt", "", nil, "", "",
+				"dst-bucket", "copy.txt", "", nil, "", "", nil, nil,
 			)
 			assert.Error(t, err)
 			assert.NotErrorIs(t, err, ErrObjectNotFound)
@@ -4878,12 +5661,14 @@ func TestVersioningErrorPaths(t *testing.T) {
 		"CopyObject returns error when isVersioningEnabledLocked fails for dst bucket",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("src-bucket", ""))
+			require.NoError(t, s.CreateBucket("src-bucket", "", false))
 			_, err := s.PutObject(
 				"src-bucket", "obj.txt", strings.NewReader("hello"), "text/plain", nil, "", "",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
-			require.NoError(t, s.CreateBucket("dst-bucket", ""))
+			require.NoError(t, s.CreateBucket("dst-bucket", "", false))
 			// Corrupt dst bucket meta so isVersioningEnabledLocked fails.
 			f, err := s.root.OpenFile("dst-bucket.bucket.json", os.O_WRONLY|os.O_TRUNC, 0o600)
 			require.NoError(t, err)
@@ -4901,6 +5686,8 @@ func TestVersioningErrorPaths(t *testing.T) {
 				nil,
 				"",
 				"",
+				nil,
+				nil,
 			)
 			assert.Error(t, err)
 		},
@@ -4910,15 +5697,19 @@ func TestVersioningErrorPaths(t *testing.T) {
 		"CopyObject returns error when archiveCurrentVersionLocked fails for dst bucket",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("src-bucket", ""))
+			require.NoError(t, s.CreateBucket("src-bucket", "", false))
 			_, err := s.PutObject(
 				"src-bucket", "obj.txt", strings.NewReader("hello"), "text/plain", nil, "", "",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
-			require.NoError(t, s.CreateBucket("dst-bucket", ""))
+			require.NoError(t, s.CreateBucket("dst-bucket", "", false))
 			require.NoError(t, s.PutBucketVersioning("dst-bucket", "Enabled"))
 			_, err = s.PutObject(
 				"dst-bucket", "copy.txt", strings.NewReader("existing"), "text/plain", nil, "", "",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 			// Fail openFile for .ver paths (dst archive).
@@ -4939,6 +5730,8 @@ func TestVersioningErrorPaths(t *testing.T) {
 				nil,
 				"",
 				"",
+				nil,
+				nil,
 			)
 			assert.Error(t, err)
 		},
@@ -4948,17 +5741,21 @@ func TestVersioningErrorPaths(t *testing.T) {
 		"CopyObject returns error when newVersionID fails for versioned dst bucket",
 		func(t *testing.T) {
 			s, _ := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("src-bucket", ""))
+			require.NoError(t, s.CreateBucket("src-bucket", "", false))
 			_, err := s.PutObject(
 				"src-bucket", "obj.txt", strings.NewReader("hello"), "text/plain", nil, "", "",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
-			require.NoError(t, s.CreateBucket("dst-bucket", ""))
+			require.NoError(t, s.CreateBucket("dst-bucket", "", false))
 			require.NoError(t, s.PutBucketVersioning("dst-bucket", "Enabled"))
 			// Put existing dst object WITH versioning so it has a VersionID;
 			// archiveCurrentVersionLocked won't call randRead.
 			_, err = s.PutObject(
 				"dst-bucket", "copy.txt", strings.NewReader("existing"), "text/plain", nil, "", "",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 			// Fail randRead only for the new version ID assignment.
@@ -4973,6 +5770,8 @@ func TestVersioningErrorPaths(t *testing.T) {
 				nil,
 				"",
 				"",
+				nil,
+				nil,
 			)
 			assert.Error(t, err)
 		},
@@ -4983,7 +5782,7 @@ func TestSetObjectRestoreInitiated(t *testing.T) {
 	setup := func(t *testing.T) (*Storage, string) {
 		t.Helper()
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("bucket", "us-east-1"))
+		require.NoError(t, s.CreateBucket("bucket", "us-east-1", false))
 		_, err := s.PutObject(
 			"bucket",
 			"obj.txt",
@@ -4992,6 +5791,8 @@ func TestSetObjectRestoreInitiated(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 		return s, "bucket"
@@ -5019,7 +5820,7 @@ func TestSetObjectRestoreInitiated(t *testing.T) {
 
 	t.Run("returns error when metadata is corrupt", func(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("bucket", ""))
+		require.NoError(t, s.CreateBucket("bucket", "", false))
 		require.NoError(t, os.WriteFile(
 			filepath.Join(rootPath, "bucket", "obj.txt.meta.json"),
 			[]byte("not valid json"),
@@ -5035,8 +5836,8 @@ func TestUploadPartCopy(t *testing.T) {
 	setup := func(t *testing.T) (*Storage, string) {
 		t.Helper()
 		s, _ := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("src-bucket", ""))
-		require.NoError(t, s.CreateBucket("dst-bucket", ""))
+		require.NoError(t, s.CreateBucket("src-bucket", "", false))
+		require.NoError(t, s.CreateBucket("dst-bucket", "", false))
 		_, err := s.PutObject(
 			"src-bucket",
 			"source.txt",
@@ -5045,9 +5846,19 @@ func TestUploadPartCopy(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
-		uploadID, err := s.CreateMultipartUpload("dst-bucket", "dest.txt", "text/plain", "", "")
+		uploadID, err := s.CreateMultipartUpload(
+			"dst-bucket",
+			"dest.txt",
+			"text/plain",
+			"",
+			"",
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
 		return s, uploadID
 	}
@@ -5130,7 +5941,7 @@ func TestUploadPartCopy(t *testing.T) {
 
 	t.Run("returns ErrUploadNotFound for nonexistent upload", func(t *testing.T) {
 		s, _ := newTestStorageWithRoot(t)
-		require.NoError(t, s.CreateBucket("src-bucket", ""))
+		require.NoError(t, s.CreateBucket("src-bucket", "", false))
 		_, err := s.PutObject(
 			"src-bucket",
 			"obj.txt",
@@ -5139,6 +5950,8 @@ func TestUploadPartCopy(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 		_, _, _, err = s.UploadPartCopy("nonexistent-upload", 1, "src-bucket", "obj.txt", "", nil)
@@ -5169,6 +5982,8 @@ func TestUploadPartCopy(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 		_, err = s.PutObject(
@@ -5179,6 +5994,8 @@ func TestUploadPartCopy(t *testing.T) {
 			nil,
 			"",
 			"",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 
@@ -5209,6 +6026,8 @@ func TestUploadPartCopy(t *testing.T) {
 
 		meta, err := s.PutObject(
 			"src-bucket", "cur.txt", strings.NewReader("current"), "text/plain", nil, "", "",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 		require.NotEmpty(t, meta.VersionID)
@@ -5241,6 +6060,8 @@ func TestUploadPartCopy(t *testing.T) {
 
 		_, err := s.PutObject(
 			"src-bucket", "del.txt", strings.NewReader("data"), "text/plain", nil, "", "",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 
@@ -5258,6 +6079,8 @@ func TestUploadPartCopy(t *testing.T) {
 		require.NoError(t, s.PutBucketVersioning("src-bucket", "Enabled"))
 		meta, err := s.PutObject(
 			"src-bucket", "ver.txt", strings.NewReader("v1"), "text/plain", nil, "", "",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 		require.NotEmpty(t, meta.VersionID)
@@ -5293,6 +6116,8 @@ func TestUploadPartCopy(t *testing.T) {
 		require.NoError(t, s.PutBucketVersioning("src-bucket", "Enabled"))
 		_, err := s.PutObject(
 			"src-bucket", "ver.txt", strings.NewReader("v1"), "text/plain", nil, "", "",
+			nil,
+			nil,
 		)
 		require.NoError(t, err)
 
@@ -5311,19 +6136,31 @@ func TestUploadPartCopy(t *testing.T) {
 		"returns error when current object meta is corrupt and versionId is set",
 		func(t *testing.T) {
 			s, rootPath := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("src-bucket", ""))
-			require.NoError(t, s.CreateBucket("dst-bucket", ""))
+			require.NoError(t, s.CreateBucket("src-bucket", "", false))
+			require.NoError(t, s.CreateBucket("dst-bucket", "", false))
 			require.NoError(t, s.PutBucketVersioning("src-bucket", "Enabled"))
 			meta1, err := s.PutObject(
 				"src-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 			// Put a second version so v1 is archived and a current object file exists.
 			_, err = s.PutObject(
 				"src-bucket", "obj.txt", strings.NewReader("v2"), "text/plain", nil, "", "",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
-			uploadID, err := s.CreateMultipartUpload("dst-bucket", "obj.txt", "text/plain", "", "")
+			uploadID, err := s.CreateMultipartUpload(
+				"dst-bucket",
+				"obj.txt",
+				"text/plain",
+				"",
+				"",
+				nil,
+				nil,
+			)
 			require.NoError(t, err)
 
 			// Corrupt the current object's meta so readMeta returns a non-ErrNotExist error.
@@ -5355,13 +6192,23 @@ func TestUploadPartCopy(t *testing.T) {
 				t.Skip("skipping: cannot test permission errors as root")
 			}
 			s, rootPath := newTestStorageWithRoot(t)
-			require.NoError(t, s.CreateBucket("src-bucket", ""))
-			require.NoError(t, s.CreateBucket("dst-bucket", ""))
+			require.NoError(t, s.CreateBucket("src-bucket", "", false))
+			require.NoError(t, s.CreateBucket("dst-bucket", "", false))
 			_, err := s.PutObject(
 				"src-bucket", "obj.txt", strings.NewReader("data"), "text/plain", nil, "", "",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
-			uploadID, err := s.CreateMultipartUpload("dst-bucket", "obj.txt", "text/plain", "", "")
+			uploadID, err := s.CreateMultipartUpload(
+				"dst-bucket",
+				"obj.txt",
+				"text/plain",
+				"",
+				"",
+				nil,
+				nil,
+			)
 			require.NoError(t, err)
 
 			uploadDir := filepath.Join(rootPath, ".mpu", uploadID)
@@ -5384,8 +6231,18 @@ func TestObjectRetention(t *testing.T) {
 	setup := func(t *testing.T) (*Storage, string, string) {
 		t.Helper()
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("b", ""))
-		_, err := s.PutObject("b", "obj.txt", strings.NewReader("data"), "text/plain", nil, "", "")
+		require.NoError(t, s.CreateBucket("b", "", false))
+		_, err := s.PutObject(
+			"b",
+			"obj.txt",
+			strings.NewReader("data"),
+			"text/plain",
+			nil,
+			"",
+			"",
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
 		return s, "b", "obj.txt"
 	}
@@ -5435,7 +6292,7 @@ func TestObjectRetention(t *testing.T) {
 
 	t.Run("Put returns ErrObjectNotFound for missing object", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("b", ""))
+		require.NoError(t, s.CreateBucket("b", "", false))
 		assert.ErrorIs(
 			t,
 			s.PutObjectRetention("b", "missing.txt", "", retention),
@@ -5445,18 +6302,38 @@ func TestObjectRetention(t *testing.T) {
 
 	t.Run("Get returns ErrObjectNotFound for missing object", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("b", ""))
+		require.NoError(t, s.CreateBucket("b", "", false))
 		_, err := s.GetObjectRetention("b", "missing.txt", "")
 		assert.ErrorIs(t, err, ErrObjectNotFound)
 	})
 
 	t.Run("Put/Get by versionId on versioned bucket", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("b", ""))
+		require.NoError(t, s.CreateBucket("b", "", false))
 		require.NoError(t, s.PutBucketVersioning("b", "Enabled"))
-		m1, err := s.PutObject("b", "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "")
+		m1, err := s.PutObject(
+			"b",
+			"obj.txt",
+			strings.NewReader("v1"),
+			"text/plain",
+			nil,
+			"",
+			"",
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
-		m2, err := s.PutObject("b", "obj.txt", strings.NewReader("v2"), "text/plain", nil, "", "")
+		m2, err := s.PutObject(
+			"b",
+			"obj.txt",
+			strings.NewReader("v2"),
+			"text/plain",
+			nil,
+			"",
+			"",
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
 
 		// Set retention only on v1 (archived).
@@ -5473,9 +6350,19 @@ func TestObjectRetention(t *testing.T) {
 
 	t.Run("Put returns DeleteMarkerError for delete marker", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("b", ""))
+		require.NoError(t, s.CreateBucket("b", "", false))
 		require.NoError(t, s.PutBucketVersioning("b", "Enabled"))
-		_, err := s.PutObject("b", "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "")
+		_, err := s.PutObject(
+			"b",
+			"obj.txt",
+			strings.NewReader("v1"),
+			"text/plain",
+			nil,
+			"",
+			"",
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
 		markerVID, _, err := s.DeleteObjectVersioned("b", "obj.txt", false)
 		require.NoError(t, err)
@@ -5487,9 +6374,19 @@ func TestObjectRetention(t *testing.T) {
 
 	t.Run("Get returns DeleteMarkerError for delete marker", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("b", ""))
+		require.NoError(t, s.CreateBucket("b", "", false))
 		require.NoError(t, s.PutBucketVersioning("b", "Enabled"))
-		_, err := s.PutObject("b", "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "")
+		_, err := s.PutObject(
+			"b",
+			"obj.txt",
+			strings.NewReader("v1"),
+			"text/plain",
+			nil,
+			"",
+			"",
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
 		markerVID, _, err := s.DeleteObjectVersioned("b", "obj.txt", false)
 		require.NoError(t, err)
@@ -5503,7 +6400,7 @@ func TestObjectRetention(t *testing.T) {
 		"Put returns DeleteMarkerError when current is delete marker and no versionId",
 		func(t *testing.T) {
 			s := newTestStorage(t)
-			require.NoError(t, s.CreateBucket("b", ""))
+			require.NoError(t, s.CreateBucket("b", "", false))
 			require.NoError(t, s.PutBucketVersioning("b", "Enabled"))
 			_, err := s.PutObject(
 				"b",
@@ -5513,6 +6410,8 @@ func TestObjectRetention(t *testing.T) {
 				nil,
 				"",
 				"",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 			_, _, err = s.DeleteObjectVersioned("b", "obj.txt", false)
@@ -5528,7 +6427,7 @@ func TestObjectRetention(t *testing.T) {
 		"Get returns DeleteMarkerError when current is delete marker and no versionId",
 		func(t *testing.T) {
 			s := newTestStorage(t)
-			require.NoError(t, s.CreateBucket("b", ""))
+			require.NoError(t, s.CreateBucket("b", "", false))
 			require.NoError(t, s.PutBucketVersioning("b", "Enabled"))
 			_, err := s.PutObject(
 				"b",
@@ -5538,6 +6437,8 @@ func TestObjectRetention(t *testing.T) {
 				nil,
 				"",
 				"",
+				nil,
+				nil,
 			)
 			require.NoError(t, err)
 			_, _, err = s.DeleteObjectVersioned("b", "obj.txt", false)
@@ -5551,14 +6452,34 @@ func TestObjectRetention(t *testing.T) {
 
 	t.Run("Put returns DeleteMarkerError for archived delete marker", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("b", ""))
+		require.NoError(t, s.CreateBucket("b", "", false))
 		require.NoError(t, s.PutBucketVersioning("b", "Enabled"))
-		_, err := s.PutObject("b", "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "")
+		_, err := s.PutObject(
+			"b",
+			"obj.txt",
+			strings.NewReader("v1"),
+			"text/plain",
+			nil,
+			"",
+			"",
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
 		markerVID, _, err := s.DeleteObjectVersioned("b", "obj.txt", false)
 		require.NoError(t, err)
 		// Put v2 — archives the delete marker.
-		_, err = s.PutObject("b", "obj.txt", strings.NewReader("v2"), "text/plain", nil, "", "")
+		_, err = s.PutObject(
+			"b",
+			"obj.txt",
+			strings.NewReader("v2"),
+			"text/plain",
+			nil,
+			"",
+			"",
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
 
 		err = s.PutObjectRetention("b", "obj.txt", markerVID, retention)
@@ -5568,14 +6489,34 @@ func TestObjectRetention(t *testing.T) {
 
 	t.Run("Get returns DeleteMarkerError for archived delete marker", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("b", ""))
+		require.NoError(t, s.CreateBucket("b", "", false))
 		require.NoError(t, s.PutBucketVersioning("b", "Enabled"))
-		_, err := s.PutObject("b", "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "")
+		_, err := s.PutObject(
+			"b",
+			"obj.txt",
+			strings.NewReader("v1"),
+			"text/plain",
+			nil,
+			"",
+			"",
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
 		markerVID, _, err := s.DeleteObjectVersioned("b", "obj.txt", false)
 		require.NoError(t, err)
 		// Put v2 — archives the delete marker.
-		_, err = s.PutObject("b", "obj.txt", strings.NewReader("v2"), "text/plain", nil, "", "")
+		_, err = s.PutObject(
+			"b",
+			"obj.txt",
+			strings.NewReader("v2"),
+			"text/plain",
+			nil,
+			"",
+			"",
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
 
 		_, err = s.GetObjectRetention("b", "obj.txt", markerVID)
@@ -5588,8 +6529,18 @@ func TestObjectLegalHold(t *testing.T) {
 	setup := func(t *testing.T) (*Storage, string, string) {
 		t.Helper()
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("b", ""))
-		_, err := s.PutObject("b", "obj.txt", strings.NewReader("data"), "text/plain", nil, "", "")
+		require.NoError(t, s.CreateBucket("b", "", false))
+		_, err := s.PutObject(
+			"b",
+			"obj.txt",
+			strings.NewReader("data"),
+			"text/plain",
+			nil,
+			"",
+			"",
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
 		return s, "b", "obj.txt"
 	}
@@ -5630,24 +6581,44 @@ func TestObjectLegalHold(t *testing.T) {
 
 	t.Run("Put returns ErrObjectNotFound for missing object", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("b", ""))
+		require.NoError(t, s.CreateBucket("b", "", false))
 		assert.ErrorIs(t, s.PutObjectLegalHold("b", "missing.txt", "", "ON"), ErrObjectNotFound)
 	})
 
 	t.Run("Get returns ErrObjectNotFound for missing object", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("b", ""))
+		require.NoError(t, s.CreateBucket("b", "", false))
 		_, err := s.GetObjectLegalHold("b", "missing.txt", "")
 		assert.ErrorIs(t, err, ErrObjectNotFound)
 	})
 
 	t.Run("Put/Get by versionId on versioned bucket", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("b", ""))
+		require.NoError(t, s.CreateBucket("b", "", false))
 		require.NoError(t, s.PutBucketVersioning("b", "Enabled"))
-		m1, err := s.PutObject("b", "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "")
+		m1, err := s.PutObject(
+			"b",
+			"obj.txt",
+			strings.NewReader("v1"),
+			"text/plain",
+			nil,
+			"",
+			"",
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
-		m2, err := s.PutObject("b", "obj.txt", strings.NewReader("v2"), "text/plain", nil, "", "")
+		m2, err := s.PutObject(
+			"b",
+			"obj.txt",
+			strings.NewReader("v2"),
+			"text/plain",
+			nil,
+			"",
+			"",
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
 
 		// Set legal hold only on v1 (archived).
@@ -5664,9 +6635,19 @@ func TestObjectLegalHold(t *testing.T) {
 
 	t.Run("Put returns DeleteMarkerError for delete marker", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("b", ""))
+		require.NoError(t, s.CreateBucket("b", "", false))
 		require.NoError(t, s.PutBucketVersioning("b", "Enabled"))
-		_, err := s.PutObject("b", "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "")
+		_, err := s.PutObject(
+			"b",
+			"obj.txt",
+			strings.NewReader("v1"),
+			"text/plain",
+			nil,
+			"",
+			"",
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
 		markerVID, _, err := s.DeleteObjectVersioned("b", "obj.txt", false)
 		require.NoError(t, err)
@@ -5678,9 +6659,19 @@ func TestObjectLegalHold(t *testing.T) {
 
 	t.Run("Get returns DeleteMarkerError for delete marker", func(t *testing.T) {
 		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("b", ""))
+		require.NoError(t, s.CreateBucket("b", "", false))
 		require.NoError(t, s.PutBucketVersioning("b", "Enabled"))
-		_, err := s.PutObject("b", "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "")
+		_, err := s.PutObject(
+			"b",
+			"obj.txt",
+			strings.NewReader("v1"),
+			"text/plain",
+			nil,
+			"",
+			"",
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
 		markerVID, _, err := s.DeleteObjectVersioned("b", "obj.txt", false)
 		require.NoError(t, err)

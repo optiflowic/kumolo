@@ -22,12 +22,18 @@ func (ro *Router) handleCreateMultipartUpload(
 	}
 	sseAlgorithm := r.Header.Get(amzSSE)
 	sseKMSKeyID := r.Header.Get(amzSSEKMSKeyID)
+	retention, legalHold, ok := parseObjectLockHeaders(w, r)
+	if !ok {
+		return
+	}
 	uploadID, err := ro.storage.CreateMultipartUpload(
 		bucket,
 		key,
 		contentType,
 		sseAlgorithm,
 		sseKMSKeyID,
+		retention,
+		legalHold,
 	)
 	if err != nil {
 		switch {

@@ -157,6 +157,27 @@ func TestRouterCreateBucket(t *testing.T) {
 		assert.Equal(t, http.StatusConflict, w.Code)
 		assert.Contains(t, w.Body.String(), "BucketAlreadyOwnedByYou")
 	})
+
+	t.Run("x-amz-object-lock-enabled enables versioning and object lock", func(t *testing.T) {
+		ro := newTestRouter(t)
+		req := httptest.NewRequest(http.MethodPut, "/my-bucket", nil)
+		req.Header.Set(amzObjectLockEnabled, "true")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		// Versioning should be Enabled.
+		vReq := httptest.NewRequest(http.MethodGet, "/my-bucket?versioning", nil)
+		vW := httptest.NewRecorder()
+		ro.ServeHTTP(vW, vReq)
+		assert.Contains(t, vW.Body.String(), "Enabled")
+
+		// ObjectLock configuration should reflect enabled.
+		olReq := httptest.NewRequest(http.MethodGet, "/my-bucket?object-lock", nil)
+		olW := httptest.NewRecorder()
+		ro.ServeHTTP(olW, olReq)
+		assert.Contains(t, olW.Body.String(), "ObjectLockEnabled")
+	})
 }
 
 func TestRouterDeleteBucket(t *testing.T) {
@@ -325,10 +346,12 @@ type mockStore struct {
 	getObjectLegalHoldErr     error
 }
 
-func (m *mockStore) ListBuckets() ([]BucketInfo, error)    { return nil, m.listBucketsErr }
-func (m *mockStore) CreateBucket(_ string, _ string) error { return m.createBucketErr }
-func (m *mockStore) DeleteBucket(_ string) error           { return m.deleteBucketErr }
-func (m *mockStore) BucketExists(_ string) bool            { return m.bucketExists }
+func (m *mockStore) ListBuckets() ([]BucketInfo, error) { return nil, m.listBucketsErr }
+func (m *mockStore) CreateBucket(_ string, _ string, _ bool) error {
+	return m.createBucketErr
+}
+func (m *mockStore) DeleteBucket(_ string) error { return m.deleteBucketErr }
+func (m *mockStore) BucketExists(_ string) bool  { return m.bucketExists }
 func (m *mockStore) GetBucketRegion(_ string) (string, error) {
 	return m.getBucketRegionStr, m.getBucketRegionErr
 }
@@ -340,6 +363,8 @@ func (m *mockStore) PutObject(
 	_ string,
 	_ map[string]string,
 	_, _ string,
+	_ *ObjectRetention,
+	_ *ObjectLegalHold,
 ) (ObjectMetadata, error) {
 	return m.putObjectMeta, m.putObjectErr
 }
@@ -359,6 +384,8 @@ func (m *mockStore) CopyObject(
 	_, _, _, _, _, _ string,
 	_ map[string]string,
 	_, _ string,
+	_ *ObjectRetention,
+	_ *ObjectLegalHold,
 ) (ObjectMetadata, error) {
 	return m.copyObjectMeta, m.copyObjectErr
 }
@@ -384,7 +411,12 @@ func (m *mockStore) ListObjects(_ string) ([]ObjectInfo, error) {
 func (m *mockStore) ListObjectVersions(_ string) ([]VersionInfo, []DeleteMarkerInfo, error) {
 	return nil, nil, m.listObjectVersionsErr
 }
-func (m *mockStore) CreateMultipartUpload(_, _, _, _, _ string) (string, error) {
+
+func (m *mockStore) CreateMultipartUpload(
+	_, _, _, _, _ string,
+	_ *ObjectRetention,
+	_ *ObjectLegalHold,
+) (string, error) {
 	return m.createMultipartUploadID, m.createMultipartUploadErr
 }
 func (m *mockStore) UploadPart(_ string, _ int, _ io.Reader) (string, error) {
@@ -652,6 +684,121 @@ func TestRouterPutObject(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Equal(t, "images", w.Header().Get("x-amz-meta-category"))
+	})
+
+	t.Run(
+		"Object Lock headers are stored and reflected in GetObjectRetention/GetObjectLegalHold",
+		func(t *testing.T) {
+			ro := newTestRouter(t)
+			// Create bucket with Object Lock enabled.
+			createReq := httptest.NewRequest(http.MethodPut, "/my-bucket", nil)
+			createReq.Header.Set(amzObjectLockEnabled, "true")
+			ro.ServeHTTP(httptest.NewRecorder(), createReq)
+
+			putReq := httptest.NewRequest(
+				http.MethodPut,
+				"/my-bucket/obj.txt",
+				strings.NewReader("data"),
+			)
+			putReq.Header.Set(amzObjectLockMode, "GOVERNANCE")
+			putReq.Header.Set(amzObjectLockRetainUntilDate, "2099-01-01T00:00:00Z")
+			putReq.Header.Set(amzObjectLockLegalHold, "ON")
+			ro.ServeHTTP(httptest.NewRecorder(), putReq)
+
+			retReq := httptest.NewRequest(http.MethodGet, "/my-bucket/obj.txt?retention", nil)
+			retW := httptest.NewRecorder()
+			ro.ServeHTTP(retW, retReq)
+			assert.Equal(t, http.StatusOK, retW.Code)
+			assert.Contains(t, retW.Body.String(), "GOVERNANCE")
+
+			holdReq := httptest.NewRequest(http.MethodGet, "/my-bucket/obj.txt?legal-hold", nil)
+			holdW := httptest.NewRecorder()
+			ro.ServeHTTP(holdW, holdReq)
+			assert.Equal(t, http.StatusOK, holdW.Code)
+			assert.Contains(t, holdW.Body.String(), "ON")
+		},
+	)
+
+	t.Run("returns 400 on invalid Object Lock mode", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+
+		putReq := httptest.NewRequest(
+			http.MethodPut,
+			"/my-bucket/obj.txt",
+			strings.NewReader("data"),
+		)
+		putReq.Header.Set(amzObjectLockMode, "INVALID")
+		putReq.Header.Set(amzObjectLockRetainUntilDate, "2099-01-01T00:00:00Z")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, putReq)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidArgument")
+	})
+
+	t.Run("returns 400 on invalid retain-until-date", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+
+		putReq := httptest.NewRequest(
+			http.MethodPut,
+			"/my-bucket/obj.txt",
+			strings.NewReader("data"),
+		)
+		putReq.Header.Set(amzObjectLockMode, "GOVERNANCE")
+		putReq.Header.Set(amzObjectLockRetainUntilDate, "not-a-date")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, putReq)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidArgument")
+	})
+
+	t.Run("returns 400 on invalid legal-hold value", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+
+		putReq := httptest.NewRequest(
+			http.MethodPut,
+			"/my-bucket/obj.txt",
+			strings.NewReader("data"),
+		)
+		putReq.Header.Set(amzObjectLockLegalHold, "MAYBE")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, putReq)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidArgument")
+	})
+
+	t.Run("returns 400 when only retain-until-date is set without mode", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+
+		putReq := httptest.NewRequest(
+			http.MethodPut,
+			"/my-bucket/obj.txt",
+			strings.NewReader("data"),
+		)
+		putReq.Header.Set(amzObjectLockRetainUntilDate, "2099-01-01T00:00:00Z")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, putReq)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidArgument")
+	})
+
+	t.Run("returns 400 when only mode is set without retain-until-date", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+
+		putReq := httptest.NewRequest(
+			http.MethodPut,
+			"/my-bucket/obj.txt",
+			strings.NewReader("data"),
+		)
+		putReq.Header.Set(amzObjectLockMode, "GOVERNANCE")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, putReq)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidArgument")
 	})
 }
 
@@ -1810,6 +1957,61 @@ func TestRouterCopyObject(t *testing.T) {
 			assert.Equal(t, "application/octet-stream", w.Header().Get("Content-Type"))
 		},
 	)
+
+	t.Run("invalid Object Lock mode header on CopyObject returns 400", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/src-bucket", nil),
+		)
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/src-bucket/orig.txt", strings.NewReader("hello")),
+		)
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/dst-bucket", nil),
+		)
+
+		copyReq := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
+		copyReq.Header.Set("X-Amz-Copy-Source", "/src-bucket/orig.txt")
+		// Only mode without retain-until-date → parseObjectLockHeaders returns !ok.
+		copyReq.Header.Set(amzObjectLockMode, "GOVERNANCE")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, copyReq)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("Object Lock headers on CopyObject are stored", func(t *testing.T) {
+		ro := newTestRouter(t)
+		// Create dst bucket with Object Lock enabled.
+		createReq := httptest.NewRequest(http.MethodPut, "/dst-bucket", nil)
+		createReq.Header.Set("x-amz-object-lock-enabled", "true")
+		ro.ServeHTTP(httptest.NewRecorder(), createReq)
+
+		// Create src bucket and put source object.
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/src-bucket", nil),
+		)
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/src-bucket/orig.txt", strings.NewReader("hello")),
+		)
+
+		copyReq := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
+		copyReq.Header.Set("X-Amz-Copy-Source", "/src-bucket/orig.txt")
+		copyReq.Header.Set(amzObjectLockMode, "GOVERNANCE")
+		copyReq.Header.Set(amzObjectLockRetainUntilDate, "2099-01-01T00:00:00Z")
+		copyReq.Header.Set(amzObjectLockLegalHold, "ON")
+		ro.ServeHTTP(httptest.NewRecorder(), copyReq)
+
+		retReq := httptest.NewRequest(http.MethodGet, "/dst-bucket/copy.txt?retention", nil)
+		retW := httptest.NewRecorder()
+		ro.ServeHTTP(retW, retReq)
+		assert.Equal(t, http.StatusOK, retW.Code)
+		assert.Contains(t, retW.Body.String(), "GOVERNANCE")
+	})
 }
 
 func TestRouterGetBucketLocation(t *testing.T) {
@@ -2042,6 +2244,17 @@ func TestRouterMultipartUpload(t *testing.T) {
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+
+	t.Run("CreateMultipartUpload returns 400 on invalid Object Lock header", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{})
+		req := httptest.NewRequest(http.MethodPost, "/my-bucket/key?uploads", nil)
+		// Only mode without retain-until-date → parseObjectLockHeaders returns !ok.
+		req.Header.Set(amzObjectLockMode, "GOVERNANCE")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidArgument")
 	})
 
 	t.Run("UploadPart returns 400 for invalid partNumber", func(t *testing.T) {
@@ -6120,17 +6333,47 @@ func TestSSEResponseHeaders(t *testing.T) {
 func TestObjectLockConfigHandlers(t *testing.T) {
 	const validXML = `<ObjectLockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ObjectLockEnabled>Enabled</ObjectLockEnabled></ObjectLockConfiguration>`
 
-	t.Run("PUT returns 200 on valid XML", func(t *testing.T) {
+	t.Run("PUT returns 200 on valid XML when versioning enabled", func(t *testing.T) {
 		ro := newTestRouter(t)
 		putReq := httptest.NewRequest(http.MethodPut, "/b", nil)
 		putW := httptest.NewRecorder()
 		ro.ServeHTTP(putW, putReq)
 		require.Equal(t, http.StatusOK, putW.Code)
 
+		// Enable versioning (required for Object Lock).
+		verReq := httptest.NewRequest(
+			http.MethodPut,
+			"/b?versioning",
+			strings.NewReader(
+				`<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`,
+			),
+		)
+		ro.ServeHTTP(httptest.NewRecorder(), verReq)
+
 		req := httptest.NewRequest(http.MethodPut, "/b?object-lock", strings.NewReader(validXML))
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("PUT returns 400 InvalidBucketState when versioning not enabled", func(t *testing.T) {
+		ro := newRouterWithMock(
+			newMockStore(func(m *mockStore) { m.putBucketObjectLockErr = ErrInvalidBucketState }),
+		)
+		req := httptest.NewRequest(http.MethodPut, "/b?object-lock", strings.NewReader(validXML))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidBucketState")
+	})
+
+	t.Run("PUT returns 500 on body read error", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{})
+		req := httptest.NewRequest(http.MethodPut, "/b?object-lock", errReader{})
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assert.Contains(t, w.Body.String(), "InternalError")
 	})
 
 	t.Run("PUT returns 400 on malformed XML", func(t *testing.T) {
