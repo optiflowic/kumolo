@@ -409,12 +409,8 @@ func (s *Storage) CopyObject(
 		meta.UserMetadata = userMetadata
 		meta.SSEAlgorithm = sseAlgorithm
 		meta.SSEKMSKeyID = sseKMSKeyID
-		if retention != nil {
-			meta.Retention = retention
-		}
-		if legalHold != nil {
-			meta.LegalHold = legalHold
-		}
+		meta.Retention = retention
+		meta.LegalHold = legalHold
 		if err := s.writeMeta(dstPath, meta); err != nil {
 			return ObjectMetadata{}, err
 		}
@@ -1388,12 +1384,14 @@ func (s *Storage) DeleteBucketPolicy(bucket string) error {
 
 // uploadMeta is stored as .mpu/<uploadID>/upload.json.
 type uploadMeta struct {
-	Bucket       string    `json:"bucket"`
-	Key          string    `json:"key"`
-	ContentType  string    `json:"contentType"`
-	Initiated    time.Time `json:"initiated"`
-	SSEAlgorithm string    `json:"sseAlgorithm,omitempty"`
-	SSEKMSKeyID  string    `json:"sseKmsKeyId,omitempty"`
+	Bucket       string           `json:"bucket"`
+	Key          string           `json:"key"`
+	ContentType  string           `json:"contentType"`
+	Initiated    time.Time        `json:"initiated"`
+	SSEAlgorithm string           `json:"sseAlgorithm,omitempty"`
+	SSEKMSKeyID  string           `json:"sseKmsKeyId,omitempty"`
+	Retention    *ObjectRetention `json:"retention,omitempty"`
+	LegalHold    *ObjectLegalHold `json:"legalHold,omitempty"`
 }
 
 // partMeta is stored as .mpu/<uploadID>/<partNumber>.part.meta.json.
@@ -1406,6 +1404,8 @@ const mpuDir = ".mpu"
 
 func (s *Storage) CreateMultipartUpload(
 	bucket, key, contentType, sseAlgorithm, sseKMSKeyID string,
+	retention *ObjectRetention,
+	legalHold *ObjectLegalHold,
 ) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1428,6 +1428,8 @@ func (s *Storage) CreateMultipartUpload(
 		Initiated:    time.Now().UTC(),
 		SSEAlgorithm: sseAlgorithm,
 		SSEKMSKeyID:  sseKMSKeyID,
+		Retention:    retention,
+		LegalHold:    legalHold,
 	}
 	data, _ := json.Marshal(meta) // json.Marshal never fails for uploadMeta
 	var uploadJSONWritten bool
@@ -1703,8 +1705,8 @@ func (s *Storage) CompleteMultipartUpload(
 		versionID,
 		umeta.SSEAlgorithm,
 		umeta.SSEKMSKeyID,
-		nil, // TODO: propagate Object Lock retention/legalHold from CreateMultipartUpload metadata
-		nil,
+		umeta.Retention,
+		umeta.LegalHold,
 	)
 	if err != nil {
 		return ObjectMetadata{}, err
@@ -1987,7 +1989,11 @@ func (s *Storage) PutBucketObjectLock(bucket, xmlBody string) error {
 	}
 	meta, err := s.readBucketMeta(bucket)
 	if err != nil {
-		return err
+		if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		slog.Error("bucket exists but metadata file is missing", "bucket", bucket) // #nosec G706
+		meta = bucketMeta{}
 	}
 	if meta.VersioningStatus != "Enabled" {
 		return ErrInvalidBucketState

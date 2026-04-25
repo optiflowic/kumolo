@@ -657,7 +657,19 @@ func (ro *Router) handlePutObjectLockConfiguration(
 	bucket string,
 ) {
 	body, err := io.ReadAll(r.Body)
-	if err != nil || !isWellFormedXML(body) {
+	if err != nil {
+		slog.Error(
+			"object lock configuration read error",
+			"bucket",
+			bucket,
+			"err",
+			err,
+		) // #nosec G706
+		writeError(w, r, http.StatusInternalServerError, "InternalError",
+			"Failed to read request body.")
+		return
+	}
+	if !isWellFormedXML(body) {
 		slog.Debug("object lock configuration malformed XML", "bucket", bucket) // #nosec G706
 		writeError(w, r, http.StatusBadRequest, "MalformedXML",
 			"The XML you provided was not well-formed.")

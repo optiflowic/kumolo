@@ -411,7 +411,12 @@ func (m *mockStore) ListObjects(_ string) ([]ObjectInfo, error) {
 func (m *mockStore) ListObjectVersions(_ string) ([]VersionInfo, []DeleteMarkerInfo, error) {
 	return nil, nil, m.listObjectVersionsErr
 }
-func (m *mockStore) CreateMultipartUpload(_, _, _, _, _ string) (string, error) {
+
+func (m *mockStore) CreateMultipartUpload(
+	_, _, _, _, _ string,
+	_ *ObjectRetention,
+	_ *ObjectLegalHold,
+) (string, error) {
 	return m.createMultipartUploadID, m.createMultipartUploadErr
 }
 func (m *mockStore) UploadPart(_ string, _ int, _ io.Reader) (string, error) {
@@ -2239,6 +2244,17 @@ func TestRouterMultipartUpload(t *testing.T) {
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+
+	t.Run("CreateMultipartUpload returns 400 on invalid Object Lock header", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{})
+		req := httptest.NewRequest(http.MethodPost, "/my-bucket/key?uploads", nil)
+		// Only mode without retain-until-date → parseObjectLockHeaders returns !ok.
+		req.Header.Set(amzObjectLockMode, "GOVERNANCE")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidArgument")
 	})
 
 	t.Run("UploadPart returns 400 for invalid partNumber", func(t *testing.T) {
@@ -6349,6 +6365,15 @@ func TestObjectLockConfigHandlers(t *testing.T) {
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assert.Contains(t, w.Body.String(), "InvalidBucketState")
+	})
+
+	t.Run("PUT returns 500 on body read error", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{})
+		req := httptest.NewRequest(http.MethodPut, "/b?object-lock", errReader{})
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assert.Contains(t, w.Body.String(), "InternalError")
 	})
 
 	t.Run("PUT returns 400 on malformed XML", func(t *testing.T) {

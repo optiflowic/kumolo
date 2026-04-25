@@ -56,6 +56,8 @@ type objectStore interface {
 type multipartStore interface {
 	CreateMultipartUpload(
 		bucket, key, contentType, sseAlgorithm, sseKMSKeyID string,
+		retention *ObjectRetention,
+		legalHold *ObjectLegalHold,
 	) (uploadID string, err error)
 	UploadPart(uploadID string, partNumber int, r io.Reader) (etag string, err error)
 	UploadPartCopy(
