@@ -260,15 +260,14 @@ func (n cmpCondNode) eval(
 	if err != nil {
 		return false, err
 	}
-	if n.op == "=" {
+	if n.op == "=" || n.op == "<>" {
 		lj, _ := json.Marshal(lv) // json.Marshal only fails for unmarshalable types
 		rj, _ := json.Marshal(rv) // json.Marshal only fails for unmarshalable types
-		return string(lj) == string(rj), nil
-	}
-	if n.op == "<>" {
-		lj, _ := json.Marshal(lv) // json.Marshal only fails for unmarshalable types
-		rj, _ := json.Marshal(rv) // json.Marshal only fails for unmarshalable types
-		return string(lj) != string(rj), nil
+		eq := string(lj) == string(rj)
+		if n.op == "=" {
+			return eq, nil
+		}
+		return !eq, nil
 	}
 	cmp, err := dynamoValueCmp(lv, rv)
 	if err != nil {
@@ -408,10 +407,23 @@ func (p *exprParser) consume() exprToken {
 	return t
 }
 
+var tokenKindNames = map[tokenKind]string{
+	tokLParen: "'('",
+	tokRParen: "')'",
+	tokComma:  "','",
+}
+
+func tokenKindName(k tokenKind) string {
+	if s, ok := tokenKindNames[k]; ok {
+		return s
+	}
+	return fmt.Sprintf("token(%d)", k)
+}
+
 func (p *exprParser) expectKind(kind tokenKind) (exprToken, error) {
 	t := p.consume()
 	if t.kind != kind {
-		return exprToken{}, fmt.Errorf("expected token %d, got %q", kind, t.val)
+		return exprToken{}, fmt.Errorf("expected %s, got %q", tokenKindName(kind), t.val)
 	}
 	return t, nil
 }

@@ -625,6 +625,9 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 			writeError(w, http.StatusBadRequest, "ValidationException", err.Error())
 			return
 		}
+		if items == nil {
+			items = []map[string]any{}
+		}
 	}
 	slog.Debug("scanned DynamoDB table", "table", req.TableName, "count", len(items))
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -783,6 +786,9 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 			slog.Debug("Query: invalid FilterExpression", "table", req.TableName, "err", err)
 			writeError(w, http.StatusBadRequest, "ValidationException", err.Error())
 			return
+		}
+		if items == nil {
+			items = []map[string]any{}
 		}
 	}
 	slog.Debug("queried DynamoDB table", "table", req.TableName, "count", len(items))

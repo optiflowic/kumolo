@@ -265,6 +265,7 @@ func TestHandleScanWithFilterExpression(t *testing.T) {
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 			assert.Equal(t, float64(tc.wantCount), resp["Count"])
 			assert.Equal(t, float64(tc.wantScanned), resp["ScannedCount"])
+			assert.IsType(t, []any{}, resp["Items"])
 		})
 	}
 
