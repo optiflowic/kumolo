@@ -347,6 +347,18 @@ func TestHandleQueryWithFilterExpression(t *testing.T) {
 			wantCount:   3,
 			wantScanned: 3,
 		},
+		{
+			name: "query filter matches none",
+			body: `{
+				"TableName":"orders",
+				"KeyConditionExpression":"userId = :uid",
+				"FilterExpression":"#s = :cancelled",
+				"ExpressionAttributeNames":{"#s":"status"},
+				"ExpressionAttributeValues":{":uid":{"S":"u1"},":cancelled":{"S":"cancelled"}}
+			}`,
+			wantCount:   0,
+			wantScanned: 3,
+		},
 	}
 
 	for _, tc := range tests {
@@ -358,6 +370,7 @@ func TestHandleQueryWithFilterExpression(t *testing.T) {
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 			assert.Equal(t, float64(tc.wantCount), resp["Count"])
 			assert.Equal(t, float64(tc.wantScanned), resp["ScannedCount"])
+			assert.IsType(t, []any{}, resp["Items"])
 		})
 	}
 
@@ -462,6 +475,11 @@ func TestExprNodesDirect(t *testing.T) {
 		_, err := node.eval(item, names, values)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "attribute_exists")
+	})
+
+	t.Run("tokenKindName fallback for unknown kind", func(t *testing.T) {
+		got := tokenKindName(tokenKind(999))
+		assert.Equal(t, "token(999)", got)
 	})
 
 	t.Run("cmpCondNode unknown operator returns error", func(t *testing.T) {
