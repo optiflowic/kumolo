@@ -113,12 +113,10 @@ func tokenizeExpr(expr string) ([]exprToken, error) {
 // exprOperand resolves to a DynamoDB typed value from an item, names, or values.
 type exprOperand interface {
 	resolve(item map[string]any, names map[string]string, values map[string]any) (any, error)
-	// attrName returns the plain attribute name for attribute_exists/not_exists checks.
-	// Returns ("", false) when the operand is not an attribute path.
+	// attrName returns the attribute name for exists checks; ("", false) if not a path.
 	attrName(names map[string]string) (string, bool)
 }
 
-// nameRefOperand resolves a #name reference → item attribute value.
 type nameRefOperand struct{ ref string }
 
 func (o nameRefOperand) resolve(
@@ -138,7 +136,6 @@ func (o nameRefOperand) attrName(names map[string]string) (string, bool) {
 	return actual, ok
 }
 
-// valRefOperand resolves a :val reference → ExpressionAttributeValues entry.
 type valRefOperand struct{ ref string }
 
 func (o valRefOperand) resolve(
@@ -155,7 +152,6 @@ func (o valRefOperand) resolve(
 
 func (o valRefOperand) attrName(_ map[string]string) (string, bool) { return "", false }
 
-// plainOperand resolves a bare attribute name → item attribute value.
 type plainOperand struct{ name string }
 
 func (o plainOperand) resolve(
@@ -350,7 +346,6 @@ func (n containsCondNode) eval(
 		return false, nil
 	}
 	if al, ok := pm["L"].([]any); ok {
-		// json.Marshal only fails for unmarshalable types (channels, funcs), not DynamoDB values
 		sj, _ := json.Marshal(searchVal)
 		for _, elem := range al {
 			ej, _ := json.Marshal(elem)
@@ -658,7 +653,6 @@ func parseFilterExpr(expr string) (condNode, error) {
 }
 
 // evalFilterExpr evaluates a DynamoDB filter/condition expression against an item.
-// Returns true if the item satisfies the expression.
 func evalFilterExpr(
 	expr string,
 	item map[string]any,
@@ -673,7 +667,6 @@ func evalFilterExpr(
 }
 
 // applyFilterExpression filters items by a DynamoDB filter expression.
-// Returns filtered items and an error if the expression is invalid.
 func applyFilterExpression(
 	items []map[string]any,
 	filterExpr string,

@@ -88,6 +88,7 @@ func TestEvalFilterExpr(t *testing.T) {
 		{"or both false", "#n = :bob OR #a = :twenty", false, false},
 		{"not true", "NOT #n = :bob", true, false},
 		{"not false", "NOT #n = :alice", false, false},
+		{"not eval error", "NOT #missing = :alice", false, true},
 		// Parentheses
 		{"parens", "(#n = :alice OR #n = :bob) AND #a = :thirty", true, false},
 		// Plain attr name (no #)
