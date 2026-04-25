@@ -1703,7 +1703,7 @@ func (s *Storage) CompleteMultipartUpload(
 		versionID,
 		umeta.SSEAlgorithm,
 		umeta.SSEKMSKeyID,
-		nil,
+		nil, // TODO: propagate Object Lock retention/legalHold from CreateMultipartUpload metadata
 		nil,
 	)
 	if err != nil {
@@ -1987,10 +1987,7 @@ func (s *Storage) PutBucketObjectLock(bucket, xmlBody string) error {
 	}
 	meta, err := s.readBucketMeta(bucket)
 	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		meta = bucketMeta{}
+		return err
 	}
 	if meta.VersioningStatus != "Enabled" {
 		return ErrInvalidBucketState

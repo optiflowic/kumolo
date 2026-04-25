@@ -681,35 +681,38 @@ func TestRouterPutObject(t *testing.T) {
 		assert.Equal(t, "images", w.Header().Get("x-amz-meta-category"))
 	})
 
-	t.Run("Object Lock headers are stored and reflected in HeadObject", func(t *testing.T) {
-		ro := newTestRouter(t)
-		// Create bucket with Object Lock enabled.
-		createReq := httptest.NewRequest(http.MethodPut, "/my-bucket", nil)
-		createReq.Header.Set("x-amz-object-lock-enabled", "true")
-		ro.ServeHTTP(httptest.NewRecorder(), createReq)
+	t.Run(
+		"Object Lock headers are stored and reflected in GetObjectRetention/GetObjectLegalHold",
+		func(t *testing.T) {
+			ro := newTestRouter(t)
+			// Create bucket with Object Lock enabled.
+			createReq := httptest.NewRequest(http.MethodPut, "/my-bucket", nil)
+			createReq.Header.Set("x-amz-object-lock-enabled", "true")
+			ro.ServeHTTP(httptest.NewRecorder(), createReq)
 
-		putReq := httptest.NewRequest(
-			http.MethodPut,
-			"/my-bucket/obj.txt",
-			strings.NewReader("data"),
-		)
-		putReq.Header.Set(amzObjectLockMode, "GOVERNANCE")
-		putReq.Header.Set(amzObjectLockRetainUntilDate, "2099-01-01T00:00:00Z")
-		putReq.Header.Set(amzObjectLockLegalHold, "ON")
-		ro.ServeHTTP(httptest.NewRecorder(), putReq)
+			putReq := httptest.NewRequest(
+				http.MethodPut,
+				"/my-bucket/obj.txt",
+				strings.NewReader("data"),
+			)
+			putReq.Header.Set(amzObjectLockMode, "GOVERNANCE")
+			putReq.Header.Set(amzObjectLockRetainUntilDate, "2099-01-01T00:00:00Z")
+			putReq.Header.Set(amzObjectLockLegalHold, "ON")
+			ro.ServeHTTP(httptest.NewRecorder(), putReq)
 
-		retReq := httptest.NewRequest(http.MethodGet, "/my-bucket/obj.txt?retention", nil)
-		retW := httptest.NewRecorder()
-		ro.ServeHTTP(retW, retReq)
-		assert.Equal(t, http.StatusOK, retW.Code)
-		assert.Contains(t, retW.Body.String(), "GOVERNANCE")
+			retReq := httptest.NewRequest(http.MethodGet, "/my-bucket/obj.txt?retention", nil)
+			retW := httptest.NewRecorder()
+			ro.ServeHTTP(retW, retReq)
+			assert.Equal(t, http.StatusOK, retW.Code)
+			assert.Contains(t, retW.Body.String(), "GOVERNANCE")
 
-		holdReq := httptest.NewRequest(http.MethodGet, "/my-bucket/obj.txt?legal-hold", nil)
-		holdW := httptest.NewRecorder()
-		ro.ServeHTTP(holdW, holdReq)
-		assert.Equal(t, http.StatusOK, holdW.Code)
-		assert.Contains(t, holdW.Body.String(), "ON")
-	})
+			holdReq := httptest.NewRequest(http.MethodGet, "/my-bucket/obj.txt?legal-hold", nil)
+			holdW := httptest.NewRecorder()
+			ro.ServeHTTP(holdW, holdReq)
+			assert.Equal(t, http.StatusOK, holdW.Code)
+			assert.Contains(t, holdW.Body.String(), "ON")
+		},
+	)
 
 	t.Run("returns 400 on invalid Object Lock mode", func(t *testing.T) {
 		ro := newTestRouter(t)
@@ -755,6 +758,38 @@ func TestRouterPutObject(t *testing.T) {
 			strings.NewReader("data"),
 		)
 		putReq.Header.Set(amzObjectLockLegalHold, "MAYBE")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, putReq)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidArgument")
+	})
+
+	t.Run("returns 400 when only retain-until-date is set without mode", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+
+		putReq := httptest.NewRequest(
+			http.MethodPut,
+			"/my-bucket/obj.txt",
+			strings.NewReader("data"),
+		)
+		putReq.Header.Set(amzObjectLockRetainUntilDate, "2099-01-01T00:00:00Z")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, putReq)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidArgument")
+	})
+
+	t.Run("returns 400 when only mode is set without retain-until-date", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+
+		putReq := httptest.NewRequest(
+			http.MethodPut,
+			"/my-bucket/obj.txt",
+			strings.NewReader("data"),
+		)
+		putReq.Header.Set(amzObjectLockMode, "GOVERNANCE")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, putReq)
 		assert.Equal(t, http.StatusBadRequest, w.Code)

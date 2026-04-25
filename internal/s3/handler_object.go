@@ -961,12 +961,22 @@ func parseObjectLockHeaders(
 	holdStr := r.Header.Get(amzObjectLockLegalHold)
 
 	if modeStr != "" || dateStr != "" {
+		if modeStr == "" || dateStr == "" {
+			writeError(
+				w,
+				r,
+				http.StatusBadRequest,
+				"InvalidArgument",
+				"Both x-amz-object-lock-mode and x-amz-object-lock-retain-until-date must be supplied together.",
+			)
+			return nil, nil, false
+		}
 		if modeStr != "GOVERNANCE" && modeStr != "COMPLIANCE" {
 			writeError(w, r, http.StatusBadRequest, "InvalidArgument",
 				"x-amz-object-lock-mode must be GOVERNANCE or COMPLIANCE.")
 			return nil, nil, false
 		}
-		retainUntil, err := time.Parse(time.RFC3339, dateStr)
+		retainUntil, err := time.Parse(time.RFC3339Nano, dateStr)
 		if err != nil {
 			writeError(w, r, http.StatusBadRequest, "InvalidArgument",
 				"x-amz-object-lock-retain-until-date must be an RFC3339 timestamp.")
