@@ -6,8 +6,6 @@ import (
 	"strings"
 )
 
-// --- Tokenizer ---
-
 type tokenKind int
 
 const (
@@ -112,8 +110,6 @@ func tokenizeExpr(expr string) ([]exprToken, error) {
 	return toks, nil
 }
 
-// --- Operands ---
-
 // exprOperand resolves to a DynamoDB typed value from an item, names, or values.
 type exprOperand interface {
 	resolve(item map[string]any, names map[string]string, values map[string]any) (any, error)
@@ -172,8 +168,6 @@ func (o plainOperand) resolve(
 
 func (o plainOperand) attrName(_ map[string]string) (string, bool) { return o.name, true }
 
-// --- AST nodes ---
-
 type condNode interface {
 	eval(item map[string]any, names map[string]string, values map[string]any) (bool, error)
 }
@@ -209,8 +203,6 @@ type betweenCondNode struct {
 	hi   exprOperand
 }
 
-// --- Evaluators ---
-
 func (n andCondNode) eval(
 	item map[string]any,
 	names map[string]string,
@@ -244,7 +236,10 @@ func (n notCondNode) eval(
 	values map[string]any,
 ) (bool, error) {
 	v, err := n.operand.eval(item, names, values)
-	return !v, err
+	if err != nil {
+		return false, err
+	}
+	return !v, nil
 }
 
 func (n cmpCondNode) eval(
@@ -261,8 +256,9 @@ func (n cmpCondNode) eval(
 		return false, err
 	}
 	if n.op == "=" || n.op == "<>" {
-		lj, _ := json.Marshal(lv) // json.Marshal only fails for unmarshalable types
-		rj, _ := json.Marshal(rv) // json.Marshal only fails for unmarshalable types
+		// json.Marshal only fails for unmarshalable types (channels, funcs), not DynamoDB values
+		lj, _ := json.Marshal(lv)
+		rj, _ := json.Marshal(rv)
 		eq := string(lj) == string(rj)
 		if n.op == "=" {
 			return eq, nil
@@ -347,18 +343,17 @@ func (n containsCondNode) eval(
 	if !pok || !sok {
 		return false, nil
 	}
-	// String contains substring
 	if as, ok := pm["S"].(string); ok {
 		if bs, ok := sm["S"].(string); ok {
 			return strings.Contains(as, bs), nil
 		}
 		return false, nil
 	}
-	// List contains element
 	if al, ok := pm["L"].([]any); ok {
-		sj, _ := json.Marshal(searchVal) // json.Marshal only fails for unmarshalable types
+		// json.Marshal only fails for unmarshalable types (channels, funcs), not DynamoDB values
+		sj, _ := json.Marshal(searchVal)
 		for _, elem := range al {
-			ej, _ := json.Marshal(elem) // json.Marshal only fails for unmarshalable types
+			ej, _ := json.Marshal(elem)
 			if string(ej) == string(sj) {
 				return true, nil
 			}
@@ -389,8 +384,6 @@ func (n betweenCondNode) eval(
 	c2, err2 := dynamoValueCmp(attrVal, hiVal)
 	return err1 == nil && err2 == nil && c1 >= 0 && c2 <= 0, nil
 }
-
-// --- Parser ---
 
 type exprParser struct {
 	toks []exprToken
