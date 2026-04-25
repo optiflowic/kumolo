@@ -125,7 +125,11 @@ type exprOperand interface {
 // nameRefOperand resolves a #name reference → item attribute value.
 type nameRefOperand struct{ ref string }
 
-func (o nameRefOperand) resolve(item map[string]any, names map[string]string, _ map[string]any) (any, error) {
+func (o nameRefOperand) resolve(
+	item map[string]any,
+	names map[string]string,
+	_ map[string]any,
+) (any, error) {
 	actual, ok := names[o.ref]
 	if !ok {
 		return nil, fmt.Errorf("ExpressionAttributeNames missing %q", o.ref)
@@ -141,7 +145,11 @@ func (o nameRefOperand) attrName(names map[string]string) (string, bool) {
 // valRefOperand resolves a :val reference → ExpressionAttributeValues entry.
 type valRefOperand struct{ ref string }
 
-func (o valRefOperand) resolve(_ map[string]any, _ map[string]string, values map[string]any) (any, error) {
+func (o valRefOperand) resolve(
+	_ map[string]any,
+	_ map[string]string,
+	values map[string]any,
+) (any, error) {
 	v, ok := values[o.ref]
 	if !ok {
 		return nil, fmt.Errorf("ExpressionAttributeValues missing %q", o.ref)
@@ -154,7 +162,11 @@ func (o valRefOperand) attrName(_ map[string]string) (string, bool) { return "",
 // plainOperand resolves a bare attribute name → item attribute value.
 type plainOperand struct{ name string }
 
-func (o plainOperand) resolve(item map[string]any, _ map[string]string, _ map[string]any) (any, error) {
+func (o plainOperand) resolve(
+	item map[string]any,
+	_ map[string]string,
+	_ map[string]any,
+) (any, error) {
 	return item[o.name], nil
 }
 
@@ -199,7 +211,11 @@ type betweenCondNode struct {
 
 // --- Evaluators ---
 
-func (n andCondNode) eval(item map[string]any, names map[string]string, values map[string]any) (bool, error) {
+func (n andCondNode) eval(
+	item map[string]any,
+	names map[string]string,
+	values map[string]any,
+) (bool, error) {
 	l, err := n.left.eval(item, names, values)
 	if err != nil || !l {
 		return false, err
@@ -207,7 +223,11 @@ func (n andCondNode) eval(item map[string]any, names map[string]string, values m
 	return n.right.eval(item, names, values)
 }
 
-func (n orCondNode) eval(item map[string]any, names map[string]string, values map[string]any) (bool, error) {
+func (n orCondNode) eval(
+	item map[string]any,
+	names map[string]string,
+	values map[string]any,
+) (bool, error) {
 	l, err := n.left.eval(item, names, values)
 	if err != nil {
 		return false, err
@@ -218,12 +238,20 @@ func (n orCondNode) eval(item map[string]any, names map[string]string, values ma
 	return n.right.eval(item, names, values)
 }
 
-func (n notCondNode) eval(item map[string]any, names map[string]string, values map[string]any) (bool, error) {
+func (n notCondNode) eval(
+	item map[string]any,
+	names map[string]string,
+	values map[string]any,
+) (bool, error) {
 	v, err := n.operand.eval(item, names, values)
 	return !v, err
 }
 
-func (n cmpCondNode) eval(item map[string]any, names map[string]string, values map[string]any) (bool, error) {
+func (n cmpCondNode) eval(
+	item map[string]any,
+	names map[string]string,
+	values map[string]any,
+) (bool, error) {
 	lv, err := n.left.resolve(item, names, values)
 	if err != nil {
 		return false, err
@@ -259,9 +287,17 @@ func (n cmpCondNode) eval(item map[string]any, names map[string]string, values m
 	return false, fmt.Errorf("unknown operator %q", n.op)
 }
 
-func (n attrExistsCondNode) eval(item map[string]any, names map[string]string, _ map[string]any) (bool, error) {
+func (n attrExistsCondNode) eval(
+	item map[string]any,
+	names map[string]string,
+	_ map[string]any,
+) (bool, error) {
 	attrName, ok := n.operand.attrName(names)
 	if !ok {
+		// nameRefOperand returns false when the #ref is absent from ExpressionAttributeNames.
+		if nr, isRef := n.operand.(nameRefOperand); isRef {
+			return false, fmt.Errorf("ExpressionAttributeNames missing %q", nr.ref)
+		}
 		return false, fmt.Errorf("attribute_exists/attribute_not_exists requires an attribute path")
 	}
 	_, exists := item[attrName]
@@ -271,7 +307,11 @@ func (n attrExistsCondNode) eval(item map[string]any, names map[string]string, _
 	return exists, nil
 }
 
-func (n beginsWithCondNode) eval(item map[string]any, names map[string]string, values map[string]any) (bool, error) {
+func (n beginsWithCondNode) eval(
+	item map[string]any,
+	names map[string]string,
+	values map[string]any,
+) (bool, error) {
 	pathVal, err := n.path.resolve(item, names, values)
 	if err != nil {
 		return false, err
@@ -290,7 +330,11 @@ func (n beginsWithCondNode) eval(item map[string]any, names map[string]string, v
 	return aok && bok && strings.HasPrefix(as, bs), nil
 }
 
-func (n containsCondNode) eval(item map[string]any, names map[string]string, values map[string]any) (bool, error) {
+func (n containsCondNode) eval(
+	item map[string]any,
+	names map[string]string,
+	values map[string]any,
+) (bool, error) {
 	pathVal, err := n.path.resolve(item, names, values)
 	if err != nil {
 		return false, err
@@ -325,7 +369,11 @@ func (n containsCondNode) eval(item map[string]any, names map[string]string, val
 	return false, nil
 }
 
-func (n betweenCondNode) eval(item map[string]any, names map[string]string, values map[string]any) (bool, error) {
+func (n betweenCondNode) eval(
+	item map[string]any,
+	names map[string]string,
+	values map[string]any,
+) (bool, error) {
 	attrVal, err := n.attr.resolve(item, names, values)
 	if err != nil {
 		return false, err
@@ -537,7 +585,8 @@ func (p *exprParser) parseContainsFunc() (condNode, error) {
 }
 
 func (p *exprParser) parseComparison() (condNode, error) {
-	left, err := p.parseOperand()
+	// LHS of any comparison or BETWEEN must be an attribute path, not a value ref.
+	left, err := p.parseAttrPath()
 	if err != nil {
 		return nil, err
 	}
@@ -633,7 +682,7 @@ func applyFilterExpression(
 	if err != nil {
 		return nil, err
 	}
-	filtered := items[:0:0]
+	var filtered []map[string]any
 	for _, item := range items {
 		ok, err := node.eval(item, attrNames, attrValues)
 		if err != nil {

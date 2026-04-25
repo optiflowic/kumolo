@@ -14,7 +14,9 @@ func TestEvalFilterExpr(t *testing.T) {
 		"name":  map[string]any{"S": "Alice"},
 		"age":   map[string]any{"N": "30"},
 		"score": map[string]any{"N": "95"},
-		"tags":  map[string]any{"L": []any{map[string]any{"S": "admin"}, map[string]any{"S": "user"}}},
+		"tags": map[string]any{
+			"L": []any{map[string]any{"S": "admin"}, map[string]any{"S": "user"}},
+		},
 	}
 	names := map[string]string{
 		"#n":     "name",
@@ -68,6 +70,8 @@ func TestEvalFilterExpr(t *testing.T) {
 		{"attr exists no", "attribute_exists(#nope)", false, false},
 		{"attr not exists yes", "attribute_not_exists(#nope)", true, false},
 		{"attr not exists no", "attribute_not_exists(#n)", false, false},
+		{"attr exists missing name ref", "attribute_exists(#undefined)", false, true},
+		{"attr not exists missing name ref", "attribute_not_exists(#undefined)", false, true},
 		// begins_with
 		{"begins_with match", "begins_with(#n, :al)", true, false},
 		{"begins_with no match", "begins_with(#n, :bob)", false, false},
@@ -111,9 +115,21 @@ func TestEvalFilterExpr(t *testing.T) {
 
 func TestApplyFilterExpression(t *testing.T) {
 	items := []map[string]any{
-		{"pk": map[string]any{"S": "1"}, "status": map[string]any{"S": "active"}, "age": map[string]any{"N": "25"}},
-		{"pk": map[string]any{"S": "2"}, "status": map[string]any{"S": "inactive"}, "age": map[string]any{"N": "40"}},
-		{"pk": map[string]any{"S": "3"}, "status": map[string]any{"S": "active"}, "age": map[string]any{"N": "35"}},
+		{
+			"pk":     map[string]any{"S": "1"},
+			"status": map[string]any{"S": "active"},
+			"age":    map[string]any{"N": "25"},
+		},
+		{
+			"pk":     map[string]any{"S": "2"},
+			"status": map[string]any{"S": "inactive"},
+			"age":    map[string]any{"N": "40"},
+		},
+		{
+			"pk":     map[string]any{"S": "3"},
+			"status": map[string]any{"S": "active"},
+			"age":    map[string]any{"N": "35"},
+		},
 	}
 
 	t.Run("no filter returns all", func(t *testing.T) {
@@ -164,14 +180,14 @@ func TestHandleScanWithFilterExpression(t *testing.T) {
 	}
 
 	tests := []struct {
-		name          string
-		body          string
-		wantCount     int
-		wantScanned   int
+		name        string
+		body        string
+		wantCount   int
+		wantScanned int
 	}{
 		{
-			name: "no filter returns all",
-			body: `{"TableName":"test-table"}`,
+			name:        "no filter returns all",
+			body:        `{"TableName":"test-table"}`,
 			wantCount:   3,
 			wantScanned: 3,
 		},
