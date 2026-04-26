@@ -579,7 +579,10 @@ func (ro *Router) handleDeleteItem(w http.ResponseWriter, body []byte) {
 
 func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 	var req struct {
-		TableName string `json:"TableName"`
+		TableName                 string            `json:"TableName"`
+		FilterExpression          string            `json:"FilterExpression"`
+		ExpressionAttributeNames  map[string]string `json:"ExpressionAttributeNames"`
+		ExpressionAttributeValues map[string]any    `json:"ExpressionAttributeValues"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
@@ -609,11 +612,28 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 	if items == nil {
 		items = []map[string]any{}
 	}
+	scannedCount := len(items)
+	if req.FilterExpression != "" {
+		items, err = applyFilterExpression(
+			items,
+			req.FilterExpression,
+			req.ExpressionAttributeNames,
+			req.ExpressionAttributeValues,
+		)
+		if err != nil {
+			slog.Debug("Scan: invalid FilterExpression", "table", req.TableName, "err", err)
+			writeError(w, http.StatusBadRequest, "ValidationException", err.Error())
+			return
+		}
+		if items == nil {
+			items = []map[string]any{}
+		}
+	}
 	slog.Debug("scanned DynamoDB table", "table", req.TableName, "count", len(items))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"Items":        items,
 		"Count":        len(items),
-		"ScannedCount": len(items),
+		"ScannedCount": scannedCount,
 	})
 }
 
@@ -705,6 +725,7 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 	var req struct {
 		TableName                 string            `json:"TableName"`
 		KeyConditionExpression    string            `json:"KeyConditionExpression"`
+		FilterExpression          string            `json:"FilterExpression"`
 		ExpressionAttributeNames  map[string]string `json:"ExpressionAttributeNames"`
 		ExpressionAttributeValues map[string]any    `json:"ExpressionAttributeValues"`
 	}
@@ -753,11 +774,28 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 	if items == nil {
 		items = []map[string]any{}
 	}
+	scannedCount := len(items)
+	if req.FilterExpression != "" {
+		items, err = applyFilterExpression(
+			items,
+			req.FilterExpression,
+			req.ExpressionAttributeNames,
+			req.ExpressionAttributeValues,
+		)
+		if err != nil {
+			slog.Debug("Query: invalid FilterExpression", "table", req.TableName, "err", err)
+			writeError(w, http.StatusBadRequest, "ValidationException", err.Error())
+			return
+		}
+		if items == nil {
+			items = []map[string]any{}
+		}
+	}
 	slog.Debug("queried DynamoDB table", "table", req.TableName, "count", len(items))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"Items":        items,
 		"Count":        len(items),
-		"ScannedCount": len(items),
+		"ScannedCount": scannedCount,
 	})
 }
 
