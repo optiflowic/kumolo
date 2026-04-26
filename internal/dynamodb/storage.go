@@ -355,6 +355,7 @@ func (s *Storage) UpdateItem(
 	}
 	itemPath := filepath.Join(tableName, k+".json")
 	item, err := readJSON[map[string]any](s, itemPath)
+	var before map[string]any
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			return nil, nil, err
@@ -363,10 +364,12 @@ func (s *Storage) UpdateItem(
 		for kk, v := range key {
 			item[kk] = v
 		}
-	}
-	before := make(map[string]any, len(item))
-	for k, v := range item {
-		before[k] = v
+		// before stays nil: item did not exist prior to this update
+	} else {
+		before = make(map[string]any, len(item))
+		for k, v := range item {
+			before[k] = v
+		}
 	}
 	for attr, val := range updates {
 		if val == nil {

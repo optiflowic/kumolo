@@ -575,6 +575,18 @@ func TestUpdateItem(t *testing.T) {
 		assert.NotNil(t, got["x"])
 	})
 
+	t.Run("returns nil before when item did not exist", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		before, _, err := s.UpdateItem(
+			"test-table",
+			map[string]any{"pk": map[string]any{"S": "new"}},
+			map[string]any{"x": map[string]any{"N": "1"}},
+		)
+		require.NoError(t, err)
+		assert.Nil(t, before)
+	})
+
 	t.Run("error when table not found", func(t *testing.T) {
 		s := newTestStorage(t)
 		_, _, err := s.UpdateItem("no-table", map[string]any{"pk": map[string]any{"S": "k"}}, nil)

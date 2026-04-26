@@ -637,6 +637,40 @@ func TestHandleUpdateItem(t *testing.T) {
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		assert.Nil(t, resp["Attributes"])
 	})
+
+	t.Run("ALL_OLD omits Attributes when item did not exist", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+            "TableName": "test-table",
+            "Key": {"pk": {"S": "new"}},
+            "UpdateExpression": "SET val = :v",
+            "ExpressionAttributeValues": {":v": {"S": "x"}},
+            "ReturnValues": "ALL_OLD"
+        }`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Nil(t, resp["Attributes"])
+	})
+
+	t.Run("UPDATED_OLD returns old value of REMOVEd existing attribute", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"val":{"S":"old"}}}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+            "TableName": "test-table",
+            "Key": {"pk": {"S": "k1"}},
+            "UpdateExpression": "REMOVE val",
+            "ReturnValues": "UPDATED_OLD"
+        }`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		attrs := resp["Attributes"].(map[string]any)
+		assert.Equal(t, map[string]any{"S": "old"}, attrs["val"])
+	})
 }
 
 func TestHandleUpdateItem_InternalErrors(t *testing.T) {

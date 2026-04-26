@@ -723,7 +723,9 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 	case "ALL_NEW":
 		resp["Attributes"] = after
 	case "ALL_OLD":
-		resp["Attributes"] = before
+		if before != nil {
+			resp["Attributes"] = before
+		}
 	case "UPDATED_NEW":
 		attrs := make(map[string]any, len(updates))
 		for k := range updates {
@@ -735,14 +737,16 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 			resp["Attributes"] = attrs
 		}
 	case "UPDATED_OLD":
-		attrs := make(map[string]any, len(updates))
-		for k := range updates {
-			if v, ok := before[k]; ok {
-				attrs[k] = v
+		if before != nil {
+			attrs := make(map[string]any, len(updates))
+			for k := range updates {
+				if v, ok := before[k]; ok {
+					attrs[k] = v
+				}
 			}
-		}
-		if len(attrs) > 0 {
-			resp["Attributes"] = attrs
+			if len(attrs) > 0 {
+				resp["Attributes"] = attrs
+			}
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)
