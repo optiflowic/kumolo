@@ -215,7 +215,7 @@ type store interface {
 		tableName string,
 		key map[string]any,
 		updates map[string]any,
-	) (before, after map[string]any, err error)
+	) (map[string]any, map[string]any, error)
 	Query(
 		tableName, hashKeyName string,
 		hashKeyValue any,
