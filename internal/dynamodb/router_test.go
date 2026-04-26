@@ -544,6 +544,100 @@ func TestHandleUpdateItem(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assertErrorType(t, w, "ValidationException")
 	})
+
+	t.Run("returns old item when ReturnValues is ALL_OLD", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"val":{"S":"old"}}}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+            "TableName": "test-table",
+            "Key": {"pk": {"S": "k1"}},
+            "UpdateExpression": "SET val = :v",
+            "ExpressionAttributeValues": {":v": {"S": "new"}},
+            "ReturnValues": "ALL_OLD"
+        }`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		attrs := resp["Attributes"].(map[string]any)
+		assert.Equal(t, map[string]any{"S": "old"}, attrs["val"])
+		assert.Nil(t, attrs["name"])
+	})
+
+	t.Run(
+		"returns only changed attrs after update when ReturnValues is UPDATED_NEW",
+		func(t *testing.T) {
+			ro := newTestRouter(t)
+			require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+			require.Equal(t, http.StatusOK, dynamo(
+				t,
+				ro,
+				"PutItem",
+				`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"other":{"S":"keep"},"val":{"S":"old"}}}`,
+			).Code)
+			w := dynamo(t, ro, "UpdateItem", `{
+            "TableName": "test-table",
+            "Key": {"pk": {"S": "k1"}},
+            "UpdateExpression": "SET val = :v",
+            "ExpressionAttributeValues": {":v": {"S": "new"}},
+            "ReturnValues": "UPDATED_NEW"
+        }`)
+			assert.Equal(t, http.StatusOK, w.Code)
+			var resp map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+			attrs := resp["Attributes"].(map[string]any)
+			assert.Equal(t, map[string]any{"S": "new"}, attrs["val"])
+			assert.Nil(t, attrs["other"])
+			assert.Nil(t, attrs["pk"])
+		},
+	)
+
+	t.Run(
+		"returns only changed attrs before update when ReturnValues is UPDATED_OLD",
+		func(t *testing.T) {
+			ro := newTestRouter(t)
+			require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+			require.Equal(t, http.StatusOK, dynamo(
+				t,
+				ro,
+				"PutItem",
+				`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"other":{"S":"keep"},"val":{"S":"old"}}}`,
+			).Code)
+			w := dynamo(t, ro, "UpdateItem", `{
+            "TableName": "test-table",
+            "Key": {"pk": {"S": "k1"}},
+            "UpdateExpression": "SET val = :v",
+            "ExpressionAttributeValues": {":v": {"S": "new"}},
+            "ReturnValues": "UPDATED_OLD"
+        }`)
+			assert.Equal(t, http.StatusOK, w.Code)
+			var resp map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+			attrs := resp["Attributes"].(map[string]any)
+			assert.Equal(t, map[string]any{"S": "old"}, attrs["val"])
+			assert.Nil(t, attrs["other"])
+			assert.Nil(t, attrs["pk"])
+		},
+	)
+
+	t.Run("UPDATED_OLD excludes removed attr absent in original", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"val":{"S":"x"}}}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+            "TableName": "test-table",
+            "Key": {"pk": {"S": "k1"}},
+            "UpdateExpression": "REMOVE nonexistent",
+            "ReturnValues": "UPDATED_OLD"
+        }`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		attrs := resp["Attributes"].(map[string]any)
+		assert.Empty(t, attrs)
+	})
 }
 
 func TestHandleUpdateItem_InternalErrors(t *testing.T) {
@@ -1116,8 +1210,9 @@ func (m *mockStore) UpdateItem(
 	tableName string,
 	key map[string]any,
 	updates map[string]any,
-) (map[string]any, error) {
-	return m.updateItemFn(tableName, key, updates)
+) (map[string]any, map[string]any, error) {
+	item, err := m.updateItemFn(tableName, key, updates)
+	return nil, item, err
 }
 
 func (m *mockStore) Query(

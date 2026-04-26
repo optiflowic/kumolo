@@ -333,34 +333,40 @@ func (s *Storage) Scan(tableName string) ([]map[string]any, error) {
 // UpdateItem reads an existing item (or seeds one from the key), applies the
 // provided attribute updates, and writes the result back.
 // A nil value in updates means remove the attribute.
+// Returns (before, after, error): before is the item state prior to update,
+// after is the item state following the update.
 func (s *Storage) UpdateItem(
 	tableName string,
 	key map[string]any,
 	updates map[string]any,
-) (map[string]any, error) {
+) (before, after map[string]any, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	meta, err := s.readTableMeta(tableName)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, ErrTableNotFound
+			return nil, nil, ErrTableNotFound
 		}
-		return nil, err
+		return nil, nil, err
 	}
 	k, err := itemKey(key, meta.KeySchema)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	itemPath := filepath.Join(tableName, k+".json")
 	item, err := readJSON[map[string]any](s, itemPath)
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
-			return nil, err
+			return nil, nil, err
 		}
 		item = make(map[string]any, len(key))
 		for kk, v := range key {
 			item[kk] = v
 		}
+	}
+	before = make(map[string]any, len(item))
+	for k, v := range item {
+		before[k] = v
 	}
 	for attr, val := range updates {
 		if val == nil {
@@ -370,9 +376,9 @@ func (s *Storage) UpdateItem(
 		}
 	}
 	if err := s.writeJSON(itemPath, item); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return item, nil
+	return before, item, nil
 }
 
 // Query returns items in tableName matching the hash key equality and the optional
