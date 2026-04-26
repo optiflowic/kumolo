@@ -339,7 +339,7 @@ func (s *Storage) UpdateItem(
 	tableName string,
 	key map[string]any,
 	updates map[string]any,
-) (before, after map[string]any, err error) {
+) (map[string]any, map[string]any, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	meta, err := s.readTableMeta(tableName)
@@ -364,7 +364,7 @@ func (s *Storage) UpdateItem(
 			item[kk] = v
 		}
 	}
-	before = make(map[string]any, len(item))
+	before := make(map[string]any, len(item))
 	for k, v := range item {
 		before[k] = v
 	}

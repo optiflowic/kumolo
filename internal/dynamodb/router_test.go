@@ -635,16 +635,15 @@ func TestHandleUpdateItem(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 		var resp map[string]any
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-		attrs := resp["Attributes"].(map[string]any)
-		assert.Empty(t, attrs)
+		assert.Nil(t, resp["Attributes"])
 	})
 }
 
 func TestHandleUpdateItem_InternalErrors(t *testing.T) {
 	t.Run("500 when UpdateItem fails with unexpected error", func(t *testing.T) {
 		ro := &Router{storage: &mockStore{
-			updateItemFn: func(string, map[string]any, map[string]any) (map[string]any, error) {
-				return nil, errInternal
+			updateItemFn: func(string, map[string]any, map[string]any) (map[string]any, map[string]any, error) {
+				return nil, nil, errInternal
 			},
 		}}
 		w := dynamo(t, ro, "UpdateItem", `{
@@ -1168,7 +1167,7 @@ type mockStore struct {
 	getItemFn         func(tableName string, key map[string]any) (map[string]any, error)
 	deleteItemFn      func(tableName string, key map[string]any) error
 	scanFn            func(tableName string) ([]map[string]any, error)
-	updateItemFn      func(tableName string, key map[string]any, updates map[string]any) (map[string]any, error)
+	updateItemFn      func(tableName string, key map[string]any, updates map[string]any) (map[string]any, map[string]any, error)
 	queryFn           func(tableName, hashKeyName string, hashKeyValue any) ([]map[string]any, error)
 	batchGetItemsFn   func(tableName string, keys []map[string]any) ([]map[string]any, error)
 	batchWriteItemsFn func(tableName string, puts []map[string]any, deletes []map[string]any) error
@@ -1211,8 +1210,7 @@ func (m *mockStore) UpdateItem(
 	key map[string]any,
 	updates map[string]any,
 ) (map[string]any, map[string]any, error) {
-	item, err := m.updateItemFn(tableName, key, updates)
-	return nil, item, err
+	return m.updateItemFn(tableName, key, updates)
 }
 
 func (m *mockStore) Query(

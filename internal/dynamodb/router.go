@@ -731,7 +731,9 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 				attrs[k] = v
 			}
 		}
-		resp["Attributes"] = attrs
+		if len(attrs) > 0 {
+			resp["Attributes"] = attrs
+		}
 	case "UPDATED_OLD":
 		attrs := make(map[string]any, len(updates))
 		for k := range updates {
@@ -739,7 +741,9 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 				attrs[k] = v
 			}
 		}
-		resp["Attributes"] = attrs
+		if len(attrs) > 0 {
+			resp["Attributes"] = attrs
+		}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
