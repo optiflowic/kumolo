@@ -1227,18 +1227,24 @@ func (e *errorReader) Read(_ []byte) (int, error) {
 
 // mockStore is a configurable in-memory store for router tests.
 type mockStore struct {
-	createTableFn     func(meta TableMetadata) error
-	deleteTableFn     func(name string) error
-	describeTableFn   func(name string) (TableMetadata, error)
-	listTablesFn      func() ([]string, error)
-	putItemFn         func(tableName string, item map[string]any) error
-	getItemFn         func(tableName string, key map[string]any) (map[string]any, error)
-	deleteItemFn      func(tableName string, key map[string]any) error
-	scanFn            func(tableName string) ([]map[string]any, error)
-	updateItemFn      func(tableName string, key map[string]any, updates map[string]any) (map[string]any, map[string]any, error)
-	queryFn           func(tableName, hashKeyName string, hashKeyValue any) ([]map[string]any, error)
-	batchGetItemsFn   func(tableName string, keys []map[string]any) ([]map[string]any, error)
-	batchWriteItemsFn func(tableName string, puts []map[string]any, deletes []map[string]any) error
+	createTableFn        func(meta TableMetadata) error
+	deleteTableFn        func(name string) error
+	describeTableFn      func(name string) (TableMetadata, error)
+	listTablesFn         func() ([]string, error)
+	putItemFn            func(tableName string, item map[string]any) error
+	getItemFn            func(tableName string, key map[string]any) (map[string]any, error)
+	deleteItemFn         func(tableName string, key map[string]any) error
+	scanFn               func(tableName string) ([]map[string]any, error)
+	updateItemFn         func(tableName string, key map[string]any, updates map[string]any) (map[string]any, map[string]any, error)
+	queryFn              func(tableName, hashKeyName string, hashKeyValue any) ([]map[string]any, error)
+	batchGetItemsFn      func(tableName string, keys []map[string]any) ([]map[string]any, error)
+	batchWriteItemsFn    func(tableName string, puts []map[string]any, deletes []map[string]any) error
+	updateTimeToLiveFn   func(tableName string, spec TTLSpec) (TTLSpec, error)
+	describeTimeToLiveFn func(tableName string) (string, *TTLSpec, error)
+	tagResourceFn        func(resourceARN string, tags map[string]string) error
+	untagResourceFn      func(resourceARN string, tagKeys []string) error
+	listTagsOfResourceFn func(resourceARN string) (map[string]string, error)
+	updateTableFn        func(tableName string, in UpdateTableInput) (TableMetadata, error)
 }
 
 func (m *mockStore) CreateTable(meta TableMetadata) error {
@@ -1302,6 +1308,30 @@ func (m *mockStore) BatchWriteItems(
 	deletes []map[string]any,
 ) error {
 	return m.batchWriteItemsFn(tableName, puts, deletes)
+}
+
+func (m *mockStore) UpdateTimeToLive(tableName string, spec TTLSpec) (TTLSpec, error) {
+	return m.updateTimeToLiveFn(tableName, spec)
+}
+
+func (m *mockStore) DescribeTimeToLive(tableName string) (string, *TTLSpec, error) {
+	return m.describeTimeToLiveFn(tableName)
+}
+
+func (m *mockStore) TagResource(resourceARN string, tags map[string]string) error {
+	return m.tagResourceFn(resourceARN, tags)
+}
+
+func (m *mockStore) UntagResource(resourceARN string, tagKeys []string) error {
+	return m.untagResourceFn(resourceARN, tagKeys)
+}
+
+func (m *mockStore) ListTagsOfResource(resourceARN string) (map[string]string, error) {
+	return m.listTagsOfResourceFn(resourceARN)
+}
+
+func (m *mockStore) UpdateTable(tableName string, in UpdateTableInput) (TableMetadata, error) {
+	return m.updateTableFn(tableName, in)
 }
 
 var errInternal = errors.New("internal error")
@@ -1624,5 +1654,447 @@ func TestHandleBatchWriteItem(t *testing.T) {
 			"RequestItems": {"tbl": [{"PutRequest": {"Item": {"pk": {"S": "k"}}}}]}
 		}`)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+}
+
+func TestHandleUpdateTimeToLive(t *testing.T) {
+	t.Run("enables TTL", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "UpdateTimeToLive", `{
+			"TableName": "test-table",
+			"TimeToLiveSpecification": {"AttributeName": "expires", "Enabled": true}
+		}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		spec := resp["TimeToLiveSpecification"].(map[string]any)
+		assert.Equal(t, "expires", spec["AttributeName"])
+		assert.Equal(t, true, spec["Enabled"])
+	})
+
+	t.Run("disables TTL", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		dynamo(t, ro, "UpdateTimeToLive", `{
+			"TableName": "test-table",
+			"TimeToLiveSpecification": {"AttributeName": "expires", "Enabled": true}
+		}`)
+		w := dynamo(t, ro, "UpdateTimeToLive", `{
+			"TableName": "test-table",
+			"TimeToLiveSpecification": {"AttributeName": "expires", "Enabled": false}
+		}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		spec := resp["TimeToLiveSpecification"].(map[string]any)
+		assert.Equal(t, false, spec["Enabled"])
+	})
+
+	t.Run("400 for missing TableName", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "UpdateTimeToLive", `{}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ValidationException")
+	})
+
+	t.Run("400 for table not found", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "UpdateTimeToLive", `{
+			"TableName": "no-such",
+			"TimeToLiveSpecification": {"AttributeName": "exp", "Enabled": true}
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ResourceNotFoundException")
+	})
+
+	t.Run("400 for invalid JSON", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "UpdateTimeToLive", `{bad}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("500 when storage fails", func(t *testing.T) {
+		ro := &Router{storage: &mockStore{
+			updateTimeToLiveFn: func(string, TTLSpec) (TTLSpec, error) { return TTLSpec{}, errInternal },
+		}}
+		w := dynamo(t, ro, "UpdateTimeToLive", `{
+			"TableName": "t",
+			"TimeToLiveSpecification": {"AttributeName": "exp", "Enabled": true}
+		}`)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+}
+
+func TestHandleDescribeTimeToLive(t *testing.T) {
+	t.Run("returns DISABLED by default", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "DescribeTimeToLive", `{"TableName": "test-table"}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		desc := resp["TimeToLiveDescription"].(map[string]any)
+		assert.Equal(t, "DISABLED", desc["TimeToLiveStatus"])
+	})
+
+	t.Run("returns ENABLED after UpdateTimeToLive", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "UpdateTimeToLive", `{
+			"TableName": "test-table",
+			"TimeToLiveSpecification": {"AttributeName": "expires", "Enabled": true}
+		}`).Code)
+		w := dynamo(t, ro, "DescribeTimeToLive", `{"TableName": "test-table"}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		desc := resp["TimeToLiveDescription"].(map[string]any)
+		assert.Equal(t, "ENABLED", desc["TimeToLiveStatus"])
+		assert.Equal(t, "expires", desc["AttributeName"])
+	})
+
+	t.Run("400 for missing TableName", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "DescribeTimeToLive", `{}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ValidationException")
+	})
+
+	t.Run("400 for table not found", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "DescribeTimeToLive", `{"TableName": "no-such"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ResourceNotFoundException")
+	})
+
+	t.Run("400 for invalid JSON", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "DescribeTimeToLive", `{bad}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("500 when storage fails", func(t *testing.T) {
+		ro := &Router{storage: &mockStore{
+			describeTimeToLiveFn: func(string) (string, *TTLSpec, error) {
+				return "", nil, errInternal
+			},
+		}}
+		w := dynamo(t, ro, "DescribeTimeToLive", `{"TableName": "t"}`)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+}
+
+func TestHandleUpdateTable(t *testing.T) {
+	t.Run("updates billing mode and sets BillingModeSummary", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "UpdateTable", `{
+			"TableName": "test-table",
+			"BillingMode": "PROVISIONED",
+			"ProvisionedThroughput": {"ReadCapacityUnits": 10, "WriteCapacityUnits": 10}
+		}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		desc := resp["TableDescription"].(map[string]any)
+		assert.Equal(t, "test-table", desc["TableName"])
+		assert.Equal(t, "ACTIVE", desc["TableStatus"])
+		bms := desc["BillingModeSummary"].(map[string]any)
+		assert.Equal(t, "PROVISIONED", bms["BillingMode"])
+		assert.NotZero(t, bms["LastUpdateToPayPerRequestDateTime"])
+	})
+
+	t.Run("creates GSI and merges AttributeDefinitions", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "UpdateTable", `{
+			"TableName": "test-table",
+			"AttributeDefinitions": [{"AttributeName": "sk", "AttributeType": "S"}],
+			"GlobalSecondaryIndexUpdates": [{"Create": {
+				"IndexName": "gsi1",
+				"KeySchema": [{"AttributeName": "sk", "KeyType": "HASH"}],
+				"Projection": {"ProjectionType": "ALL"}
+			}}]
+		}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		desc := resp["TableDescription"].(map[string]any)
+		gsis := desc["GlobalSecondaryIndexes"].([]any)
+		require.Len(t, gsis, 1)
+		assert.Equal(t, "gsi1", gsis[0].(map[string]any)["IndexName"])
+		attrDefs := desc["AttributeDefinitions"].([]any)
+		var attrNames []string
+		for _, a := range attrDefs {
+			attrNames = append(attrNames, a.(map[string]any)["AttributeName"].(string))
+		}
+		assert.Contains(t, attrNames, "pk")
+		assert.Contains(t, attrNames, "sk")
+	})
+
+	t.Run("deletes GSI", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "UpdateTable", `{
+			"TableName": "test-table",
+			"GlobalSecondaryIndexUpdates": [{"Create": {
+				"IndexName": "gsi1",
+				"KeySchema": [{"AttributeName": "sk", "KeyType": "HASH"}],
+				"Projection": {"ProjectionType": "ALL"}
+			}}]
+		}`).Code)
+		w := dynamo(t, ro, "UpdateTable", `{
+			"TableName": "test-table",
+			"GlobalSecondaryIndexUpdates": [{"Delete": {"IndexName": "gsi1"}}]
+		}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		desc := resp["TableDescription"].(map[string]any)
+		assert.Empty(t, desc["GlobalSecondaryIndexes"])
+	})
+
+	t.Run("updates GSI throughput", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "UpdateTable", `{
+			"TableName": "test-table",
+			"GlobalSecondaryIndexUpdates": [{"Create": {
+				"IndexName": "gsi1",
+				"KeySchema": [{"AttributeName": "sk", "KeyType": "HASH"}],
+				"Projection": {"ProjectionType": "ALL"},
+				"ProvisionedThroughput": {"ReadCapacityUnits": 5, "WriteCapacityUnits": 5}
+			}}]
+		}`).Code)
+		w := dynamo(t, ro, "UpdateTable", `{
+			"TableName": "test-table",
+			"GlobalSecondaryIndexUpdates": [{"Update": {
+				"IndexName": "gsi1",
+				"ProvisionedThroughput": {"ReadCapacityUnits": 20, "WriteCapacityUnits": 20}
+			}}]
+		}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		desc := resp["TableDescription"].(map[string]any)
+		gsis := desc["GlobalSecondaryIndexes"].([]any)
+		pt := gsis[0].(map[string]any)["ProvisionedThroughput"].(map[string]any)
+		assert.Equal(t, float64(20), pt["ReadCapacityUnits"])
+	})
+
+	t.Run("400 for missing TableName", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "UpdateTable", `{}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ValidationException")
+	})
+
+	t.Run("400 for table not found", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "UpdateTable", `{"TableName": "no-such"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ResourceNotFoundException")
+	})
+
+	t.Run("400 for invalid JSON", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "UpdateTable", `{bad}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("500 when storage fails", func(t *testing.T) {
+		ro := &Router{storage: &mockStore{
+			updateTableFn: func(string, UpdateTableInput) (TableMetadata, error) {
+				return TableMetadata{}, errInternal
+			},
+		}}
+		w := dynamo(t, ro, "UpdateTable", `{"TableName": "t"}`)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+}
+
+func tableARNFor(name string) string {
+	return "arn:aws:dynamodb:us-east-1:000000000000:table/" + name
+}
+
+func TestHandleTagResource(t *testing.T) {
+	t.Run("tags resource", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		arn := tableARNFor("test-table")
+		w := dynamo(
+			t,
+			ro,
+			"TagResource",
+			`{"ResourceArn":"`+arn+`","Tags":[{"Key":"env","Value":"dev"}]}`,
+		)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("400 for missing ResourceArn", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "TagResource", `{}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ValidationException")
+	})
+
+	t.Run("400 for invalid ARN", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "TagResource", `{"ResourceArn":"invalid","Tags":[]}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ResourceNotFoundException")
+	})
+
+	t.Run("400 for invalid JSON", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "TagResource", `{bad}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("500 when storage fails", func(t *testing.T) {
+		ro := &Router{storage: &mockStore{
+			tagResourceFn: func(string, map[string]string) error { return errInternal },
+		}}
+		arn := tableARNFor("t")
+		w := dynamo(t, ro, "TagResource", `{"ResourceArn":"`+arn+`","Tags":[]}`)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+}
+
+func TestHandleUntagResource(t *testing.T) {
+	t.Run("untags resource", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		arn := tableARNFor("test-table")
+		dynamo(
+			t,
+			ro,
+			"TagResource",
+			`{"ResourceArn":"`+arn+`","Tags":[{"Key":"env","Value":"dev"}]}`,
+		)
+		w := dynamo(t, ro, "UntagResource", `{"ResourceArn":"`+arn+`","TagKeys":["env"]}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("400 for missing ResourceArn", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "UntagResource", `{}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ValidationException")
+	})
+
+	t.Run("400 for invalid ARN", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "UntagResource", `{"ResourceArn":"invalid","TagKeys":[]}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ResourceNotFoundException")
+	})
+
+	t.Run("400 for invalid JSON", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "UntagResource", `{bad}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("500 when storage fails", func(t *testing.T) {
+		ro := &Router{storage: &mockStore{
+			untagResourceFn: func(string, []string) error { return errInternal },
+		}}
+		arn := tableARNFor("t")
+		w := dynamo(t, ro, "UntagResource", `{"ResourceArn":"`+arn+`","TagKeys":[]}`)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+}
+
+func TestHandleListTagsOfResource(t *testing.T) {
+	t.Run("lists tags", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		arn := tableARNFor("test-table")
+		dynamo(
+			t,
+			ro,
+			"TagResource",
+			`{"ResourceArn":"`+arn+`","Tags":[{"Key":"env","Value":"dev"},{"Key":"app","Value":"kumolo"}]}`,
+		)
+		w := dynamo(t, ro, "ListTagsOfResource", `{"ResourceArn":"`+arn+`"}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		tags := resp["Tags"].([]any)
+		assert.Len(t, tags, 2)
+	})
+
+	t.Run("returns empty Tags for untagged resource", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		arn := tableARNFor("test-table")
+		w := dynamo(t, ro, "ListTagsOfResource", `{"ResourceArn":"`+arn+`"}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		tags := resp["Tags"].([]any)
+		assert.Empty(t, tags)
+	})
+
+	t.Run("400 for missing ResourceArn", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "ListTagsOfResource", `{}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ValidationException")
+	})
+
+	t.Run("400 for invalid ARN", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "ListTagsOfResource", `{"ResourceArn":"invalid"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ResourceNotFoundException")
+	})
+
+	t.Run("400 for invalid JSON", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "ListTagsOfResource", `{bad}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("500 when storage fails", func(t *testing.T) {
+		ro := &Router{storage: &mockStore{
+			listTagsOfResourceFn: func(string) (map[string]string, error) {
+				return nil, errInternal
+			},
+		}}
+		arn := tableARNFor("t")
+		w := dynamo(t, ro, "ListTagsOfResource", `{"ResourceArn":"`+arn+`"}`)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+}
+
+func TestHandleDescribeLimits(t *testing.T) {
+	t.Run("returns hardcoded capacity limits", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "DescribeLimits", `{}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, float64(80000), resp["AccountMaxReadCapacityUnits"])
+		assert.Equal(t, float64(80000), resp["AccountMaxWriteCapacityUnits"])
+		assert.Equal(t, float64(40000), resp["TableMaxReadCapacityUnits"])
+		assert.Equal(t, float64(40000), resp["TableMaxWriteCapacityUnits"])
+	})
+}
+
+func TestHandleDescribeEndpoints(t *testing.T) {
+	t.Run("returns static localhost endpoint", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "DescribeEndpoints", `{}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		endpoints := resp["Endpoints"].([]any)
+		require.Len(t, endpoints, 1)
+		ep := endpoints[0].(map[string]any)
+		assert.Equal(t, "localhost:5566", ep["Address"])
+		assert.Equal(t, float64(1440), ep["CachePeriodInMinutes"])
 	})
 }

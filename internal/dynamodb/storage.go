@@ -28,14 +28,39 @@ type AttributeDefinition struct {
 	AttributeType string `json:"AttributeType"`
 }
 
+// TTLSpec holds the TimeToLive configuration for a table.
+type TTLSpec struct {
+	AttributeName string `json:"attributeName"`
+	Enabled       bool   `json:"enabled"`
+}
+
+// ProvisionedThroughput holds read/write capacity units.
+type ProvisionedThroughput struct {
+	ReadCapacityUnits  int64 `json:"ReadCapacityUnits,omitempty"`
+	WriteCapacityUnits int64 `json:"WriteCapacityUnits,omitempty"`
+}
+
+// GlobalSecondaryIndex holds the definition of a GSI.
+type GlobalSecondaryIndex struct {
+	IndexName             string                 `json:"indexName"`
+	KeySchema             []KeySchemaElement     `json:"keySchema"`
+	Projection            map[string]any         `json:"projection,omitempty"`
+	ProvisionedThroughput *ProvisionedThroughput `json:"provisionedThroughput,omitempty"`
+}
+
 // TableMetadata is stored as <table>.table.json at the storage root.
 type TableMetadata struct {
-	Name                 string                `json:"name"`
-	KeySchema            []KeySchemaElement    `json:"keySchema"`
-	AttributeDefinitions []AttributeDefinition `json:"attributeDefinitions"`
-	BillingMode          string                `json:"billingMode,omitempty"`
-	Status               string                `json:"status"`
-	CreatedAt            time.Time             `json:"createdAt"`
+	Name                   string                 `json:"name"`
+	KeySchema              []KeySchemaElement     `json:"keySchema"`
+	AttributeDefinitions   []AttributeDefinition  `json:"attributeDefinitions"`
+	BillingMode            string                 `json:"billingMode,omitempty"`
+	BillingModeUpdatedAt   *time.Time             `json:"billingModeUpdatedAt,omitempty"`
+	ProvisionedThroughput  *ProvisionedThroughput `json:"provisionedThroughput,omitempty"`
+	GlobalSecondaryIndexes []GlobalSecondaryIndex `json:"globalSecondaryIndexes,omitempty"`
+	Status                 string                 `json:"status"`
+	CreatedAt              time.Time              `json:"createdAt"`
+	TTL                    *TTLSpec               `json:"ttl,omitempty"`
+	Tags                   map[string]string      `json:"tags,omitempty"`
 }
 
 // Sort key condition operators used in SortKeyCondition.Operator.
@@ -556,6 +581,175 @@ func (s *Storage) readTableMeta(name string) (TableMetadata, error) {
 
 func (s *Storage) writeTableMeta(name string, meta TableMetadata) error {
 	return s.writeJSON(name+".table.json", meta)
+}
+
+// UpdateTableInput holds the optional fields that can be changed via UpdateTable.
+type UpdateTableInput struct {
+	BillingMode           string
+	ProvisionedThroughput *ProvisionedThroughput
+	AttributeDefinitions  []AttributeDefinition
+	GSICreates            []GlobalSecondaryIndex
+	GSIUpdates            map[string]*ProvisionedThroughput // indexName → new throughput
+	GSIDeletes            []string                          // indexNames to remove
+}
+
+func (s *Storage) UpdateTable(tableName string, in UpdateTableInput) (TableMetadata, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.tableExistsLocked(tableName) {
+		return TableMetadata{}, ErrTableNotFound
+	}
+	meta, err := s.readTableMeta(tableName)
+	if err != nil {
+		return TableMetadata{}, err
+	}
+	if in.BillingMode != "" && in.BillingMode != meta.BillingMode {
+		meta.BillingMode = in.BillingMode
+		now := time.Now().UTC()
+		meta.BillingModeUpdatedAt = &now
+	}
+	if in.ProvisionedThroughput != nil {
+		meta.ProvisionedThroughput = in.ProvisionedThroughput
+	}
+	// Merge new AttributeDefinitions (deduplicate by AttributeName)
+	existing := make(map[string]struct{}, len(meta.AttributeDefinitions))
+	for _, a := range meta.AttributeDefinitions {
+		existing[a.AttributeName] = struct{}{}
+	}
+	for _, a := range in.AttributeDefinitions {
+		if _, ok := existing[a.AttributeName]; !ok {
+			meta.AttributeDefinitions = append(meta.AttributeDefinitions, a)
+			existing[a.AttributeName] = struct{}{}
+		}
+	}
+	// GSI deletes
+	deleteSet := make(map[string]struct{}, len(in.GSIDeletes))
+	for _, name := range in.GSIDeletes {
+		deleteSet[name] = struct{}{}
+	}
+	// GSI updates and deletes applied to existing list
+	filtered := meta.GlobalSecondaryIndexes[:0:0]
+	for _, gsi := range meta.GlobalSecondaryIndexes {
+		if _, del := deleteSet[gsi.IndexName]; del {
+			continue
+		}
+		if pt, ok := in.GSIUpdates[gsi.IndexName]; ok {
+			gsi.ProvisionedThroughput = pt
+		}
+		filtered = append(filtered, gsi)
+	}
+	// GSI creates
+	filtered = append(filtered, in.GSICreates...)
+	meta.GlobalSecondaryIndexes = filtered
+	if err := s.writeTableMeta(tableName, meta); err != nil {
+		return TableMetadata{}, err
+	}
+	return meta, nil
+}
+
+// tableNameFromARN extracts the table name from a DynamoDB table ARN.
+func tableNameFromARN(arn string) (string, bool) {
+	const prefix = "arn:aws:dynamodb:us-east-1:000000000000:table/"
+	if !strings.HasPrefix(arn, prefix) {
+		return "", false
+	}
+	return strings.TrimPrefix(arn, prefix), true
+}
+
+func (s *Storage) TagResource(resourceARN string, tags map[string]string) error {
+	name, ok := tableNameFromARN(resourceARN)
+	if !ok {
+		return ErrTableNotFound
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.tableExistsLocked(name) {
+		return ErrTableNotFound
+	}
+	meta, err := s.readTableMeta(name)
+	if err != nil {
+		return err
+	}
+	if meta.Tags == nil {
+		meta.Tags = make(map[string]string, len(tags))
+	}
+	for k, v := range tags {
+		meta.Tags[k] = v
+	}
+	return s.writeTableMeta(name, meta)
+}
+
+func (s *Storage) UntagResource(resourceARN string, tagKeys []string) error {
+	name, ok := tableNameFromARN(resourceARN)
+	if !ok {
+		return ErrTableNotFound
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.tableExistsLocked(name) {
+		return ErrTableNotFound
+	}
+	meta, err := s.readTableMeta(name)
+	if err != nil {
+		return err
+	}
+	for _, k := range tagKeys {
+		delete(meta.Tags, k)
+	}
+	return s.writeTableMeta(name, meta)
+}
+
+func (s *Storage) ListTagsOfResource(resourceARN string) (map[string]string, error) {
+	name, ok := tableNameFromARN(resourceARN)
+	if !ok {
+		return nil, ErrTableNotFound
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.tableExistsLocked(name) {
+		return nil, ErrTableNotFound
+	}
+	meta, err := s.readTableMeta(name)
+	if err != nil {
+		return nil, err
+	}
+	if meta.Tags == nil {
+		return map[string]string{}, nil
+	}
+	return meta.Tags, nil
+}
+
+func (s *Storage) UpdateTimeToLive(tableName string, spec TTLSpec) (TTLSpec, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.tableExistsLocked(tableName) {
+		return TTLSpec{}, ErrTableNotFound
+	}
+	meta, err := s.readTableMeta(tableName)
+	if err != nil {
+		return TTLSpec{}, err
+	}
+	meta.TTL = &spec
+	if err := s.writeTableMeta(tableName, meta); err != nil {
+		return TTLSpec{}, err
+	}
+	return spec, nil
+}
+
+func (s *Storage) DescribeTimeToLive(tableName string) (string, *TTLSpec, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.tableExistsLocked(tableName) {
+		return "", nil, ErrTableNotFound
+	}
+	meta, err := s.readTableMeta(tableName)
+	if err != nil {
+		return "", nil, err
+	}
+	if meta.TTL == nil || !meta.TTL.Enabled {
+		return "DISABLED", meta.TTL, nil
+	}
+	return "ENABLED", meta.TTL, nil
 }
 
 func (s *Storage) writeJSON(path string, v any) (retErr error) {
