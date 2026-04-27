@@ -225,6 +225,9 @@ type store interface {
 	BatchWriteItems(tableName string, puts []map[string]any, deletes []map[string]any) error
 	UpdateTimeToLive(tableName string, spec TTLSpec) (TTLSpec, error)
 	DescribeTimeToLive(tableName string) (string, *TTLSpec, error)
+	TagResource(resourceARN string, tags map[string]string) error
+	UntagResource(resourceARN string, tagKeys []string) error
+	ListTagsOfResource(resourceARN string) (map[string]string, error)
 }
 
 // tableDescription is the DynamoDB API representation of a table.
@@ -301,6 +304,12 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ro.handleUpdateTimeToLive(w, body)
 	case "DescribeTimeToLive":
 		ro.handleDescribeTimeToLive(w, body)
+	case "TagResource":
+		ro.handleTagResource(w, body)
+	case "UntagResource":
+		ro.handleUntagResource(w, body)
+	case "ListTagsOfResource":
+		ro.handleListTagsOfResource(w, body)
 	case "DescribeLimits":
 		ro.handleDescribeLimits(w)
 	case "DescribeEndpoints":
@@ -945,6 +954,101 @@ func (ro *Router) handleBatchWriteItem(w http.ResponseWriter, body []byte) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"UnprocessedItems": map[string]any{},
 	})
+}
+
+func (ro *Router) handleTagResource(w http.ResponseWriter, body []byte) {
+	var req struct {
+		ResourceArn string `json:"ResourceArn"`
+		Tags        []struct {
+			Key   string `json:"Key"`
+			Value string `json:"Value"`
+		} `json:"Tags"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
+		return
+	}
+	if req.ResourceArn == "" {
+		writeError(w, http.StatusBadRequest, "ValidationException", "ResourceArn is required")
+		return
+	}
+	tags := make(map[string]string, len(req.Tags))
+	for _, t := range req.Tags {
+		tags[t.Key] = t.Value
+	}
+	if err := ro.storage.TagResource(req.ResourceArn, tags); err != nil {
+		if errors.Is(err, ErrTableNotFound) {
+			slog.Debug("TagResource: resource not found", "arn", req.ResourceArn)
+			writeError(w, http.StatusBadRequest, "ResourceNotFoundException",
+				"Requested resource not found: "+req.ResourceArn)
+			return
+		}
+		slog.Error("TagResource failed", "arn", req.ResourceArn, "err", err)
+		writeError(w, http.StatusInternalServerError, "InternalServerError", "internal server error")
+		return
+	}
+	slog.Info("tagged DynamoDB resource", "arn", req.ResourceArn, "count", len(tags))
+	writeJSON(w, http.StatusOK, map[string]any{})
+}
+
+func (ro *Router) handleUntagResource(w http.ResponseWriter, body []byte) {
+	var req struct {
+		ResourceArn string   `json:"ResourceArn"`
+		TagKeys     []string `json:"TagKeys"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
+		return
+	}
+	if req.ResourceArn == "" {
+		writeError(w, http.StatusBadRequest, "ValidationException", "ResourceArn is required")
+		return
+	}
+	if err := ro.storage.UntagResource(req.ResourceArn, req.TagKeys); err != nil {
+		if errors.Is(err, ErrTableNotFound) {
+			slog.Debug("UntagResource: resource not found", "arn", req.ResourceArn)
+			writeError(w, http.StatusBadRequest, "ResourceNotFoundException",
+				"Requested resource not found: "+req.ResourceArn)
+			return
+		}
+		slog.Error("UntagResource failed", "arn", req.ResourceArn, "err", err)
+		writeError(w, http.StatusInternalServerError, "InternalServerError", "internal server error")
+		return
+	}
+	slog.Info("untagged DynamoDB resource", "arn", req.ResourceArn)
+	writeJSON(w, http.StatusOK, map[string]any{})
+}
+
+func (ro *Router) handleListTagsOfResource(w http.ResponseWriter, body []byte) {
+	var req struct {
+		ResourceArn string `json:"ResourceArn"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
+		return
+	}
+	if req.ResourceArn == "" {
+		writeError(w, http.StatusBadRequest, "ValidationException", "ResourceArn is required")
+		return
+	}
+	tags, err := ro.storage.ListTagsOfResource(req.ResourceArn)
+	if err != nil {
+		if errors.Is(err, ErrTableNotFound) {
+			slog.Debug("ListTagsOfResource: resource not found", "arn", req.ResourceArn)
+			writeError(w, http.StatusBadRequest, "ResourceNotFoundException",
+				"Requested resource not found: "+req.ResourceArn)
+			return
+		}
+		slog.Error("ListTagsOfResource failed", "arn", req.ResourceArn, "err", err)
+		writeError(w, http.StatusInternalServerError, "InternalServerError", "internal server error")
+		return
+	}
+	tagList := make([]map[string]string, 0, len(tags))
+	for k, v := range tags {
+		tagList = append(tagList, map[string]string{"Key": k, "Value": v})
+	}
+	slog.Debug("listed DynamoDB resource tags", "arn", req.ResourceArn, "count", len(tagList))
+	writeJSON(w, http.StatusOK, map[string]any{"Tags": tagList})
 }
 
 func (ro *Router) handleUpdateTimeToLive(w http.ResponseWriter, body []byte) {

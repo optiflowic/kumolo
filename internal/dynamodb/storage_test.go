@@ -1105,6 +1105,122 @@ func TestBatchWriteItems(t *testing.T) {
 	})
 }
 
+const testTableARN = "arn:aws:dynamodb:us-east-1:000000000000:table/test-table"
+
+func TestTagResource(t *testing.T) {
+	t.Run("adds and merges tags", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		require.NoError(t, s.TagResource(testTableARN, map[string]string{"env": "dev"}))
+		require.NoError(t, s.TagResource(testTableARN, map[string]string{"app": "kumolo"}))
+		tags, err := s.ListTagsOfResource(testTableARN)
+		require.NoError(t, err)
+		assert.Equal(t, map[string]string{"env": "dev", "app": "kumolo"}, tags)
+	})
+
+	t.Run("returns ErrTableNotFound for invalid ARN", func(t *testing.T) {
+		s := newTestStorage(t)
+		err := s.TagResource("invalid-arn", map[string]string{"k": "v"})
+		assert.ErrorIs(t, err, ErrTableNotFound)
+	})
+
+	t.Run("returns ErrTableNotFound for missing table", func(t *testing.T) {
+		s := newTestStorage(t)
+		err := s.TagResource(testTableARN, map[string]string{"k": "v"})
+		assert.ErrorIs(t, err, ErrTableNotFound)
+	})
+
+	t.Run("returns error when readTableMeta fails", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		s.readAll = func(io.Reader) ([]byte, error) { return nil, errors.New("read error") }
+		err := s.TagResource(testTableARN, map[string]string{"k": "v"})
+		assert.Error(t, err)
+	})
+
+	t.Run("returns error when writeTableMeta fails", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		s.openFile = func(string, int, os.FileMode) (io.WriteCloser, error) {
+			return nil, errors.New("write error")
+		}
+		err := s.TagResource(testTableARN, map[string]string{"k": "v"})
+		assert.Error(t, err)
+	})
+}
+
+func TestUntagResource(t *testing.T) {
+	t.Run("removes specified tags", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		require.NoError(t, s.TagResource(testTableARN, map[string]string{"env": "dev", "app": "kumolo"}))
+		require.NoError(t, s.UntagResource(testTableARN, []string{"env"}))
+		tags, err := s.ListTagsOfResource(testTableARN)
+		require.NoError(t, err)
+		assert.Equal(t, map[string]string{"app": "kumolo"}, tags)
+	})
+
+	t.Run("returns ErrTableNotFound for invalid ARN", func(t *testing.T) {
+		s := newTestStorage(t)
+		err := s.UntagResource("invalid-arn", []string{"k"})
+		assert.ErrorIs(t, err, ErrTableNotFound)
+	})
+
+	t.Run("returns ErrTableNotFound for missing table", func(t *testing.T) {
+		s := newTestStorage(t)
+		err := s.UntagResource(testTableARN, []string{"k"})
+		assert.ErrorIs(t, err, ErrTableNotFound)
+	})
+
+	t.Run("returns error when readTableMeta fails", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		s.readAll = func(io.Reader) ([]byte, error) { return nil, errors.New("read error") }
+		err := s.UntagResource(testTableARN, []string{"k"})
+		assert.Error(t, err)
+	})
+
+	t.Run("returns error when writeTableMeta fails", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		s.openFile = func(string, int, os.FileMode) (io.WriteCloser, error) {
+			return nil, errors.New("write error")
+		}
+		err := s.UntagResource(testTableARN, []string{"k"})
+		assert.Error(t, err)
+	})
+}
+
+func TestListTagsOfResource(t *testing.T) {
+	t.Run("returns empty map for untagged table", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		tags, err := s.ListTagsOfResource(testTableARN)
+		require.NoError(t, err)
+		assert.Empty(t, tags)
+	})
+
+	t.Run("returns ErrTableNotFound for invalid ARN", func(t *testing.T) {
+		s := newTestStorage(t)
+		_, err := s.ListTagsOfResource("invalid-arn")
+		assert.ErrorIs(t, err, ErrTableNotFound)
+	})
+
+	t.Run("returns ErrTableNotFound for missing table", func(t *testing.T) {
+		s := newTestStorage(t)
+		_, err := s.ListTagsOfResource(testTableARN)
+		assert.ErrorIs(t, err, ErrTableNotFound)
+	})
+
+	t.Run("returns error when readTableMeta fails", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		s.readAll = func(io.Reader) ([]byte, error) { return nil, errors.New("read error") }
+		_, err := s.ListTagsOfResource(testTableARN)
+		assert.Error(t, err)
+	})
+}
+
 func TestUpdateTimeToLive(t *testing.T) {
 	t.Run("enables and persists TTL", func(t *testing.T) {
 		s := newTestStorage(t)

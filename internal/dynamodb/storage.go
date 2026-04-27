@@ -43,6 +43,7 @@ type TableMetadata struct {
 	Status               string                `json:"status"`
 	CreatedAt            time.Time             `json:"createdAt"`
 	TTL                  *TTLSpec              `json:"ttl,omitempty"`
+	Tags                 map[string]string     `json:"tags,omitempty"`
 }
 
 // Sort key condition operators used in SortKeyCondition.Operator.
@@ -563,6 +564,83 @@ func (s *Storage) readTableMeta(name string) (TableMetadata, error) {
 
 func (s *Storage) writeTableMeta(name string, meta TableMetadata) error {
 	return s.writeJSON(name+".table.json", meta)
+}
+
+// tableARN returns the ARN for the given table name.
+func tableARN(name string) string {
+	return "arn:aws:dynamodb:us-east-1:000000000000:table/" + name
+}
+
+// tableNameFromARN extracts the table name from a DynamoDB table ARN.
+func tableNameFromARN(arn string) (string, bool) {
+	const prefix = "arn:aws:dynamodb:us-east-1:000000000000:table/"
+	if !strings.HasPrefix(arn, prefix) {
+		return "", false
+	}
+	return strings.TrimPrefix(arn, prefix), true
+}
+
+func (s *Storage) TagResource(resourceARN string, tags map[string]string) error {
+	name, ok := tableNameFromARN(resourceARN)
+	if !ok {
+		return ErrTableNotFound
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.tableExistsLocked(name) {
+		return ErrTableNotFound
+	}
+	meta, err := s.readTableMeta(name)
+	if err != nil {
+		return err
+	}
+	if meta.Tags == nil {
+		meta.Tags = make(map[string]string, len(tags))
+	}
+	for k, v := range tags {
+		meta.Tags[k] = v
+	}
+	return s.writeTableMeta(name, meta)
+}
+
+func (s *Storage) UntagResource(resourceARN string, tagKeys []string) error {
+	name, ok := tableNameFromARN(resourceARN)
+	if !ok {
+		return ErrTableNotFound
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.tableExistsLocked(name) {
+		return ErrTableNotFound
+	}
+	meta, err := s.readTableMeta(name)
+	if err != nil {
+		return err
+	}
+	for _, k := range tagKeys {
+		delete(meta.Tags, k)
+	}
+	return s.writeTableMeta(name, meta)
+}
+
+func (s *Storage) ListTagsOfResource(resourceARN string) (map[string]string, error) {
+	name, ok := tableNameFromARN(resourceARN)
+	if !ok {
+		return nil, ErrTableNotFound
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.tableExistsLocked(name) {
+		return nil, ErrTableNotFound
+	}
+	meta, err := s.readTableMeta(name)
+	if err != nil {
+		return nil, err
+	}
+	if meta.Tags == nil {
+		return map[string]string{}, nil
+	}
+	return meta.Tags, nil
 }
 
 func (s *Storage) UpdateTimeToLive(tableName string, spec TTLSpec) (TTLSpec, error) {
