@@ -1869,7 +1869,7 @@ func TestHandleUpdateTable(t *testing.T) {
 		desc := resp["TableDescription"].(map[string]any)
 		gsis := desc["GlobalSecondaryIndexes"].([]any)
 		pt := gsis[0].(map[string]any)["ProvisionedThroughput"].(map[string]any)
-		assert.Equal(t, float64(20), pt["readCapacityUnits"])
+		assert.Equal(t, float64(20), pt["ReadCapacityUnits"])
 	})
 
 	t.Run("400 for missing TableName", func(t *testing.T) {
@@ -1912,7 +1912,12 @@ func TestHandleTagResource(t *testing.T) {
 		ro := newTestRouter(t)
 		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
 		arn := tableARNFor("test-table")
-		w := dynamo(t, ro, "TagResource", `{"ResourceArn":"`+arn+`","Tags":[{"Key":"env","Value":"dev"}]}`)
+		w := dynamo(
+			t,
+			ro,
+			"TagResource",
+			`{"ResourceArn":"`+arn+`","Tags":[{"Key":"env","Value":"dev"}]}`,
+		)
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
 
@@ -1951,7 +1956,12 @@ func TestHandleUntagResource(t *testing.T) {
 		ro := newTestRouter(t)
 		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
 		arn := tableARNFor("test-table")
-		dynamo(t, ro, "TagResource", `{"ResourceArn":"`+arn+`","Tags":[{"Key":"env","Value":"dev"}]}`)
+		dynamo(
+			t,
+			ro,
+			"TagResource",
+			`{"ResourceArn":"`+arn+`","Tags":[{"Key":"env","Value":"dev"}]}`,
+		)
 		w := dynamo(t, ro, "UntagResource", `{"ResourceArn":"`+arn+`","TagKeys":["env"]}`)
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
@@ -1991,7 +2001,12 @@ func TestHandleListTagsOfResource(t *testing.T) {
 		ro := newTestRouter(t)
 		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
 		arn := tableARNFor("test-table")
-		dynamo(t, ro, "TagResource", `{"ResourceArn":"`+arn+`","Tags":[{"Key":"env","Value":"dev"},{"Key":"app","Value":"kumolo"}]}`)
+		dynamo(
+			t,
+			ro,
+			"TagResource",
+			`{"ResourceArn":"`+arn+`","Tags":[{"Key":"env","Value":"dev"},{"Key":"app","Value":"kumolo"}]}`,
+		)
 		w := dynamo(t, ro, "ListTagsOfResource", `{"ResourceArn":"`+arn+`"}`)
 		assert.Equal(t, http.StatusOK, w.Code)
 		var resp map[string]any

@@ -1131,7 +1131,10 @@ func TestUpdateTable(t *testing.T) {
 			IndexName: "gsi1",
 			KeySchema: []KeySchemaElement{{AttributeName: "sk", KeyType: "HASH"}},
 		}
-		meta, err := s.UpdateTable("test-table", UpdateTableInput{GSICreates: []GlobalSecondaryIndex{gsi}})
+		meta, err := s.UpdateTable(
+			"test-table",
+			UpdateTableInput{GSICreates: []GlobalSecondaryIndex{gsi}},
+		)
 		require.NoError(t, err)
 		require.Len(t, meta.GlobalSecondaryIndexes, 1)
 		assert.Equal(t, "gsi1", meta.GlobalSecondaryIndexes[0].IndexName)
@@ -1143,9 +1146,15 @@ func TestUpdateTable(t *testing.T) {
 		gsi := GlobalSecondaryIndex{
 			IndexName: "gsi1",
 			KeySchema: []KeySchemaElement{{AttributeName: "sk", KeyType: "HASH"}},
-			ProvisionedThroughput: &ProvisionedThroughput{ReadCapacityUnits: 5, WriteCapacityUnits: 5},
+			ProvisionedThroughput: &ProvisionedThroughput{
+				ReadCapacityUnits:  5,
+				WriteCapacityUnits: 5,
+			},
 		}
-		_, err := s.UpdateTable("test-table", UpdateTableInput{GSICreates: []GlobalSecondaryIndex{gsi}})
+		_, err := s.UpdateTable(
+			"test-table",
+			UpdateTableInput{GSICreates: []GlobalSecondaryIndex{gsi}},
+		)
 		require.NoError(t, err)
 		newPT := &ProvisionedThroughput{ReadCapacityUnits: 20, WriteCapacityUnits: 20}
 		meta, err := s.UpdateTable("test-table", UpdateTableInput{
@@ -1153,7 +1162,11 @@ func TestUpdateTable(t *testing.T) {
 		})
 		require.NoError(t, err)
 		require.NotNil(t, meta.GlobalSecondaryIndexes[0].ProvisionedThroughput)
-		assert.Equal(t, int64(20), meta.GlobalSecondaryIndexes[0].ProvisionedThroughput.ReadCapacityUnits)
+		assert.Equal(
+			t,
+			int64(20),
+			meta.GlobalSecondaryIndexes[0].ProvisionedThroughput.ReadCapacityUnits,
+		)
 	})
 
 	t.Run("deletes GSI", func(t *testing.T) {
@@ -1163,7 +1176,10 @@ func TestUpdateTable(t *testing.T) {
 			IndexName: "gsi1",
 			KeySchema: []KeySchemaElement{{AttributeName: "sk", KeyType: "HASH"}},
 		}
-		_, err := s.UpdateTable("test-table", UpdateTableInput{GSICreates: []GlobalSecondaryIndex{gsi}})
+		_, err := s.UpdateTable(
+			"test-table",
+			UpdateTableInput{GSICreates: []GlobalSecondaryIndex{gsi}},
+		)
 		require.NoError(t, err)
 		meta, err := s.UpdateTable("test-table", UpdateTableInput{GSIDeletes: []string{"gsi1"}})
 		require.NoError(t, err)
@@ -1243,7 +1259,10 @@ func TestUntagResource(t *testing.T) {
 	t.Run("removes specified tags", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		require.NoError(t, s.TagResource(testTableARN, map[string]string{"env": "dev", "app": "kumolo"}))
+		require.NoError(
+			t,
+			s.TagResource(testTableARN, map[string]string{"env": "dev", "app": "kumolo"}),
+		)
 		require.NoError(t, s.UntagResource(testTableARN, []string{"env"}))
 		tags, err := s.ListTagsOfResource(testTableARN)
 		require.NoError(t, err)
@@ -1315,7 +1334,10 @@ func TestUpdateTimeToLive(t *testing.T) {
 	t.Run("enables and persists TTL", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		spec, err := s.UpdateTimeToLive("test-table", TTLSpec{AttributeName: "expires", Enabled: true})
+		spec, err := s.UpdateTimeToLive(
+			"test-table",
+			TTLSpec{AttributeName: "expires", Enabled: true},
+		)
 		require.NoError(t, err)
 		assert.Equal(t, "expires", spec.AttributeName)
 		assert.True(t, spec.Enabled)

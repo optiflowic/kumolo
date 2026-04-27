@@ -1030,7 +1030,6 @@ func (ro *Router) handleUpdateTable(w http.ResponseWriter, body []byte) {
 			WriteCapacityUnits: req.ProvisionedThroughput.WriteCapacityUnits,
 		}
 	}
-	in.GSIUpdates = make(map[string]*ProvisionedThroughput)
 	for _, update := range req.GlobalSecondaryIndexUpdates {
 		switch {
 		case update.Create != nil:
@@ -1047,6 +1046,9 @@ func (ro *Router) handleUpdateTable(w http.ResponseWriter, body []byte) {
 			}
 			in.GSICreates = append(in.GSICreates, gsi)
 		case update.Update != nil:
+			if in.GSIUpdates == nil {
+				in.GSIUpdates = make(map[string]*ProvisionedThroughput)
+			}
 			in.GSIUpdates[update.Update.IndexName] = &ProvisionedThroughput{
 				ReadCapacityUnits:  update.Update.ProvisionedThroughput.ReadCapacityUnits,
 				WriteCapacityUnits: update.Update.ProvisionedThroughput.WriteCapacityUnits,
@@ -1065,7 +1067,12 @@ func (ro *Router) handleUpdateTable(w http.ResponseWriter, body []byte) {
 			return
 		}
 		slog.Error("UpdateTable failed", "table", req.TableName, "err", err)
-		writeError(w, http.StatusInternalServerError, "InternalServerError", "internal server error")
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			"InternalServerError",
+			"internal server error",
+		)
 		return
 	}
 	slog.Info("updated DynamoDB table", "table", req.TableName)
@@ -1100,7 +1107,12 @@ func (ro *Router) handleTagResource(w http.ResponseWriter, body []byte) {
 			return
 		}
 		slog.Error("TagResource failed", "arn", req.ResourceArn, "err", err)
-		writeError(w, http.StatusInternalServerError, "InternalServerError", "internal server error")
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			"InternalServerError",
+			"internal server error",
+		)
 		return
 	}
 	slog.Info("tagged DynamoDB resource", "arn", req.ResourceArn, "count", len(tags))
@@ -1128,7 +1140,12 @@ func (ro *Router) handleUntagResource(w http.ResponseWriter, body []byte) {
 			return
 		}
 		slog.Error("UntagResource failed", "arn", req.ResourceArn, "err", err)
-		writeError(w, http.StatusInternalServerError, "InternalServerError", "internal server error")
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			"InternalServerError",
+			"internal server error",
+		)
 		return
 	}
 	slog.Info("untagged DynamoDB resource", "arn", req.ResourceArn)
@@ -1156,7 +1173,12 @@ func (ro *Router) handleListTagsOfResource(w http.ResponseWriter, body []byte) {
 			return
 		}
 		slog.Error("ListTagsOfResource failed", "arn", req.ResourceArn, "err", err)
-		writeError(w, http.StatusInternalServerError, "InternalServerError", "internal server error")
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			"InternalServerError",
+			"internal server error",
+		)
 		return
 	}
 	tagList := make([]map[string]string, 0, len(tags))
@@ -1169,7 +1191,7 @@ func (ro *Router) handleListTagsOfResource(w http.ResponseWriter, body []byte) {
 
 func (ro *Router) handleUpdateTimeToLive(w http.ResponseWriter, body []byte) {
 	var req struct {
-		TableName              string `json:"TableName"`
+		TableName               string `json:"TableName"`
 		TimeToLiveSpecification struct {
 			AttributeName string `json:"AttributeName"`
 			Enabled       bool   `json:"Enabled"`
@@ -1195,7 +1217,12 @@ func (ro *Router) handleUpdateTimeToLive(w http.ResponseWriter, body []byte) {
 			return
 		}
 		slog.Error("UpdateTimeToLive failed", "table", req.TableName, "err", err)
-		writeError(w, http.StatusInternalServerError, "InternalServerError", "internal server error")
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			"InternalServerError",
+			"internal server error",
+		)
 		return
 	}
 	slog.Info("updated TTL", "table", req.TableName, "enabled", spec.Enabled)
@@ -1228,7 +1255,12 @@ func (ro *Router) handleDescribeTimeToLive(w http.ResponseWriter, body []byte) {
 			return
 		}
 		slog.Error("DescribeTimeToLive failed", "table", req.TableName, "err", err)
-		writeError(w, http.StatusInternalServerError, "InternalServerError", "internal server error")
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			"InternalServerError",
+			"internal server error",
+		)
 		return
 	}
 	ttlDesc := map[string]any{"TimeToLiveStatus": status}

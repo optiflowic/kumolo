@@ -36,30 +36,30 @@ type TTLSpec struct {
 
 // ProvisionedThroughput holds read/write capacity units.
 type ProvisionedThroughput struct {
-	ReadCapacityUnits  int64 `json:"readCapacityUnits,omitempty"`
-	WriteCapacityUnits int64 `json:"writeCapacityUnits,omitempty"`
+	ReadCapacityUnits  int64 `json:"ReadCapacityUnits,omitempty"`
+	WriteCapacityUnits int64 `json:"WriteCapacityUnits,omitempty"`
 }
 
 // GlobalSecondaryIndex holds the definition of a GSI.
 type GlobalSecondaryIndex struct {
-	IndexName             string                `json:"indexName"`
-	KeySchema             []KeySchemaElement    `json:"keySchema"`
-	Projection            map[string]any        `json:"projection,omitempty"`
+	IndexName             string                 `json:"indexName"`
+	KeySchema             []KeySchemaElement     `json:"keySchema"`
+	Projection            map[string]any         `json:"projection,omitempty"`
 	ProvisionedThroughput *ProvisionedThroughput `json:"provisionedThroughput,omitempty"`
 }
 
 // TableMetadata is stored as <table>.table.json at the storage root.
 type TableMetadata struct {
-	Name                    string                 `json:"name"`
-	KeySchema               []KeySchemaElement     `json:"keySchema"`
-	AttributeDefinitions    []AttributeDefinition  `json:"attributeDefinitions"`
-	BillingMode             string                 `json:"billingMode,omitempty"`
-	ProvisionedThroughput   *ProvisionedThroughput `json:"provisionedThroughput,omitempty"`
-	GlobalSecondaryIndexes  []GlobalSecondaryIndex `json:"globalSecondaryIndexes,omitempty"`
-	Status                  string                 `json:"status"`
-	CreatedAt               time.Time              `json:"createdAt"`
-	TTL                     *TTLSpec               `json:"ttl,omitempty"`
-	Tags                    map[string]string      `json:"tags,omitempty"`
+	Name                   string                 `json:"name"`
+	KeySchema              []KeySchemaElement     `json:"keySchema"`
+	AttributeDefinitions   []AttributeDefinition  `json:"attributeDefinitions"`
+	BillingMode            string                 `json:"billingMode,omitempty"`
+	ProvisionedThroughput  *ProvisionedThroughput `json:"provisionedThroughput,omitempty"`
+	GlobalSecondaryIndexes []GlobalSecondaryIndex `json:"globalSecondaryIndexes,omitempty"`
+	Status                 string                 `json:"status"`
+	CreatedAt              time.Time              `json:"createdAt"`
+	TTL                    *TTLSpec               `json:"ttl,omitempty"`
+	Tags                   map[string]string      `json:"tags,omitempty"`
 }
 
 // Sort key condition operators used in SortKeyCondition.Operator.
@@ -588,7 +588,7 @@ type UpdateTableInput struct {
 	ProvisionedThroughput *ProvisionedThroughput
 	GSICreates            []GlobalSecondaryIndex
 	GSIUpdates            map[string]*ProvisionedThroughput // indexName → new throughput
-	GSIDeletes            []string                         // indexNames to remove
+	GSIDeletes            []string                          // indexNames to remove
 }
 
 func (s *Storage) UpdateTable(tableName string, in UpdateTableInput) (TableMetadata, error) {
@@ -630,11 +630,6 @@ func (s *Storage) UpdateTable(tableName string, in UpdateTableInput) (TableMetad
 		return TableMetadata{}, err
 	}
 	return meta, nil
-}
-
-// tableARN returns the ARN for the given table name.
-func tableARN(name string) string {
-	return "arn:aws:dynamodb:us-east-1:000000000000:table/" + name
 }
 
 // tableNameFromARN extracts the table name from a DynamoDB table ARN.
