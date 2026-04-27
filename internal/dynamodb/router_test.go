@@ -1626,3 +1626,32 @@ func TestHandleBatchWriteItem(t *testing.T) {
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
 }
+
+func TestHandleDescribeLimits(t *testing.T) {
+	t.Run("returns hardcoded capacity limits", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "DescribeLimits", `{}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, float64(80000), resp["AccountMaxReadCapacityUnits"])
+		assert.Equal(t, float64(80000), resp["AccountMaxWriteCapacityUnits"])
+		assert.Equal(t, float64(40000), resp["TableMaxReadCapacityUnits"])
+		assert.Equal(t, float64(40000), resp["TableMaxWriteCapacityUnits"])
+	})
+}
+
+func TestHandleDescribeEndpoints(t *testing.T) {
+	t.Run("returns static localhost endpoint", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "DescribeEndpoints", `{}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		endpoints := resp["Endpoints"].([]any)
+		require.Len(t, endpoints, 1)
+		ep := endpoints[0].(map[string]any)
+		assert.Equal(t, "localhost:5566", ep["Address"])
+		assert.Equal(t, float64(1440), ep["CachePeriodInMinutes"])
+	})
+}

@@ -295,6 +295,10 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ro.handleBatchGetItem(w, body)
 	case "BatchWriteItem":
 		ro.handleBatchWriteItem(w, body)
+	case "DescribeLimits":
+		ro.handleDescribeLimits(w)
+	case "DescribeEndpoints":
+		ro.handleDescribeEndpoints(w)
 	default:
 		slog.Debug( // #nosec G706 -- target comes from the X-Amz-Target header; log injection risk accepted for a local dev emulator
 			"DynamoDB operation not implemented",
@@ -934,5 +938,27 @@ func (ro *Router) handleBatchWriteItem(w http.ResponseWriter, body []byte) {
 	slog.Info("batch wrote DynamoDB items", "tables", len(req.RequestItems))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"UnprocessedItems": map[string]any{},
+	})
+}
+
+func (ro *Router) handleDescribeLimits(w http.ResponseWriter) {
+	slog.Debug("DescribeLimits")
+	writeJSON(w, http.StatusOK, map[string]any{
+		"AccountMaxReadCapacityUnits":  80000,
+		"AccountMaxWriteCapacityUnits": 80000,
+		"TableMaxReadCapacityUnits":    40000,
+		"TableMaxWriteCapacityUnits":   40000,
+	})
+}
+
+func (ro *Router) handleDescribeEndpoints(w http.ResponseWriter) {
+	slog.Debug("DescribeEndpoints")
+	writeJSON(w, http.StatusOK, map[string]any{
+		"Endpoints": []map[string]any{
+			{
+				"Address":              "localhost:5566",
+				"CachePeriodInMinutes": 1440,
+			},
+		},
 	})
 }
