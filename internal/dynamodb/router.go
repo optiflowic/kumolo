@@ -211,7 +211,11 @@ type store interface {
 	GetItem(tableName string, key map[string]any) (map[string]any, error)
 	DeleteItem(tableName string, key map[string]any) error
 	Scan(tableName string) ([]map[string]any, error)
-	UpdateItem(tableName string, key map[string]any, updates map[string]any) (map[string]any, error)
+	UpdateItem(
+		tableName string,
+		key map[string]any,
+		updates map[string]any,
+	) (map[string]any, map[string]any, error)
 	Query(
 		tableName, hashKeyName string,
 		hashKeyValue any,
@@ -691,7 +695,7 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 		updates = map[string]any{}
 	}
 
-	item, err := ro.storage.UpdateItem(req.TableName, req.Key, updates)
+	before, after, err := ro.storage.UpdateItem(req.TableName, req.Key, updates)
 	if err != nil {
 		if errors.Is(err, ErrTableNotFound) {
 			slog.Debug("UpdateItem: table not found", "table", req.TableName)
@@ -715,8 +719,35 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 	}
 	slog.Info("updated DynamoDB item", "table", req.TableName)
 	resp := map[string]any{}
-	if req.ReturnValues == "ALL_NEW" {
-		resp["Attributes"] = item
+	switch req.ReturnValues {
+	case "ALL_NEW":
+		resp["Attributes"] = after
+	case "ALL_OLD":
+		if before != nil {
+			resp["Attributes"] = before
+		}
+	case "UPDATED_NEW":
+		attrs := make(map[string]any, len(updates))
+		for k := range updates {
+			if v, ok := after[k]; ok {
+				attrs[k] = v
+			}
+		}
+		if len(attrs) > 0 {
+			resp["Attributes"] = attrs
+		}
+	case "UPDATED_OLD":
+		if before != nil {
+			attrs := make(map[string]any, len(updates))
+			for k := range updates {
+				if v, ok := before[k]; ok {
+					attrs[k] = v
+				}
+			}
+			if len(attrs) > 0 {
+				resp["Attributes"] = attrs
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

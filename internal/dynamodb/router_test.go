@@ -544,13 +544,174 @@ func TestHandleUpdateItem(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assertErrorType(t, w, "ValidationException")
 	})
+
+	t.Run("returns old item when ReturnValues is ALL_OLD", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"val":{"S":"old"}}}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+            "TableName": "test-table",
+            "Key": {"pk": {"S": "k1"}},
+            "UpdateExpression": "SET val = :v",
+            "ExpressionAttributeValues": {":v": {"S": "new"}},
+            "ReturnValues": "ALL_OLD"
+        }`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		attrs := resp["Attributes"].(map[string]any)
+		assert.Equal(t, map[string]any{"S": "old"}, attrs["val"])
+		assert.Nil(t, attrs["name"])
+	})
+
+	t.Run(
+		"returns only changed attrs after update when ReturnValues is UPDATED_NEW",
+		func(t *testing.T) {
+			ro := newTestRouter(t)
+			require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+			require.Equal(t, http.StatusOK, dynamo(
+				t,
+				ro,
+				"PutItem",
+				`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"other":{"S":"keep"},"val":{"S":"old"}}}`,
+			).Code)
+			w := dynamo(t, ro, "UpdateItem", `{
+            "TableName": "test-table",
+            "Key": {"pk": {"S": "k1"}},
+            "UpdateExpression": "SET val = :v",
+            "ExpressionAttributeValues": {":v": {"S": "new"}},
+            "ReturnValues": "UPDATED_NEW"
+        }`)
+			assert.Equal(t, http.StatusOK, w.Code)
+			var resp map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+			attrs := resp["Attributes"].(map[string]any)
+			assert.Equal(t, map[string]any{"S": "new"}, attrs["val"])
+			assert.Nil(t, attrs["other"])
+			assert.Nil(t, attrs["pk"])
+		},
+	)
+
+	t.Run(
+		"returns only changed attrs before update when ReturnValues is UPDATED_OLD",
+		func(t *testing.T) {
+			ro := newTestRouter(t)
+			require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+			require.Equal(t, http.StatusOK, dynamo(
+				t,
+				ro,
+				"PutItem",
+				`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"other":{"S":"keep"},"val":{"S":"old"}}}`,
+			).Code)
+			w := dynamo(t, ro, "UpdateItem", `{
+            "TableName": "test-table",
+            "Key": {"pk": {"S": "k1"}},
+            "UpdateExpression": "SET val = :v",
+            "ExpressionAttributeValues": {":v": {"S": "new"}},
+            "ReturnValues": "UPDATED_OLD"
+        }`)
+			assert.Equal(t, http.StatusOK, w.Code)
+			var resp map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+			attrs := resp["Attributes"].(map[string]any)
+			assert.Equal(t, map[string]any{"S": "old"}, attrs["val"])
+			assert.Nil(t, attrs["other"])
+			assert.Nil(t, attrs["pk"])
+		},
+	)
+
+	t.Run("UPDATED_OLD excludes removed attr absent in original", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"val":{"S":"x"}}}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+            "TableName": "test-table",
+            "Key": {"pk": {"S": "k1"}},
+            "UpdateExpression": "REMOVE nonexistent",
+            "ReturnValues": "UPDATED_OLD"
+        }`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Nil(t, resp["Attributes"])
+	})
+
+	t.Run("ALL_OLD omits Attributes when item did not exist", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+            "TableName": "test-table",
+            "Key": {"pk": {"S": "new"}},
+            "UpdateExpression": "SET val = :v",
+            "ExpressionAttributeValues": {":v": {"S": "x"}},
+            "ReturnValues": "ALL_OLD"
+        }`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Nil(t, resp["Attributes"])
+	})
+
+	t.Run("UPDATED_OLD returns old value of REMOVEd existing attribute", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"val":{"S":"old"}}}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+            "TableName": "test-table",
+            "Key": {"pk": {"S": "k1"}},
+            "UpdateExpression": "REMOVE val",
+            "ReturnValues": "UPDATED_OLD"
+        }`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		attrs := resp["Attributes"].(map[string]any)
+		assert.Equal(t, map[string]any{"S": "old"}, attrs["val"])
+	})
+
+	t.Run("UPDATED_NEW returns SET attrs when item did not exist", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+            "TableName": "test-table",
+            "Key": {"pk": {"S": "new"}},
+            "UpdateExpression": "SET val = :v",
+            "ExpressionAttributeValues": {":v": {"S": "x"}},
+            "ReturnValues": "UPDATED_NEW"
+        }`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		attrs := resp["Attributes"].(map[string]any)
+		assert.Equal(t, map[string]any{"S": "x"}, attrs["val"])
+		assert.Nil(t, attrs["pk"])
+	})
+
+	t.Run("UPDATED_OLD omits Attributes when item did not exist", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+            "TableName": "test-table",
+            "Key": {"pk": {"S": "new"}},
+            "UpdateExpression": "SET val = :v",
+            "ExpressionAttributeValues": {":v": {"S": "x"}},
+            "ReturnValues": "UPDATED_OLD"
+        }`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Nil(t, resp["Attributes"])
+	})
 }
 
 func TestHandleUpdateItem_InternalErrors(t *testing.T) {
 	t.Run("500 when UpdateItem fails with unexpected error", func(t *testing.T) {
 		ro := &Router{storage: &mockStore{
-			updateItemFn: func(string, map[string]any, map[string]any) (map[string]any, error) {
-				return nil, errInternal
+			updateItemFn: func(string, map[string]any, map[string]any) (map[string]any, map[string]any, error) {
+				return nil, nil, errInternal
 			},
 		}}
 		w := dynamo(t, ro, "UpdateItem", `{
@@ -1074,7 +1235,7 @@ type mockStore struct {
 	getItemFn         func(tableName string, key map[string]any) (map[string]any, error)
 	deleteItemFn      func(tableName string, key map[string]any) error
 	scanFn            func(tableName string) ([]map[string]any, error)
-	updateItemFn      func(tableName string, key map[string]any, updates map[string]any) (map[string]any, error)
+	updateItemFn      func(tableName string, key map[string]any, updates map[string]any) (map[string]any, map[string]any, error)
 	queryFn           func(tableName, hashKeyName string, hashKeyValue any) ([]map[string]any, error)
 	batchGetItemsFn   func(tableName string, keys []map[string]any) ([]map[string]any, error)
 	batchWriteItemsFn func(tableName string, puts []map[string]any, deletes []map[string]any) error
@@ -1116,7 +1277,7 @@ func (m *mockStore) UpdateItem(
 	tableName string,
 	key map[string]any,
 	updates map[string]any,
-) (map[string]any, error) {
+) (map[string]any, map[string]any, error) {
 	return m.updateItemFn(tableName, key, updates)
 }
 
