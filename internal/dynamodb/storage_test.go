@@ -1105,6 +1105,96 @@ func TestBatchWriteItems(t *testing.T) {
 	})
 }
 
+func TestUpdateTable(t *testing.T) {
+	t.Run("updates billing mode", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		meta, err := s.UpdateTable("test-table", UpdateTableInput{BillingMode: "PROVISIONED"})
+		require.NoError(t, err)
+		assert.Equal(t, "PROVISIONED", meta.BillingMode)
+	})
+
+	t.Run("updates provisioned throughput", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		pt := &ProvisionedThroughput{ReadCapacityUnits: 10, WriteCapacityUnits: 10}
+		meta, err := s.UpdateTable("test-table", UpdateTableInput{ProvisionedThroughput: pt})
+		require.NoError(t, err)
+		require.NotNil(t, meta.ProvisionedThroughput)
+		assert.Equal(t, int64(10), meta.ProvisionedThroughput.ReadCapacityUnits)
+	})
+
+	t.Run("creates GSI", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		gsi := GlobalSecondaryIndex{
+			IndexName: "gsi1",
+			KeySchema: []KeySchemaElement{{AttributeName: "sk", KeyType: "HASH"}},
+		}
+		meta, err := s.UpdateTable("test-table", UpdateTableInput{GSICreates: []GlobalSecondaryIndex{gsi}})
+		require.NoError(t, err)
+		require.Len(t, meta.GlobalSecondaryIndexes, 1)
+		assert.Equal(t, "gsi1", meta.GlobalSecondaryIndexes[0].IndexName)
+	})
+
+	t.Run("updates GSI throughput", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		gsi := GlobalSecondaryIndex{
+			IndexName: "gsi1",
+			KeySchema: []KeySchemaElement{{AttributeName: "sk", KeyType: "HASH"}},
+			ProvisionedThroughput: &ProvisionedThroughput{ReadCapacityUnits: 5, WriteCapacityUnits: 5},
+		}
+		_, err := s.UpdateTable("test-table", UpdateTableInput{GSICreates: []GlobalSecondaryIndex{gsi}})
+		require.NoError(t, err)
+		newPT := &ProvisionedThroughput{ReadCapacityUnits: 20, WriteCapacityUnits: 20}
+		meta, err := s.UpdateTable("test-table", UpdateTableInput{
+			GSIUpdates: map[string]*ProvisionedThroughput{"gsi1": newPT},
+		})
+		require.NoError(t, err)
+		require.NotNil(t, meta.GlobalSecondaryIndexes[0].ProvisionedThroughput)
+		assert.Equal(t, int64(20), meta.GlobalSecondaryIndexes[0].ProvisionedThroughput.ReadCapacityUnits)
+	})
+
+	t.Run("deletes GSI", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		gsi := GlobalSecondaryIndex{
+			IndexName: "gsi1",
+			KeySchema: []KeySchemaElement{{AttributeName: "sk", KeyType: "HASH"}},
+		}
+		_, err := s.UpdateTable("test-table", UpdateTableInput{GSICreates: []GlobalSecondaryIndex{gsi}})
+		require.NoError(t, err)
+		meta, err := s.UpdateTable("test-table", UpdateTableInput{GSIDeletes: []string{"gsi1"}})
+		require.NoError(t, err)
+		assert.Empty(t, meta.GlobalSecondaryIndexes)
+	})
+
+	t.Run("returns ErrTableNotFound for missing table", func(t *testing.T) {
+		s := newTestStorage(t)
+		_, err := s.UpdateTable("no-such", UpdateTableInput{BillingMode: "PROVISIONED"})
+		assert.ErrorIs(t, err, ErrTableNotFound)
+	})
+
+	t.Run("returns error when readTableMeta fails", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		s.readAll = func(io.Reader) ([]byte, error) { return nil, errors.New("read error") }
+		_, err := s.UpdateTable("test-table", UpdateTableInput{BillingMode: "PROVISIONED"})
+		assert.Error(t, err)
+	})
+
+	t.Run("returns error when writeTableMeta fails", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		s.openFile = func(string, int, os.FileMode) (io.WriteCloser, error) {
+			return nil, errors.New("write error")
+		}
+		_, err := s.UpdateTable("test-table", UpdateTableInput{BillingMode: "PROVISIONED"})
+		assert.Error(t, err)
+	})
+}
+
 const testTableARN = "arn:aws:dynamodb:us-east-1:000000000000:table/test-table"
 
 func TestTagResource(t *testing.T) {

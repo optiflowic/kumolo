@@ -34,16 +34,32 @@ type TTLSpec struct {
 	Enabled       bool   `json:"enabled"`
 }
 
+// ProvisionedThroughput holds read/write capacity units.
+type ProvisionedThroughput struct {
+	ReadCapacityUnits  int64 `json:"readCapacityUnits,omitempty"`
+	WriteCapacityUnits int64 `json:"writeCapacityUnits,omitempty"`
+}
+
+// GlobalSecondaryIndex holds the definition of a GSI.
+type GlobalSecondaryIndex struct {
+	IndexName             string                `json:"indexName"`
+	KeySchema             []KeySchemaElement    `json:"keySchema"`
+	Projection            map[string]any        `json:"projection,omitempty"`
+	ProvisionedThroughput *ProvisionedThroughput `json:"provisionedThroughput,omitempty"`
+}
+
 // TableMetadata is stored as <table>.table.json at the storage root.
 type TableMetadata struct {
-	Name                 string                `json:"name"`
-	KeySchema            []KeySchemaElement    `json:"keySchema"`
-	AttributeDefinitions []AttributeDefinition `json:"attributeDefinitions"`
-	BillingMode          string                `json:"billingMode,omitempty"`
-	Status               string                `json:"status"`
-	CreatedAt            time.Time             `json:"createdAt"`
-	TTL                  *TTLSpec              `json:"ttl,omitempty"`
-	Tags                 map[string]string     `json:"tags,omitempty"`
+	Name                    string                 `json:"name"`
+	KeySchema               []KeySchemaElement     `json:"keySchema"`
+	AttributeDefinitions    []AttributeDefinition  `json:"attributeDefinitions"`
+	BillingMode             string                 `json:"billingMode,omitempty"`
+	ProvisionedThroughput   *ProvisionedThroughput `json:"provisionedThroughput,omitempty"`
+	GlobalSecondaryIndexes  []GlobalSecondaryIndex `json:"globalSecondaryIndexes,omitempty"`
+	Status                  string                 `json:"status"`
+	CreatedAt               time.Time              `json:"createdAt"`
+	TTL                     *TTLSpec               `json:"ttl,omitempty"`
+	Tags                    map[string]string      `json:"tags,omitempty"`
 }
 
 // Sort key condition operators used in SortKeyCondition.Operator.
@@ -564,6 +580,56 @@ func (s *Storage) readTableMeta(name string) (TableMetadata, error) {
 
 func (s *Storage) writeTableMeta(name string, meta TableMetadata) error {
 	return s.writeJSON(name+".table.json", meta)
+}
+
+// UpdateTableInput holds the optional fields that can be changed via UpdateTable.
+type UpdateTableInput struct {
+	BillingMode           string
+	ProvisionedThroughput *ProvisionedThroughput
+	GSICreates            []GlobalSecondaryIndex
+	GSIUpdates            map[string]*ProvisionedThroughput // indexName → new throughput
+	GSIDeletes            []string                         // indexNames to remove
+}
+
+func (s *Storage) UpdateTable(tableName string, in UpdateTableInput) (TableMetadata, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.tableExistsLocked(tableName) {
+		return TableMetadata{}, ErrTableNotFound
+	}
+	meta, err := s.readTableMeta(tableName)
+	if err != nil {
+		return TableMetadata{}, err
+	}
+	if in.BillingMode != "" {
+		meta.BillingMode = in.BillingMode
+	}
+	if in.ProvisionedThroughput != nil {
+		meta.ProvisionedThroughput = in.ProvisionedThroughput
+	}
+	// GSI deletes
+	deleteSet := make(map[string]struct{}, len(in.GSIDeletes))
+	for _, name := range in.GSIDeletes {
+		deleteSet[name] = struct{}{}
+	}
+	// GSI updates and deletes applied to existing list
+	filtered := meta.GlobalSecondaryIndexes[:0:0]
+	for _, gsi := range meta.GlobalSecondaryIndexes {
+		if _, del := deleteSet[gsi.IndexName]; del {
+			continue
+		}
+		if pt, ok := in.GSIUpdates[gsi.IndexName]; ok {
+			gsi.ProvisionedThroughput = pt
+		}
+		filtered = append(filtered, gsi)
+	}
+	// GSI creates
+	filtered = append(filtered, in.GSICreates...)
+	meta.GlobalSecondaryIndexes = filtered
+	if err := s.writeTableMeta(tableName, meta); err != nil {
+		return TableMetadata{}, err
+	}
+	return meta, nil
 }
 
 // tableARN returns the ARN for the given table name.

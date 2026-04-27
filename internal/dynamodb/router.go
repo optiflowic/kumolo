@@ -228,32 +228,58 @@ type store interface {
 	TagResource(resourceARN string, tags map[string]string) error
 	UntagResource(resourceARN string, tagKeys []string) error
 	ListTagsOfResource(resourceARN string) (map[string]string, error)
+	UpdateTable(tableName string, in UpdateTableInput) (TableMetadata, error)
 }
 
 // tableDescription is the DynamoDB API representation of a table.
 type tableDescription struct {
-	TableName            string                `json:"TableName"`
-	TableStatus          string                `json:"TableStatus"`
-	TableArn             string                `json:"TableArn"`
-	CreationDateTime     float64               `json:"CreationDateTime"`
-	KeySchema            []KeySchemaElement    `json:"KeySchema"`
-	AttributeDefinitions []AttributeDefinition `json:"AttributeDefinitions"`
-	ItemCount            int64                 `json:"ItemCount"`
-	TableSizeBytes       int64                 `json:"TableSizeBytes"`
+	TableName              string                 `json:"TableName"`
+	TableStatus            string                 `json:"TableStatus"`
+	TableArn               string                 `json:"TableArn"`
+	CreationDateTime       float64                `json:"CreationDateTime"`
+	KeySchema              []KeySchemaElement     `json:"KeySchema"`
+	AttributeDefinitions   []AttributeDefinition  `json:"AttributeDefinitions"`
+	BillingModeSummary     map[string]string      `json:"BillingModeSummary,omitempty"`
+	ProvisionedThroughput  *ProvisionedThroughput `json:"ProvisionedThroughput,omitempty"`
+	GlobalSecondaryIndexes []gsiDescription       `json:"GlobalSecondaryIndexes,omitempty"`
+	ItemCount              int64                  `json:"ItemCount"`
+	TableSizeBytes         int64                  `json:"TableSizeBytes"`
+}
+
+type gsiDescription struct {
+	IndexName             string                 `json:"IndexName"`
+	IndexStatus           string                 `json:"IndexStatus"`
+	KeySchema             []KeySchemaElement     `json:"KeySchema"`
+	Projection            map[string]any         `json:"Projection,omitempty"`
+	ProvisionedThroughput *ProvisionedThroughput `json:"ProvisionedThroughput,omitempty"`
 }
 
 func toTableDescription(m TableMetadata) tableDescription {
-	return tableDescription{
+	desc := tableDescription{
 		TableName:   m.Name,
 		TableStatus: m.Status,
 		TableArn: fmt.Sprintf(
 			"arn:aws:dynamodb:us-east-1:000000000000:table/%s",
 			m.Name,
 		),
-		CreationDateTime:     float64(m.CreatedAt.Unix()),
-		KeySchema:            m.KeySchema,
-		AttributeDefinitions: m.AttributeDefinitions,
+		CreationDateTime:      float64(m.CreatedAt.Unix()),
+		KeySchema:             m.KeySchema,
+		AttributeDefinitions:  m.AttributeDefinitions,
+		ProvisionedThroughput: m.ProvisionedThroughput,
 	}
+	if m.BillingMode != "" {
+		desc.BillingModeSummary = map[string]string{"BillingMode": m.BillingMode}
+	}
+	for _, gsi := range m.GlobalSecondaryIndexes {
+		desc.GlobalSecondaryIndexes = append(desc.GlobalSecondaryIndexes, gsiDescription{
+			IndexName:             gsi.IndexName,
+			IndexStatus:           "ACTIVE",
+			KeySchema:             gsi.KeySchema,
+			Projection:            gsi.Projection,
+			ProvisionedThroughput: gsi.ProvisionedThroughput,
+		})
+	}
+	return desc
 }
 
 // Router handles DynamoDB API requests dispatched via the X-Amz-Target header.
@@ -300,6 +326,8 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ro.handleBatchGetItem(w, body)
 	case "BatchWriteItem":
 		ro.handleBatchWriteItem(w, body)
+	case "UpdateTable":
+		ro.handleUpdateTable(w, body)
 	case "UpdateTimeToLive":
 		ro.handleUpdateTimeToLive(w, body)
 	case "DescribeTimeToLive":
@@ -954,6 +982,94 @@ func (ro *Router) handleBatchWriteItem(w http.ResponseWriter, body []byte) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"UnprocessedItems": map[string]any{},
 	})
+}
+
+func (ro *Router) handleUpdateTable(w http.ResponseWriter, body []byte) {
+	var req struct {
+		TableName             string `json:"TableName"`
+		BillingMode           string `json:"BillingMode"`
+		ProvisionedThroughput *struct {
+			ReadCapacityUnits  int64 `json:"ReadCapacityUnits"`
+			WriteCapacityUnits int64 `json:"WriteCapacityUnits"`
+		} `json:"ProvisionedThroughput"`
+		GlobalSecondaryIndexUpdates []struct {
+			Create *struct {
+				IndexName             string             `json:"IndexName"`
+				KeySchema             []KeySchemaElement `json:"KeySchema"`
+				Projection            map[string]any     `json:"Projection"`
+				ProvisionedThroughput *struct {
+					ReadCapacityUnits  int64 `json:"ReadCapacityUnits"`
+					WriteCapacityUnits int64 `json:"WriteCapacityUnits"`
+				} `json:"ProvisionedThroughput"`
+			} `json:"Create"`
+			Update *struct {
+				IndexName             string `json:"IndexName"`
+				ProvisionedThroughput struct {
+					ReadCapacityUnits  int64 `json:"ReadCapacityUnits"`
+					WriteCapacityUnits int64 `json:"WriteCapacityUnits"`
+				} `json:"ProvisionedThroughput"`
+			} `json:"Update"`
+			Delete *struct {
+				IndexName string `json:"IndexName"`
+			} `json:"Delete"`
+		} `json:"GlobalSecondaryIndexUpdates"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
+		return
+	}
+	if req.TableName == "" {
+		writeError(w, http.StatusBadRequest, "ValidationException", "TableName is required")
+		return
+	}
+
+	in := UpdateTableInput{BillingMode: req.BillingMode}
+	if req.ProvisionedThroughput != nil {
+		in.ProvisionedThroughput = &ProvisionedThroughput{
+			ReadCapacityUnits:  req.ProvisionedThroughput.ReadCapacityUnits,
+			WriteCapacityUnits: req.ProvisionedThroughput.WriteCapacityUnits,
+		}
+	}
+	in.GSIUpdates = make(map[string]*ProvisionedThroughput)
+	for _, update := range req.GlobalSecondaryIndexUpdates {
+		switch {
+		case update.Create != nil:
+			gsi := GlobalSecondaryIndex{
+				IndexName:  update.Create.IndexName,
+				KeySchema:  update.Create.KeySchema,
+				Projection: update.Create.Projection,
+			}
+			if update.Create.ProvisionedThroughput != nil {
+				gsi.ProvisionedThroughput = &ProvisionedThroughput{
+					ReadCapacityUnits:  update.Create.ProvisionedThroughput.ReadCapacityUnits,
+					WriteCapacityUnits: update.Create.ProvisionedThroughput.WriteCapacityUnits,
+				}
+			}
+			in.GSICreates = append(in.GSICreates, gsi)
+		case update.Update != nil:
+			in.GSIUpdates[update.Update.IndexName] = &ProvisionedThroughput{
+				ReadCapacityUnits:  update.Update.ProvisionedThroughput.ReadCapacityUnits,
+				WriteCapacityUnits: update.Update.ProvisionedThroughput.WriteCapacityUnits,
+			}
+		case update.Delete != nil:
+			in.GSIDeletes = append(in.GSIDeletes, update.Delete.IndexName)
+		}
+	}
+
+	meta, err := ro.storage.UpdateTable(req.TableName, in)
+	if err != nil {
+		if errors.Is(err, ErrTableNotFound) {
+			slog.Debug("UpdateTable: table not found", "table", req.TableName)
+			writeError(w, http.StatusBadRequest, "ResourceNotFoundException",
+				"Requested resource not found: Table: "+req.TableName+" not found")
+			return
+		}
+		slog.Error("UpdateTable failed", "table", req.TableName, "err", err)
+		writeError(w, http.StatusInternalServerError, "InternalServerError", "internal server error")
+		return
+	}
+	slog.Info("updated DynamoDB table", "table", req.TableName)
+	writeJSON(w, http.StatusOK, map[string]any{"TableDescription": toTableDescription(meta)})
 }
 
 func (ro *Router) handleTagResource(w http.ResponseWriter, body []byte) {
