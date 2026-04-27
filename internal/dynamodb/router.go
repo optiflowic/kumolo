@@ -231,6 +231,12 @@ type store interface {
 	UpdateTable(tableName string, in UpdateTableInput) (TableMetadata, error)
 }
 
+// billingModeSummary mirrors the AWS BillingModeSummary shape.
+type billingModeSummary struct {
+	BillingMode                       string  `json:"BillingMode"`
+	LastUpdateToPayPerRequestDateTime float64 `json:"LastUpdateToPayPerRequestDateTime,omitempty"`
+}
+
 // tableDescription is the DynamoDB API representation of a table.
 type tableDescription struct {
 	TableName              string                 `json:"TableName"`
@@ -239,7 +245,7 @@ type tableDescription struct {
 	CreationDateTime       float64                `json:"CreationDateTime"`
 	KeySchema              []KeySchemaElement     `json:"KeySchema"`
 	AttributeDefinitions   []AttributeDefinition  `json:"AttributeDefinitions"`
-	BillingModeSummary     map[string]string      `json:"BillingModeSummary,omitempty"`
+	BillingModeSummary     *billingModeSummary    `json:"BillingModeSummary,omitempty"`
 	ProvisionedThroughput  *ProvisionedThroughput `json:"ProvisionedThroughput,omitempty"`
 	GlobalSecondaryIndexes []gsiDescription       `json:"GlobalSecondaryIndexes,omitempty"`
 	ItemCount              int64                  `json:"ItemCount"`
@@ -268,7 +274,11 @@ func toTableDescription(m TableMetadata) tableDescription {
 		ProvisionedThroughput: m.ProvisionedThroughput,
 	}
 	if m.BillingMode != "" {
-		desc.BillingModeSummary = map[string]string{"BillingMode": m.BillingMode}
+		bms := &billingModeSummary{BillingMode: m.BillingMode}
+		if m.BillingModeUpdatedAt != nil {
+			bms.LastUpdateToPayPerRequestDateTime = float64(m.BillingModeUpdatedAt.Unix())
+		}
+		desc.BillingModeSummary = bms
 	}
 	for _, gsi := range m.GlobalSecondaryIndexes {
 		desc.GlobalSecondaryIndexes = append(desc.GlobalSecondaryIndexes, gsiDescription{
@@ -986,8 +996,9 @@ func (ro *Router) handleBatchWriteItem(w http.ResponseWriter, body []byte) {
 
 func (ro *Router) handleUpdateTable(w http.ResponseWriter, body []byte) {
 	var req struct {
-		TableName             string `json:"TableName"`
-		BillingMode           string `json:"BillingMode"`
+		TableName             string                `json:"TableName"`
+		BillingMode           string                `json:"BillingMode"`
+		AttributeDefinitions  []AttributeDefinition `json:"AttributeDefinitions"`
 		ProvisionedThroughput *struct {
 			ReadCapacityUnits  int64 `json:"ReadCapacityUnits"`
 			WriteCapacityUnits int64 `json:"WriteCapacityUnits"`
@@ -1023,7 +1034,10 @@ func (ro *Router) handleUpdateTable(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	in := UpdateTableInput{BillingMode: req.BillingMode}
+	in := UpdateTableInput{
+		BillingMode:          req.BillingMode,
+		AttributeDefinitions: req.AttributeDefinitions,
+	}
 	if req.ProvisionedThroughput != nil {
 		in.ProvisionedThroughput = &ProvisionedThroughput{
 			ReadCapacityUnits:  req.ProvisionedThroughput.ReadCapacityUnits,

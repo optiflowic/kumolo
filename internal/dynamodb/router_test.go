@@ -1786,7 +1786,7 @@ func TestHandleDescribeTimeToLive(t *testing.T) {
 }
 
 func TestHandleUpdateTable(t *testing.T) {
-	t.Run("updates billing mode", func(t *testing.T) {
+	t.Run("updates billing mode and sets BillingModeSummary", func(t *testing.T) {
 		ro := newTestRouter(t)
 		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
 		w := dynamo(t, ro, "UpdateTable", `{
@@ -1800,13 +1800,17 @@ func TestHandleUpdateTable(t *testing.T) {
 		desc := resp["TableDescription"].(map[string]any)
 		assert.Equal(t, "test-table", desc["TableName"])
 		assert.Equal(t, "ACTIVE", desc["TableStatus"])
+		bms := desc["BillingModeSummary"].(map[string]any)
+		assert.Equal(t, "PROVISIONED", bms["BillingMode"])
+		assert.NotZero(t, bms["LastUpdateToPayPerRequestDateTime"])
 	})
 
-	t.Run("creates GSI", func(t *testing.T) {
+	t.Run("creates GSI and merges AttributeDefinitions", func(t *testing.T) {
 		ro := newTestRouter(t)
 		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
 		w := dynamo(t, ro, "UpdateTable", `{
 			"TableName": "test-table",
+			"AttributeDefinitions": [{"AttributeName": "sk", "AttributeType": "S"}],
 			"GlobalSecondaryIndexUpdates": [{"Create": {
 				"IndexName": "gsi1",
 				"KeySchema": [{"AttributeName": "sk", "KeyType": "HASH"}],
@@ -1820,6 +1824,13 @@ func TestHandleUpdateTable(t *testing.T) {
 		gsis := desc["GlobalSecondaryIndexes"].([]any)
 		require.Len(t, gsis, 1)
 		assert.Equal(t, "gsi1", gsis[0].(map[string]any)["IndexName"])
+		attrDefs := desc["AttributeDefinitions"].([]any)
+		var attrNames []string
+		for _, a := range attrDefs {
+			attrNames = append(attrNames, a.(map[string]any)["AttributeName"].(string))
+		}
+		assert.Contains(t, attrNames, "pk")
+		assert.Contains(t, attrNames, "sk")
 	})
 
 	t.Run("deletes GSI", func(t *testing.T) {

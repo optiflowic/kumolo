@@ -1106,12 +1106,26 @@ func TestBatchWriteItems(t *testing.T) {
 }
 
 func TestUpdateTable(t *testing.T) {
-	t.Run("updates billing mode", func(t *testing.T) {
+	t.Run("updates billing mode and records timestamp", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
 		meta, err := s.UpdateTable("test-table", UpdateTableInput{BillingMode: "PROVISIONED"})
 		require.NoError(t, err)
 		assert.Equal(t, "PROVISIONED", meta.BillingMode)
+		require.NotNil(t, meta.BillingModeUpdatedAt)
+		assert.False(t, meta.BillingModeUpdatedAt.IsZero())
+	})
+
+	t.Run("does not update timestamp when billing mode unchanged", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		_, err := s.UpdateTable("test-table", UpdateTableInput{BillingMode: "PROVISIONED"})
+		require.NoError(t, err)
+		meta1, err := s.UpdateTable("test-table", UpdateTableInput{BillingMode: "PROVISIONED"})
+		require.NoError(t, err)
+		meta2, err := s.UpdateTable("test-table", UpdateTableInput{BillingMode: "PROVISIONED"})
+		require.NoError(t, err)
+		assert.Equal(t, meta1.BillingModeUpdatedAt, meta2.BillingModeUpdatedAt)
 	})
 
 	t.Run("updates provisioned throughput", func(t *testing.T) {
@@ -1138,6 +1152,24 @@ func TestUpdateTable(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, meta.GlobalSecondaryIndexes, 1)
 		assert.Equal(t, "gsi1", meta.GlobalSecondaryIndexes[0].IndexName)
+	})
+
+	t.Run("merges AttributeDefinitions without duplicates", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		newAttrs := []AttributeDefinition{
+			{AttributeName: "pk", AttributeType: "S"}, // duplicate, should be skipped
+			{AttributeName: "sk", AttributeType: "S"}, // new
+		}
+		meta, err := s.UpdateTable("test-table", UpdateTableInput{AttributeDefinitions: newAttrs})
+		require.NoError(t, err)
+		var names []string
+		for _, a := range meta.AttributeDefinitions {
+			names = append(names, a.AttributeName)
+		}
+		assert.Contains(t, names, "pk")
+		assert.Contains(t, names, "sk")
+		assert.Len(t, meta.AttributeDefinitions, 2)
 	})
 
 	t.Run("updates GSI throughput", func(t *testing.T) {

@@ -54,6 +54,7 @@ type TableMetadata struct {
 	KeySchema              []KeySchemaElement     `json:"keySchema"`
 	AttributeDefinitions   []AttributeDefinition  `json:"attributeDefinitions"`
 	BillingMode            string                 `json:"billingMode,omitempty"`
+	BillingModeUpdatedAt   *time.Time             `json:"billingModeUpdatedAt,omitempty"`
 	ProvisionedThroughput  *ProvisionedThroughput `json:"provisionedThroughput,omitempty"`
 	GlobalSecondaryIndexes []GlobalSecondaryIndex `json:"globalSecondaryIndexes,omitempty"`
 	Status                 string                 `json:"status"`
@@ -586,6 +587,7 @@ func (s *Storage) writeTableMeta(name string, meta TableMetadata) error {
 type UpdateTableInput struct {
 	BillingMode           string
 	ProvisionedThroughput *ProvisionedThroughput
+	AttributeDefinitions  []AttributeDefinition
 	GSICreates            []GlobalSecondaryIndex
 	GSIUpdates            map[string]*ProvisionedThroughput // indexName → new throughput
 	GSIDeletes            []string                          // indexNames to remove
@@ -601,11 +603,24 @@ func (s *Storage) UpdateTable(tableName string, in UpdateTableInput) (TableMetad
 	if err != nil {
 		return TableMetadata{}, err
 	}
-	if in.BillingMode != "" {
+	if in.BillingMode != "" && in.BillingMode != meta.BillingMode {
 		meta.BillingMode = in.BillingMode
+		now := time.Now().UTC()
+		meta.BillingModeUpdatedAt = &now
 	}
 	if in.ProvisionedThroughput != nil {
 		meta.ProvisionedThroughput = in.ProvisionedThroughput
+	}
+	// Merge new AttributeDefinitions (deduplicate by AttributeName)
+	existing := make(map[string]struct{}, len(meta.AttributeDefinitions))
+	for _, a := range meta.AttributeDefinitions {
+		existing[a.AttributeName] = struct{}{}
+	}
+	for _, a := range in.AttributeDefinitions {
+		if _, ok := existing[a.AttributeName]; !ok {
+			meta.AttributeDefinitions = append(meta.AttributeDefinitions, a)
+			existing[a.AttributeName] = struct{}{}
+		}
 	}
 	// GSI deletes
 	deleteSet := make(map[string]struct{}, len(in.GSIDeletes))
