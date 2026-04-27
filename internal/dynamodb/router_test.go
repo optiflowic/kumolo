@@ -1227,18 +1227,20 @@ func (e *errorReader) Read(_ []byte) (int, error) {
 
 // mockStore is a configurable in-memory store for router tests.
 type mockStore struct {
-	createTableFn     func(meta TableMetadata) error
-	deleteTableFn     func(name string) error
-	describeTableFn   func(name string) (TableMetadata, error)
-	listTablesFn      func() ([]string, error)
-	putItemFn         func(tableName string, item map[string]any) error
-	getItemFn         func(tableName string, key map[string]any) (map[string]any, error)
-	deleteItemFn      func(tableName string, key map[string]any) error
-	scanFn            func(tableName string) ([]map[string]any, error)
-	updateItemFn      func(tableName string, key map[string]any, updates map[string]any) (map[string]any, map[string]any, error)
-	queryFn           func(tableName, hashKeyName string, hashKeyValue any) ([]map[string]any, error)
-	batchGetItemsFn   func(tableName string, keys []map[string]any) ([]map[string]any, error)
-	batchWriteItemsFn func(tableName string, puts []map[string]any, deletes []map[string]any) error
+	createTableFn        func(meta TableMetadata) error
+	deleteTableFn        func(name string) error
+	describeTableFn      func(name string) (TableMetadata, error)
+	listTablesFn         func() ([]string, error)
+	putItemFn            func(tableName string, item map[string]any) error
+	getItemFn            func(tableName string, key map[string]any) (map[string]any, error)
+	deleteItemFn         func(tableName string, key map[string]any) error
+	scanFn               func(tableName string) ([]map[string]any, error)
+	updateItemFn         func(tableName string, key map[string]any, updates map[string]any) (map[string]any, map[string]any, error)
+	queryFn              func(tableName, hashKeyName string, hashKeyValue any) ([]map[string]any, error)
+	batchGetItemsFn      func(tableName string, keys []map[string]any) ([]map[string]any, error)
+	batchWriteItemsFn    func(tableName string, puts []map[string]any, deletes []map[string]any) error
+	updateTimeToLiveFn   func(tableName string, spec TTLSpec) (TTLSpec, error)
+	describeTimeToLiveFn func(tableName string) (string, *TTLSpec, error)
 }
 
 func (m *mockStore) CreateTable(meta TableMetadata) error {
@@ -1302,6 +1304,14 @@ func (m *mockStore) BatchWriteItems(
 	deletes []map[string]any,
 ) error {
 	return m.batchWriteItemsFn(tableName, puts, deletes)
+}
+
+func (m *mockStore) UpdateTimeToLive(tableName string, spec TTLSpec) (TTLSpec, error) {
+	return m.updateTimeToLiveFn(tableName, spec)
+}
+
+func (m *mockStore) DescribeTimeToLive(tableName string) (string, *TTLSpec, error) {
+	return m.describeTimeToLiveFn(tableName)
 }
 
 var errInternal = errors.New("internal error")
@@ -1623,6 +1633,134 @@ func TestHandleBatchWriteItem(t *testing.T) {
 		w := dynamo(t, ro, "BatchWriteItem", `{
 			"RequestItems": {"tbl": [{"PutRequest": {"Item": {"pk": {"S": "k"}}}}]}
 		}`)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+}
+
+func TestHandleUpdateTimeToLive(t *testing.T) {
+	t.Run("enables TTL", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "UpdateTimeToLive", `{
+			"TableName": "test-table",
+			"TimeToLiveSpecification": {"AttributeName": "expires", "Enabled": true}
+		}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		spec := resp["TimeToLiveSpecification"].(map[string]any)
+		assert.Equal(t, "expires", spec["AttributeName"])
+		assert.Equal(t, true, spec["Enabled"])
+	})
+
+	t.Run("disables TTL", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		dynamo(t, ro, "UpdateTimeToLive", `{
+			"TableName": "test-table",
+			"TimeToLiveSpecification": {"AttributeName": "expires", "Enabled": true}
+		}`)
+		w := dynamo(t, ro, "UpdateTimeToLive", `{
+			"TableName": "test-table",
+			"TimeToLiveSpecification": {"AttributeName": "expires", "Enabled": false}
+		}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		spec := resp["TimeToLiveSpecification"].(map[string]any)
+		assert.Equal(t, false, spec["Enabled"])
+	})
+
+	t.Run("400 for missing TableName", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "UpdateTimeToLive", `{}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ValidationException")
+	})
+
+	t.Run("400 for table not found", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "UpdateTimeToLive", `{
+			"TableName": "no-such",
+			"TimeToLiveSpecification": {"AttributeName": "exp", "Enabled": true}
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ResourceNotFoundException")
+	})
+
+	t.Run("400 for invalid JSON", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "UpdateTimeToLive", `{bad}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("500 when storage fails", func(t *testing.T) {
+		ro := &Router{storage: &mockStore{
+			updateTimeToLiveFn: func(string, TTLSpec) (TTLSpec, error) { return TTLSpec{}, errInternal },
+		}}
+		w := dynamo(t, ro, "UpdateTimeToLive", `{
+			"TableName": "t",
+			"TimeToLiveSpecification": {"AttributeName": "exp", "Enabled": true}
+		}`)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+}
+
+func TestHandleDescribeTimeToLive(t *testing.T) {
+	t.Run("returns DISABLED by default", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "DescribeTimeToLive", `{"TableName": "test-table"}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		desc := resp["TimeToLiveDescription"].(map[string]any)
+		assert.Equal(t, "DISABLED", desc["TimeToLiveStatus"])
+	})
+
+	t.Run("returns ENABLED after UpdateTimeToLive", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "UpdateTimeToLive", `{
+			"TableName": "test-table",
+			"TimeToLiveSpecification": {"AttributeName": "expires", "Enabled": true}
+		}`).Code)
+		w := dynamo(t, ro, "DescribeTimeToLive", `{"TableName": "test-table"}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		desc := resp["TimeToLiveDescription"].(map[string]any)
+		assert.Equal(t, "ENABLED", desc["TimeToLiveStatus"])
+		assert.Equal(t, "expires", desc["AttributeName"])
+	})
+
+	t.Run("400 for missing TableName", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "DescribeTimeToLive", `{}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ValidationException")
+	})
+
+	t.Run("400 for table not found", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "DescribeTimeToLive", `{"TableName": "no-such"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ResourceNotFoundException")
+	})
+
+	t.Run("400 for invalid JSON", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "DescribeTimeToLive", `{bad}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("500 when storage fails", func(t *testing.T) {
+		ro := &Router{storage: &mockStore{
+			describeTimeToLiveFn: func(string) (string, *TTLSpec, error) {
+				return "", nil, errInternal
+			},
+		}}
+		w := dynamo(t, ro, "DescribeTimeToLive", `{"TableName": "t"}`)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
 }

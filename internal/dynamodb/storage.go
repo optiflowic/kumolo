@@ -28,6 +28,12 @@ type AttributeDefinition struct {
 	AttributeType string `json:"AttributeType"`
 }
 
+// TTLSpec holds the TimeToLive configuration for a table.
+type TTLSpec struct {
+	AttributeName string `json:"attributeName"`
+	Enabled       bool   `json:"enabled"`
+}
+
 // TableMetadata is stored as <table>.table.json at the storage root.
 type TableMetadata struct {
 	Name                 string                `json:"name"`
@@ -36,6 +42,7 @@ type TableMetadata struct {
 	BillingMode          string                `json:"billingMode,omitempty"`
 	Status               string                `json:"status"`
 	CreatedAt            time.Time             `json:"createdAt"`
+	TTL                  *TTLSpec              `json:"ttl,omitempty"`
 }
 
 // Sort key condition operators used in SortKeyCondition.Operator.
@@ -556,6 +563,39 @@ func (s *Storage) readTableMeta(name string) (TableMetadata, error) {
 
 func (s *Storage) writeTableMeta(name string, meta TableMetadata) error {
 	return s.writeJSON(name+".table.json", meta)
+}
+
+func (s *Storage) UpdateTimeToLive(tableName string, spec TTLSpec) (TTLSpec, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.tableExistsLocked(tableName) {
+		return TTLSpec{}, ErrTableNotFound
+	}
+	meta, err := s.readTableMeta(tableName)
+	if err != nil {
+		return TTLSpec{}, err
+	}
+	meta.TTL = &spec
+	if err := s.writeTableMeta(tableName, meta); err != nil {
+		return TTLSpec{}, err
+	}
+	return spec, nil
+}
+
+func (s *Storage) DescribeTimeToLive(tableName string) (string, *TTLSpec, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.tableExistsLocked(tableName) {
+		return "", nil, ErrTableNotFound
+	}
+	meta, err := s.readTableMeta(tableName)
+	if err != nil {
+		return "", nil, err
+	}
+	if meta.TTL == nil || !meta.TTL.Enabled {
+		return "DISABLED", meta.TTL, nil
+	}
+	return "ENABLED", meta.TTL, nil
 }
 
 func (s *Storage) writeJSON(path string, v any) (retErr error) {

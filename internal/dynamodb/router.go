@@ -223,6 +223,8 @@ type store interface {
 	) ([]map[string]any, error)
 	BatchGetItems(tableName string, keys []map[string]any) ([]map[string]any, error)
 	BatchWriteItems(tableName string, puts []map[string]any, deletes []map[string]any) error
+	UpdateTimeToLive(tableName string, spec TTLSpec) (TTLSpec, error)
+	DescribeTimeToLive(tableName string) (string, *TTLSpec, error)
 }
 
 // tableDescription is the DynamoDB API representation of a table.
@@ -295,6 +297,10 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ro.handleBatchGetItem(w, body)
 	case "BatchWriteItem":
 		ro.handleBatchWriteItem(w, body)
+	case "UpdateTimeToLive":
+		ro.handleUpdateTimeToLive(w, body)
+	case "DescribeTimeToLive":
+		ro.handleDescribeTimeToLive(w, body)
 	case "DescribeLimits":
 		ro.handleDescribeLimits(w)
 	case "DescribeEndpoints":
@@ -939,6 +945,78 @@ func (ro *Router) handleBatchWriteItem(w http.ResponseWriter, body []byte) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"UnprocessedItems": map[string]any{},
 	})
+}
+
+func (ro *Router) handleUpdateTimeToLive(w http.ResponseWriter, body []byte) {
+	var req struct {
+		TableName              string `json:"TableName"`
+		TimeToLiveSpecification struct {
+			AttributeName string `json:"AttributeName"`
+			Enabled       bool   `json:"Enabled"`
+		} `json:"TimeToLiveSpecification"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
+		return
+	}
+	if req.TableName == "" {
+		writeError(w, http.StatusBadRequest, "ValidationException", "TableName is required")
+		return
+	}
+	spec, err := ro.storage.UpdateTimeToLive(req.TableName, TTLSpec{
+		AttributeName: req.TimeToLiveSpecification.AttributeName,
+		Enabled:       req.TimeToLiveSpecification.Enabled,
+	})
+	if err != nil {
+		if errors.Is(err, ErrTableNotFound) {
+			slog.Debug("UpdateTimeToLive: table not found", "table", req.TableName)
+			writeError(w, http.StatusBadRequest, "ResourceNotFoundException",
+				"Requested resource not found: Table: "+req.TableName+" not found")
+			return
+		}
+		slog.Error("UpdateTimeToLive failed", "table", req.TableName, "err", err)
+		writeError(w, http.StatusInternalServerError, "InternalServerError", "internal server error")
+		return
+	}
+	slog.Info("updated TTL", "table", req.TableName, "enabled", spec.Enabled)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"TimeToLiveSpecification": map[string]any{
+			"AttributeName": spec.AttributeName,
+			"Enabled":       spec.Enabled,
+		},
+	})
+}
+
+func (ro *Router) handleDescribeTimeToLive(w http.ResponseWriter, body []byte) {
+	var req struct {
+		TableName string `json:"TableName"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
+		return
+	}
+	if req.TableName == "" {
+		writeError(w, http.StatusBadRequest, "ValidationException", "TableName is required")
+		return
+	}
+	status, spec, err := ro.storage.DescribeTimeToLive(req.TableName)
+	if err != nil {
+		if errors.Is(err, ErrTableNotFound) {
+			slog.Debug("DescribeTimeToLive: table not found", "table", req.TableName)
+			writeError(w, http.StatusBadRequest, "ResourceNotFoundException",
+				"Requested resource not found: Table: "+req.TableName+" not found")
+			return
+		}
+		slog.Error("DescribeTimeToLive failed", "table", req.TableName, "err", err)
+		writeError(w, http.StatusInternalServerError, "InternalServerError", "internal server error")
+		return
+	}
+	ttlDesc := map[string]any{"TimeToLiveStatus": status}
+	if spec != nil {
+		ttlDesc["AttributeName"] = spec.AttributeName
+	}
+	slog.Debug("described TTL", "table", req.TableName, "status", status)
+	writeJSON(w, http.StatusOK, map[string]any{"TimeToLiveDescription": ttlDesc})
 }
 
 func (ro *Router) handleDescribeLimits(w http.ResponseWriter) {

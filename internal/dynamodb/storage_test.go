@@ -1104,3 +1104,88 @@ func TestBatchWriteItems(t *testing.T) {
 		assert.Error(t, err)
 	})
 }
+
+func TestUpdateTimeToLive(t *testing.T) {
+	t.Run("enables and persists TTL", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		spec, err := s.UpdateTimeToLive("test-table", TTLSpec{AttributeName: "expires", Enabled: true})
+		require.NoError(t, err)
+		assert.Equal(t, "expires", spec.AttributeName)
+		assert.True(t, spec.Enabled)
+	})
+
+	t.Run("returns ErrTableNotFound for missing table", func(t *testing.T) {
+		s := newTestStorage(t)
+		_, err := s.UpdateTimeToLive("no-such", TTLSpec{AttributeName: "exp", Enabled: true})
+		assert.ErrorIs(t, err, ErrTableNotFound)
+	})
+
+	t.Run("returns error when readTableMeta fails", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		s.readAll = func(io.Reader) ([]byte, error) { return nil, errors.New("read error") }
+		_, err := s.UpdateTimeToLive("test-table", TTLSpec{AttributeName: "exp", Enabled: true})
+		assert.Error(t, err)
+	})
+
+	t.Run("returns error when writeTableMeta fails", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		s.openFile = func(string, int, os.FileMode) (io.WriteCloser, error) {
+			return nil, errors.New("write error")
+		}
+		_, err := s.UpdateTimeToLive("test-table", TTLSpec{AttributeName: "exp", Enabled: true})
+		assert.Error(t, err)
+	})
+}
+
+func TestDescribeTimeToLive(t *testing.T) {
+	t.Run("returns DISABLED with no TTL attribute when not set", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		status, spec, err := s.DescribeTimeToLive("test-table")
+		require.NoError(t, err)
+		assert.Equal(t, "DISABLED", status)
+		assert.Nil(t, spec)
+	})
+
+	t.Run("returns ENABLED after UpdateTimeToLive enables it", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		_, err := s.UpdateTimeToLive("test-table", TTLSpec{AttributeName: "expires", Enabled: true})
+		require.NoError(t, err)
+		status, spec, err := s.DescribeTimeToLive("test-table")
+		require.NoError(t, err)
+		assert.Equal(t, "ENABLED", status)
+		require.NotNil(t, spec)
+		assert.Equal(t, "expires", spec.AttributeName)
+	})
+
+	t.Run("returns DISABLED after TTL is disabled", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		_, err := s.UpdateTimeToLive("test-table", TTLSpec{AttributeName: "expires", Enabled: true})
+		require.NoError(t, err)
+		_, err = s.UpdateTimeToLive("test-table", TTLSpec{AttributeName: "expires", Enabled: false})
+		require.NoError(t, err)
+		status, spec, err := s.DescribeTimeToLive("test-table")
+		require.NoError(t, err)
+		assert.Equal(t, "DISABLED", status)
+		require.NotNil(t, spec)
+	})
+
+	t.Run("returns ErrTableNotFound for missing table", func(t *testing.T) {
+		s := newTestStorage(t)
+		_, _, err := s.DescribeTimeToLive("no-such")
+		assert.ErrorIs(t, err, ErrTableNotFound)
+	})
+
+	t.Run("returns error when readTableMeta fails", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		s.readAll = func(io.Reader) ([]byte, error) { return nil, errors.New("read error") }
+		_, _, err := s.DescribeTimeToLive("test-table")
+		assert.Error(t, err)
+	})
+}
