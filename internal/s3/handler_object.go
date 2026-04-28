@@ -974,9 +974,7 @@ func validateContentMD5(w http.ResponseWriter, r *http.Request) (io.Reader, bool
 		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return nil, false // untestable: httptest bodies never return read errors
 	}
-	sum := md5.Sum(
-		body,
-	) //nolint:gosec // MD5 used for data-integrity checking per S3 spec, not cryptographic security
+	sum := md5.Sum(body) //nolint:gosec // MD5 used for data-integrity checking per S3 spec
 	if !bytes.Equal(sum[:], expected) {
 		writeError(w, r, http.StatusBadRequest, "InvalidDigest",
 			"The Content-MD5 you specified was invalid.")
