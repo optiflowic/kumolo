@@ -843,16 +843,26 @@ func TestRouterPutObject(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "InvalidDigest")
 	})
 
-	t.Run("Content-MD5 valid base64 but wrong length returns 400 InvalidDigest", func(t *testing.T) {
-		ro := newTestRouter(t)
-		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
-		req := httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", strings.NewReader("data"))
-		req.Header.Set("Content-MD5", base64.StdEncoding.EncodeToString([]byte("short")))
-		w := httptest.NewRecorder()
-		ro.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assert.Contains(t, w.Body.String(), "InvalidDigest")
-	})
+	t.Run(
+		"Content-MD5 valid base64 but wrong length returns 400 InvalidDigest",
+		func(t *testing.T) {
+			ro := newTestRouter(t)
+			ro.ServeHTTP(
+				httptest.NewRecorder(),
+				httptest.NewRequest(http.MethodPut, "/my-bucket", nil),
+			)
+			req := httptest.NewRequest(
+				http.MethodPut,
+				"/my-bucket/obj.txt",
+				strings.NewReader("data"),
+			)
+			req.Header.Set("Content-MD5", base64.StdEncoding.EncodeToString([]byte("short")))
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Contains(t, w.Body.String(), "InvalidDigest")
+		},
+	)
 }
 
 func TestRouterGetObject(t *testing.T) {
@@ -2417,6 +2427,24 @@ func TestRouterMultipartUpload(t *testing.T) {
 				strings.NewReader("part data"),
 			)
 			req.Header.Set("Content-MD5", "!!!not-base64!!!")
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Contains(t, w.Body.String(), "InvalidDigest")
+		},
+	)
+
+	t.Run(
+		"UploadPart with valid base64 but wrong length Content-MD5 returns 400 InvalidDigest",
+		func(t *testing.T) {
+			ro, path := setup(t)
+			uploadID := initiateUpload(t, ro, path)
+			req := httptest.NewRequest(
+				http.MethodPut,
+				path+"?partNumber=1&uploadId="+uploadID,
+				strings.NewReader("part data"),
+			)
+			req.Header.Set("Content-MD5", base64.StdEncoding.EncodeToString([]byte("short")))
 			w := httptest.NewRecorder()
 			ro.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusBadRequest, w.Code)
