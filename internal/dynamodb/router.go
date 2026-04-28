@@ -533,6 +533,17 @@ func (ro *Router) handlePutItem(w http.ResponseWriter, body []byte) {
 		writeError(w, http.StatusBadRequest, "ValidationException", "TableName is required")
 		return
 	}
+	switch req.ReturnValues {
+	case "", "NONE", "ALL_OLD":
+	default:
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"ValidationException",
+			"Value '"+req.ReturnValues+"' at 'returnValues' failed to satisfy constraint: Member must satisfy enum value set: [ALL_OLD, NONE]",
+		)
+		return
+	}
 	old, err := ro.storage.PutItem(req.TableName, req.Item)
 	if err != nil {
 		if errors.Is(err, ErrTableNotFound) {
@@ -552,17 +563,6 @@ func (ro *Router) handlePutItem(w http.ResponseWriter, body []byte) {
 			http.StatusInternalServerError,
 			"InternalServerError",
 			"internal server error",
-		)
-		return
-	}
-	switch req.ReturnValues {
-	case "", "NONE", "ALL_OLD":
-	default:
-		writeError(
-			w,
-			http.StatusBadRequest,
-			"ValidationException",
-			"Value '"+req.ReturnValues+"' at 'returnValues' failed to satisfy constraint: Member must satisfy enum value set: [ALL_OLD, NONE]",
 		)
 		return
 	}
@@ -631,6 +631,17 @@ func (ro *Router) handleDeleteItem(w http.ResponseWriter, body []byte) {
 		writeError(w, http.StatusBadRequest, "ValidationException", "TableName is required")
 		return
 	}
+	switch req.ReturnValues {
+	case "", "NONE", "ALL_OLD":
+	default:
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"ValidationException",
+			"Value '"+req.ReturnValues+"' at 'returnValues' failed to satisfy constraint: Member must satisfy enum value set: [ALL_OLD, NONE]",
+		)
+		return
+	}
 	old, err := ro.storage.DeleteItem(req.TableName, req.Key)
 	if err != nil {
 		if errors.Is(err, ErrTableNotFound) {
@@ -650,17 +661,6 @@ func (ro *Router) handleDeleteItem(w http.ResponseWriter, body []byte) {
 			http.StatusInternalServerError,
 			"InternalServerError",
 			"internal server error",
-		)
-		return
-	}
-	switch req.ReturnValues {
-	case "", "NONE", "ALL_OLD":
-	default:
-		writeError(
-			w,
-			http.StatusBadRequest,
-			"ValidationException",
-			"Value '"+req.ReturnValues+"' at 'returnValues' failed to satisfy constraint: Member must satisfy enum value set: [ALL_OLD, NONE]",
 		)
 		return
 	}
