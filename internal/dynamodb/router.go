@@ -207,9 +207,9 @@ type store interface {
 	DeleteTable(name string) error
 	DescribeTable(name string) (TableMetadata, error)
 	ListTables() ([]string, error)
-	PutItem(tableName string, item map[string]any) error
+	PutItem(tableName string, item map[string]any) (map[string]any, error)
 	GetItem(tableName string, key map[string]any) (map[string]any, error)
-	DeleteItem(tableName string, key map[string]any) error
+	DeleteItem(tableName string, key map[string]any) (map[string]any, error)
 	Scan(tableName string) ([]map[string]any, error)
 	UpdateItem(
 		tableName string,
@@ -521,8 +521,9 @@ func (ro *Router) handleListTables(w http.ResponseWriter, body []byte) {
 
 func (ro *Router) handlePutItem(w http.ResponseWriter, body []byte) {
 	var req struct {
-		TableName string         `json:"TableName"`
-		Item      map[string]any `json:"Item"`
+		TableName    string         `json:"TableName"`
+		Item         map[string]any `json:"Item"`
+		ReturnValues string         `json:"ReturnValues"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
@@ -532,7 +533,19 @@ func (ro *Router) handlePutItem(w http.ResponseWriter, body []byte) {
 		writeError(w, http.StatusBadRequest, "ValidationException", "TableName is required")
 		return
 	}
-	if err := ro.storage.PutItem(req.TableName, req.Item); err != nil {
+	switch req.ReturnValues {
+	case "", "NONE", "ALL_OLD":
+	default:
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"ValidationException",
+			"Value '"+req.ReturnValues+"' at 'returnValues' failed to satisfy constraint: Member must satisfy enum value set: [ALL_OLD, NONE]",
+		)
+		return
+	}
+	old, err := ro.storage.PutItem(req.TableName, req.Item)
+	if err != nil {
 		if errors.Is(err, ErrTableNotFound) {
 			slog.Debug("PutItem: table not found", "table", req.TableName)
 			writeError(w, http.StatusBadRequest, "ResourceNotFoundException",
@@ -554,7 +567,11 @@ func (ro *Router) handlePutItem(w http.ResponseWriter, body []byte) {
 		return
 	}
 	slog.Info("put DynamoDB item", "table", req.TableName)
-	writeJSON(w, http.StatusOK, map[string]any{})
+	resp := map[string]any{}
+	if req.ReturnValues == "ALL_OLD" && old != nil {
+		resp["Attributes"] = old
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (ro *Router) handleGetItem(w http.ResponseWriter, body []byte) {
@@ -602,8 +619,9 @@ func (ro *Router) handleGetItem(w http.ResponseWriter, body []byte) {
 
 func (ro *Router) handleDeleteItem(w http.ResponseWriter, body []byte) {
 	var req struct {
-		TableName string         `json:"TableName"`
-		Key       map[string]any `json:"Key"`
+		TableName    string         `json:"TableName"`
+		Key          map[string]any `json:"Key"`
+		ReturnValues string         `json:"ReturnValues"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
@@ -613,7 +631,19 @@ func (ro *Router) handleDeleteItem(w http.ResponseWriter, body []byte) {
 		writeError(w, http.StatusBadRequest, "ValidationException", "TableName is required")
 		return
 	}
-	if err := ro.storage.DeleteItem(req.TableName, req.Key); err != nil {
+	switch req.ReturnValues {
+	case "", "NONE", "ALL_OLD":
+	default:
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"ValidationException",
+			"Value '"+req.ReturnValues+"' at 'returnValues' failed to satisfy constraint: Member must satisfy enum value set: [ALL_OLD, NONE]",
+		)
+		return
+	}
+	old, err := ro.storage.DeleteItem(req.TableName, req.Key)
+	if err != nil {
 		if errors.Is(err, ErrTableNotFound) {
 			slog.Debug("DeleteItem: table not found", "table", req.TableName)
 			writeError(w, http.StatusBadRequest, "ResourceNotFoundException",
@@ -635,7 +665,11 @@ func (ro *Router) handleDeleteItem(w http.ResponseWriter, body []byte) {
 		return
 	}
 	slog.Info("deleted DynamoDB item", "table", req.TableName)
-	writeJSON(w, http.StatusOK, map[string]any{})
+	resp := map[string]any{}
+	if req.ReturnValues == "ALL_OLD" && old != nil {
+		resp["Attributes"] = old
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {

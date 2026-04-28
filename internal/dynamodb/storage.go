@@ -282,21 +282,26 @@ func (s *Storage) ListTables() ([]string, error) {
 	return names, nil
 }
 
-func (s *Storage) PutItem(tableName string, item map[string]any) error {
+func (s *Storage) PutItem(tableName string, item map[string]any) (map[string]any, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	meta, err := s.readTableMeta(tableName)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return ErrTableNotFound
+			return nil, ErrTableNotFound
 		}
-		return err
+		return nil, err
 	}
 	key, err := itemKey(item, meta.KeySchema)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return s.writeJSON(filepath.Join(tableName, key+".json"), item)
+	path := filepath.Join(tableName, key+".json")
+	old, err := readJSON[map[string]any](s, path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	return old, s.writeJSON(path, item)
 }
 
 func (s *Storage) GetItem(tableName string, key map[string]any) (map[string]any, error) {
@@ -323,27 +328,32 @@ func (s *Storage) GetItem(tableName string, key map[string]any) (map[string]any,
 	return item, nil
 }
 
-func (s *Storage) DeleteItem(tableName string, key map[string]any) error {
+func (s *Storage) DeleteItem(tableName string, key map[string]any) (map[string]any, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	meta, err := s.readTableMeta(tableName)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return ErrTableNotFound
+			return nil, ErrTableNotFound
 		}
-		return err
+		return nil, err
 	}
 	k, err := itemKey(key, meta.KeySchema)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if err := s.removeFile(filepath.Join(tableName, k+".json")); err != nil {
+	path := filepath.Join(tableName, k+".json")
+	old, err := readJSON[map[string]any](s, path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	if err := s.removeFile(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil
+			return nil, nil
 		}
-		return err
+		return nil, err
 	}
-	return nil
+	return old, nil
 }
 
 func (s *Storage) Scan(tableName string) ([]map[string]any, error) {
