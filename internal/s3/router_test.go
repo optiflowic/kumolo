@@ -1,6 +1,9 @@
 package s3
 
 import (
+	"bytes"
+	"crypto/md5" //nolint:gosec // MD5 used for data-integrity checking per S3 spec, not cryptographic security
+	"encoding/base64"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -799,6 +802,56 @@ func TestRouterPutObject(t *testing.T) {
 		ro.ServeHTTP(w, putReq)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assert.Contains(t, w.Body.String(), "InvalidArgument")
+	})
+
+	t.Run("Content-MD5 valid digest returns 200", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		data := []byte("hello world")
+		sum := md5.Sum(data) //nolint:gosec
+		req := httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", bytes.NewReader(data))
+		req.Header.Set("Content-MD5", base64.StdEncoding.EncodeToString(sum[:]))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("Content-MD5 mismatched digest returns 400 InvalidDigest", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		req := httptest.NewRequest(
+			http.MethodPut,
+			"/my-bucket/obj.txt",
+			strings.NewReader("hello world"),
+		)
+		wrong := md5.Sum([]byte("wrong")) //nolint:gosec
+		req.Header.Set("Content-MD5", base64.StdEncoding.EncodeToString(wrong[:]))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidDigest")
+	})
+
+	t.Run("Content-MD5 invalid base64 returns 400 InvalidDigest", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		req := httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", strings.NewReader("data"))
+		req.Header.Set("Content-MD5", "!!!not-base64!!!")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidDigest")
+	})
+
+	t.Run("Content-MD5 valid base64 but wrong length returns 400 InvalidDigest", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		req := httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", strings.NewReader("data"))
+		req.Header.Set("Content-MD5", base64.StdEncoding.EncodeToString([]byte("short")))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidDigest")
 	})
 }
 
@@ -2320,6 +2373,56 @@ func TestRouterMultipartUpload(t *testing.T) {
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
+
+	t.Run("UploadPart with valid Content-MD5 returns 200", func(t *testing.T) {
+		ro, path := setup(t)
+		uploadID := initiateUpload(t, ro, path)
+		data := []byte("part data")
+		sum := md5.Sum(data) //nolint:gosec
+		req := httptest.NewRequest(
+			http.MethodPut,
+			path+"?partNumber=1&uploadId="+uploadID,
+			bytes.NewReader(data),
+		)
+		req.Header.Set("Content-MD5", base64.StdEncoding.EncodeToString(sum[:]))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("UploadPart with mismatched Content-MD5 returns 400 InvalidDigest", func(t *testing.T) {
+		ro, path := setup(t)
+		uploadID := initiateUpload(t, ro, path)
+		req := httptest.NewRequest(
+			http.MethodPut,
+			path+"?partNumber=1&uploadId="+uploadID,
+			strings.NewReader("part data"),
+		)
+		wrong := md5.Sum([]byte("wrong")) //nolint:gosec
+		req.Header.Set("Content-MD5", base64.StdEncoding.EncodeToString(wrong[:]))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidDigest")
+	})
+
+	t.Run(
+		"UploadPart with invalid base64 Content-MD5 returns 400 InvalidDigest",
+		func(t *testing.T) {
+			ro, path := setup(t)
+			uploadID := initiateUpload(t, ro, path)
+			req := httptest.NewRequest(
+				http.MethodPut,
+				path+"?partNumber=1&uploadId="+uploadID,
+				strings.NewReader("part data"),
+			)
+			req.Header.Set("Content-MD5", "!!!not-base64!!!")
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Contains(t, w.Body.String(), "InvalidDigest")
+		},
+	)
 
 	t.Run("CompleteMultipartUpload returns 400 for missing uploadId", func(t *testing.T) {
 		ro, path := setup(t)
