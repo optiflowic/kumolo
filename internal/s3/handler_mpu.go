@@ -100,7 +100,11 @@ func (ro *Router) handleUploadPart(w http.ResponseWriter, r *http.Request, bucke
 		)
 		return
 	}
-	etag, err := ro.storage.UploadPart(uploadID, partNumber, r.Body)
+	body, ok := validateContentMD5(w, r)
+	if !ok {
+		return
+	}
+	etag, err := ro.storage.UploadPart(uploadID, partNumber, body)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrUploadNotFound):

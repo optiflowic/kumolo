@@ -1,6 +1,9 @@
 package s3
 
 import (
+	"bytes"
+	"crypto/md5" //nolint:gosec // MD5 used for data-integrity checking per S3 spec, not cryptographic security
+	"encoding/base64"
 	"encoding/xml"
 	"errors"
 	"io"
@@ -171,6 +174,10 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 	userMetadata := extractUserMetadata(r.Header)
 	sseAlgorithm := r.Header.Get(amzSSE)
 	sseKMSKeyID := r.Header.Get(amzSSEKMSKeyID)
+	body, ok := validateContentMD5(w, r)
+	if !ok {
+		return
+	}
 	retention, legalHold, ok := parseObjectLockHeaders(w, r)
 	if !ok {
 		return
@@ -178,7 +185,7 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 	meta, err := ro.storage.PutObject(
 		bucket,
 		key,
-		r.Body,
+		body,
 		contentType,
 		userMetadata,
 		sseAlgorithm,
@@ -946,6 +953,34 @@ func (ro *Router) handleDeleteObjectTagging(
 		key,
 	)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// validateContentMD5 checks the Content-MD5 header if present. It reads the
+// entire body, verifies the MD5 digest, and returns a new reader over the body
+// data. Returns (nil, false) and writes 400 InvalidDigest on mismatch.
+func validateContentMD5(w http.ResponseWriter, r *http.Request) (io.Reader, bool) {
+	encoded := r.Header.Get("Content-MD5")
+	if encoded == "" {
+		return r.Body, true
+	}
+	expected, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil || len(expected) != md5.Size {
+		writeError(w, r, http.StatusBadRequest, "InvalidDigest",
+			"The Content-MD5 you specified was invalid.")
+		return nil, false
+	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		return nil, false // untestable: httptest bodies never return read errors
+	}
+	sum := md5.Sum(body) //nolint:gosec // MD5 used for data-integrity checking per S3 spec
+	if !bytes.Equal(sum[:], expected) {
+		writeError(w, r, http.StatusBadRequest, "InvalidDigest",
+			"The Content-MD5 you specified was invalid.")
+		return nil, false
+	}
+	return bytes.NewReader(body), true
 }
 
 // parseObjectLockHeaders reads x-amz-object-lock-* request headers and returns
