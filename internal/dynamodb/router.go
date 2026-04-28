@@ -786,6 +786,18 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 		updates = map[string]any{}
 	}
 
+	switch req.ReturnValues {
+	case "", "NONE", "ALL_OLD", "ALL_NEW", "UPDATED_OLD", "UPDATED_NEW":
+	default:
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"ValidationException",
+			"Value '"+req.ReturnValues+"' at 'returnValues' failed to satisfy constraint: Member must satisfy enum value set: [ALL_NEW, ALL_OLD, NONE, UPDATED_NEW, UPDATED_OLD]",
+		)
+		return
+	}
+
 	before, after, err := ro.storage.UpdateItem(req.TableName, req.Key, updates)
 	if err != nil {
 		if errors.Is(err, ErrTableNotFound) {

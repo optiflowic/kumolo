@@ -781,6 +781,24 @@ func TestHandleUpdateItem(t *testing.T) {
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		assert.Nil(t, resp["Attributes"])
 	})
+
+	t.Run("400 for invalid ReturnValues", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+            "TableName": "test-table",
+            "Key": {"pk": {"S": "k1"}},
+            "UpdateExpression": "SET x = :v",
+            "ExpressionAttributeValues": {":v": {"S": "1"}},
+            "ReturnValues": "INVALID"
+        }`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ValidationException")
+		var body map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+		assert.Contains(t, body["message"], "INVALID")
+		assert.Contains(t, body["message"], "returnValues")
+	})
 }
 
 func TestHandleUpdateItem_InternalErrors(t *testing.T) {
