@@ -207,6 +207,31 @@ func TestHandlePutItem(t *testing.T) {
 		w := dynamo(t, ro, "PutItem", `{bad}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
+
+	t.Run("ReturnValues ALL_OLD returns previous item", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"val":{"S":"old"}}}`).Code)
+		w := dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"val":{"S":"new"}},"ReturnValues":"ALL_OLD"}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		attrs := resp["Attributes"].(map[string]any)
+		assert.Equal(t, map[string]any{"S": "old"}, attrs["val"])
+	})
+
+	t.Run("ReturnValues ALL_OLD returns empty when no previous item", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"val":{"S":"new"}},"ReturnValues":"ALL_OLD"}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Nil(t, resp["Attributes"])
+	})
 }
 
 func TestHandleGetItem(t *testing.T) {
@@ -302,6 +327,31 @@ func TestHandleDeleteItem(t *testing.T) {
 		ro := newTestRouter(t)
 		w := dynamo(t, ro, "DeleteItem", `{bad}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("ReturnValues ALL_OLD returns deleted item", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"val":{"S":"hello"}}}`).Code)
+		w := dynamo(t, ro, "DeleteItem",
+			`{"TableName":"test-table","Key":{"pk":{"S":"k1"}},"ReturnValues":"ALL_OLD"}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		attrs := resp["Attributes"].(map[string]any)
+		assert.Equal(t, map[string]any{"S": "hello"}, attrs["val"])
+	})
+
+	t.Run("ReturnValues ALL_OLD returns empty when item not found", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "DeleteItem",
+			`{"TableName":"test-table","Key":{"pk":{"S":"missing"}},"ReturnValues":"ALL_OLD"}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Nil(t, resp["Attributes"])
 	})
 }
 
@@ -1231,9 +1281,9 @@ type mockStore struct {
 	deleteTableFn        func(name string) error
 	describeTableFn      func(name string) (TableMetadata, error)
 	listTablesFn         func() ([]string, error)
-	putItemFn            func(tableName string, item map[string]any) error
+	putItemFn            func(tableName string, item map[string]any) (map[string]any, error)
 	getItemFn            func(tableName string, key map[string]any) (map[string]any, error)
-	deleteItemFn         func(tableName string, key map[string]any) error
+	deleteItemFn         func(tableName string, key map[string]any) (map[string]any, error)
 	scanFn               func(tableName string) ([]map[string]any, error)
 	updateItemFn         func(tableName string, key map[string]any, updates map[string]any) (map[string]any, map[string]any, error)
 	queryFn              func(tableName, hashKeyName string, hashKeyValue any) ([]map[string]any, error)
@@ -1263,7 +1313,7 @@ func (m *mockStore) ListTables() ([]string, error) {
 	return m.listTablesFn()
 }
 
-func (m *mockStore) PutItem(tableName string, item map[string]any) error {
+func (m *mockStore) PutItem(tableName string, item map[string]any) (map[string]any, error) {
 	return m.putItemFn(tableName, item)
 }
 
@@ -1271,7 +1321,7 @@ func (m *mockStore) GetItem(tableName string, key map[string]any) (map[string]an
 	return m.getItemFn(tableName, key)
 }
 
-func (m *mockStore) DeleteItem(tableName string, key map[string]any) error {
+func (m *mockStore) DeleteItem(tableName string, key map[string]any) (map[string]any, error) {
 	return m.deleteItemFn(tableName, key)
 }
 
@@ -1405,7 +1455,7 @@ func TestHandleListTables_InternalErrors(t *testing.T) {
 func TestHandlePutItem_InternalErrors(t *testing.T) {
 	t.Run("500 when PutItem fails with unexpected error", func(t *testing.T) {
 		ro := &Router{storage: &mockStore{
-			putItemFn: func(string, map[string]any) error { return errInternal },
+			putItemFn: func(string, map[string]any) (map[string]any, error) { return nil, errInternal },
 		}}
 		w := dynamo(t, ro, "PutItem", `{"TableName":"t","Item":{"pk":{"S":"k"}}}`)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
@@ -1427,7 +1477,7 @@ func TestHandleGetItem_InternalErrors(t *testing.T) {
 func TestHandleDeleteItem_InternalErrors(t *testing.T) {
 	t.Run("500 when DeleteItem fails with unexpected error", func(t *testing.T) {
 		ro := &Router{storage: &mockStore{
-			deleteItemFn: func(string, map[string]any) error { return errInternal },
+			deleteItemFn: func(string, map[string]any) (map[string]any, error) { return nil, errInternal },
 		}}
 		w := dynamo(t, ro, "DeleteItem", `{"TableName":"t","Key":{"pk":{"S":"k"}}}`)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)

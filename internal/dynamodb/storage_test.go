@@ -20,6 +20,12 @@ func newTestStorage(t *testing.T) *Storage {
 	return s
 }
 
+func mustPutItem(t *testing.T, s *Storage, tableName string, item map[string]any) {
+	t.Helper()
+	_, err := s.PutItem(tableName, item)
+	require.NoError(t, err)
+}
+
 // badCloseWriter wraps an io.WriteCloser and returns an error on Close.
 type badCloseWriter struct {
 	io.WriteCloser
@@ -124,9 +130,9 @@ func TestDeleteTable(t *testing.T) {
 	t.Run("deletes table and items", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		require.NoError(t, s.PutItem("test-table", map[string]any{
+		mustPutItem(t, s, "test-table", map[string]any{
 			"pk": map[string]any{"S": "key1"},
-		}))
+		})
 		require.NoError(t, s.DeleteTable("test-table"))
 		assert.False(t, s.tableExistsLocked("test-table"))
 	})
@@ -150,7 +156,7 @@ func TestDeleteTable(t *testing.T) {
 	t.Run("returns error when removeFile fails for item", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		require.NoError(t, s.PutItem("test-table", map[string]any{"pk": map[string]any{"S": "k"}}))
+		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "k"}})
 		s.removeFile = func(string) error { return errors.New("remove failed") }
 		err := s.DeleteTable("test-table")
 		assert.Error(t, err)
@@ -230,18 +236,18 @@ func TestPutItem(t *testing.T) {
 	t.Run("stores item", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		require.NoError(t, s.PutItem("test-table", item))
+		mustPutItem(t, s, "test-table", item)
 	})
 
 	t.Run("overwrites existing item", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		require.NoError(t, s.PutItem("test-table", item))
+		mustPutItem(t, s, "test-table", item)
 		updated := map[string]any{
 			"pk":  map[string]any{"S": "key1"},
 			"val": map[string]any{"S": "updated"},
 		}
-		require.NoError(t, s.PutItem("test-table", updated))
+		mustPutItem(t, s, "test-table", updated)
 		got, err := s.GetItem("test-table", map[string]any{"pk": map[string]any{"S": "key1"}})
 		require.NoError(t, err)
 		require.NotNil(t, got)
@@ -250,14 +256,14 @@ func TestPutItem(t *testing.T) {
 
 	t.Run("returns ErrTableNotFound for missing table", func(t *testing.T) {
 		s := newTestStorage(t)
-		err := s.PutItem("no-such-table", item)
+		_, err := s.PutItem("no-such-table", item)
 		assert.ErrorIs(t, err, ErrTableNotFound)
 	})
 
 	t.Run("returns ErrValidationException for missing key attribute", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		err := s.PutItem("test-table", map[string]any{"other": map[string]any{"S": "value"}})
+		_, err := s.PutItem("test-table", map[string]any{"other": map[string]any{"S": "value"}})
 		assert.ErrorIs(t, err, ErrValidationException)
 	})
 
@@ -265,8 +271,27 @@ func TestPutItem(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
 		s.readAll = func(io.Reader) ([]byte, error) { return nil, errors.New("unexpected") }
-		err := s.PutItem("test-table", item)
+		_, err := s.PutItem("test-table", item)
 		assert.Error(t, err)
+	})
+
+	t.Run("returns old item when overwriting", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		mustPutItem(t, s, "test-table", item)
+		updated := map[string]any{"pk": map[string]any{"S": "key1"}, "val": map[string]any{"S": "new"}}
+		old, err := s.PutItem("test-table", updated)
+		require.NoError(t, err)
+		require.NotNil(t, old)
+		assert.Equal(t, map[string]any{"S": "hello"}, old["val"])
+	})
+
+	t.Run("returns nil old item when no previous item", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		old, err := s.PutItem("test-table", item)
+		require.NoError(t, err)
+		assert.Nil(t, old)
 	})
 }
 
@@ -276,7 +301,7 @@ func TestGetItem(t *testing.T) {
 	t.Run("returns item by key", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		require.NoError(t, s.PutItem("test-table", item))
+		mustPutItem(t, s, "test-table", item)
 		got, err := s.GetItem("test-table", map[string]any{"pk": map[string]any{"S": "key1"}})
 		require.NoError(t, err)
 		require.NotNil(t, got)
@@ -315,7 +340,7 @@ func TestGetItem(t *testing.T) {
 	t.Run("returns error when item file contains invalid JSON", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		require.NoError(t, s.PutItem("test-table", item))
+		mustPutItem(t, s, "test-table", item)
 		callCount := 0
 		origReadAll := s.readAll
 		s.readAll = func(r io.Reader) ([]byte, error) {
@@ -336,11 +361,9 @@ func TestDeleteItem(t *testing.T) {
 	t.Run("deletes existing item", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		require.NoError(t, s.PutItem("test-table", item))
-		require.NoError(
-			t,
-			s.DeleteItem("test-table", map[string]any{"pk": map[string]any{"S": "key1"}}),
-		)
+		mustPutItem(t, s, "test-table", item)
+		_, err := s.DeleteItem("test-table", map[string]any{"pk": map[string]any{"S": "key1"}})
+		require.NoError(t, err)
 		got, err := s.GetItem("test-table", map[string]any{"pk": map[string]any{"S": "key1"}})
 		require.NoError(t, err)
 		assert.Nil(t, got)
@@ -349,20 +372,20 @@ func TestDeleteItem(t *testing.T) {
 	t.Run("no error when item does not exist", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		err := s.DeleteItem("test-table", map[string]any{"pk": map[string]any{"S": "missing"}})
+		_, err := s.DeleteItem("test-table", map[string]any{"pk": map[string]any{"S": "missing"}})
 		assert.NoError(t, err)
 	})
 
 	t.Run("returns ErrTableNotFound for missing table", func(t *testing.T) {
 		s := newTestStorage(t)
-		err := s.DeleteItem("no-such-table", map[string]any{"pk": map[string]any{"S": "key1"}})
+		_, err := s.DeleteItem("no-such-table", map[string]any{"pk": map[string]any{"S": "key1"}})
 		assert.ErrorIs(t, err, ErrTableNotFound)
 	})
 
 	t.Run("returns ErrValidationException for missing key attribute", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		err := s.DeleteItem("test-table", map[string]any{})
+		_, err := s.DeleteItem("test-table", map[string]any{})
 		assert.ErrorIs(t, err, ErrValidationException)
 	})
 
@@ -370,17 +393,35 @@ func TestDeleteItem(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
 		s.readAll = func(io.Reader) ([]byte, error) { return nil, errors.New("unexpected") }
-		err := s.DeleteItem("test-table", map[string]any{"pk": map[string]any{"S": "k"}})
+		_, err := s.DeleteItem("test-table", map[string]any{"pk": map[string]any{"S": "k"}})
 		assert.Error(t, err)
 	})
 
 	t.Run("returns error when removeFile fails with non-ErrNotExist error", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		require.NoError(t, s.PutItem("test-table", map[string]any{"pk": map[string]any{"S": "k"}}))
+		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "k"}})
 		s.removeFile = func(string) error { return errors.New("remove failed") }
-		err := s.DeleteItem("test-table", map[string]any{"pk": map[string]any{"S": "k"}})
+		_, err := s.DeleteItem("test-table", map[string]any{"pk": map[string]any{"S": "k"}})
 		assert.Error(t, err)
+	})
+
+	t.Run("returns deleted item", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "k"}, "v": map[string]any{"S": "hi"}})
+		old, err := s.DeleteItem("test-table", map[string]any{"pk": map[string]any{"S": "k"}})
+		require.NoError(t, err)
+		require.NotNil(t, old)
+		assert.Equal(t, map[string]any{"S": "hi"}, old["v"])
+	})
+
+	t.Run("returns nil when item not found", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		old, err := s.DeleteItem("test-table", map[string]any{"pk": map[string]any{"S": "missing"}})
+		require.NoError(t, err)
+		assert.Nil(t, old)
 	})
 }
 
@@ -388,8 +429,8 @@ func TestScan(t *testing.T) {
 	t.Run("returns all items", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		require.NoError(t, s.PutItem("test-table", map[string]any{"pk": map[string]any{"S": "a"}}))
-		require.NoError(t, s.PutItem("test-table", map[string]any{"pk": map[string]any{"S": "b"}}))
+		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "a"}})
+		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "b"}})
 		items, err := s.Scan("test-table")
 		require.NoError(t, err)
 		assert.Len(t, items, 2)
@@ -433,7 +474,7 @@ func TestScan(t *testing.T) {
 	t.Run("skips item when json is invalid", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		require.NoError(t, s.PutItem("test-table", map[string]any{"pk": map[string]any{"S": "a"}}))
+		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "a"}})
 		s.readAll = func(io.Reader) ([]byte, error) {
 			return []byte("not-json"), nil
 		}
@@ -534,7 +575,7 @@ func TestUpdateItem(t *testing.T) {
 	t.Run("updates attribute on existing item", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		require.NoError(t, s.PutItem("test-table", item1))
+		mustPutItem(t, s, "test-table", item1)
 		_, got, err := s.UpdateItem("test-table", map[string]any{"pk": map[string]any{"S": "k1"}},
 			map[string]any{"val": map[string]any{"S": "new"}})
 		require.NoError(t, err)
@@ -544,7 +585,7 @@ func TestUpdateItem(t *testing.T) {
 	t.Run("returns before state", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		require.NoError(t, s.PutItem("test-table", item1))
+		mustPutItem(t, s, "test-table", item1)
 		before, _, err := s.UpdateItem(
 			"test-table",
 			map[string]any{"pk": map[string]any{"S": "k1"}},
@@ -557,7 +598,7 @@ func TestUpdateItem(t *testing.T) {
 	t.Run("removes attribute when value is nil", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		require.NoError(t, s.PutItem("test-table", item1))
+		mustPutItem(t, s, "test-table", item1)
 		_, got, err := s.UpdateItem("test-table", map[string]any{"pk": map[string]any{"S": "k1"}},
 			map[string]any{"val": nil})
 		require.NoError(t, err)
@@ -603,7 +644,7 @@ func TestUpdateItem(t *testing.T) {
 	t.Run("error when writeJSON fails", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		require.NoError(t, s.PutItem("test-table", item1))
+		mustPutItem(t, s, "test-table", item1)
 		s.openFile = func(string, int, os.FileMode) (io.WriteCloser, error) {
 			return nil, errors.New("open failed")
 		}
@@ -615,7 +656,7 @@ func TestUpdateItem(t *testing.T) {
 	t.Run("error when readAll fails for existing item", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		require.NoError(t, s.PutItem("test-table", item1))
+		mustPutItem(t, s, "test-table", item1)
 		callCount := 0
 		s.readAll = func(r io.Reader) ([]byte, error) {
 			callCount++
@@ -648,10 +689,10 @@ func TestQuery(t *testing.T) {
 	t.Run("returns matching items by hash key", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		require.NoError(t, s.PutItem("test-table",
-			map[string]any{"pk": map[string]any{"S": "a"}, "v": map[string]any{"N": "1"}}))
-		require.NoError(t, s.PutItem("test-table",
-			map[string]any{"pk": map[string]any{"S": "b"}, "v": map[string]any{"N": "2"}}))
+		mustPutItem(t, s, "test-table",
+			map[string]any{"pk": map[string]any{"S": "a"}, "v": map[string]any{"N": "1"}})
+		mustPutItem(t, s, "test-table",
+			map[string]any{"pk": map[string]any{"S": "b"}, "v": map[string]any{"N": "2"}})
 		items, err := s.Query("test-table", "pk", map[string]any{"S": "a"}, nil)
 		require.NoError(t, err)
 		require.Len(t, items, 1)
@@ -661,8 +702,8 @@ func TestQuery(t *testing.T) {
 	t.Run("returns empty slice when no match", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		require.NoError(t, s.PutItem("test-table",
-			map[string]any{"pk": map[string]any{"S": "x"}}))
+		mustPutItem(t, s, "test-table",
+			map[string]any{"pk": map[string]any{"S": "x"}})
 		items, err := s.Query("test-table", "pk", map[string]any{"S": "notfound"}, nil)
 		require.NoError(t, err)
 		assert.Empty(t, items)
@@ -671,8 +712,8 @@ func TestQuery(t *testing.T) {
 	t.Run("returns nil when hash key attribute absent in item", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		require.NoError(t, s.PutItem("test-table",
-			map[string]any{"pk": map[string]any{"S": "k1"}}))
+		mustPutItem(t, s, "test-table",
+			map[string]any{"pk": map[string]any{"S": "k1"}})
 		items, err := s.Query("test-table", "other", map[string]any{"S": "k1"}, nil)
 		require.NoError(t, err)
 		assert.Empty(t, items)
@@ -724,8 +765,8 @@ func TestQuerySortKeyCondition(t *testing.T) {
 	t.Run("equality", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(skTestMeta))
-		require.NoError(t, s.PutItem("sk-table", mkItem("p", "a")))
-		require.NoError(t, s.PutItem("sk-table", mkItem("p", "b")))
+		mustPutItem(t, s, "sk-table", mkItem("p", "a"))
+		mustPutItem(t, s, "sk-table", mkItem("p", "b"))
 		items, err := s.Query("sk-table", "pk", map[string]any{"S": "p"},
 			&SortKeyCondition{Name: "sk", Operator: OpEQ, Value: map[string]any{"S": "a"}})
 		require.NoError(t, err)
@@ -736,7 +777,7 @@ func TestQuerySortKeyCondition(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(skTestMeta))
 		for _, v := range []string{"a", "b", "c"} {
-			require.NoError(t, s.PutItem("sk-table", mkItem("p", v)))
+			mustPutItem(t, s, "sk-table", mkItem("p", v))
 		}
 		items, err := s.Query("sk-table", "pk", map[string]any{"S": "p"},
 			&SortKeyCondition{Name: "sk", Operator: OpLT, Value: map[string]any{"S": "b"}})
@@ -748,7 +789,7 @@ func TestQuerySortKeyCondition(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(skTestMeta))
 		for _, v := range []string{"a", "b", "c"} {
-			require.NoError(t, s.PutItem("sk-table", mkItem("p", v)))
+			mustPutItem(t, s, "sk-table", mkItem("p", v))
 		}
 		items, err := s.Query("sk-table", "pk", map[string]any{"S": "p"},
 			&SortKeyCondition{Name: "sk", Operator: OpLTE, Value: map[string]any{"S": "b"}})
@@ -760,7 +801,7 @@ func TestQuerySortKeyCondition(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(skTestMeta))
 		for _, v := range []string{"a", "b", "c"} {
-			require.NoError(t, s.PutItem("sk-table", mkItem("p", v)))
+			mustPutItem(t, s, "sk-table", mkItem("p", v))
 		}
 		items, err := s.Query("sk-table", "pk", map[string]any{"S": "p"},
 			&SortKeyCondition{Name: "sk", Operator: OpGT, Value: map[string]any{"S": "b"}})
@@ -772,7 +813,7 @@ func TestQuerySortKeyCondition(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(skTestMeta))
 		for _, v := range []string{"a", "b", "c"} {
-			require.NoError(t, s.PutItem("sk-table", mkItem("p", v)))
+			mustPutItem(t, s, "sk-table", mkItem("p", v))
 		}
 		items, err := s.Query("sk-table", "pk", map[string]any{"S": "p"},
 			&SortKeyCondition{Name: "sk", Operator: OpGTE, Value: map[string]any{"S": "b"}})
@@ -784,7 +825,7 @@ func TestQuerySortKeyCondition(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(skTestMeta))
 		for _, v := range []string{"a", "b", "c", "d"} {
-			require.NoError(t, s.PutItem("sk-table", mkItem("p", v)))
+			mustPutItem(t, s, "sk-table", mkItem("p", v))
 		}
 		items, err := s.Query("sk-table", "pk", map[string]any{"S": "p"},
 			&SortKeyCondition{
@@ -801,7 +842,7 @@ func TestQuerySortKeyCondition(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(skTestMeta))
 		for _, v := range []string{"foo1", "foo2", "bar"} {
-			require.NoError(t, s.PutItem("sk-table", mkItem("p", v)))
+			mustPutItem(t, s, "sk-table", mkItem("p", v))
 		}
 		items, err := s.Query(
 			"sk-table",
@@ -820,8 +861,8 @@ func TestQuerySortKeyCondition(t *testing.T) {
 	t.Run("begins_with with non-S type returns no match", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(skTestMeta))
-		require.NoError(t, s.PutItem("sk-table",
-			map[string]any{"pk": map[string]any{"S": "p"}, "sk": map[string]any{"N": "1"}}))
+		mustPutItem(t, s, "sk-table",
+			map[string]any{"pk": map[string]any{"S": "p"}, "sk": map[string]any{"N": "1"}})
 		items, err := s.Query("sk-table", "pk", map[string]any{"S": "p"},
 			&SortKeyCondition{Name: "sk", Operator: OpBeginsWith, Value: map[string]any{"N": "1"}})
 		require.NoError(t, err)
@@ -832,7 +873,7 @@ func TestQuerySortKeyCondition(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(skTestMeta))
 		for _, v := range []int{1, 2, 3, 4, 5} {
-			require.NoError(t, s.PutItem("sk-table", mkNumItem("p", v)))
+			mustPutItem(t, s, "sk-table", mkNumItem("p", v))
 		}
 		items, err := s.Query("sk-table", "pk", map[string]any{"S": "p"},
 			&SortKeyCondition{Name: "sk", Operator: OpGTE, Value: map[string]any{"N": "3"}})
@@ -843,8 +884,8 @@ func TestQuerySortKeyCondition(t *testing.T) {
 	t.Run("item without sort key attribute is excluded", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(skTestMeta))
-		require.NoError(t, s.PutItem("sk-table",
-			map[string]any{"pk": map[string]any{"S": "p"}, "sk": map[string]any{"S": "x"}}))
+		mustPutItem(t, s, "sk-table",
+			map[string]any{"pk": map[string]any{"S": "p"}, "sk": map[string]any{"S": "x"}})
 		items, err := s.Query("sk-table", "pk", map[string]any{"S": "p"},
 			&SortKeyCondition{Name: "other", Operator: OpEQ, Value: map[string]any{"S": "x"}})
 		require.NoError(t, err)
@@ -854,7 +895,7 @@ func TestQuerySortKeyCondition(t *testing.T) {
 	t.Run("unknown operator returns no match", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(skTestMeta))
-		require.NoError(t, s.PutItem("sk-table", mkItem("p", "x")))
+		mustPutItem(t, s, "sk-table", mkItem("p", "x"))
 		items, err := s.Query("sk-table", "pk", map[string]any{"S": "p"},
 			&SortKeyCondition{Name: "sk", Operator: "contains", Value: map[string]any{"S": "x"}})
 		require.NoError(t, err)
@@ -925,8 +966,8 @@ func TestBatchGetItems(t *testing.T) {
 	t.Run("returns all requested items when all exist", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		require.NoError(t, s.PutItem("test-table", item1))
-		require.NoError(t, s.PutItem("test-table", item2))
+		mustPutItem(t, s, "test-table", item1)
+		mustPutItem(t, s, "test-table", item2)
 		keys := []map[string]any{
 			{"pk": map[string]any{"S": "k1"}},
 			{"pk": map[string]any{"S": "k2"}},
@@ -939,7 +980,7 @@ func TestBatchGetItems(t *testing.T) {
 	t.Run("omits items that do not exist", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		require.NoError(t, s.PutItem("test-table", item1))
+		mustPutItem(t, s, "test-table", item1)
 		keys := []map[string]any{
 			{"pk": map[string]any{"S": "k1"}},
 			{"pk": map[string]any{"S": "missing"}},
@@ -983,7 +1024,7 @@ func TestBatchGetItems(t *testing.T) {
 	t.Run("returns error when item read fails with unexpected error", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		require.NoError(t, s.PutItem("test-table", item1))
+		mustPutItem(t, s, "test-table", item1)
 		callCount := 0
 		origReadAll := s.readAll
 		s.readAll = func(r io.Reader) ([]byte, error) {
@@ -1016,8 +1057,8 @@ func TestBatchWriteItems(t *testing.T) {
 	t.Run("deletes multiple items", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		require.NoError(t, s.PutItem("test-table", map[string]any{"pk": map[string]any{"S": "k1"}}))
-		require.NoError(t, s.PutItem("test-table", map[string]any{"pk": map[string]any{"S": "k2"}}))
+		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "k1"}})
+		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "k2"}})
 		deletes := []map[string]any{
 			{"pk": map[string]any{"S": "k1"}},
 			{"pk": map[string]any{"S": "k2"}},
@@ -1038,10 +1079,7 @@ func TestBatchWriteItems(t *testing.T) {
 	t.Run("applies mixed puts and deletes", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		require.NoError(
-			t,
-			s.PutItem("test-table", map[string]any{"pk": map[string]any{"S": "old"}}),
-		)
+		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "old"}})
 		puts := []map[string]any{{"pk": map[string]any{"S": "new"}}}
 		deletes := []map[string]any{{"pk": map[string]any{"S": "old"}}}
 		require.NoError(t, s.BatchWriteItems("test-table", puts, deletes))
@@ -1097,7 +1135,7 @@ func TestBatchWriteItems(t *testing.T) {
 	t.Run("returns error when delete removeFile fails with non-ErrNotExist", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		require.NoError(t, s.PutItem("test-table", map[string]any{"pk": map[string]any{"S": "k1"}}))
+		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "k1"}})
 		s.removeFile = func(string) error { return errors.New("remove failed") }
 		deletes := []map[string]any{{"pk": map[string]any{"S": "k1"}}}
 		err := s.BatchWriteItems("test-table", nil, deletes)
