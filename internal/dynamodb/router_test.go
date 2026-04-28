@@ -213,8 +213,12 @@ func TestHandlePutItem(t *testing.T) {
 		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
 		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
 			`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"val":{"S":"old"}}}`).Code)
-		w := dynamo(t, ro, "PutItem",
-			`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"val":{"S":"new"}},"ReturnValues":"ALL_OLD"}`)
+		w := dynamo(
+			t,
+			ro,
+			"PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"val":{"S":"new"}},"ReturnValues":"ALL_OLD"}`,
+		)
 		assert.Equal(t, http.StatusOK, w.Code)
 		var resp map[string]any
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
@@ -225,12 +229,25 @@ func TestHandlePutItem(t *testing.T) {
 	t.Run("ReturnValues ALL_OLD returns empty when no previous item", func(t *testing.T) {
 		ro := newTestRouter(t)
 		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
-		w := dynamo(t, ro, "PutItem",
-			`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"val":{"S":"new"}},"ReturnValues":"ALL_OLD"}`)
+		w := dynamo(
+			t,
+			ro,
+			"PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"val":{"S":"new"}},"ReturnValues":"ALL_OLD"}`,
+		)
 		assert.Equal(t, http.StatusOK, w.Code)
 		var resp map[string]any
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		assert.Nil(t, resp["Attributes"])
+	})
+
+	t.Run("400 for invalid ReturnValues", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k1"}},"ReturnValues":"ALL_NEW"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ValidationException")
 	})
 }
 
@@ -352,6 +369,15 @@ func TestHandleDeleteItem(t *testing.T) {
 		var resp map[string]any
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		assert.Nil(t, resp["Attributes"])
+	})
+
+	t.Run("400 for invalid ReturnValues", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "DeleteItem",
+			`{"TableName":"test-table","Key":{"pk":{"S":"k1"}},"ReturnValues":"UPDATED_NEW"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ValidationException")
 	})
 }
 

@@ -555,6 +555,17 @@ func (ro *Router) handlePutItem(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
+	switch req.ReturnValues {
+	case "", "NONE", "ALL_OLD":
+	default:
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"ValidationException",
+			"Value '"+req.ReturnValues+"' at 'returnValues' failed to satisfy constraint: Member must satisfy enum value set: [ALL_OLD, NONE]",
+		)
+		return
+	}
 	slog.Info("put DynamoDB item", "table", req.TableName)
 	resp := map[string]any{}
 	if req.ReturnValues == "ALL_OLD" && old != nil {
@@ -639,6 +650,17 @@ func (ro *Router) handleDeleteItem(w http.ResponseWriter, body []byte) {
 			http.StatusInternalServerError,
 			"InternalServerError",
 			"internal server error",
+		)
+		return
+	}
+	switch req.ReturnValues {
+	case "", "NONE", "ALL_OLD":
+	default:
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"ValidationException",
+			"Value '"+req.ReturnValues+"' at 'returnValues' failed to satisfy constraint: Member must satisfy enum value set: [ALL_OLD, NONE]",
 		)
 		return
 	}

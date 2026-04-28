@@ -275,11 +275,31 @@ func TestPutItem(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("returns error when reading old item fails with unexpected error", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		mustPutItem(t, s, "test-table", item)
+		callCount := 0
+		origReadAll := s.readAll
+		s.readAll = func(r io.Reader) ([]byte, error) {
+			callCount++
+			if callCount > 1 {
+				return nil, errors.New("unexpected read error")
+			}
+			return origReadAll(r)
+		}
+		_, err := s.PutItem("test-table", item)
+		assert.Error(t, err)
+	})
+
 	t.Run("returns old item when overwriting", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
 		mustPutItem(t, s, "test-table", item)
-		updated := map[string]any{"pk": map[string]any{"S": "key1"}, "val": map[string]any{"S": "new"}}
+		updated := map[string]any{
+			"pk":  map[string]any{"S": "key1"},
+			"val": map[string]any{"S": "new"},
+		}
 		old, err := s.PutItem("test-table", updated)
 		require.NoError(t, err)
 		require.NotNil(t, old)
@@ -409,7 +429,12 @@ func TestDeleteItem(t *testing.T) {
 	t.Run("returns deleted item", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "k"}, "v": map[string]any{"S": "hi"}})
+		mustPutItem(
+			t,
+			s,
+			"test-table",
+			map[string]any{"pk": map[string]any{"S": "k"}, "v": map[string]any{"S": "hi"}},
+		)
 		old, err := s.DeleteItem("test-table", map[string]any{"pk": map[string]any{"S": "k"}})
 		require.NoError(t, err)
 		require.NotNil(t, old)
@@ -422,6 +447,23 @@ func TestDeleteItem(t *testing.T) {
 		old, err := s.DeleteItem("test-table", map[string]any{"pk": map[string]any{"S": "missing"}})
 		require.NoError(t, err)
 		assert.Nil(t, old)
+	})
+
+	t.Run("returns error when reading old item fails with unexpected error", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "k"}})
+		callCount := 0
+		origReadAll := s.readAll
+		s.readAll = func(r io.Reader) ([]byte, error) {
+			callCount++
+			if callCount > 1 {
+				return nil, errors.New("unexpected read error")
+			}
+			return origReadAll(r)
+		}
+		_, err := s.DeleteItem("test-table", map[string]any{"pk": map[string]any{"S": "k"}})
+		assert.Error(t, err)
 	})
 }
 
