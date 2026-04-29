@@ -775,14 +775,12 @@ func TestPutObjectIfNotExists(t *testing.T) {
 		s, rootPath := newTestStorageWithRoot(t)
 		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 
-		// Block MkdirAll("my-bucket/dir") by placing a file at that path.
-		require.NoError(
-			t,
-			os.WriteFile(filepath.Join(rootPath, "my-bucket", "dir"), []byte{}, 0o600),
-		)
+		// Remove write permission so MkdirAll cannot create subdirectories.
+		require.NoError(t, os.Chmod(filepath.Join(rootPath, "my-bucket"), 0o500))
+		t.Cleanup(func() { _ = os.Chmod(filepath.Join(rootPath, "my-bucket"), 0o750) })
 
 		_, err := s.PutObjectIfNotExists(
-			"my-bucket", "dir/obj.txt",
+			"my-bucket", "nested/obj.txt",
 			strings.NewReader("data"),
 			"text/plain", nil, "", "", nil, nil,
 		)
