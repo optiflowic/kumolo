@@ -252,6 +252,8 @@ type mockStore struct {
 	getBucketRegionErr            error
 	putObjectErr                  error
 	putObjectMeta                 ObjectMetadata
+	putObjectIfNotExistsErr       error
+	putObjectIfNotExistsMeta      ObjectMetadata
 	getObjectFile                 *os.File
 	getObjectMeta                 ObjectMetadata
 	getObjectErr                  error
@@ -370,6 +372,18 @@ func (m *mockStore) PutObject(
 	_ *ObjectLegalHold,
 ) (ObjectMetadata, error) {
 	return m.putObjectMeta, m.putObjectErr
+}
+func (m *mockStore) PutObjectIfNotExists(
+	_ string,
+	_ string,
+	_ io.Reader,
+	_ string,
+	_ map[string]string,
+	_, _ string,
+	_ *ObjectRetention,
+	_ *ObjectLegalHold,
+) (ObjectMetadata, error) {
+	return m.putObjectIfNotExistsMeta, m.putObjectIfNotExistsErr
 }
 func (m *mockStore) GetObject(_ string, _ string) (*os.File, ObjectMetadata, error) {
 	return m.getObjectFile, m.getObjectMeta, m.getObjectErr

@@ -227,6 +227,52 @@ func (s *Storage) PutObject(
 	)
 }
 
+// PutObjectIfNotExists writes object data only when no object with the given key
+// currently exists. The existence check and the write happen under the same lock,
+// making this an atomic create-if-not-exists operation. Returns ErrObjectAlreadyExists
+// if the key is already present.
+func (s *Storage) PutObjectIfNotExists(
+	bucket, key string,
+	r io.Reader,
+	contentType string,
+	userMetadata map[string]string,
+	sseAlgorithm, sseKMSKeyID string,
+	retention *ObjectRetention,
+	legalHold *ObjectLegalHold,
+) (ObjectMetadata, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.bucketExistsLocked(bucket) {
+		return ObjectMetadata{}, ErrBucketNotFound
+	}
+
+	objPath := filepath.Join(bucket, key)
+	if _, err := s.readMeta(objPath); err == nil {
+		return ObjectMetadata{}, ErrObjectAlreadyExists
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return ObjectMetadata{}, err
+	}
+
+	if dir := filepath.Dir(objPath); dir != bucket {
+		if err := s.root.MkdirAll(dir, 0o750); err != nil {
+			return ObjectMetadata{}, err
+		}
+	}
+
+	versionID := ""
+	if enabled, err := s.isVersioningEnabledLocked(bucket); err != nil {
+		return ObjectMetadata{}, err
+	} else if enabled {
+		vid, err := s.newVersionID()
+		if err != nil {
+			return ObjectMetadata{}, err
+		}
+		versionID = vid
+	}
+
+	return s.writeObject(objPath, r, contentType, "", userMetadata, versionID, sseAlgorithm, sseKMSKeyID, retention, legalHold)
+}
+
 // writeObject writes r to objPath and records metadata. If etag is non-empty
 // it is used as-is (multipart ETag); otherwise the MD5 of the content is used.
 // versionID is stored in the metadata; pass "" for non-versioned objects.
