@@ -26,6 +26,15 @@ type objectStore interface {
 		retention *ObjectRetention,
 		legalHold *ObjectLegalHold,
 	) (ObjectMetadata, error)
+	PutObjectIfNotExists(
+		bucket, key string,
+		r io.Reader,
+		contentType string,
+		userMetadata map[string]string,
+		sseAlgorithm, sseKMSKeyID string,
+		retention *ObjectRetention,
+		legalHold *ObjectLegalHold,
+	) (ObjectMetadata, error)
 	GetObject(bucket, key string) (*os.File, ObjectMetadata, error)
 	GetObjectVersion(bucket, key, versionID string) (*os.File, ObjectMetadata, error)
 	CopyObject(

@@ -227,6 +227,65 @@ func (s *Storage) PutObject(
 	)
 }
 
+// PutObjectIfNotExists is like PutObject but returns ErrObjectAlreadyExists if a live object already exists at key.
+func (s *Storage) PutObjectIfNotExists(
+	bucket, key string,
+	r io.Reader,
+	contentType string,
+	userMetadata map[string]string,
+	sseAlgorithm, sseKMSKeyID string,
+	retention *ObjectRetention,
+	legalHold *ObjectLegalHold,
+) (ObjectMetadata, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.bucketExistsLocked(bucket) {
+		return ObjectMetadata{}, ErrBucketNotFound
+	}
+
+	objPath := filepath.Join(bucket, key)
+	if existing, err := s.readMeta(objPath); err == nil {
+		if !existing.IsDeleteMarker {
+			return ObjectMetadata{}, &ObjectAlreadyExistsError{ETag: existing.ETag}
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return ObjectMetadata{}, err
+	}
+
+	if dir := filepath.Dir(objPath); dir != bucket {
+		if err := s.root.MkdirAll(dir, 0o750); err != nil {
+			return ObjectMetadata{}, err
+		}
+	}
+
+	versionID := ""
+	if enabled, err := s.isVersioningEnabledLocked(bucket); err != nil {
+		return ObjectMetadata{}, err
+	} else if enabled {
+		if err := s.archiveCurrentVersionLocked(bucket, key, objPath); err != nil {
+			return ObjectMetadata{}, err // untestable: same lock prevents corrupting meta between the existence check above and this call
+		}
+		vid, err := s.newVersionID()
+		if err != nil {
+			return ObjectMetadata{}, err
+		}
+		versionID = vid
+	}
+
+	return s.writeObject(
+		objPath,
+		r,
+		contentType,
+		"",
+		userMetadata,
+		versionID,
+		sseAlgorithm,
+		sseKMSKeyID,
+		retention,
+		legalHold,
+	)
+}
+
 // writeObject writes r to objPath and records metadata. If etag is non-empty
 // it is used as-is (multipart ETag); otherwise the MD5 of the content is used.
 // versionID is stored in the metadata; pass "" for non-versioned objects.

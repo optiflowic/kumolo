@@ -182,7 +182,11 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 	if !ok {
 		return
 	}
-	meta, err := ro.storage.PutObject(
+	putFn := ro.storage.PutObject
+	if r.Header.Get("If-None-Match") == "*" {
+		putFn = ro.storage.PutObjectIfNotExists
+	}
+	meta, err := putFn(
 		bucket,
 		key,
 		body,
@@ -194,6 +198,22 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 		legalHold,
 	)
 	if err != nil {
+		var oae *ObjectAlreadyExistsError
+		if errors.As(err, &oae) {
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"precondition failed: object already exists",
+				"bucket",
+				bucket,
+				"key",
+				key,
+			)
+			if oae.ETag != "" {
+				w.Header().Set("ETag", oae.ETag)
+			}
+			writeError(w, r, http.StatusPreconditionFailed, "PreconditionFailed",
+				"At least one of the pre-conditions you specified did not hold.")
+			return
+		}
 		if errors.Is(err, ErrBucketNotFound) {
 			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
 				"bucket not found",

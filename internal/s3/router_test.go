@@ -252,6 +252,8 @@ type mockStore struct {
 	getBucketRegionErr            error
 	putObjectErr                  error
 	putObjectMeta                 ObjectMetadata
+	putObjectIfNotExistsErr       error
+	putObjectIfNotExistsMeta      ObjectMetadata
 	getObjectFile                 *os.File
 	getObjectMeta                 ObjectMetadata
 	getObjectErr                  error
@@ -370,6 +372,18 @@ func (m *mockStore) PutObject(
 	_ *ObjectLegalHold,
 ) (ObjectMetadata, error) {
 	return m.putObjectMeta, m.putObjectErr
+}
+func (m *mockStore) PutObjectIfNotExists(
+	_ string,
+	_ string,
+	_ io.Reader,
+	_ string,
+	_ map[string]string,
+	_, _ string,
+	_ *ObjectRetention,
+	_ *ObjectLegalHold,
+) (ObjectMetadata, error) {
+	return m.putObjectIfNotExistsMeta, m.putObjectIfNotExistsErr
 }
 func (m *mockStore) GetObject(_ string, _ string) (*os.File, ObjectMetadata, error) {
 	return m.getObjectFile, m.getObjectMeta, m.getObjectErr
@@ -863,6 +877,98 @@ func TestRouterPutObject(t *testing.T) {
 			assert.Contains(t, w.Body.String(), "InvalidDigest")
 		},
 	)
+
+	t.Run("If-None-Match: * succeeds when object does not exist", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+
+		req := httptest.NewRequest(http.MethodPut, "/my-bucket/new.txt", strings.NewReader("data"))
+		req.Header.Set("If-None-Match", "*")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("If-None-Match: * returns 412 when object already exists", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(
+				http.MethodPut,
+				"/my-bucket/existing.txt",
+				strings.NewReader("first"),
+			),
+		)
+
+		req := httptest.NewRequest(
+			http.MethodPut,
+			"/my-bucket/existing.txt",
+			strings.NewReader("second"),
+		)
+		req.Header.Set("If-None-Match", "*")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusPreconditionFailed, w.Code)
+		assert.Contains(t, w.Body.String(), "PreconditionFailed")
+		assert.Regexp(t, `^"[a-f0-9]+"$`, w.Header().Get("ETag"))
+	})
+
+	t.Run("If-None-Match with non-* value is ignored", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", strings.NewReader("first")),
+		)
+
+		req := httptest.NewRequest(
+			http.MethodPut,
+			"/my-bucket/obj.txt",
+			strings.NewReader("second"),
+		)
+		req.Header.Set("If-None-Match", `"someetag"`)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("If-None-Match: * succeeds when current version is a delete marker", func(t *testing.T) {
+		ro := newTestRouter(t)
+
+		createReq := httptest.NewRequest(http.MethodPut, "/my-bucket", nil)
+		ro.ServeHTTP(httptest.NewRecorder(), createReq)
+
+		versioningReq := httptest.NewRequest(
+			http.MethodPut,
+			"/my-bucket?versioning",
+			strings.NewReader(
+				`<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`,
+			),
+		)
+		ro.ServeHTTP(httptest.NewRecorder(), versioningReq)
+
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", strings.NewReader("v1")),
+		)
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodDelete, "/my-bucket/obj.txt", nil),
+		)
+
+		req := httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", strings.NewReader("v2"))
+		req.Header.Set("If-None-Match", "*")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
 }
 
 func TestRouterGetObject(t *testing.T) {
