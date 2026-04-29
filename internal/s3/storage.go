@@ -263,7 +263,7 @@ func (s *Storage) PutObjectIfNotExists(
 		return ObjectMetadata{}, err
 	} else if enabled {
 		if err := s.archiveCurrentVersionLocked(bucket, key, objPath); err != nil {
-			return ObjectMetadata{}, err
+			return ObjectMetadata{}, err // untestable: same lock prevents corrupting meta between the existence check above and this call
 		}
 		vid, err := s.newVersionID()
 		if err != nil {
