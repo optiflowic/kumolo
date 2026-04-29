@@ -270,7 +270,18 @@ func (s *Storage) PutObjectIfNotExists(
 		versionID = vid
 	}
 
-	return s.writeObject(objPath, r, contentType, "", userMetadata, versionID, sseAlgorithm, sseKMSKeyID, retention, legalHold)
+	return s.writeObject(
+		objPath,
+		r,
+		contentType,
+		"",
+		userMetadata,
+		versionID,
+		sseAlgorithm,
+		sseKMSKeyID,
+		retention,
+		legalHold,
+	)
 }
 
 // writeObject writes r to objPath and records metadata. If etag is non-empty

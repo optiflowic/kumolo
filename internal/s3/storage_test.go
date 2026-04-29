@@ -628,6 +628,172 @@ func TestPutObject(t *testing.T) {
 	})
 }
 
+func TestPutObjectIfNotExists(t *testing.T) {
+	t.Run("succeeds when object does not exist", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
+
+		meta, err := s.PutObjectIfNotExists(
+			"my-bucket", "obj.txt",
+			strings.NewReader("hello"),
+			"text/plain", nil, "", "", nil, nil,
+		)
+		require.NoError(t, err)
+		assert.Equal(t, int64(5), meta.Size)
+	})
+
+	t.Run("returns ErrObjectAlreadyExists when object exists", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
+		_, err := s.PutObject(
+			"my-bucket",
+			"obj.txt",
+			strings.NewReader("first"),
+			"text/plain",
+			nil,
+			"",
+			"",
+			nil,
+			nil,
+		)
+		require.NoError(t, err)
+
+		_, err = s.PutObjectIfNotExists(
+			"my-bucket", "obj.txt",
+			strings.NewReader("second"),
+			"text/plain", nil, "", "", nil, nil,
+		)
+		require.ErrorIs(t, err, ErrObjectAlreadyExists)
+	})
+
+	t.Run("returns ErrBucketNotFound when bucket does not exist", func(t *testing.T) {
+		s := newTestStorage(t)
+
+		_, err := s.PutObjectIfNotExists(
+			"no-bucket", "obj.txt",
+			strings.NewReader("data"),
+			"text/plain", nil, "", "", nil, nil,
+		)
+		require.ErrorIs(t, err, ErrBucketNotFound)
+	})
+
+	t.Run("assigns versionID when versioning is enabled", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
+		require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
+
+		meta, err := s.PutObjectIfNotExists(
+			"my-bucket", "obj.txt",
+			strings.NewReader("data"),
+			"text/plain", nil, "", "", nil, nil,
+		)
+		require.NoError(t, err)
+		assert.NotEmpty(t, meta.VersionID)
+	})
+
+	t.Run("stores object with nested key", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
+
+		_, err := s.PutObjectIfNotExists(
+			"my-bucket", "dir/sub/obj.txt",
+			strings.NewReader("data"),
+			"text/plain", nil, "", "", nil, nil,
+		)
+		require.NoError(t, err)
+
+		objects, err := s.ListObjects("my-bucket")
+		require.NoError(t, err)
+		require.Len(t, objects, 1)
+		assert.Equal(t, "dir/sub/obj.txt", objects[0].Key)
+	})
+
+	t.Run("returns error when meta file is corrupt", func(t *testing.T) {
+		s, _ := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
+
+		_, err := s.PutObject(
+			"my-bucket",
+			"obj.txt",
+			strings.NewReader("data"),
+			"text/plain",
+			nil,
+			"",
+			"",
+			nil,
+			nil,
+		)
+		require.NoError(t, err)
+
+		// Corrupt the meta file so readMeta returns a non-ErrNotExist error.
+		f, err := s.root.OpenFile("my-bucket/obj.txt.meta.json", os.O_WRONLY|os.O_TRUNC, 0o600)
+		require.NoError(t, err)
+		_, err = f.Write([]byte("not-json"))
+		require.NoError(t, err)
+		require.NoError(t, f.Close())
+
+		_, err = s.PutObjectIfNotExists(
+			"my-bucket", "obj.txt",
+			strings.NewReader("second"),
+			"text/plain", nil, "", "", nil, nil,
+		)
+		require.Error(t, err)
+		assert.NotErrorIs(t, err, ErrObjectAlreadyExists)
+		assert.NotErrorIs(t, err, ErrObjectNotFound)
+	})
+
+	t.Run("returns error when MkdirAll fails for nested key", func(t *testing.T) {
+		s, rootPath := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
+
+		// Block MkdirAll("my-bucket/dir") by placing a file at that path.
+		require.NoError(
+			t,
+			os.WriteFile(filepath.Join(rootPath, "my-bucket", "dir"), []byte{}, 0o600),
+		)
+
+		_, err := s.PutObjectIfNotExists(
+			"my-bucket", "dir/obj.txt",
+			strings.NewReader("data"),
+			"text/plain", nil, "", "", nil, nil,
+		)
+		require.Error(t, err)
+	})
+
+	t.Run("returns error when isVersioningEnabledLocked fails", func(t *testing.T) {
+		s, _ := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
+
+		// Corrupt bucket meta so JSON unmarshal fails inside isVersioningEnabledLocked.
+		f, err := s.root.OpenFile("my-bucket.bucket.json", os.O_WRONLY|os.O_TRUNC, 0o600)
+		require.NoError(t, err)
+		_, err = f.Write([]byte("not-json"))
+		require.NoError(t, err)
+		require.NoError(t, f.Close())
+
+		_, err = s.PutObjectIfNotExists(
+			"my-bucket", "obj.txt",
+			strings.NewReader("data"),
+			"text/plain", nil, "", "", nil, nil,
+		)
+		require.Error(t, err)
+	})
+
+	t.Run("returns error when newVersionID fails", func(t *testing.T) {
+		s, _ := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
+		require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
+		s.randRead = func(b []byte) (int, error) { return 0, errors.New("rand failure") }
+
+		_, err := s.PutObjectIfNotExists(
+			"my-bucket", "obj.txt",
+			strings.NewReader("data"),
+			"text/plain", nil, "", "", nil, nil,
+		)
+		require.Error(t, err)
+	})
+}
+
 func TestCopyObject(t *testing.T) {
 	setup := func(t *testing.T) (*Storage, string) {
 		t.Helper()
