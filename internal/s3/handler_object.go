@@ -182,6 +182,17 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 	if !ok {
 		return
 	}
+	if r.Header.Get("If-None-Match") == "*" {
+		_, err := ro.storage.HeadObject(bucket, key)
+		if err == nil {
+			writeError(w, r, http.StatusPreconditionFailed, "PreconditionFailed",
+				"At least one of the pre-conditions you specified did not hold.")
+			return
+		} else if !errors.Is(err, ErrObjectNotFound) {
+			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+			return
+		}
+	}
 	meta, err := ro.storage.PutObject(
 		bucket,
 		key,

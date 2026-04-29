@@ -863,6 +863,65 @@ func TestRouterPutObject(t *testing.T) {
 			assert.Contains(t, w.Body.String(), "InvalidDigest")
 		},
 	)
+
+	t.Run("If-None-Match: * succeeds when object does not exist", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+
+		req := httptest.NewRequest(http.MethodPut, "/my-bucket/new.txt", strings.NewReader("data"))
+		req.Header.Set("If-None-Match", "*")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("If-None-Match: * returns 412 when object already exists", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(
+				http.MethodPut,
+				"/my-bucket/existing.txt",
+				strings.NewReader("first"),
+			),
+		)
+
+		req := httptest.NewRequest(
+			http.MethodPut,
+			"/my-bucket/existing.txt",
+			strings.NewReader("second"),
+		)
+		req.Header.Set("If-None-Match", "*")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusPreconditionFailed, w.Code)
+		assert.Contains(t, w.Body.String(), "PreconditionFailed")
+	})
+
+	t.Run("If-None-Match with non-* value is ignored", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", strings.NewReader("first")),
+		)
+
+		req := httptest.NewRequest(
+			http.MethodPut,
+			"/my-bucket/obj.txt",
+			strings.NewReader("second"),
+		)
+		req.Header.Set("If-None-Match", `"someetag"`)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
 }
 
 func TestRouterGetObject(t *testing.T) {
