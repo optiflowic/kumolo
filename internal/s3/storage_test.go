@@ -677,6 +677,35 @@ func TestPutObjectIfNotExists(t *testing.T) {
 		require.ErrorIs(t, err, ErrBucketNotFound)
 	})
 
+	t.Run("succeeds when current version is a delete marker", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
+		require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
+
+		_, err := s.PutObject(
+			"my-bucket",
+			"obj.txt",
+			strings.NewReader("v1"),
+			"text/plain",
+			nil,
+			"",
+			"",
+			nil,
+			nil,
+		)
+		require.NoError(t, err)
+		_, _, err = s.DeleteObjectVersioned("my-bucket", "obj.txt", false)
+		require.NoError(t, err)
+
+		meta, err := s.PutObjectIfNotExists(
+			"my-bucket", "obj.txt",
+			strings.NewReader("v2"),
+			"text/plain", nil, "", "", nil, nil,
+		)
+		require.NoError(t, err)
+		assert.NotEmpty(t, meta.VersionID)
+	})
+
 	t.Run("assigns versionID when versioning is enabled", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateBucket("my-bucket", "", false))

@@ -936,6 +936,38 @@ func TestRouterPutObject(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
+
+	t.Run("If-None-Match: * succeeds when current version is a delete marker", func(t *testing.T) {
+		ro := newTestRouter(t)
+
+		createReq := httptest.NewRequest(http.MethodPut, "/my-bucket", nil)
+		ro.ServeHTTP(httptest.NewRecorder(), createReq)
+
+		versioningReq := httptest.NewRequest(
+			http.MethodPut,
+			"/my-bucket?versioning",
+			strings.NewReader(
+				`<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`,
+			),
+		)
+		ro.ServeHTTP(httptest.NewRecorder(), versioningReq)
+
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", strings.NewReader("v1")),
+		)
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodDelete, "/my-bucket/obj.txt", nil),
+		)
+
+		req := httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", strings.NewReader("v2"))
+		req.Header.Set("If-None-Match", "*")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
 }
 
 func TestRouterGetObject(t *testing.T) {
