@@ -227,10 +227,7 @@ func (s *Storage) PutObject(
 	)
 }
 
-// PutObjectIfNotExists writes object data only when no object with the given key
-// currently exists. The existence check and the write happen under the same lock,
-// making this an atomic create-if-not-exists operation. Returns ErrObjectAlreadyExists
-// if the key is already present.
+// PutObjectIfNotExists is like PutObject but returns ErrObjectAlreadyExists if a live object already exists at key.
 func (s *Storage) PutObjectIfNotExists(
 	bucket, key string,
 	r io.Reader,
@@ -265,6 +262,9 @@ func (s *Storage) PutObjectIfNotExists(
 	if enabled, err := s.isVersioningEnabledLocked(bucket); err != nil {
 		return ObjectMetadata{}, err
 	} else if enabled {
+		if err := s.archiveCurrentVersionLocked(bucket, key, objPath); err != nil {
+			return ObjectMetadata{}, err
+		}
 		vid, err := s.newVersionID()
 		if err != nil {
 			return ObjectMetadata{}, err

@@ -183,8 +183,7 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 		return
 	}
 	putFn := ro.storage.PutObject
-	ifNoneMatch := r.Header.Get("If-None-Match") == "*"
-	if ifNoneMatch {
+	if r.Header.Get("If-None-Match") == "*" {
 		putFn = ro.storage.PutObjectIfNotExists
 	}
 	meta, err := putFn(
