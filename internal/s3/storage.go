@@ -246,7 +246,7 @@ func (s *Storage) PutObjectIfNotExists(
 	objPath := filepath.Join(bucket, key)
 	if existing, err := s.readMeta(objPath); err == nil {
 		if !existing.IsDeleteMarker {
-			return ObjectMetadata{}, ErrObjectAlreadyExists
+			return ObjectMetadata{}, &ObjectAlreadyExistsError{ETag: existing.ETag}
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return ObjectMetadata{}, err

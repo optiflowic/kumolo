@@ -198,7 +198,18 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 		legalHold,
 	)
 	if err != nil {
-		if errors.Is(err, ErrObjectAlreadyExists) {
+		var oae *ObjectAlreadyExistsError
+		if errors.As(err, &oae) {
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"precondition failed: object already exists",
+				"bucket",
+				bucket,
+				"key",
+				key,
+			)
+			if oae.ETag != "" {
+				w.Header().Set("ETag", oae.ETag)
+			}
 			writeError(w, r, http.StatusPreconditionFailed, "PreconditionFailed",
 				"At least one of the pre-conditions you specified did not hold.")
 			return

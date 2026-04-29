@@ -664,6 +664,9 @@ func TestPutObjectIfNotExists(t *testing.T) {
 			"text/plain", nil, "", "", nil, nil,
 		)
 		require.ErrorIs(t, err, ErrObjectAlreadyExists)
+		var oae *ObjectAlreadyExistsError
+		require.ErrorAs(t, err, &oae)
+		assert.NotEmpty(t, oae.ETag)
 	})
 
 	t.Run("returns ErrBucketNotFound when bucket does not exist", func(t *testing.T) {

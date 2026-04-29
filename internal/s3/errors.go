@@ -32,6 +32,14 @@ type DeleteMarkerError struct {
 
 func (e *DeleteMarkerError) Error() string { return "object is a delete marker" }
 
+// ObjectAlreadyExistsError is returned by PutObjectIfNotExists; carries the existing ETag for the 412 response.
+type ObjectAlreadyExistsError struct {
+	ETag string
+}
+
+func (e *ObjectAlreadyExistsError) Error() string { return ErrObjectAlreadyExists.Error() }
+func (e *ObjectAlreadyExistsError) Unwrap() error { return ErrObjectAlreadyExists }
+
 type errorResponse struct {
 	XMLName   xml.Name `xml:"Error"`
 	Code      string   `xml:"Code"`

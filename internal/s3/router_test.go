@@ -914,6 +914,7 @@ func TestRouterPutObject(t *testing.T) {
 
 		assert.Equal(t, http.StatusPreconditionFailed, w.Code)
 		assert.Contains(t, w.Body.String(), "PreconditionFailed")
+		assert.Regexp(t, `^"[a-f0-9]+"$`, w.Header().Get("ETag"))
 	})
 
 	t.Run("If-None-Match with non-* value is ignored", func(t *testing.T) {
