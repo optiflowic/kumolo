@@ -1562,13 +1562,15 @@ func (s *Storage) UploadPart(uploadID string, partNumber int, r io.Reader) (stri
 	return etag, mf.Close()
 }
 
-// DeletePart removes a previously uploaded part and its metadata file.
-// Used to roll back a part after a Content-MD5 mismatch.
+// DeletePart removes the data and metadata files for a single upload part.
 func (s *Storage) DeletePart(uploadID string, partNumber int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	partPath := filepath.Join(mpuDir, uploadID, fmt.Sprintf("%d.part", partNumber))
-	_ = s.root.Remove(partPath + ".meta.json")
+	if err := s.root.Remove(partPath + ".meta.json"); err != nil &&
+		!errors.Is(err, os.ErrNotExist) {
+		slog.Warn("failed to remove part meta file", "path", partPath+".meta.json", "err", err)
+	}
 	return s.root.Remove(partPath)
 }
 

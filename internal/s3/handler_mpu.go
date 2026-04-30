@@ -149,7 +149,17 @@ func (ro *Router) handleUploadPart(w http.ResponseWriter, r *http.Request, bucke
 		return
 	}
 	if md5Hash != nil && !bytes.Equal(md5Hash.Sum(nil), expected) {
-		_ = ro.storage.DeletePart(uploadID, partNumber)
+		if err := ro.storage.DeletePart(uploadID, partNumber); err != nil {
+			slog.Warn( // #nosec G706 -- uploadId comes from URL query; log injection risk accepted for a local dev emulator
+				"failed to roll back part after Content-MD5 mismatch",
+				"uploadId",
+				uploadID,
+				"partNumber",
+				partNumber,
+				"err",
+				err,
+			)
+		}
 		writeError(w, r, http.StatusBadRequest, "InvalidDigest",
 			"The Content-MD5 you specified was invalid.")
 		return

@@ -245,9 +245,24 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 	}
 	if md5Hash != nil && !bytes.Equal(md5Hash.Sum(nil), expected) {
 		if meta.VersionID != "" {
-			_, _ = ro.storage.DeleteObjectVersion(bucket, key, meta.VersionID, false)
+			if _, err := ro.storage.DeleteObjectVersion(bucket, key, meta.VersionID, false); err != nil {
+				slog.Warn( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+					"failed to roll back object version after Content-MD5 mismatch",
+					"bucket",
+					bucket,
+					"key",
+					key,
+					"versionID",
+					meta.VersionID,
+					"err",
+					err,
+				)
+			}
 		} else {
-			_ = ro.storage.DeleteObject(bucket, key, false)
+			if err := ro.storage.DeleteObject(bucket, key, false); err != nil {
+				slog.Warn( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+					"failed to roll back object after Content-MD5 mismatch", "bucket", bucket, "key", key, "err", err)
+			}
 		}
 		writeError(w, r, http.StatusBadRequest, "InvalidDigest",
 			"The Content-MD5 you specified was invalid.")
