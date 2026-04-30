@@ -44,6 +44,7 @@ type fakeLCStore struct {
 
 	// error injection
 	errListBuckets           error
+	errGetVersioning         error
 	errListObjects           error
 	errDeleteObject          error
 	errDeleteObjectVersioned error
@@ -76,6 +77,9 @@ func (f *fakeLCStore) GetBucketLifecycle(bucket string) (string, error) {
 }
 
 func (f *fakeLCStore) GetBucketVersioning(bucket string) (string, error) {
+	if f.errGetVersioning != nil {
+		return "", f.errGetVersioning
+	}
 	return f.versioning[bucket], nil
 }
 
@@ -146,14 +150,6 @@ func buildLifecycleXML(t *testing.T, cfg lifecycleConfiguration) string {
 	b, err := xml.Marshal(cfg)
 	require.NoError(t, err)
 	return string(b)
-}
-
-func fixedNow(s string) func() time.Time {
-	t, err := time.Parse(time.RFC3339, s)
-	if err != nil {
-		panic(err)
-	}
-	return func() time.Time { return t }
 }
 
 // --- enforceExpiration (non-versioned) ---
@@ -577,13 +573,16 @@ func TestStart_TickerFiresRunOnce(t *testing.T) {
 	e.now = func() time.Time { return now }
 	e.Start(ctx)
 
-	// Wait for at least two ticks so the ticker.C branch is exercised.
-	time.Sleep(60 * time.Millisecond)
-	store.mu.Lock()
-	deleted := make([]string, len(store.deletedObjects))
-	copy(deleted, store.deletedObjects)
-	store.mu.Unlock()
-	assert.Contains(t, deleted, "b/old.txt")
+	assert.Eventually(t, func() bool {
+		store.mu.Lock()
+		defer store.mu.Unlock()
+		for _, d := range store.deletedObjects {
+			if d == "b/old.txt" {
+				return true
+			}
+		}
+		return false
+	}, 500*time.Millisecond, 10*time.Millisecond)
 }
 
 // --- error path coverage ---
@@ -689,6 +688,30 @@ func TestEnforceAbortIncomplete_ListUploadsError(t *testing.T) {
 	e := NewLifecycleEnforcer(store, time.Minute)
 	e.now = func() time.Time { return now }
 	e.enforceAbortIncomplete("b", "", 7, now) // must not panic
+}
+
+func TestEnforceBucket_GetVersioningError(t *testing.T) {
+	// GetBucketVersioning error should log a warning and continue as unversioned.
+	now := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+
+	store := newFakeLCStore()
+	store.buckets = []BucketInfo{{Name: "b"}}
+	store.objects["b"] = []ObjectInfo{
+		{Key: "old.txt", Metadata: ObjectMetadata{LastModified: now.AddDate(0, 0, -31)}},
+	}
+	store.lifecycle["b"] = buildLifecycleXML(t, lifecycleConfiguration{
+		Rules: []lifecycleRule{
+			{Status: "Enabled", Expiration: &lifecycleExpiration{Days: 30}},
+		},
+	})
+	store.errGetVersioning = errFake
+
+	e := NewLifecycleEnforcer(store, time.Minute)
+	e.now = func() time.Time { return now }
+	e.runOnce()
+
+	// Continues as non-versioned; object should still be deleted.
+	assert.Contains(t, store.deletedObjects, "b/old.txt")
 }
 
 func TestEnforceBucket_GetLifecycleError(t *testing.T) {

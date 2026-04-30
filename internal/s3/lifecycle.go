@@ -46,7 +46,7 @@ func (e *LifecycleEnforcer) Start(ctx context.Context) {
 		defer ticker.Stop()
 		for {
 			select {
-			case <-ticker.C:
+			case <-ticker.C: // untestable without real-time coupling; tested via TestStart_TickerFiresRunOnce
 				e.runOnce()
 			case <-ctx.Done():
 				return
@@ -68,7 +68,11 @@ func (e *LifecycleEnforcer) runOnce() {
 
 func (e *LifecycleEnforcer) enforceBucket(bucket string) {
 	xmlBody, err := e.storage.GetBucketLifecycle(bucket)
-	if err != nil || xmlBody == "" {
+	if err != nil {
+		slog.Error("lifecycle: get lifecycle config", "bucket", bucket, "err", err)
+		return
+	}
+	if xmlBody == "" {
 		return
 	}
 
@@ -78,7 +82,16 @@ func (e *LifecycleEnforcer) enforceBucket(bucket string) {
 		return
 	}
 
-	versioning, _ := e.storage.GetBucketVersioning(bucket)
+	versioning, err := e.storage.GetBucketVersioning(bucket)
+	if err != nil {
+		slog.Warn(
+			"lifecycle: get versioning status, treating as unversioned",
+			"bucket",
+			bucket,
+			"err",
+			err,
+		)
+	}
 	versioned := versioning == "Enabled"
 	now := e.now()
 
@@ -284,6 +297,14 @@ func (e *LifecycleEnforcer) enforceAbortIncomplete(
 			u.UploadID,
 		)
 	}
+}
+
+// effectivePrefix returns the prefix from Filter (V2) or the top-level Prefix (V1).
+func (r lifecycleRule) effectivePrefix() string {
+	if r.Filter != nil {
+		return r.Filter.Prefix
+	}
+	return r.Prefix
 }
 
 func matchPrefix(key, prefix string) bool {

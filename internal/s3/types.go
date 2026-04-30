@@ -374,14 +374,6 @@ type lifecycleRule struct {
 	AbortIncompleteMultipartUpload *lifecycleAbortIncompleteMultipartUpload `xml:"AbortIncompleteMultipartUpload"`
 }
 
-// effectivePrefix returns the prefix from Filter (V2) or the top-level Prefix (V1).
-func (r lifecycleRule) effectivePrefix() string {
-	if r.Filter != nil {
-		return r.Filter.Prefix
-	}
-	return r.Prefix
-}
-
 type lifecycleFilter struct {
 	Prefix string `xml:"Prefix"`
 }

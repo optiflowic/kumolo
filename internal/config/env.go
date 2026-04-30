@@ -29,10 +29,20 @@ func loadEnv(dotenvLoader func(...string) error) Env {
 
 	lifecycleInterval := time.Minute
 	if raw := getEnv("KUMOLO_LIFECYCLE_INTERVAL", ""); raw != "" {
-		if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+		d, err := time.ParseDuration(raw)
+		switch {
+		case err != nil:
+			slog.Warn(
+				"invalid KUMOLO_LIFECYCLE_INTERVAL, using default 1m",
+				"value",
+				raw,
+				"err",
+				err,
+			)
+		case d <= 0:
+			slog.Warn("KUMOLO_LIFECYCLE_INTERVAL must be positive, using default 1m", "value", raw)
+		default:
 			lifecycleInterval = d
-		} else {
-			slog.Warn("invalid KUMOLO_LIFECYCLE_INTERVAL, using default 1m", "value", raw)
 		}
 	}
 

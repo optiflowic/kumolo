@@ -47,6 +47,12 @@ func TestLoadEnv(t *testing.T) {
 		assert.Equal(t, time.Minute, env.LifecycleInterval)
 	})
 
+	t.Run("uses default for zero KUMOLO_LIFECYCLE_INTERVAL", func(t *testing.T) {
+		t.Setenv("KUMOLO_LIFECYCLE_INTERVAL", "0s")
+		env := loadEnv(func(_ ...string) error { return os.ErrNotExist })
+		assert.Equal(t, time.Minute, env.LifecycleInterval)
+	})
+
 	t.Run("logs warning and continues when .env file cannot be parsed", func(t *testing.T) {
 		env := loadEnv(func(_ ...string) error { return errors.New("parse error") })
 		assert.Equal(t, "5566", env.Port)

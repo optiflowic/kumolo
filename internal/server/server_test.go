@@ -35,7 +35,9 @@ func TestNewMuxError(t *testing.T) {
 }
 
 func TestNewMux(t *testing.T) {
-	mux, cleanup, err := NewMux(context.Background(), t.TempDir(), time.Minute)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	mux, cleanup, err := NewMux(ctx, t.TempDir(), time.Minute)
 	require.NoError(t, err)
 	require.NotNil(t, mux)
 	t.Cleanup(cleanup)
