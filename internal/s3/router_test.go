@@ -7808,8 +7808,21 @@ func TestGetObjectAttributes(t *testing.T) {
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		require.Equal(t, http.StatusOK, w.Code)
-		assert.Contains(t, w.Body.String(), "<ETag>")
+		body := w.Body.String()
+		assert.Contains(t, body, "<ETag>")
+		// AWS spec: ETag in XML body must NOT include surrounding quotes
+		assert.NotContains(t, body, `<ETag>"`)
 		assert.NotEmpty(t, w.Header().Get("Last-Modified"))
+	})
+
+	t.Run("returns 400 when x-amz-object-attributes header is whitespace-only", func(t *testing.T) {
+		ro, bucket, key := setup(t)
+		req := httptest.NewRequest(http.MethodGet, "/"+bucket+"/"+key+"?attributes", nil)
+		req.Header.Set("x-amz-object-attributes", " , ")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidArgument")
 	})
 
 	t.Run("returns ObjectSize when requested", func(t *testing.T) {

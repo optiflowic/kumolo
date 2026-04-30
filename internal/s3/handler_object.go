@@ -1142,6 +1142,9 @@ func (ro *Router) handleGetObjectAttributes(
 	requested := map[string]struct{}{}
 	for _, a := range strings.Split(attrHeader, ",") {
 		a = strings.TrimSpace(a)
+		if a == "" {
+			continue
+		}
 		if _, ok := validObjectAttributes[a]; !ok {
 			slog.Debug("get object attributes: unknown attribute",
 				"bucket", bucket, "key", key, "attr", a) // #nosec G706
@@ -1150,6 +1153,13 @@ func (ro *Router) handleGetObjectAttributes(
 			return
 		}
 		requested[a] = struct{}{}
+	}
+	if len(requested) == 0 {
+		slog.Debug("get object attributes: no valid attributes in header",
+			"bucket", bucket, "key", key) // #nosec G706
+		writeError(w, r, http.StatusBadRequest, "InvalidArgument",
+			"x-amz-object-attributes header is required.")
+		return
 	}
 
 	var meta ObjectMetadata
@@ -1191,7 +1201,7 @@ func (ro *Router) handleGetObjectAttributes(
 
 	resp := getObjectAttributesResponse{}
 	if _, ok := requested["ETag"]; ok {
-		resp.ETag = meta.ETag
+		resp.ETag = strings.Trim(meta.ETag, `"`)
 	}
 	if _, ok := requested["StorageClass"]; ok {
 		resp.StorageClass = "STANDARD"
