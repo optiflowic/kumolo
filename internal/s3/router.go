@@ -43,6 +43,14 @@ const (
 	amzChecksumSHA1                = "X-Amz-Checksum-Sha1"
 	amzChecksumSHA256              = "X-Amz-Checksum-Sha256"
 	amzChecksumCRC64NVME           = "X-Amz-Checksum-Crc64nvme"
+	amzObjectAttributes            = "X-Amz-Object-Attributes"
+
+	// Presigned URL query parameter names.
+	amzQSignature  = "X-Amz-Signature"
+	amzQAlgorithm  = "X-Amz-Algorithm"
+	amzQDate       = "X-Amz-Date"
+	amzQExpires    = "X-Amz-Expires"
+	amzQCredential = "X-Amz-Credential" // #nosec G101 -- presigned URL query parameter name, not a credential value
 
 	presignedURLMaxExpiry = 7 * 24 * 60 * 60 // 604800 seconds; AWS S3 maximum
 	maxPartNumber         = 10000            // AWS S3 maximum part number
@@ -81,7 +89,7 @@ func NewRouter(storage *Storage) *Router {
 }
 
 func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Query().Has("X-Amz-Signature") {
+	if r.URL.Query().Has(amzQSignature) {
 		if status, code, msg := checkPresigned(r, ro.now()); status != 0 {
 			slog.Debug( // #nosec G706 -- path comes from URL; log injection risk accepted for a local dev emulator
 				"presigned request rejected",
@@ -110,14 +118,14 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func checkPresigned(r *http.Request, now time.Time) (int, string, string) {
 	q := r.URL.Query()
 
-	if algo := q.Get("X-Amz-Algorithm"); algo != "" && algo != "AWS4-HMAC-SHA256" {
+	if algo := q.Get(amzQAlgorithm); algo != "" && algo != "AWS4-HMAC-SHA256" {
 		return http.StatusBadRequest,
 			"AuthorizationQueryParametersError",
 			`X-Amz-Algorithm only supports "AWS4-HMAC-SHA256".`
 	}
 
-	amzDate := q.Get("X-Amz-Date")
-	amzExpires := q.Get("X-Amz-Expires")
+	amzDate := q.Get(amzQDate)
+	amzExpires := q.Get(amzQExpires)
 	if amzDate == "" || amzExpires == "" {
 		return 0, "", ""
 	}

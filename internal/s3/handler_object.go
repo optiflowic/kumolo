@@ -1131,7 +1131,7 @@ func (ro *Router) handleGetObjectAttributes(
 	r *http.Request,
 	bucket, key string,
 ) {
-	attrHeader := r.Header.Get("x-amz-object-attributes")
+	attrHeader := r.Header.Get(amzObjectAttributes)
 	if attrHeader == "" {
 		slog.Debug("get object attributes: missing x-amz-object-attributes header",
 			"bucket", bucket, "key", key) // #nosec G706
