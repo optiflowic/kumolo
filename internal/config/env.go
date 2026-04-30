@@ -4,15 +4,17 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/joho/godotenv"
 )
 
 // Env holds values resolved from the .env file and environment variables.
 type Env struct {
-	Port     string
-	DataDir  string
-	LogLevel string
+	Port              string
+	DataDir           string
+	LogLevel          string
+	LifecycleInterval time.Duration
 }
 
 // LoadEnv loads .env if present and returns the resolved environment values.
@@ -24,10 +26,21 @@ func loadEnv(dotenvLoader func(...string) error) Env {
 	if err := dotenvLoader(); err != nil && !errors.Is(err, os.ErrNotExist) {
 		slog.Warn("failed to load .env", "err", err)
 	}
+
+	lifecycleInterval := time.Minute
+	if raw := getEnv("KUMOLO_LIFECYCLE_INTERVAL", ""); raw != "" {
+		if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+			lifecycleInterval = d
+		} else {
+			slog.Warn("invalid KUMOLO_LIFECYCLE_INTERVAL, using default 1m", "value", raw)
+		}
+	}
+
 	return Env{
-		Port:     getEnv("KUMOLO_PORT", "5566"),
-		DataDir:  getEnv("KUMOLO_DATA_DIR", ""),
-		LogLevel: getEnv("KUMOLO_LOG_LEVEL", "info"),
+		Port:              getEnv("KUMOLO_PORT", "5566"),
+		DataDir:           getEnv("KUMOLO_DATA_DIR", ""),
+		LogLevel:          getEnv("KUMOLO_LOG_LEVEL", "info"),
+		LifecycleInterval: lifecycleInterval,
 	}
 }
 

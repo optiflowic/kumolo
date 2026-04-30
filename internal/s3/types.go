@@ -355,3 +355,45 @@ type getObjectAttributesResponse struct {
 type xmlObjectParts struct {
 	TotalPartsCount int `xml:"TotalPartsCount"`
 }
+
+// Lifecycle configuration XML types used by LifecycleEnforcer.
+
+type lifecycleConfiguration struct {
+	XMLName xml.Name        `xml:"LifecycleConfiguration"`
+	Rules   []lifecycleRule `xml:"Rule"`
+}
+
+type lifecycleRule struct {
+	ID     string           `xml:"ID,omitempty"`
+	Status string           `xml:"Status"`
+	Prefix string           `xml:"Prefix,omitempty"` // legacy V1 style; V2 uses Filter
+	Filter *lifecycleFilter `xml:"Filter"`
+
+	Expiration                     *lifecycleExpiration                     `xml:"Expiration"`
+	NoncurrentVersionExpiration    *lifecycleNoncurrentVersionExpiration    `xml:"NoncurrentVersionExpiration"`
+	AbortIncompleteMultipartUpload *lifecycleAbortIncompleteMultipartUpload `xml:"AbortIncompleteMultipartUpload"`
+}
+
+// effectivePrefix returns the prefix from Filter (V2) or the top-level Prefix (V1).
+func (r lifecycleRule) effectivePrefix() string {
+	if r.Filter != nil {
+		return r.Filter.Prefix
+	}
+	return r.Prefix
+}
+
+type lifecycleFilter struct {
+	Prefix string `xml:"Prefix"`
+}
+
+type lifecycleExpiration struct {
+	Days int `xml:"Days"`
+}
+
+type lifecycleNoncurrentVersionExpiration struct {
+	NoncurrentDays int `xml:"NoncurrentDays"`
+}
+
+type lifecycleAbortIncompleteMultipartUpload struct {
+	DaysAfterInitiation int `xml:"DaysAfterInitiation"`
+}

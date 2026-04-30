@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -14,11 +15,13 @@ func TestLoadEnv(t *testing.T) {
 		require.NoError(t, os.Unsetenv("KUMOLO_PORT"))
 		require.NoError(t, os.Unsetenv("KUMOLO_DATA_DIR"))
 		require.NoError(t, os.Unsetenv("KUMOLO_LOG_LEVEL"))
+		require.NoError(t, os.Unsetenv("KUMOLO_LIFECYCLE_INTERVAL"))
 
 		env := LoadEnv()
 		assert.Equal(t, "5566", env.Port)
 		assert.Equal(t, "", env.DataDir)
 		assert.Equal(t, "info", env.LogLevel)
+		assert.Equal(t, time.Minute, env.LifecycleInterval)
 	})
 
 	t.Run("reads values from environment variables", func(t *testing.T) {
@@ -30,6 +33,18 @@ func TestLoadEnv(t *testing.T) {
 		assert.Equal(t, "8080", env.Port)
 		assert.Equal(t, "/env/kumolo", env.DataDir)
 		assert.Equal(t, "warn", env.LogLevel)
+	})
+
+	t.Run("reads KUMOLO_LIFECYCLE_INTERVAL", func(t *testing.T) {
+		t.Setenv("KUMOLO_LIFECYCLE_INTERVAL", "5m")
+		env := loadEnv(func(_ ...string) error { return os.ErrNotExist })
+		assert.Equal(t, 5*time.Minute, env.LifecycleInterval)
+	})
+
+	t.Run("uses default for invalid KUMOLO_LIFECYCLE_INTERVAL", func(t *testing.T) {
+		t.Setenv("KUMOLO_LIFECYCLE_INTERVAL", "notaduration")
+		env := loadEnv(func(_ ...string) error { return os.ErrNotExist })
+		assert.Equal(t, time.Minute, env.LifecycleInterval)
 	})
 
 	t.Run("logs warning and continues when .env file cannot be parsed", func(t *testing.T) {
