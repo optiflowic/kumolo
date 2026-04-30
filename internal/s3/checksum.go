@@ -48,8 +48,9 @@ func newChecksumHash(algo checksumAlgorithm) hash.Hash {
 }
 
 // parseChecksumHeaders reads x-amz-sdk-checksum-algorithm and the corresponding
-// x-amz-checksum-* header. Returns (nil, nil, true) when absent, (hash, expected, true)
-// when both are present and valid, or (nil, nil, false) after writing an error response.
+// x-amz-checksum-* header. Returns (nil, nil, true) when the algorithm header is absent,
+// (hash, expected, true) when both headers are present and valid, or (nil, nil, false)
+// after writing an error response (unknown algorithm, missing checksum header, bad digest).
 func parseChecksumHeaders(w http.ResponseWriter, r *http.Request) (hash.Hash, []byte, bool) {
 	algoStr := r.Header.Get("X-Amz-Sdk-Checksum-Algorithm")
 	if algoStr == "" {
@@ -75,11 +76,6 @@ func parseChecksumHeaders(w http.ResponseWriter, r *http.Request) (hash.Hash, []
 		return nil, nil, false
 	}
 	h := newChecksumHash(algo)
-	if h == nil {
-		writeError(w, r, http.StatusInternalServerError, "InternalError",
-			"Internal server error.")
-		return nil, nil, false
-	}
 	if len(expected) != h.Size() {
 		writeError(w, r, http.StatusBadRequest, "InvalidDigest",
 			"The checksum value you specified is invalid.")

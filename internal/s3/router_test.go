@@ -956,6 +956,62 @@ func TestRouterPutObject(t *testing.T) {
 	)
 
 	t.Run(
+		"checksum mismatch rollback: DeleteObjectVersion error is logged, 400 still returned",
+		func(t *testing.T) {
+			m := newMockStore(func(m *mockStore) {
+				m.bucketExists = true
+				m.putObjectMeta = ObjectMetadata{VersionID: "v1"}
+				m.deleteObjectVersionErr = errors.New("delete failed")
+			})
+			ro := newRouterWithMock(m)
+			req := httptest.NewRequest(
+				http.MethodPut,
+				"/my-bucket/obj.txt",
+				strings.NewReader("body"),
+			)
+			wrong := newChecksumHash(checksumCRC32)
+			_, _ = wrong.Write([]byte("wrong"))
+			req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "CRC32")
+			req.Header.Set(
+				"X-Amz-Checksum-Crc32",
+				base64.StdEncoding.EncodeToString(wrong.Sum(nil)),
+			)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Contains(t, w.Body.String(), "BadDigest")
+		},
+	)
+
+	t.Run(
+		"checksum mismatch rollback: DeleteObject error is logged, 400 still returned",
+		func(t *testing.T) {
+			m := newMockStore(func(m *mockStore) {
+				m.bucketExists = true
+				m.putObjectMeta = ObjectMetadata{}
+				m.deleteObjectErr = errors.New("delete failed")
+			})
+			ro := newRouterWithMock(m)
+			req := httptest.NewRequest(
+				http.MethodPut,
+				"/my-bucket/obj.txt",
+				strings.NewReader("body"),
+			)
+			wrong := newChecksumHash(checksumCRC32)
+			_, _ = wrong.Write([]byte("wrong"))
+			req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "CRC32")
+			req.Header.Set(
+				"X-Amz-Checksum-Crc32",
+				base64.StdEncoding.EncodeToString(wrong.Sum(nil)),
+			)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Contains(t, w.Body.String(), "BadDigest")
+		},
+	)
+
+	t.Run(
 		"Content-MD5 mismatch rollback: DeleteObject error is logged, 400 still returned",
 		func(t *testing.T) {
 			m := newMockStore(func(m *mockStore) {
@@ -1039,6 +1095,70 @@ func TestRouterPutObject(t *testing.T) {
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("x-amz-checksum SHA1 valid returns 200", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		data := []byte("hello world")
+		h := newChecksumHash(checksumSHA1)
+		_, _ = h.Write(data)
+		req := httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", bytes.NewReader(data))
+		req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "SHA1")
+		req.Header.Set("X-Amz-Checksum-Sha1", base64.StdEncoding.EncodeToString(h.Sum(nil)))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("x-amz-checksum SHA1 mismatch returns 400 BadDigest", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		req := httptest.NewRequest(
+			http.MethodPut,
+			"/my-bucket/obj.txt",
+			strings.NewReader("hello world"),
+		)
+		wrong := newChecksumHash(checksumSHA1)
+		_, _ = wrong.Write([]byte("wrong"))
+		req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "SHA1")
+		req.Header.Set("X-Amz-Checksum-Sha1", base64.StdEncoding.EncodeToString(wrong.Sum(nil)))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "BadDigest")
+	})
+
+	t.Run("x-amz-checksum CRC32C valid returns 200", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		data := []byte("hello world")
+		h := newChecksumHash(checksumCRC32C)
+		_, _ = h.Write(data)
+		req := httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", bytes.NewReader(data))
+		req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "CRC32C")
+		req.Header.Set("X-Amz-Checksum-Crc32c", base64.StdEncoding.EncodeToString(h.Sum(nil)))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("x-amz-checksum CRC32C mismatch returns 400 BadDigest", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		req := httptest.NewRequest(
+			http.MethodPut,
+			"/my-bucket/obj.txt",
+			strings.NewReader("hello world"),
+		)
+		wrong := newChecksumHash(checksumCRC32C)
+		_, _ = wrong.Write([]byte("wrong"))
+		req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "CRC32C")
+		req.Header.Set("X-Amz-Checksum-Crc32c", base64.StdEncoding.EncodeToString(wrong.Sum(nil)))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "BadDigest")
 	})
 
 	t.Run("x-amz-checksum CRC64NVME valid returns 200", func(t *testing.T) {
@@ -2787,6 +2907,33 @@ func TestRouterMultipartUpload(t *testing.T) {
 	)
 
 	t.Run(
+		"UploadPart checksum mismatch rollback: DeletePart error is logged, 400 still returned",
+		func(t *testing.T) {
+			m := newMockStore(func(m *mockStore) {
+				m.uploadPartETag = `"abc123"`
+				m.deletePartErr = errors.New("delete failed")
+			})
+			ro := newRouterWithMock(m)
+			req := httptest.NewRequest(
+				http.MethodPut,
+				"/my-bucket/obj.txt?partNumber=1&uploadId=test-upload",
+				strings.NewReader("part data"),
+			)
+			wrong := newChecksumHash(checksumCRC32)
+			_, _ = wrong.Write([]byte("wrong"))
+			req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "CRC32")
+			req.Header.Set(
+				"X-Amz-Checksum-Crc32",
+				base64.StdEncoding.EncodeToString(wrong.Sum(nil)),
+			)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Contains(t, w.Body.String(), "BadDigest")
+		},
+	)
+
+	t.Run(
 		"UploadPart with invalid base64 Content-MD5 returns 400 InvalidDigest",
 		func(t *testing.T) {
 			ro, path := setup(t)
@@ -2899,6 +3046,78 @@ func TestRouterMultipartUpload(t *testing.T) {
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("UploadPart with valid SHA1 checksum returns 200", func(t *testing.T) {
+		ro, path := setup(t)
+		uploadID := initiateUpload(t, ro, path)
+		data := []byte("part data")
+		h := newChecksumHash(checksumSHA1)
+		_, _ = h.Write(data)
+		req := httptest.NewRequest(
+			http.MethodPut,
+			path+"?partNumber=1&uploadId="+uploadID,
+			bytes.NewReader(data),
+		)
+		req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "SHA1")
+		req.Header.Set("X-Amz-Checksum-Sha1", base64.StdEncoding.EncodeToString(h.Sum(nil)))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("UploadPart with mismatched SHA1 checksum returns 400 BadDigest", func(t *testing.T) {
+		ro, path := setup(t)
+		uploadID := initiateUpload(t, ro, path)
+		wrong := newChecksumHash(checksumSHA1)
+		_, _ = wrong.Write([]byte("wrong"))
+		req := httptest.NewRequest(
+			http.MethodPut,
+			path+"?partNumber=1&uploadId="+uploadID,
+			strings.NewReader("part data"),
+		)
+		req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "SHA1")
+		req.Header.Set("X-Amz-Checksum-Sha1", base64.StdEncoding.EncodeToString(wrong.Sum(nil)))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "BadDigest")
+	})
+
+	t.Run("UploadPart with valid CRC32C checksum returns 200", func(t *testing.T) {
+		ro, path := setup(t)
+		uploadID := initiateUpload(t, ro, path)
+		data := []byte("part data")
+		h := newChecksumHash(checksumCRC32C)
+		_, _ = h.Write(data)
+		req := httptest.NewRequest(
+			http.MethodPut,
+			path+"?partNumber=1&uploadId="+uploadID,
+			bytes.NewReader(data),
+		)
+		req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "CRC32C")
+		req.Header.Set("X-Amz-Checksum-Crc32c", base64.StdEncoding.EncodeToString(h.Sum(nil)))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("UploadPart with mismatched CRC32C checksum returns 400 BadDigest", func(t *testing.T) {
+		ro, path := setup(t)
+		uploadID := initiateUpload(t, ro, path)
+		wrong := newChecksumHash(checksumCRC32C)
+		_, _ = wrong.Write([]byte("wrong"))
+		req := httptest.NewRequest(
+			http.MethodPut,
+			path+"?partNumber=1&uploadId="+uploadID,
+			strings.NewReader("part data"),
+		)
+		req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "CRC32C")
+		req.Header.Set("X-Amz-Checksum-Crc32c", base64.StdEncoding.EncodeToString(wrong.Sum(nil)))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "BadDigest")
 	})
 
 	t.Run("UploadPart with unknown algorithm returns 400 InvalidArgument", func(t *testing.T) {
