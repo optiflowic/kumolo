@@ -37,6 +37,12 @@ const (
 	amzObjectLockMode              = "X-Amz-Object-Lock-Mode"
 	amzObjectLockRetainUntilDate   = "X-Amz-Object-Lock-Retain-Until-Date"
 	amzObjectLockLegalHold         = "X-Amz-Object-Lock-Legal-Hold"
+	amzSdkChecksumAlgorithm        = "X-Amz-Sdk-Checksum-Algorithm"
+	amzChecksumCRC32               = "X-Amz-Checksum-Crc32"
+	amzChecksumCRC32C              = "X-Amz-Checksum-Crc32c"
+	amzChecksumSHA1                = "X-Amz-Checksum-Sha1"
+	amzChecksumSHA256              = "X-Amz-Checksum-Sha256"
+	amzChecksumCRC64NVME           = "X-Amz-Checksum-Crc64nvme"
 
 	presignedURLMaxExpiry = 7 * 24 * 60 * 60 // 604800 seconds; AWS S3 maximum
 	maxPartNumber         = 10000            // AWS S3 maximum part number

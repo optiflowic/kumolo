@@ -23,11 +23,11 @@ const (
 
 // checksumHeaderName maps each algorithm to its canonical HTTP header name.
 var checksumHeaderName = map[checksumAlgorithm]string{
-	checksumCRC32:     "X-Amz-Checksum-Crc32",
-	checksumCRC32C:    "X-Amz-Checksum-Crc32c",
-	checksumSHA1:      "X-Amz-Checksum-Sha1",
-	checksumSHA256:    "X-Amz-Checksum-Sha256",
-	checksumCRC64NVME: "X-Amz-Checksum-Crc64nvme",
+	checksumCRC32:     amzChecksumCRC32,
+	checksumCRC32C:    amzChecksumCRC32C,
+	checksumSHA1:      amzChecksumSHA1,
+	checksumSHA256:    amzChecksumSHA256,
+	checksumCRC64NVME: amzChecksumCRC64NVME,
 }
 
 func newChecksumHash(algo checksumAlgorithm) hash.Hash {
@@ -52,7 +52,7 @@ func newChecksumHash(algo checksumAlgorithm) hash.Hash {
 // (hash, expected, true) when both headers are present and valid, or (nil, nil, false)
 // after writing an error response (unknown algorithm, missing checksum header, bad digest).
 func parseChecksumHeaders(w http.ResponseWriter, r *http.Request) (hash.Hash, []byte, bool) {
-	algoStr := r.Header.Get("X-Amz-Sdk-Checksum-Algorithm")
+	algoStr := r.Header.Get(amzSdkChecksumAlgorithm)
 	if algoStr == "" {
 		return nil, nil, true
 	}
