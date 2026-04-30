@@ -1121,6 +1121,7 @@ func parseObjectLockHeaders(
 	return retention, legalHold, true
 }
 
+// validObjectAttributes is the set of attribute names accepted by GetObjectAttributes.
 var validObjectAttributes = map[string]struct{}{
 	"ETag": {}, "Checksum": {}, "ObjectParts": {}, "StorageClass": {}, "ObjectSize": {},
 }
@@ -1151,14 +1152,35 @@ func (ro *Router) handleGetObjectAttributes(
 		requested[a] = struct{}{}
 	}
 
-	meta, err := ro.storage.HeadObject(bucket, key)
+	var meta ObjectMetadata
+	var err error
+	if versionID := r.URL.Query().Get("versionId"); versionID != "" {
+		meta, err = ro.storage.HeadObjectVersion(bucket, key, versionID)
+	} else {
+		meta, err = ro.storage.HeadObject(bucket, key)
+	}
 	if err != nil {
+		var dme *DeleteMarkerError
 		switch {
-		case errors.Is(err, ErrBucketNotFound), errors.Is(err, ErrObjectNotFound):
+		case errors.Is(err, ErrBucketNotFound):
+			slog.Debug("get object attributes: bucket not found",
+				"bucket", bucket, "key", key) // #nosec G706
+			writeError(w, r, http.StatusNotFound, "NoSuchKey",
+				"The specified key does not exist.")
+		case errors.Is(err, ErrObjectNotFound):
 			slog.Debug("get object attributes: object not found",
 				"bucket", bucket, "key", key) // #nosec G706
 			writeError(w, r, http.StatusNotFound, "NoSuchKey",
 				"The specified key does not exist.")
+		case errors.As(err, &dme):
+			slog.Debug("get object attributes: object is a delete marker",
+				"bucket", bucket, "key", key) // #nosec G706
+			w.Header().Set(amzDeleteMarker, "true")
+			if dme.VersionID != "" {
+				w.Header().Set(amzVersionID, dme.VersionID)
+			}
+			writeError(w, r, http.StatusMethodNotAllowed, "MethodNotAllowed",
+				"The specified method is not allowed against this resource.")
 		default:
 			slog.Error("get object attributes: storage error",
 				"bucket", bucket, "key", key, "err", err) // #nosec G706

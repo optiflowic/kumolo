@@ -7981,6 +7981,70 @@ func TestGetObjectAttributes(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code)
 		assert.NotContains(t, w.Body.String(), "<ObjectParts>")
 	})
+
+	t.Run("supports versionId query parameter", func(t *testing.T) {
+		ro := newTestRouter(t)
+		bucket, key := "ver-bucket", "ver-obj.txt"
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/"+bucket, nil))
+		// enable versioning
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(
+			http.MethodPut,
+			"/"+bucket+"?versioning",
+			strings.NewReader(
+				`<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`,
+			),
+		))
+		// put object to get a version ID
+		putW := httptest.NewRecorder()
+		ro.ServeHTTP(
+			putW,
+			httptest.NewRequest(http.MethodPut, "/"+bucket+"/"+key, strings.NewReader("v1")),
+		)
+		require.Equal(t, http.StatusOK, putW.Code)
+		vid := putW.Header().Get("x-amz-version-id")
+		require.NotEmpty(t, vid)
+
+		req := httptest.NewRequest(
+			http.MethodGet,
+			"/"+bucket+"/"+key+"?attributes&versionId="+vid,
+			nil,
+		)
+		req.Header.Set("x-amz-object-attributes", "ETag,ObjectSize")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		body := w.Body.String()
+		assert.Contains(t, body, "<ETag>")
+		assert.Contains(t, body, "<ObjectSize>2</ObjectSize>")
+		assert.Equal(t, vid, w.Header().Get("x-amz-version-id"))
+	})
+
+	t.Run("returns 405 with x-amz-delete-marker for delete marker", func(t *testing.T) {
+		ro := newTestRouter(t)
+		bucket, key := "dm-bucket", "dm-obj.txt"
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/"+bucket, nil))
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(
+			http.MethodPut,
+			"/"+bucket+"?versioning",
+			strings.NewReader(
+				`<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`,
+			),
+		))
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(
+			http.MethodPut, "/"+bucket+"/"+key, strings.NewReader("data"),
+		))
+		// delete to create a delete marker as the latest version
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(
+			http.MethodDelete, "/"+bucket+"/"+key, nil,
+		))
+
+		req := httptest.NewRequest(http.MethodGet, "/"+bucket+"/"+key+"?attributes", nil)
+		req.Header.Set("x-amz-object-attributes", "ETag")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+		assert.Equal(t, "true", w.Header().Get("x-amz-delete-marker"))
+	})
 }
 
 func TestParseMultipartPartCount(t *testing.T) {
