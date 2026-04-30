@@ -1120,3 +1120,122 @@ func parseObjectLockHeaders(
 
 	return retention, legalHold, true
 }
+
+// validObjectAttributes is the set of attribute names accepted by GetObjectAttributes.
+var validObjectAttributes = map[string]struct{}{
+	"ETag": {}, "Checksum": {}, "ObjectParts": {}, "StorageClass": {}, "ObjectSize": {},
+}
+
+func (ro *Router) handleGetObjectAttributes(
+	w http.ResponseWriter,
+	r *http.Request,
+	bucket, key string,
+) {
+	attrHeader := r.Header.Get(amzObjectAttributes)
+	if attrHeader == "" {
+		slog.Debug("get object attributes: missing x-amz-object-attributes header",
+			"bucket", bucket, "key", key) // #nosec G706
+		writeError(w, r, http.StatusBadRequest, "InvalidArgument",
+			"x-amz-object-attributes header is required.")
+		return
+	}
+	requested := map[string]struct{}{}
+	for _, a := range strings.Split(attrHeader, ",") {
+		a = strings.TrimSpace(a)
+		if a == "" {
+			continue
+		}
+		if _, ok := validObjectAttributes[a]; !ok {
+			slog.Debug("get object attributes: unknown attribute",
+				"bucket", bucket, "key", key, "attr", a) // #nosec G706
+			writeError(w, r, http.StatusBadRequest, "InvalidArgument",
+				"Invalid attribute: "+a)
+			return
+		}
+		requested[a] = struct{}{}
+	}
+	if len(requested) == 0 {
+		slog.Debug("get object attributes: no valid attributes in header",
+			"bucket", bucket, "key", key) // #nosec G706
+		writeError(w, r, http.StatusBadRequest, "InvalidArgument",
+			"x-amz-object-attributes header is required.")
+		return
+	}
+
+	var meta ObjectMetadata
+	var err error
+	if versionID := r.URL.Query().Get("versionId"); versionID != "" {
+		meta, err = ro.storage.HeadObjectVersion(bucket, key, versionID)
+	} else {
+		meta, err = ro.storage.HeadObject(bucket, key)
+	}
+	if err != nil {
+		var dme *DeleteMarkerError
+		switch {
+		case errors.Is(err, ErrBucketNotFound):
+			slog.Debug("get object attributes: bucket not found",
+				"bucket", bucket, "key", key) // #nosec G706
+			writeError(w, r, http.StatusNotFound, "NoSuchKey",
+				"The specified key does not exist.")
+		case errors.Is(err, ErrObjectNotFound):
+			slog.Debug("get object attributes: object not found",
+				"bucket", bucket, "key", key) // #nosec G706
+			writeError(w, r, http.StatusNotFound, "NoSuchKey",
+				"The specified key does not exist.")
+		case errors.As(err, &dme):
+			slog.Debug("get object attributes: object is a delete marker",
+				"bucket", bucket, "key", key) // #nosec G706
+			w.Header().Set(amzDeleteMarker, "true")
+			if dme.VersionID != "" {
+				w.Header().Set(amzVersionID, dme.VersionID)
+			}
+			writeError(w, r, http.StatusMethodNotAllowed, "MethodNotAllowed",
+				"The specified method is not allowed against this resource.")
+		default:
+			slog.Error("get object attributes: storage error",
+				"bucket", bucket, "key", key, "err", err) // #nosec G706
+			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+
+	resp := getObjectAttributesResponse{}
+	if _, ok := requested["ETag"]; ok {
+		resp.ETag = strings.Trim(meta.ETag, `"`)
+	}
+	if _, ok := requested["StorageClass"]; ok {
+		resp.StorageClass = "STANDARD"
+	}
+	if _, ok := requested["ObjectSize"]; ok {
+		size := meta.Size
+		resp.ObjectSize = &size
+	}
+	if _, ok := requested["ObjectParts"]; ok {
+		if n := parseMultipartPartCount(meta.ETag); n > 0 {
+			resp.ObjectParts = &xmlObjectParts{TotalPartsCount: n}
+		}
+	}
+
+	w.Header().Set("Last-Modified", meta.LastModified.UTC().Format(http.TimeFormat))
+	if meta.VersionID != "" {
+		w.Header().Set(amzVersionID, meta.VersionID)
+	}
+	slog.Debug("get object attributes",
+		"bucket", bucket, "key", key) // #nosec G706
+	writeXML(w, http.StatusOK, resp)
+}
+
+// parseMultipartPartCount returns the part count encoded in a multipart ETag
+// (e.g. `"abc123-5"` → 5). Returns 0 for single-part (non-multipart) ETags.
+func parseMultipartPartCount(etag string) int {
+	s := strings.Trim(etag, `"`)
+	idx := strings.LastIndex(s, "-")
+	if idx < 0 {
+		return 0
+	}
+	n, err := strconv.Atoi(s[idx+1:])
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
+}

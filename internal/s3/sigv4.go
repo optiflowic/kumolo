@@ -22,7 +22,7 @@ type RequestContext struct {
 // X-Amz-Credential=<key>/<date>/<region>/<service>/aws4_request
 func ParseSigV4(r *http.Request) RequestContext {
 	// Presigned URL: credentials are in the query string.
-	if cred := r.URL.Query().Get("X-Amz-Credential"); cred != "" {
+	if cred := r.URL.Query().Get(amzQCredential); cred != "" {
 		return parseCredential(cred)
 	}
 
