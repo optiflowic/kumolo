@@ -1,11 +1,15 @@
 package config
 
-import "flag"
+import (
+	"flag"
+	"time"
+)
 
 type Config struct {
-	Port     string
-	DataDir  string
-	LogLevel string
+	Port              string
+	DataDir           string
+	LogLevel          string
+	LifecycleInterval time.Duration
 }
 
 // RegisterFlags registers flags on fs and returns a builder.
@@ -24,9 +28,10 @@ func RegisterFlags(fs *flag.FlagSet, env Env) func() Config {
 	)
 	return func() Config {
 		return Config{
-			Port:     *port,
-			DataDir:  *dataDir,
-			LogLevel: *logLevel,
+			Port:              *port,
+			DataDir:           *dataDir,
+			LogLevel:          *logLevel,
+			LifecycleInterval: env.LifecycleInterval,
 		}
 	}
 }

@@ -825,19 +825,21 @@ func (s *Storage) ListObjectVersions(bucket string) ([]VersionInfo, []DeleteMark
 		}
 		if e.meta.IsDeleteMarker {
 			deleteMarkers = append(deleteMarkers, DeleteMarkerInfo{
-				Key:          e.key,
-				VersionID:    vid,
-				IsLatest:     isLatest,
-				LastModified: e.meta.LastModified,
+				Key:             e.key,
+				VersionID:       vid,
+				IsLatest:        isLatest,
+				LastModified:    e.meta.LastModified,
+				NoncurrentSince: e.meta.NoncurrentSince,
 			})
 		} else {
 			versions = append(versions, VersionInfo{
-				Key:          e.key,
-				VersionID:    vid,
-				IsLatest:     isLatest,
-				LastModified: e.meta.LastModified,
-				ETag:         e.meta.ETag,
-				Size:         e.meta.Size,
+				Key:             e.key,
+				VersionID:       vid,
+				IsLatest:        isLatest,
+				LastModified:    e.meta.LastModified,
+				ETag:            e.meta.ETag,
+				Size:            e.meta.Size,
+				NoncurrentSince: e.meta.NoncurrentSince,
 			})
 		}
 	}
@@ -1106,6 +1108,8 @@ func (s *Storage) archiveCurrentVersionLocked(bucket, key, objPath string) error
 		_ = s.removeFile(vp)
 		return copyErr
 	}
+
+	meta.NoncurrentSince = s.now()
 
 	// Write metadata with resolved version ID.
 	if err := s.writeJSON(vp+".meta.json", meta); err != nil {

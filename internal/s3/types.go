@@ -40,24 +40,28 @@ type ObjectMetadata struct {
 	RestoreInitiated bool              `json:"restoreInitiated,omitempty"`
 	Retention        *ObjectRetention  `json:"retention,omitempty"`
 	LegalHold        *ObjectLegalHold  `json:"legalHold,omitempty"`
+	// Set when superseded; zero for versions predating lifecycle enforcement.
+	NoncurrentSince time.Time `json:"noncurrentSince,omitempty"`
 }
 
 // VersionInfo represents a non-delete-marker version of an object in a versioned bucket.
 type VersionInfo struct {
-	Key          string
-	VersionID    string
-	IsLatest     bool
-	LastModified time.Time
-	ETag         string
-	Size         int64
+	Key             string
+	VersionID       string
+	IsLatest        bool
+	LastModified    time.Time
+	ETag            string
+	Size            int64
+	NoncurrentSince time.Time // zero when IsLatest is true
 }
 
 // DeleteMarkerInfo represents a delete marker version in a versioned bucket.
 type DeleteMarkerInfo struct {
-	Key          string
-	VersionID    string
-	IsLatest     bool
-	LastModified time.Time
+	Key             string
+	VersionID       string
+	IsLatest        bool
+	LastModified    time.Time
+	NoncurrentSince time.Time // zero when IsLatest is true
 }
 
 // Tag is a key-value pair attached to an S3 object.
@@ -354,4 +358,38 @@ type getObjectAttributesResponse struct {
 // xmlObjectParts holds multipart info returned by GetObjectAttributes.
 type xmlObjectParts struct {
 	TotalPartsCount int `xml:"TotalPartsCount"`
+}
+
+// Lifecycle configuration XML types used by LifecycleEnforcer.
+
+type lifecycleConfiguration struct {
+	XMLName xml.Name        `xml:"LifecycleConfiguration"`
+	Rules   []lifecycleRule `xml:"Rule"`
+}
+
+type lifecycleRule struct {
+	ID     string           `xml:"ID,omitempty"`
+	Status string           `xml:"Status"`
+	Prefix string           `xml:"Prefix,omitempty"` // legacy V1 style; V2 uses Filter
+	Filter *lifecycleFilter `xml:"Filter"`
+
+	Expiration                     *lifecycleExpiration                     `xml:"Expiration"`
+	NoncurrentVersionExpiration    *lifecycleNoncurrentVersionExpiration    `xml:"NoncurrentVersionExpiration"`
+	AbortIncompleteMultipartUpload *lifecycleAbortIncompleteMultipartUpload `xml:"AbortIncompleteMultipartUpload"`
+}
+
+type lifecycleFilter struct {
+	Prefix string `xml:"Prefix"`
+}
+
+type lifecycleExpiration struct {
+	Days int `xml:"Days"`
+}
+
+type lifecycleNoncurrentVersionExpiration struct {
+	NoncurrentDays int `xml:"NoncurrentDays"`
+}
+
+type lifecycleAbortIncompleteMultipartUpload struct {
+	DaysAfterInitiation int `xml:"DaysAfterInitiation"`
 }

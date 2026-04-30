@@ -1,15 +1,21 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/optiflowic/kumolo/internal/dynamodb"
 	"github.com/optiflowic/kumolo/internal/logging"
 	"github.com/optiflowic/kumolo/internal/s3"
 )
 
-func NewMux(dataDir string) (http.Handler, func(), error) {
+func NewMux(
+	ctx context.Context,
+	dataDir string,
+	lifecycleInterval time.Duration,
+) (http.Handler, func(), error) {
 	s3Storage, err := s3.NewStorage(dataDir)
 	if err != nil {
 		return nil, nil, err
@@ -22,6 +28,8 @@ func NewMux(dataDir string) (http.Handler, func(), error) {
 
 	s3Router := s3.NewRouter(s3Storage)
 	dynamoRouter := dynamodb.NewRouter(dynamoStorage)
+
+	s3.NewLifecycleEnforcer(s3Storage, lifecycleInterval).Start(ctx)
 
 	mux := http.NewServeMux()
 	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

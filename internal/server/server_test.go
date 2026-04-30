@@ -1,12 +1,14 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -16,7 +18,7 @@ func TestNewMuxError(t *testing.T) {
 	t.Run("error when s3 storage fails to init", func(t *testing.T) {
 		dir := t.TempDir()
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "s3"), []byte{}, 0o600))
-		mux, cleanup, err := NewMux(dir)
+		mux, cleanup, err := NewMux(context.Background(), dir, time.Minute)
 		assert.Error(t, err)
 		assert.Nil(t, mux)
 		assert.Nil(t, cleanup)
@@ -25,7 +27,7 @@ func TestNewMuxError(t *testing.T) {
 	t.Run("error when dynamodb storage fails to init", func(t *testing.T) {
 		dir := t.TempDir()
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "dynamodb"), []byte{}, 0o600))
-		mux, cleanup, err := NewMux(dir)
+		mux, cleanup, err := NewMux(context.Background(), dir, time.Minute)
 		assert.Error(t, err)
 		assert.Nil(t, mux)
 		assert.Nil(t, cleanup)
@@ -33,7 +35,9 @@ func TestNewMuxError(t *testing.T) {
 }
 
 func TestNewMux(t *testing.T) {
-	mux, cleanup, err := NewMux(t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	mux, cleanup, err := NewMux(ctx, t.TempDir(), time.Minute)
 	require.NoError(t, err)
 	require.NotNil(t, mux)
 	t.Cleanup(cleanup)

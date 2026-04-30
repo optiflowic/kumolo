@@ -52,7 +52,10 @@ func run() error {
 		dataDir = tmpDir
 	}
 
-	mux, cleanup, err := server.NewMux(dataDir)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	mux, cleanup, err := server.NewMux(ctx, dataDir, cfg.LifecycleInterval)
 	if err != nil {
 		return fmt.Errorf("initialize storage: %w", err)
 	}
@@ -65,9 +68,6 @@ func run() error {
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  120 * time.Second,
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	listenErr := make(chan error, 1)
 	go func() {

@@ -4130,6 +4130,107 @@ func TestVersioning(t *testing.T) {
 		assert.Contains(t, vids, m2.VersionID)
 	})
 
+	t.Run("ListObjectVersions sets NoncurrentSince on noncurrent versions", func(t *testing.T) {
+		s, bucket := setup(t)
+
+		_, err := s.PutObject(
+			bucket,
+			"obj.txt",
+			strings.NewReader("v1"),
+			"text/plain",
+			nil,
+			"",
+			"",
+			nil,
+			nil,
+		)
+		require.NoError(t, err)
+
+		// Inject a fixed time so we can assert on NoncurrentSince precisely.
+		noncurrentAt := time.Date(2030, 6, 15, 12, 0, 0, 0, time.UTC)
+		s.now = func() time.Time { return noncurrentAt }
+		_, err = s.PutObject(
+			bucket,
+			"obj.txt",
+			strings.NewReader("v2"),
+			"text/plain",
+			nil,
+			"",
+			"",
+			nil,
+			nil,
+		)
+		require.NoError(t, err)
+
+		versions, _, err := s.ListObjectVersions(bucket)
+		require.NoError(t, err)
+
+		var noncurrent *VersionInfo
+		for i := range versions {
+			if !versions[i].IsLatest {
+				noncurrent = &versions[i]
+			}
+		}
+		require.NotNil(t, noncurrent)
+		assert.Equal(
+			t,
+			noncurrentAt.UTC(),
+			noncurrent.NoncurrentSince.UTC(),
+			"NoncurrentSince should be set to when v2 was written",
+		)
+		assert.False(t, noncurrent.NoncurrentSince.IsZero())
+	})
+
+	t.Run(
+		"ListObjectVersions sets NoncurrentSince on noncurrent delete markers",
+		func(t *testing.T) {
+			s, bucket := setup(t)
+
+			_, err := s.PutObject(
+				bucket,
+				"obj.txt",
+				strings.NewReader("v1"),
+				"text/plain",
+				nil,
+				"",
+				"",
+				nil,
+				nil,
+			)
+			require.NoError(t, err)
+
+			_, _, err = s.DeleteObjectVersioned(bucket, "obj.txt", false)
+			require.NoError(t, err)
+
+			supersededAt := time.Date(2030, 6, 15, 12, 0, 0, 0, time.UTC)
+			s.now = func() time.Time { return supersededAt }
+			_, err = s.PutObject(
+				bucket,
+				"obj.txt",
+				strings.NewReader("v2"),
+				"text/plain",
+				nil,
+				"",
+				"",
+				nil,
+				nil,
+			)
+			require.NoError(t, err)
+
+			_, markers, err := s.ListObjectVersions(bucket)
+			require.NoError(t, err)
+
+			var noncurrentDM *DeleteMarkerInfo
+			for i := range markers {
+				if !markers[i].IsLatest {
+					noncurrentDM = &markers[i]
+				}
+			}
+			require.NotNil(t, noncurrentDM)
+			assert.Equal(t, supersededAt.UTC(), noncurrentDM.NoncurrentSince.UTC())
+		},
+	)
+
 	t.Run(
 		"ListObjectVersions on non-versioned bucket returns objects with null versionId",
 		func(t *testing.T) {
