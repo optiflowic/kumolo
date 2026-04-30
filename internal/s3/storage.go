@@ -1562,6 +1562,16 @@ func (s *Storage) UploadPart(uploadID string, partNumber int, r io.Reader) (stri
 	return etag, mf.Close()
 }
 
+// DeletePart removes a previously uploaded part and its metadata file.
+// Used to roll back a part after a Content-MD5 mismatch.
+func (s *Storage) DeletePart(uploadID string, partNumber int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	partPath := filepath.Join(mpuDir, uploadID, fmt.Sprintf("%d.part", partNumber))
+	_ = s.root.Remove(partPath + ".meta.json")
+	return s.root.Remove(partPath)
+}
+
 // UploadPartCopy copies bytes from a source object (optionally a specific byte
 // range) into a multipart upload part. It mirrors the AWS S3 UploadPartCopy API.
 // copySourceVersionID is the VersionID of the source object actually copied

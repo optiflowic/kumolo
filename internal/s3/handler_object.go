@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/xml"
 	"errors"
+	"hash"
 	"io"
 	"log/slog"
 	"net/http"
@@ -174,7 +175,7 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 	userMetadata := extractUserMetadata(r.Header)
 	sseAlgorithm := r.Header.Get(amzSSE)
 	sseKMSKeyID := r.Header.Get(amzSSEKMSKeyID)
-	body, ok := validateContentMD5(w, r)
+	expected, ok := parseContentMD5Header(w, r)
 	if !ok {
 		return
 	}
@@ -185,6 +186,12 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 	putFn := ro.storage.PutObject
 	if r.Header.Get("If-None-Match") == "*" {
 		putFn = ro.storage.PutObjectIfNotExists
+	}
+	var body io.Reader = r.Body
+	var md5Hash hash.Hash
+	if expected != nil {
+		md5Hash = md5.New() //nolint:gosec // MD5 used for data-integrity checking per S3 spec
+		body = io.TeeReader(r.Body, md5Hash)
 	}
 	meta, err := putFn(
 		bucket,
@@ -234,6 +241,16 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 			err,
 		)
 		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	if md5Hash != nil && !bytes.Equal(md5Hash.Sum(nil), expected) {
+		if meta.VersionID != "" {
+			_, _ = ro.storage.DeleteObjectVersion(bucket, key, meta.VersionID, false)
+		} else {
+			_ = ro.storage.DeleteObject(bucket, key, false)
+		}
+		writeError(w, r, http.StatusBadRequest, "InvalidDigest",
+			"The Content-MD5 you specified was invalid.")
 		return
 	}
 	slog.Info( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
@@ -975,13 +992,13 @@ func (ro *Router) handleDeleteObjectTagging(
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// validateContentMD5 checks the Content-MD5 header if present. It reads the
-// entire body, verifies the MD5 digest, and returns a new reader over the body
-// data. Returns (nil, false) and writes 400 InvalidDigest on mismatch.
-func validateContentMD5(w http.ResponseWriter, r *http.Request) (io.Reader, bool) {
+// parseContentMD5Header decodes the Content-MD5 request header.
+// Returns (nil, true) when absent, (expected, true) when valid,
+// or (nil, false) after writing 400 InvalidDigest when malformed.
+func parseContentMD5Header(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
 	encoded := r.Header.Get("Content-MD5")
 	if encoded == "" {
-		return r.Body, true
+		return nil, true
 	}
 	expected, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil || len(expected) != md5.Size {
@@ -989,18 +1006,7 @@ func validateContentMD5(w http.ResponseWriter, r *http.Request) (io.Reader, bool
 			"The Content-MD5 you specified was invalid.")
 		return nil, false
 	}
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
-		return nil, false // untestable: httptest bodies never return read errors
-	}
-	sum := md5.Sum(body) //nolint:gosec // MD5 used for data-integrity checking per S3 spec
-	if !bytes.Equal(sum[:], expected) {
-		writeError(w, r, http.StatusBadRequest, "InvalidDigest",
-			"The Content-MD5 you specified was invalid.")
-		return nil, false
-	}
-	return bytes.NewReader(body), true
+	return expected, true
 }
 
 // parseObjectLockHeaders reads x-amz-object-lock-* request headers and returns

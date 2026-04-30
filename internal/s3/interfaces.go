@@ -69,6 +69,7 @@ type multipartStore interface {
 		legalHold *ObjectLegalHold,
 	) (uploadID string, err error)
 	UploadPart(uploadID string, partNumber int, r io.Reader) (etag string, err error)
+	DeletePart(uploadID string, partNumber int) error
 	UploadPartCopy(
 		uploadID string,
 		partNumber int,
