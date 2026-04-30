@@ -179,6 +179,10 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 	if !ok {
 		return
 	}
+	checksumH, checksumExpected, ok := parseChecksumHeaders(w, r)
+	if !ok {
+		return
+	}
 	retention, legalHold, ok := parseObjectLockHeaders(w, r)
 	if !ok {
 		return
@@ -191,7 +195,10 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 	var md5Hash hash.Hash
 	if expected != nil {
 		md5Hash = md5.New() //nolint:gosec // MD5 used for data-integrity checking per S3 spec
-		body = io.TeeReader(r.Body, md5Hash)
+		body = io.TeeReader(body, md5Hash)
+	}
+	if checksumH != nil {
+		body = io.TeeReader(body, checksumH)
 	}
 	meta, err := putFn(
 		bucket,
@@ -273,6 +280,40 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 		}
 		writeError(w, r, http.StatusBadRequest, "BadDigest",
 			"The Content-MD5 you specified did not match what we received.")
+		return
+	}
+	if checksumH != nil && !bytes.Equal(checksumH.Sum(nil), checksumExpected) {
+		// meta.VersionID is non-empty iff versioning is enabled on the bucket;
+		// storage.PutObject always sets it when versioning is active.
+		if meta.VersionID != "" {
+			if _, err := ro.storage.DeleteObjectVersion(bucket, key, meta.VersionID, false); err != nil {
+				slog.Warn( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+					"failed to roll back object version after checksum mismatch",
+					"bucket",
+					bucket,
+					"key",
+					key,
+					"versionID",
+					meta.VersionID,
+					"err",
+					err,
+				)
+			}
+		} else {
+			if err := ro.storage.DeleteObject(bucket, key, false); err != nil {
+				slog.Warn( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+					"failed to roll back object after checksum mismatch",
+					"bucket",
+					bucket,
+					"key",
+					key,
+					"err",
+					err,
+				)
+			}
+		}
+		writeError(w, r, http.StatusBadRequest, "BadDigest",
+			"The checksum you specified did not match what we received.")
 		return
 	}
 	slog.Info( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
