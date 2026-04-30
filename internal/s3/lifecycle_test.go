@@ -342,6 +342,61 @@ func TestEnforceNoncurrentExpiration(t *testing.T) {
 
 		assert.Empty(t, store.deletedVersions)
 	})
+
+	t.Run("uses NoncurrentSince not LastModified when available", func(t *testing.T) {
+		// v1 was created 100 days ago but became noncurrent only 3 days ago.
+		// With NoncurrentDays=7 it should NOT be expired yet.
+		store := newFakeLCStore()
+		store.versions["b"] = []VersionInfo{
+			{
+				Key:             "obj.txt",
+				VersionID:       "v1",
+				IsLatest:        false,
+				LastModified:    now.AddDate(0, 0, -100),
+				NoncurrentSince: now.AddDate(0, 0, -3),
+			},
+		}
+
+		e := NewLifecycleEnforcer(store, time.Minute)
+		e.now = func() time.Time { return now }
+		e.enforceNoncurrentExpiration("b", "", 7, now)
+
+		assert.Empty(t, store.deletedVersions)
+	})
+
+	t.Run("expires version whose NoncurrentSince exceeds retention", func(t *testing.T) {
+		// v1 was created 2 days ago but became noncurrent 8 days ago (NoncurrentDays=7).
+		store := newFakeLCStore()
+		store.versions["b"] = []VersionInfo{
+			{
+				Key:             "obj.txt",
+				VersionID:       "v1",
+				IsLatest:        false,
+				LastModified:    now.AddDate(0, 0, -2),
+				NoncurrentSince: now.AddDate(0, 0, -8),
+			},
+		}
+
+		e := NewLifecycleEnforcer(store, time.Minute)
+		e.now = func() time.Time { return now }
+		e.enforceNoncurrentExpiration("b", "", 7, now)
+
+		assert.Contains(t, store.deletedVersions, "b/obj.txt/v1")
+	})
+
+	t.Run("falls back to LastModified when NoncurrentSince is zero", func(t *testing.T) {
+		// Pre-existing version without NoncurrentSince set; LastModified is 8 days ago.
+		store := newFakeLCStore()
+		store.versions["b"] = []VersionInfo{
+			{Key: "obj.txt", VersionID: "v1", IsLatest: false, LastModified: now.AddDate(0, 0, -8)},
+		}
+
+		e := NewLifecycleEnforcer(store, time.Minute)
+		e.now = func() time.Time { return now }
+		e.enforceNoncurrentExpiration("b", "", 7, now)
+
+		assert.Contains(t, store.deletedVersions, "b/obj.txt/v1")
+	})
 }
 
 // --- enforceAbortIncomplete ---

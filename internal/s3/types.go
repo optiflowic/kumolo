@@ -40,24 +40,29 @@ type ObjectMetadata struct {
 	RestoreInitiated bool              `json:"restoreInitiated,omitempty"`
 	Retention        *ObjectRetention  `json:"retention,omitempty"`
 	LegalHold        *ObjectLegalHold  `json:"legalHold,omitempty"`
+	// NoncurrentSince is set when a version is superseded by a newer version or delete
+	// marker. Used by lifecycle NoncurrentVersionExpiration to measure noncurrent age.
+	NoncurrentSince time.Time `json:"noncurrentSince,omitempty"`
 }
 
 // VersionInfo represents a non-delete-marker version of an object in a versioned bucket.
 type VersionInfo struct {
-	Key          string
-	VersionID    string
-	IsLatest     bool
-	LastModified time.Time
-	ETag         string
-	Size         int64
+	Key             string
+	VersionID       string
+	IsLatest        bool
+	LastModified    time.Time
+	ETag            string
+	Size            int64
+	NoncurrentSince time.Time // zero when IsLatest is true
 }
 
 // DeleteMarkerInfo represents a delete marker version in a versioned bucket.
 type DeleteMarkerInfo struct {
-	Key          string
-	VersionID    string
-	IsLatest     bool
-	LastModified time.Time
+	Key             string
+	VersionID       string
+	IsLatest        bool
+	LastModified    time.Time
+	NoncurrentSince time.Time // zero when IsLatest is true
 }
 
 // Tag is a key-value pair attached to an S3 object.

@@ -196,7 +196,8 @@ func (e *LifecycleEnforcer) enforceNoncurrentExpiration(
 	}
 
 	for _, v := range versions {
-		if v.IsLatest || !matchPrefix(v.Key, prefix) || !v.LastModified.Before(cutoff) {
+		if v.IsLatest || !matchPrefix(v.Key, prefix) ||
+			!noncurrentBefore(v.NoncurrentSince, v.LastModified, cutoff) {
 			continue
 		}
 		if _, err := e.storage.DeleteObjectVersion(bucket, v.Key, v.VersionID, false); err != nil {
@@ -225,7 +226,8 @@ func (e *LifecycleEnforcer) enforceNoncurrentExpiration(
 	}
 
 	for _, m := range markers {
-		if m.IsLatest || !matchPrefix(m.Key, prefix) || !m.LastModified.Before(cutoff) {
+		if m.IsLatest || !matchPrefix(m.Key, prefix) ||
+			!noncurrentBefore(m.NoncurrentSince, m.LastModified, cutoff) {
 			continue
 		}
 		if _, err := e.storage.DeleteObjectVersion(bucket, m.Key, m.VersionID, false); err != nil {
@@ -305,6 +307,16 @@ func (r lifecycleRule) effectivePrefix() string {
 		return r.Filter.Prefix
 	}
 	return r.Prefix
+}
+
+// noncurrentBefore reports whether a noncurrent version became noncurrent before cutoff.
+// noncurrentSince is the authoritative timestamp; lastModified is the fallback for versions
+// that predate NoncurrentSince tracking (zero value).
+func noncurrentBefore(noncurrentSince, lastModified, cutoff time.Time) bool {
+	if !noncurrentSince.IsZero() {
+		return noncurrentSince.Before(cutoff)
+	}
+	return lastModified.Before(cutoff)
 }
 
 func matchPrefix(key, prefix string) bool {
