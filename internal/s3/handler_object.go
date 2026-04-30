@@ -261,7 +261,14 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 		} else {
 			if err := ro.storage.DeleteObject(bucket, key, false); err != nil {
 				slog.Warn( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-					"failed to roll back object after Content-MD5 mismatch", "bucket", bucket, "key", key, "err", err)
+					"failed to roll back object after Content-MD5 mismatch",
+					"bucket",
+					bucket,
+					"key",
+					key,
+					"err",
+					err,
+				)
 			}
 		}
 		writeError(w, r, http.StatusBadRequest, "BadDigest",
