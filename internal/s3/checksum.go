@@ -64,7 +64,9 @@ func parseChecksumHeaders(w http.ResponseWriter, r *http.Request) (hash.Hash, []
 	}
 	encoded := r.Header.Get(headerName)
 	if encoded == "" {
-		return nil, nil, true
+		writeError(w, r, http.StatusBadRequest, "InvalidArgument",
+			"Missing checksum header for algorithm: "+algoStr)
+		return nil, nil, false
 	}
 	expected, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
@@ -73,6 +75,11 @@ func parseChecksumHeaders(w http.ResponseWriter, r *http.Request) (hash.Hash, []
 		return nil, nil, false
 	}
 	h := newChecksumHash(algo)
+	if h == nil {
+		writeError(w, r, http.StatusInternalServerError, "InternalError",
+			"Internal server error.")
+		return nil, nil, false
+	}
 	if len(expected) != h.Size() {
 		writeError(w, r, http.StatusBadRequest, "InvalidDigest",
 			"The checksum value you specified is invalid.")
@@ -81,10 +88,12 @@ func parseChecksumHeaders(w http.ResponseWriter, r *http.Request) (hash.Hash, []
 	return h, expected, true
 }
 
-// CRC-64/NVME: polynomial 0xAD93D23594C935A9 processed MSB-first (Go standard library),
-// with init=0xFFFFFFFFFFFFFFFF and xorout=0xFFFFFFFFFFFFFFFF per NVMe specification.
+// CRC-64/NVME: reflected polynomial 0x9A6C9329AC4BC9B5 (LSB-first) matches Go's crc64
+// reflected algorithm and produces values identical to the AWS SDK Go v2 implementation.
+// init=0xFFFFFFFFFFFFFFFF and xorout=0xFFFFFFFFFFFFFFFF are applied by crc64.Update's
+// internal ^crc at start/end when called with crc=0.
 
-var crc64NVMETable = crc64.MakeTable(0xAD93D23594C935A9)
+var crc64NVMETable = crc64.MakeTable(0x9A6C9329AC4BC9B5)
 
 type crc64NVMEHash struct {
 	crc uint64

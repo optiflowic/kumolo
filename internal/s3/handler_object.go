@@ -283,6 +283,8 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 		return
 	}
 	if checksumH != nil && !bytes.Equal(checksumH.Sum(nil), checksumExpected) {
+		// meta.VersionID is non-empty iff versioning is enabled on the bucket;
+		// storage.PutObject always sets it when versioning is active.
 		if meta.VersionID != "" {
 			if _, err := ro.storage.DeleteObjectVersion(bucket, key, meta.VersionID, false); err != nil {
 				slog.Warn( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator

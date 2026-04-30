@@ -2872,6 +2872,8 @@ func TestRouterMultipartUpload(t *testing.T) {
 		req.Header.Set("X-Amz-Checksum-Crc32", base64.StdEncoding.EncodeToString(wrong.Sum(nil)))
 		ro.ServeHTTP(httptest.NewRecorder(), req)
 
+		// ListParts must return empty: if DeletePart failed silently, the part would
+		// still appear here and the assertion would catch it.
 		listReq := httptest.NewRequest(http.MethodGet, path+"?uploadId="+uploadID, nil)
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, listReq)
@@ -2897,6 +2899,37 @@ func TestRouterMultipartUpload(t *testing.T) {
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("UploadPart with unknown algorithm returns 400 InvalidArgument", func(t *testing.T) {
+		ro, path := setup(t)
+		uploadID := initiateUpload(t, ro, path)
+		req := httptest.NewRequest(
+			http.MethodPut,
+			path+"?partNumber=1&uploadId="+uploadID,
+			strings.NewReader("part data"),
+		)
+		req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "MD5")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidArgument")
+	})
+
+	t.Run("UploadPart with invalid base64 checksum returns 400 InvalidDigest", func(t *testing.T) {
+		ro, path := setup(t)
+		uploadID := initiateUpload(t, ro, path)
+		req := httptest.NewRequest(
+			http.MethodPut,
+			path+"?partNumber=1&uploadId="+uploadID,
+			strings.NewReader("part data"),
+		)
+		req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "CRC32")
+		req.Header.Set("X-Amz-Checksum-Crc32", "!!!not-base64!!!")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidDigest")
 	})
 
 	t.Run("CompleteMultipartUpload returns 400 for missing uploadId", func(t *testing.T) {

@@ -62,6 +62,15 @@ func TestCRC64NVME(t *testing.T) {
 	t.Run("BlockSize is 1", func(t *testing.T) {
 		assert.Equal(t, 1, newCRC64NVMEHash().BlockSize())
 	})
+
+	t.Run("known-answer: \"123456789\" matches AWS SDK Go v2 value", func(t *testing.T) {
+		// AWS SDK Go v2 CRC-64/NVME check value for "123456789" = 0xAE8B14860A799888.
+		h := newCRC64NVMEHash()
+		_, err := h.Write([]byte("123456789"))
+		require.NoError(t, err)
+		want := []byte{0xAE, 0x8B, 0x14, 0x86, 0x0A, 0x79, 0x98, 0x88}
+		assert.Equal(t, want, h.Sum(nil))
+	})
 }
 
 func TestNewChecksumHash(t *testing.T) {
@@ -109,6 +118,9 @@ func TestNewChecksumHash(t *testing.T) {
 		h := newChecksumHash(checksumCRC64NVME)
 		require.NotNil(t, h)
 		assert.Equal(t, 8, h.Size())
+		_, err := h.Write(data)
+		require.NoError(t, err)
+		assert.Len(t, h.Sum(nil), 8)
 	})
 
 	t.Run("unknown algorithm returns nil", func(t *testing.T) {
@@ -154,15 +166,18 @@ func TestParseChecksumHeaders(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "InvalidArgument")
 	})
 
-	t.Run("algorithm present but no checksum header returns nil", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPut, "/", nil)
-		req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "CRC32")
-		w := httptest.NewRecorder()
-		h, expected, ok := parseChecksumHeaders(w, req)
-		require.True(t, ok)
-		assert.Nil(t, h)
-		assert.Nil(t, expected)
-	})
+	t.Run(
+		"algorithm present but no checksum header returns 400 InvalidArgument",
+		func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPut, "/", nil)
+			req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "CRC32")
+			w := httptest.NewRecorder()
+			_, _, ok := parseChecksumHeaders(w, req)
+			assert.False(t, ok)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Contains(t, w.Body.String(), "InvalidArgument")
+		},
+	)
 
 	t.Run("valid CRC32 checksum header returns hash and expected bytes", func(t *testing.T) {
 		data := []byte("hello")
