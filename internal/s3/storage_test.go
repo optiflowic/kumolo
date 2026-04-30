@@ -2684,6 +2684,46 @@ func TestMultipartUpload(t *testing.T) {
 			assert.Contains(t, meta.ETag, "-2")
 		},
 	)
+
+	t.Run("DeletePart removes part and meta files", func(t *testing.T) {
+		s, _ := setup(t)
+		uploadID, err := s.CreateMultipartUpload("my-bucket", "key", "text/plain", "", "", nil, nil)
+		require.NoError(t, err)
+		_, err = s.UploadPart(uploadID, 1, strings.NewReader("data"))
+		require.NoError(t, err)
+		require.NoError(t, s.DeletePart(uploadID, 1))
+
+		_, parts, err := s.ListParts(uploadID)
+		require.NoError(t, err)
+		assert.Empty(t, parts)
+	})
+
+	t.Run(
+		"DeletePart logs warning when meta file removal fails with non-NotExist error",
+		func(t *testing.T) {
+			s, _ := setup(t)
+			uploadID, err := s.CreateMultipartUpload(
+				"my-bucket",
+				"key",
+				"text/plain",
+				"",
+				"",
+				nil,
+				nil,
+			)
+			require.NoError(t, err)
+			_, err = s.UploadPart(uploadID, 1, strings.NewReader("data"))
+			require.NoError(t, err)
+			origRemoveFile := s.removeFile
+			s.removeFile = func(name string) error {
+				if strings.HasSuffix(name, ".meta.json") {
+					return errors.New("permission denied")
+				}
+				return origRemoveFile(name)
+			}
+			require.NoError(t, s.DeletePart(uploadID, 1))
+		},
+	)
 }
 
 func TestObjectTagging(t *testing.T) {

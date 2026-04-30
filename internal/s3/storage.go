@@ -1567,7 +1567,7 @@ func (s *Storage) DeletePart(uploadID string, partNumber int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	partPath := filepath.Join(mpuDir, uploadID, fmt.Sprintf("%d.part", partNumber))
-	if err := s.root.Remove(partPath + ".meta.json"); err != nil &&
+	if err := s.removeFile(partPath + ".meta.json"); err != nil &&
 		!errors.Is(err, os.ErrNotExist) {
 		slog.Warn("failed to remove part meta file", "path", partPath+".meta.json", "err", err)
 	}
