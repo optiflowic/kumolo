@@ -7784,3 +7784,221 @@ func TestObjectLockDeleteEnforcement(t *testing.T) {
 		},
 	)
 }
+
+func TestGetObjectAttributes(t *testing.T) {
+	setup := func(t *testing.T) (*Router, string, string) {
+		t.Helper()
+		ro := newTestRouter(t)
+		bucket, key := "attr-bucket", "obj.txt"
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/"+bucket, nil))
+		putReq := httptest.NewRequest(
+			http.MethodPut,
+			"/"+bucket+"/"+key,
+			strings.NewReader("hello world"),
+		)
+		putReq.Header.Set("Content-Type", "text/plain")
+		ro.ServeHTTP(httptest.NewRecorder(), putReq)
+		return ro, bucket, key
+	}
+
+	t.Run("returns ETag when requested", func(t *testing.T) {
+		ro, bucket, key := setup(t)
+		req := httptest.NewRequest(http.MethodGet, "/"+bucket+"/"+key+"?attributes", nil)
+		req.Header.Set("x-amz-object-attributes", "ETag")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), "<ETag>")
+		assert.NotEmpty(t, w.Header().Get("Last-Modified"))
+	})
+
+	t.Run("returns ObjectSize when requested", func(t *testing.T) {
+		ro, bucket, key := setup(t)
+		req := httptest.NewRequest(http.MethodGet, "/"+bucket+"/"+key+"?attributes", nil)
+		req.Header.Set("x-amz-object-attributes", "ObjectSize")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), "<ObjectSize>11</ObjectSize>")
+	})
+
+	t.Run("returns StorageClass when requested", func(t *testing.T) {
+		ro, bucket, key := setup(t)
+		req := httptest.NewRequest(http.MethodGet, "/"+bucket+"/"+key+"?attributes", nil)
+		req.Header.Set("x-amz-object-attributes", "StorageClass")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), "<StorageClass>STANDARD</StorageClass>")
+	})
+
+	t.Run("returns multiple attributes when requested together", func(t *testing.T) {
+		ro, bucket, key := setup(t)
+		req := httptest.NewRequest(http.MethodGet, "/"+bucket+"/"+key+"?attributes", nil)
+		req.Header.Set("x-amz-object-attributes", "ETag, StorageClass, ObjectSize")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		body := w.Body.String()
+		assert.Contains(t, body, "<ETag>")
+		assert.Contains(t, body, "<StorageClass>STANDARD</StorageClass>")
+		assert.Contains(t, body, "<ObjectSize>11</ObjectSize>")
+	})
+
+	t.Run("omits unrequested attributes", func(t *testing.T) {
+		ro, bucket, key := setup(t)
+		req := httptest.NewRequest(http.MethodGet, "/"+bucket+"/"+key+"?attributes", nil)
+		req.Header.Set("x-amz-object-attributes", "ObjectSize")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		body := w.Body.String()
+		assert.NotContains(t, body, "<ETag>")
+		assert.NotContains(t, body, "<StorageClass>")
+	})
+
+	t.Run("Checksum attribute returns empty response without error", func(t *testing.T) {
+		ro, bucket, key := setup(t)
+		req := httptest.NewRequest(http.MethodGet, "/"+bucket+"/"+key+"?attributes", nil)
+		req.Header.Set("x-amz-object-attributes", "Checksum")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("returns 404 when object does not exist", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/attr-bucket", nil),
+		)
+		req := httptest.NewRequest(http.MethodGet, "/attr-bucket/missing.txt?attributes", nil)
+		req.Header.Set("x-amz-object-attributes", "ETag")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchKey")
+	})
+
+	t.Run("returns 404 when bucket does not exist", func(t *testing.T) {
+		ro := newTestRouter(t)
+		req := httptest.NewRequest(http.MethodGet, "/no-bucket/obj.txt?attributes", nil)
+		req.Header.Set("x-amz-object-attributes", "ETag")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchKey")
+	})
+
+	t.Run("returns 400 when x-amz-object-attributes header is missing", func(t *testing.T) {
+		ro, bucket, key := setup(t)
+		req := httptest.NewRequest(http.MethodGet, "/"+bucket+"/"+key+"?attributes", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidArgument")
+	})
+
+	t.Run("returns 400 when attribute is unknown", func(t *testing.T) {
+		ro, bucket, key := setup(t)
+		req := httptest.NewRequest(http.MethodGet, "/"+bucket+"/"+key+"?attributes", nil)
+		req.Header.Set("x-amz-object-attributes", "UnknownAttr")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidArgument")
+	})
+
+	t.Run("ObjectParts is populated for multipart-uploaded objects", func(t *testing.T) {
+		ro := newTestRouter(t)
+		bucket := "mp-bucket"
+		key := "mp-obj"
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/"+bucket, nil))
+
+		// initiate
+		initReq := httptest.NewRequest(http.MethodPost, "/"+bucket+"/"+key+"?uploads", nil)
+		initW := httptest.NewRecorder()
+		ro.ServeHTTP(initW, initReq)
+		require.Equal(t, http.StatusOK, initW.Code)
+		var initResp initiateMultipartUploadResult
+		require.NoError(t, xml.Unmarshal(initW.Body.Bytes(), &initResp))
+		uid := initResp.UploadID
+
+		// upload 2 parts (each >= 5 MB is not required in tests)
+		part1 := strings.Repeat("a", 5*1024*1024)
+		p1Req := httptest.NewRequest(
+			http.MethodPut,
+			fmt.Sprintf("/%s/%s?partNumber=1&uploadId=%s", bucket, key, uid),
+			strings.NewReader(part1),
+		)
+		p1W := httptest.NewRecorder()
+		ro.ServeHTTP(p1W, p1Req)
+		require.Equal(t, http.StatusOK, p1W.Code)
+		etag1 := p1W.Header().Get("ETag")
+
+		part2 := strings.Repeat("b", 5*1024*1024)
+		p2Req := httptest.NewRequest(
+			http.MethodPut,
+			fmt.Sprintf("/%s/%s?partNumber=2&uploadId=%s", bucket, key, uid),
+			strings.NewReader(part2),
+		)
+		p2W := httptest.NewRecorder()
+		ro.ServeHTTP(p2W, p2Req)
+		require.Equal(t, http.StatusOK, p2W.Code)
+		etag2 := p2W.Header().Get("ETag")
+
+		// complete
+		completeBody := fmt.Sprintf(
+			`<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>%s</ETag></Part>`+
+				`<Part><PartNumber>2</PartNumber><ETag>%s</ETag></Part></CompleteMultipartUpload>`,
+			etag1, etag2,
+		)
+		completeReq := httptest.NewRequest(
+			http.MethodPost,
+			fmt.Sprintf("/%s/%s?uploadId=%s", bucket, key, uid),
+			strings.NewReader(completeBody),
+		)
+		completeW := httptest.NewRecorder()
+		ro.ServeHTTP(completeW, completeReq)
+		require.Equal(t, http.StatusOK, completeW.Code)
+
+		// GetObjectAttributes
+		req := httptest.NewRequest(http.MethodGet, "/"+bucket+"/"+key+"?attributes", nil)
+		req.Header.Set("x-amz-object-attributes", "ObjectParts,ETag")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		body := w.Body.String()
+		assert.Contains(t, body, "<TotalPartsCount>2</TotalPartsCount>")
+	})
+
+	t.Run("ObjectParts is absent for single-part objects", func(t *testing.T) {
+		ro, bucket, key := setup(t)
+		req := httptest.NewRequest(http.MethodGet, "/"+bucket+"/"+key+"?attributes", nil)
+		req.Header.Set("x-amz-object-attributes", "ObjectParts")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		assert.NotContains(t, w.Body.String(), "<ObjectParts>")
+	})
+}
+
+func TestParseMultipartPartCount(t *testing.T) {
+	tests := []struct {
+		etag string
+		want int
+	}{
+		{`"abc123"`, 0},
+		{`"abc123-5"`, 5},
+		{`"abc123-1"`, 1},
+		{`"abc123-0"`, 0},
+		{`"abc123-abc"`, 0},
+		{`abc123-5`, 5},
+		{`""`, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.etag, func(t *testing.T) {
+			assert.Equal(t, tt.want, parseMultipartPartCount(tt.etag))
+		})
+	}
+}

@@ -340,3 +340,17 @@ type xmlObjectLegalHold struct {
 	XMLName xml.Name `xml:"http://s3.amazonaws.com/doc/2006-03-01/ LegalHold"`
 	Status  string   `xml:"Status"`
 }
+
+// getObjectAttributesResponse is the XML response for GetObjectAttributes.
+type getObjectAttributesResponse struct {
+	XMLName      xml.Name        `xml:"GetObjectAttributesResponse"`
+	ETag         string          `xml:"ETag,omitempty"`
+	StorageClass string          `xml:"StorageClass,omitempty"`
+	ObjectSize   *int64          `xml:"ObjectSize,omitempty"`
+	ObjectParts  *xmlObjectParts `xml:"ObjectParts,omitempty"`
+}
+
+// xmlObjectParts holds multipart info returned by GetObjectAttributes.
+type xmlObjectParts struct {
+	TotalPartsCount int `xml:"TotalPartsCount"`
+}

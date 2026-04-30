@@ -613,6 +613,8 @@ func (ro *Router) routeObject(w http.ResponseWriter, r *http.Request, bucket, ke
 			ro.handleListParts(w, r, bucket, key)
 		case q.Has("acl"):
 			ro.handleGetObjectACL(w, r, bucket, key)
+		case q.Has("attributes"):
+			ro.handleGetObjectAttributes(w, r, bucket, key)
 		default:
 			ro.handleGetObject(w, r, bucket, key)
 		}
