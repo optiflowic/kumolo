@@ -548,7 +548,6 @@ func TestEnforceBucket_V2FilterPrefix(t *testing.T) {
 		{Key: "logs/old.txt", Metadata: ObjectMetadata{LastModified: now.AddDate(0, 0, -31)}},
 		{Key: "data/old.txt", Metadata: ObjectMetadata{LastModified: now.AddDate(0, 0, -31)}},
 	}
-	// V2-style: prefix inside Filter element
 	store.lifecycle["b"] = buildLifecycleXML(t, lifecycleConfiguration{
 		Rules: []lifecycleRule{
 			{
@@ -576,7 +575,6 @@ func TestEnforceBucket_V1PrefixStyle(t *testing.T) {
 		{Key: "logs/old.txt", Metadata: ObjectMetadata{LastModified: now.AddDate(0, 0, -31)}},
 		{Key: "data/old.txt", Metadata: ObjectMetadata{LastModified: now.AddDate(0, 0, -31)}},
 	}
-	// V1-style: prefix directly in Rule, no Filter element
 	store.lifecycle["b"] = buildLifecycleXML(t, lifecycleConfiguration{
 		Rules: []lifecycleRule{
 			{
@@ -603,7 +601,6 @@ func TestStart_StopsOnContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	e.Start(ctx)
 	cancel()
-	// Give the goroutine a moment to exit — no assertion needed; we just verify it doesn't hang.
 	time.Sleep(50 * time.Millisecond)
 }
 

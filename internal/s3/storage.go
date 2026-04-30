@@ -1109,7 +1109,6 @@ func (s *Storage) archiveCurrentVersionLocked(bucket, key, objPath string) error
 		return copyErr
 	}
 
-	// Record when this version became noncurrent for lifecycle enforcement.
 	meta.NoncurrentSince = s.now()
 
 	// Write metadata with resolved version ID.

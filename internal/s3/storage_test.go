@@ -4202,7 +4202,6 @@ func TestVersioning(t *testing.T) {
 			_, _, err = s.DeleteObjectVersioned(bucket, "obj.txt", false)
 			require.NoError(t, err)
 
-			// A new version supersedes the delete marker; NoncurrentSince is recorded here.
 			supersededAt := time.Date(2030, 6, 15, 12, 0, 0, 0, time.UTC)
 			s.now = func() time.Time { return supersededAt }
 			_, err = s.PutObject(

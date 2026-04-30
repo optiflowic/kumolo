@@ -40,8 +40,7 @@ type ObjectMetadata struct {
 	RestoreInitiated bool              `json:"restoreInitiated,omitempty"`
 	Retention        *ObjectRetention  `json:"retention,omitempty"`
 	LegalHold        *ObjectLegalHold  `json:"legalHold,omitempty"`
-	// NoncurrentSince is set when a version is superseded by a newer version or delete
-	// marker. Used by lifecycle NoncurrentVersionExpiration to measure noncurrent age.
+	// Set when superseded; zero for versions predating lifecycle enforcement.
 	NoncurrentSince time.Time `json:"noncurrentSince,omitempty"`
 }
 

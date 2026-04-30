@@ -125,8 +125,6 @@ func (e *LifecycleEnforcer) enforceBucket(bucket string) {
 	}
 }
 
-// enforceExpiration deletes objects (or creates delete markers in versioned buckets)
-// for current-version objects older than days.
 func (e *LifecycleEnforcer) enforceExpiration(
 	bucket, prefix string,
 	days int,
@@ -180,8 +178,6 @@ func (e *LifecycleEnforcer) enforceExpiration(
 	}
 }
 
-// enforceNoncurrentExpiration permanently removes noncurrent object versions and delete
-// markers that are older than noncurrentDays.
 func (e *LifecycleEnforcer) enforceNoncurrentExpiration(
 	bucket, prefix string,
 	noncurrentDays int,
@@ -256,8 +252,6 @@ func (e *LifecycleEnforcer) enforceNoncurrentExpiration(
 	}
 }
 
-// enforceAbortIncomplete aborts multipart uploads that have been in progress for
-// longer than daysAfterInitiation.
 func (e *LifecycleEnforcer) enforceAbortIncomplete(
 	bucket, prefix string,
 	daysAfterInitiation int,
@@ -309,9 +303,7 @@ func (r lifecycleRule) effectivePrefix() string {
 	return r.Prefix
 }
 
-// noncurrentBefore reports whether a noncurrent version became noncurrent before cutoff.
-// noncurrentSince is the authoritative timestamp; lastModified is the fallback for versions
-// that predate NoncurrentSince tracking (zero value).
+// noncurrentBefore uses NoncurrentSince; falls back to LastModified for pre-existing versions.
 func noncurrentBefore(noncurrentSince, lastModified, cutoff time.Time) bool {
 	if !noncurrentSince.IsZero() {
 		return noncurrentSince.Before(cutoff)
