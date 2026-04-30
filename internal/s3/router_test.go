@@ -832,7 +832,7 @@ func TestRouterPutObject(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
 
-	t.Run("Content-MD5 mismatched digest returns 400 InvalidDigest", func(t *testing.T) {
+	t.Run("Content-MD5 mismatched digest returns 400 BadDigest", func(t *testing.T) {
 		ro := newTestRouter(t)
 		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
 		req := httptest.NewRequest(
@@ -845,7 +845,7 @@ func TestRouterPutObject(t *testing.T) {
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assert.Contains(t, w.Body.String(), "InvalidDigest")
+		assert.Contains(t, w.Body.String(), "BadDigest")
 	})
 
 	t.Run("Content-MD5 invalid base64 returns 400 InvalidDigest", func(t *testing.T) {
@@ -2526,7 +2526,7 @@ func TestRouterMultipartUpload(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
 
-	t.Run("UploadPart with mismatched Content-MD5 returns 400 InvalidDigest", func(t *testing.T) {
+	t.Run("UploadPart with mismatched Content-MD5 returns 400 BadDigest", func(t *testing.T) {
 		ro, path := setup(t)
 		uploadID := initiateUpload(t, ro, path)
 		req := httptest.NewRequest(
@@ -2539,7 +2539,7 @@ func TestRouterMultipartUpload(t *testing.T) {
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assert.Contains(t, w.Body.String(), "InvalidDigest")
+		assert.Contains(t, w.Body.String(), "BadDigest")
 	})
 
 	t.Run("UploadPart Content-MD5 mismatch rolls back: part not present", func(t *testing.T) {

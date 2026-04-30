@@ -264,8 +264,8 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 					"failed to roll back object after Content-MD5 mismatch", "bucket", bucket, "key", key, "err", err)
 			}
 		}
-		writeError(w, r, http.StatusBadRequest, "InvalidDigest",
-			"The Content-MD5 you specified was invalid.")
+		writeError(w, r, http.StatusBadRequest, "BadDigest",
+			"The Content-MD5 you specified did not match what we received.")
 		return
 	}
 	slog.Info( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
