@@ -38,6 +38,12 @@ func (b *bodyFailWriter) Write(p []byte) (int, error) {
 	return 0, http.ErrHandlerTimeout
 }
 
+func TestObjectAlreadyExistsError(t *testing.T) {
+	err := &ObjectAlreadyExistsError{ETag: `"abc123"`}
+	assert.Equal(t, ErrObjectAlreadyExists.Error(), err.Error())
+	assert.ErrorIs(t, err, ErrObjectAlreadyExists)
+}
+
 func TestWriteError(t *testing.T) {
 	t.Run("sets Content-Type and status code", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/bucket/key", nil)

@@ -1,8 +1,12 @@
 package s3
 
 import (
+	"bytes"
+	"crypto/md5" //nolint:gosec // MD5 used for data-integrity checking per S3 spec, not cryptographic security
 	"encoding/xml"
 	"errors"
+	"hash"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -100,9 +104,15 @@ func (ro *Router) handleUploadPart(w http.ResponseWriter, r *http.Request, bucke
 		)
 		return
 	}
-	body, ok := validateContentMD5(w, r)
+	expected, ok := parseContentMD5Header(w, r)
 	if !ok {
 		return
+	}
+	var body io.Reader = r.Body
+	var md5Hash hash.Hash
+	if expected != nil {
+		md5Hash = md5.New() //nolint:gosec // MD5 used for data-integrity checking per S3 spec
+		body = io.TeeReader(r.Body, md5Hash)
 	}
 	etag, err := ro.storage.UploadPart(uploadID, partNumber, body)
 	if err != nil {
@@ -136,6 +146,22 @@ func (ro *Router) handleUploadPart(w http.ResponseWriter, r *http.Request, bucke
 			)
 			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		}
+		return
+	}
+	if md5Hash != nil && !bytes.Equal(md5Hash.Sum(nil), expected) {
+		if err := ro.storage.DeletePart(uploadID, partNumber); err != nil {
+			slog.Warn( // #nosec G706 -- uploadId comes from URL query; log injection risk accepted for a local dev emulator
+				"failed to roll back part after Content-MD5 mismatch",
+				"uploadId",
+				uploadID,
+				"partNumber",
+				partNumber,
+				"err",
+				err,
+			)
+		}
+		writeError(w, r, http.StatusBadRequest, "BadDigest",
+			"The Content-MD5 you specified did not match what we received.")
 		return
 	}
 	slog.Info( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator

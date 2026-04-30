@@ -271,6 +271,7 @@ type mockStore struct {
 	createMultipartUploadErr      error
 	uploadPartETag                string
 	uploadPartErr                 error
+	deletePartErr                 error
 	uploadPartCopyETag            string
 	uploadPartCopyLastModified    time.Time
 	uploadPartCopySourceVersionID string
@@ -439,6 +440,7 @@ func (m *mockStore) CreateMultipartUpload(
 func (m *mockStore) UploadPart(_ string, _ int, _ io.Reader) (string, error) {
 	return m.uploadPartETag, m.uploadPartErr
 }
+func (m *mockStore) DeletePart(_ string, _ int) error { return m.deletePartErr }
 
 func (m *mockStore) UploadPartCopy(
 	_ string,
@@ -830,7 +832,7 @@ func TestRouterPutObject(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
 
-	t.Run("Content-MD5 mismatched digest returns 400 InvalidDigest", func(t *testing.T) {
+	t.Run("Content-MD5 mismatched digest returns 400 BadDigest", func(t *testing.T) {
 		ro := newTestRouter(t)
 		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
 		req := httptest.NewRequest(
@@ -843,7 +845,7 @@ func TestRouterPutObject(t *testing.T) {
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assert.Contains(t, w.Body.String(), "InvalidDigest")
+		assert.Contains(t, w.Body.String(), "BadDigest")
 	})
 
 	t.Run("Content-MD5 invalid base64 returns 400 InvalidDigest", func(t *testing.T) {
@@ -875,6 +877,104 @@ func TestRouterPutObject(t *testing.T) {
 			ro.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusBadRequest, w.Code)
 			assert.Contains(t, w.Body.String(), "InvalidDigest")
+		},
+	)
+
+	t.Run("Content-MD5 mismatch rolls back: object not stored", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		req := httptest.NewRequest(
+			http.MethodPut,
+			"/my-bucket/obj.txt",
+			strings.NewReader("hello world"),
+		)
+		wrong := md5.Sum([]byte("wrong")) //nolint:gosec
+		req.Header.Set("Content-MD5", base64.StdEncoding.EncodeToString(wrong[:]))
+		ro.ServeHTTP(httptest.NewRecorder(), req)
+
+		head := httptest.NewRequest(http.MethodHead, "/my-bucket/obj.txt", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, head)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+
+	t.Run(
+		"Content-MD5 mismatch with versioning enabled rolls back the new version",
+		func(t *testing.T) {
+			ro := newTestRouter(t)
+			ro.ServeHTTP(
+				httptest.NewRecorder(),
+				httptest.NewRequest(http.MethodPut, "/my-bucket", nil),
+			)
+			ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(
+				http.MethodPut,
+				"/my-bucket?versioning",
+				strings.NewReader(
+					`<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`,
+				),
+			))
+			req := httptest.NewRequest(
+				http.MethodPut,
+				"/my-bucket/obj.txt",
+				strings.NewReader("hello world"),
+			)
+			wrong := md5.Sum([]byte("wrong")) //nolint:gosec
+			req.Header.Set("Content-MD5", base64.StdEncoding.EncodeToString(wrong[:]))
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Contains(t, w.Body.String(), "BadDigest")
+
+			head := httptest.NewRequest(http.MethodHead, "/my-bucket/obj.txt", nil)
+			wHead := httptest.NewRecorder()
+			ro.ServeHTTP(wHead, head)
+			assert.Equal(t, http.StatusNotFound, wHead.Code)
+		},
+	)
+
+	t.Run(
+		"Content-MD5 mismatch rollback: DeleteObjectVersion error is logged, 400 still returned",
+		func(t *testing.T) {
+			m := newMockStore(func(m *mockStore) {
+				m.bucketExists = true
+				m.putObjectMeta = ObjectMetadata{VersionID: "v1"}
+				m.deleteObjectVersionErr = errors.New("delete failed")
+			})
+			ro := newRouterWithMock(m)
+			req := httptest.NewRequest(
+				http.MethodPut,
+				"/my-bucket/obj.txt",
+				strings.NewReader("body"),
+			)
+			wrong := md5.Sum([]byte("wrong")) //nolint:gosec
+			req.Header.Set("Content-MD5", base64.StdEncoding.EncodeToString(wrong[:]))
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Contains(t, w.Body.String(), "BadDigest")
+		},
+	)
+
+	t.Run(
+		"Content-MD5 mismatch rollback: DeleteObject error is logged, 400 still returned",
+		func(t *testing.T) {
+			m := newMockStore(func(m *mockStore) {
+				m.bucketExists = true
+				m.putObjectMeta = ObjectMetadata{}
+				m.deleteObjectErr = errors.New("delete failed")
+			})
+			ro := newRouterWithMock(m)
+			req := httptest.NewRequest(
+				http.MethodPut,
+				"/my-bucket/obj.txt",
+				strings.NewReader("body"),
+			)
+			wrong := md5.Sum([]byte("wrong")) //nolint:gosec
+			req.Header.Set("Content-MD5", base64.StdEncoding.EncodeToString(wrong[:]))
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Contains(t, w.Body.String(), "BadDigest")
 		},
 	)
 
@@ -2506,7 +2606,7 @@ func TestRouterMultipartUpload(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
 
-	t.Run("UploadPart with mismatched Content-MD5 returns 400 InvalidDigest", func(t *testing.T) {
+	t.Run("UploadPart with mismatched Content-MD5 returns 400 BadDigest", func(t *testing.T) {
 		ro, path := setup(t)
 		uploadID := initiateUpload(t, ro, path)
 		req := httptest.NewRequest(
@@ -2519,8 +2619,51 @@ func TestRouterMultipartUpload(t *testing.T) {
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assert.Contains(t, w.Body.String(), "InvalidDigest")
+		assert.Contains(t, w.Body.String(), "BadDigest")
 	})
+
+	t.Run("UploadPart Content-MD5 mismatch rolls back: part not present", func(t *testing.T) {
+		ro, path := setup(t)
+		uploadID := initiateUpload(t, ro, path)
+		req := httptest.NewRequest(
+			http.MethodPut,
+			path+"?partNumber=1&uploadId="+uploadID,
+			strings.NewReader("part data"),
+		)
+		wrong := md5.Sum([]byte("wrong")) //nolint:gosec
+		req.Header.Set("Content-MD5", base64.StdEncoding.EncodeToString(wrong[:]))
+		ro.ServeHTTP(httptest.NewRecorder(), req)
+
+		listReq := httptest.NewRequest(http.MethodGet, path+"?uploadId="+uploadID, nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, listReq)
+		require.Equal(t, http.StatusOK, w.Code)
+		var result listPartsResult
+		require.NoError(t, xml.NewDecoder(w.Body).Decode(&result))
+		assert.Empty(t, result.Parts)
+	})
+
+	t.Run(
+		"UploadPart Content-MD5 mismatch rollback: DeletePart error is logged, 400 still returned",
+		func(t *testing.T) {
+			m := newMockStore(func(m *mockStore) {
+				m.uploadPartETag = `"abc123"`
+				m.deletePartErr = errors.New("delete failed")
+			})
+			ro := newRouterWithMock(m)
+			req := httptest.NewRequest(
+				http.MethodPut,
+				"/my-bucket/obj.txt?partNumber=1&uploadId=test-upload",
+				strings.NewReader("part data"),
+			)
+			wrong := md5.Sum([]byte("wrong")) //nolint:gosec
+			req.Header.Set("Content-MD5", base64.StdEncoding.EncodeToString(wrong[:]))
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Contains(t, w.Body.String(), "BadDigest")
+		},
+	)
 
 	t.Run(
 		"UploadPart with invalid base64 Content-MD5 returns 400 InvalidDigest",
