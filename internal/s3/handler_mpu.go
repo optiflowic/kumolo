@@ -108,11 +108,18 @@ func (ro *Router) handleUploadPart(w http.ResponseWriter, r *http.Request, bucke
 	if !ok {
 		return
 	}
+	checksumH, checksumExpected, ok := parseChecksumHeaders(w, r)
+	if !ok {
+		return
+	}
 	var body io.Reader = r.Body
 	var md5Hash hash.Hash
 	if expected != nil {
 		md5Hash = md5.New() //nolint:gosec // MD5 used for data-integrity checking per S3 spec
-		body = io.TeeReader(r.Body, md5Hash)
+		body = io.TeeReader(body, md5Hash)
+	}
+	if checksumH != nil {
+		body = io.TeeReader(body, checksumH)
 	}
 	etag, err := ro.storage.UploadPart(uploadID, partNumber, body)
 	if err != nil {
@@ -162,6 +169,22 @@ func (ro *Router) handleUploadPart(w http.ResponseWriter, r *http.Request, bucke
 		}
 		writeError(w, r, http.StatusBadRequest, "BadDigest",
 			"The Content-MD5 you specified did not match what we received.")
+		return
+	}
+	if checksumH != nil && !bytes.Equal(checksumH.Sum(nil), checksumExpected) {
+		if err := ro.storage.DeletePart(uploadID, partNumber); err != nil {
+			slog.Warn( // #nosec G706 -- uploadId comes from URL query; log injection risk accepted for a local dev emulator
+				"failed to roll back part after checksum mismatch",
+				"uploadId",
+				uploadID,
+				"partNumber",
+				partNumber,
+				"err",
+				err,
+			)
+		}
+		writeError(w, r, http.StatusBadRequest, "BadDigest",
+			"The checksum you specified did not match what we received.")
 		return
 	}
 	slog.Info( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
