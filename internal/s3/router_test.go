@@ -8058,6 +8058,18 @@ func TestGetObjectAttributes(t *testing.T) {
 		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
 		assert.Equal(t, "true", w.Header().Get("x-amz-delete-marker"))
 	})
+
+	t.Run("returns 500 InternalError on unexpected storage error", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			headObjectErr: errors.New("disk failure"),
+		})
+		req := httptest.NewRequest(http.MethodGet, "/any-bucket/any-key?attributes", nil)
+		req.Header.Set("x-amz-object-attributes", "ETag")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assert.Contains(t, w.Body.String(), "InternalError")
+	})
 }
 
 func TestParseMultipartPartCount(t *testing.T) {
