@@ -898,6 +898,86 @@ func TestRouterPutObject(t *testing.T) {
 		assert.Equal(t, http.StatusNotFound, w.Code)
 	})
 
+	t.Run(
+		"Content-MD5 mismatch with versioning enabled rolls back the new version",
+		func(t *testing.T) {
+			ro := newTestRouter(t)
+			ro.ServeHTTP(
+				httptest.NewRecorder(),
+				httptest.NewRequest(http.MethodPut, "/my-bucket", nil),
+			)
+			ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(
+				http.MethodPut,
+				"/my-bucket?versioning",
+				strings.NewReader(
+					`<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`,
+				),
+			))
+			req := httptest.NewRequest(
+				http.MethodPut,
+				"/my-bucket/obj.txt",
+				strings.NewReader("hello world"),
+			)
+			wrong := md5.Sum([]byte("wrong")) //nolint:gosec
+			req.Header.Set("Content-MD5", base64.StdEncoding.EncodeToString(wrong[:]))
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Contains(t, w.Body.String(), "BadDigest")
+
+			head := httptest.NewRequest(http.MethodHead, "/my-bucket/obj.txt", nil)
+			wHead := httptest.NewRecorder()
+			ro.ServeHTTP(wHead, head)
+			assert.Equal(t, http.StatusNotFound, wHead.Code)
+		},
+	)
+
+	t.Run(
+		"Content-MD5 mismatch rollback: DeleteObjectVersion error is logged, 400 still returned",
+		func(t *testing.T) {
+			m := newMockStore(func(m *mockStore) {
+				m.bucketExists = true
+				m.putObjectMeta = ObjectMetadata{VersionID: "v1"}
+				m.deleteObjectVersionErr = errors.New("delete failed")
+			})
+			ro := newRouterWithMock(m)
+			req := httptest.NewRequest(
+				http.MethodPut,
+				"/my-bucket/obj.txt",
+				strings.NewReader("body"),
+			)
+			wrong := md5.Sum([]byte("wrong")) //nolint:gosec
+			req.Header.Set("Content-MD5", base64.StdEncoding.EncodeToString(wrong[:]))
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Contains(t, w.Body.String(), "BadDigest")
+		},
+	)
+
+	t.Run(
+		"Content-MD5 mismatch rollback: DeleteObject error is logged, 400 still returned",
+		func(t *testing.T) {
+			m := newMockStore(func(m *mockStore) {
+				m.bucketExists = true
+				m.putObjectMeta = ObjectMetadata{}
+				m.deleteObjectErr = errors.New("delete failed")
+			})
+			ro := newRouterWithMock(m)
+			req := httptest.NewRequest(
+				http.MethodPut,
+				"/my-bucket/obj.txt",
+				strings.NewReader("body"),
+			)
+			wrong := md5.Sum([]byte("wrong")) //nolint:gosec
+			req.Header.Set("Content-MD5", base64.StdEncoding.EncodeToString(wrong[:]))
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Contains(t, w.Body.String(), "BadDigest")
+		},
+	)
+
 	t.Run("If-None-Match: * succeeds when object does not exist", func(t *testing.T) {
 		ro := newTestRouter(t)
 		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
@@ -2562,6 +2642,28 @@ func TestRouterMultipartUpload(t *testing.T) {
 		require.NoError(t, xml.NewDecoder(w.Body).Decode(&result))
 		assert.Empty(t, result.Parts)
 	})
+
+	t.Run(
+		"UploadPart Content-MD5 mismatch rollback: DeletePart error is logged, 400 still returned",
+		func(t *testing.T) {
+			m := newMockStore(func(m *mockStore) {
+				m.uploadPartETag = `"abc123"`
+				m.deletePartErr = errors.New("delete failed")
+			})
+			ro := newRouterWithMock(m)
+			req := httptest.NewRequest(
+				http.MethodPut,
+				"/my-bucket/obj.txt?partNumber=1&uploadId=test-upload",
+				strings.NewReader("part data"),
+			)
+			wrong := md5.Sum([]byte("wrong")) //nolint:gosec
+			req.Header.Set("Content-MD5", base64.StdEncoding.EncodeToString(wrong[:]))
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Contains(t, w.Body.String(), "BadDigest")
+		},
+	)
 
 	t.Run(
 		"UploadPart with invalid base64 Content-MD5 returns 400 InvalidDigest",
