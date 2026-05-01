@@ -471,7 +471,12 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "ValidationException", "failed to read request body")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"failed to read request body",
+		)
 		return
 	}
 
@@ -534,11 +539,21 @@ func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 		BillingMode          string                `json:"BillingMode"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"invalid request body",
+		)
 		return
 	}
 	if req.TableName == "" {
-		writeError(w, http.StatusBadRequest, "ValidationException", "TableName is required")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"TableName is required",
+		)
 		return
 	}
 	meta := TableMetadata{
@@ -550,15 +565,19 @@ func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 	if err := ro.storage.CreateTable(meta); err != nil {
 		if errors.Is(err, ErrTableAlreadyExists) {
 			slog.Debug("CreateTable: table already exists", "table", req.TableName)
-			writeError(w, http.StatusBadRequest, "ResourceInUseException",
-				"Table already exists: "+req.TableName)
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ResourceInUseException",
+				"Table already exists: "+req.TableName,
+			)
 			return
 		}
 		slog.Error("CreateTable failed", "table", req.TableName, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"InternalServerError",
+			"com.amazonaws.dynamodb.v20120810#InternalServerError",
 			"internal server error",
 		)
 		return
@@ -569,7 +588,7 @@ func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"InternalServerError",
+			"com.amazonaws.dynamodb.v20120810#InternalServerError",
 			"internal server error",
 		)
 		return
@@ -583,26 +602,40 @@ func (ro *Router) handleDeleteTable(w http.ResponseWriter, body []byte) {
 		TableName string `json:"TableName"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"invalid request body",
+		)
 		return
 	}
 	if req.TableName == "" {
-		writeError(w, http.StatusBadRequest, "ValidationException", "TableName is required")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"TableName is required",
+		)
 		return
 	}
 	desc, err := ro.storage.DescribeTable(req.TableName)
 	if err != nil {
 		if errors.Is(err, ErrTableNotFound) {
 			slog.Debug("DeleteTable: table not found", "table", req.TableName)
-			writeError(w, http.StatusBadRequest, "ResourceNotFoundException",
-				"Requested resource not found: Table: "+req.TableName+" not found")
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+				"Requested resource not found: Table: "+req.TableName+" not found",
+			)
 			return
 		}
 		slog.Error("DescribeTable before DeleteTable failed", "table", req.TableName, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"InternalServerError",
+			"com.amazonaws.dynamodb.v20120810#InternalServerError",
 			"internal server error",
 		)
 		return
@@ -612,7 +645,7 @@ func (ro *Router) handleDeleteTable(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"InternalServerError",
+			"com.amazonaws.dynamodb.v20120810#InternalServerError",
 			"internal server error",
 		)
 		return
@@ -628,26 +661,40 @@ func (ro *Router) handleDescribeTable(w http.ResponseWriter, body []byte) {
 		TableName string `json:"TableName"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"invalid request body",
+		)
 		return
 	}
 	if req.TableName == "" {
-		writeError(w, http.StatusBadRequest, "ValidationException", "TableName is required")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"TableName is required",
+		)
 		return
 	}
 	meta, err := ro.storage.DescribeTable(req.TableName)
 	if err != nil {
 		if errors.Is(err, ErrTableNotFound) {
 			slog.Debug("DescribeTable: table not found", "table", req.TableName)
-			writeError(w, http.StatusBadRequest, "ResourceNotFoundException",
-				"Requested resource not found: Table: "+req.TableName+" not found")
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+				"Requested resource not found: Table: "+req.TableName+" not found",
+			)
 			return
 		}
 		slog.Error("DescribeTable failed", "table", req.TableName, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"InternalServerError",
+			"com.amazonaws.dynamodb.v20120810#InternalServerError",
 			"internal server error",
 		)
 		return
@@ -662,7 +709,12 @@ func (ro *Router) handleListTables(w http.ResponseWriter, body []byte) {
 		ExclusiveStartTableName string `json:"ExclusiveStartTableName"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"invalid request body",
+		)
 		return
 	}
 	names, err := ro.storage.ListTables()
@@ -671,7 +723,7 @@ func (ro *Router) handleListTables(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"InternalServerError",
+			"com.amazonaws.dynamodb.v20120810#InternalServerError",
 			"internal server error",
 		)
 		return
@@ -693,11 +745,21 @@ func (ro *Router) handlePutItem(w http.ResponseWriter, body []byte) {
 		ExpressionAttributeValues map[string]any    `json:"ExpressionAttributeValues"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"invalid request body",
+		)
 		return
 	}
 	if req.TableName == "" {
-		writeError(w, http.StatusBadRequest, "ValidationException", "TableName is required")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"TableName is required",
+		)
 		return
 	}
 	switch req.ReturnValues {
@@ -706,7 +768,7 @@ func (ro *Router) handlePutItem(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"ValidationException",
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
 			"Value '"+req.ReturnValues+"' at 'returnValues' failed to satisfy constraint: Member must satisfy enum value set: [ALL_OLD, NONE]",
 		)
 		return
@@ -730,20 +792,29 @@ func (ro *Router) handlePutItem(w http.ResponseWriter, body []byte) {
 		}
 		if errors.Is(err, ErrTableNotFound) {
 			slog.Debug("PutItem: table not found", "table", req.TableName)
-			writeError(w, http.StatusBadRequest, "ResourceNotFoundException",
-				"Requested resource not found: Table: "+req.TableName+" not found")
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+				"Requested resource not found: Table: "+req.TableName+" not found",
+			)
 			return
 		}
 		if errors.Is(err, ErrValidationException) {
 			slog.Debug("PutItem: validation error", "table", req.TableName, "err", err)
-			writeError(w, http.StatusBadRequest, "ValidationException", err.Error())
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				err.Error(),
+			)
 			return
 		}
 		slog.Error("PutItem failed", "table", req.TableName, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"InternalServerError",
+			"com.amazonaws.dynamodb.v20120810#InternalServerError",
 			"internal server error",
 		)
 		return
@@ -762,31 +833,50 @@ func (ro *Router) handleGetItem(w http.ResponseWriter, body []byte) {
 		Key       map[string]any `json:"Key"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"invalid request body",
+		)
 		return
 	}
 	if req.TableName == "" {
-		writeError(w, http.StatusBadRequest, "ValidationException", "TableName is required")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"TableName is required",
+		)
 		return
 	}
 	item, err := ro.storage.GetItem(req.TableName, req.Key)
 	if err != nil {
 		if errors.Is(err, ErrTableNotFound) {
 			slog.Debug("GetItem: table not found", "table", req.TableName)
-			writeError(w, http.StatusBadRequest, "ResourceNotFoundException",
-				"Requested resource not found: Table: "+req.TableName+" not found")
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+				"Requested resource not found: Table: "+req.TableName+" not found",
+			)
 			return
 		}
 		if errors.Is(err, ErrValidationException) {
 			slog.Debug("GetItem: validation error", "table", req.TableName, "err", err)
-			writeError(w, http.StatusBadRequest, "ValidationException", err.Error())
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				err.Error(),
+			)
 			return
 		}
 		slog.Error("GetItem failed", "table", req.TableName, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"InternalServerError",
+			"com.amazonaws.dynamodb.v20120810#InternalServerError",
 			"internal server error",
 		)
 		return
@@ -809,11 +899,21 @@ func (ro *Router) handleDeleteItem(w http.ResponseWriter, body []byte) {
 		ExpressionAttributeValues map[string]any    `json:"ExpressionAttributeValues"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"invalid request body",
+		)
 		return
 	}
 	if req.TableName == "" {
-		writeError(w, http.StatusBadRequest, "ValidationException", "TableName is required")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"TableName is required",
+		)
 		return
 	}
 	switch req.ReturnValues {
@@ -822,7 +922,7 @@ func (ro *Router) handleDeleteItem(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"ValidationException",
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
 			"Value '"+req.ReturnValues+"' at 'returnValues' failed to satisfy constraint: Member must satisfy enum value set: [ALL_OLD, NONE]",
 		)
 		return
@@ -846,20 +946,29 @@ func (ro *Router) handleDeleteItem(w http.ResponseWriter, body []byte) {
 		}
 		if errors.Is(err, ErrTableNotFound) {
 			slog.Debug("DeleteItem: table not found", "table", req.TableName)
-			writeError(w, http.StatusBadRequest, "ResourceNotFoundException",
-				"Requested resource not found: Table: "+req.TableName+" not found")
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+				"Requested resource not found: Table: "+req.TableName+" not found",
+			)
 			return
 		}
 		if errors.Is(err, ErrValidationException) {
 			slog.Debug("DeleteItem: validation error", "table", req.TableName, "err", err)
-			writeError(w, http.StatusBadRequest, "ValidationException", err.Error())
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				err.Error(),
+			)
 			return
 		}
 		slog.Error("DeleteItem failed", "table", req.TableName, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"InternalServerError",
+			"com.amazonaws.dynamodb.v20120810#InternalServerError",
 			"internal server error",
 		)
 		return
@@ -880,26 +989,40 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 		ExpressionAttributeValues map[string]any    `json:"ExpressionAttributeValues"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"invalid request body",
+		)
 		return
 	}
 	if req.TableName == "" {
-		writeError(w, http.StatusBadRequest, "ValidationException", "TableName is required")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"TableName is required",
+		)
 		return
 	}
 	items, err := ro.storage.Scan(req.TableName)
 	if err != nil {
 		if errors.Is(err, ErrTableNotFound) {
 			slog.Debug("Scan: table not found", "table", req.TableName)
-			writeError(w, http.StatusBadRequest, "ResourceNotFoundException",
-				"Requested resource not found: Table: "+req.TableName+" not found")
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+				"Requested resource not found: Table: "+req.TableName+" not found",
+			)
 			return
 		}
 		slog.Error("Scan failed", "table", req.TableName, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"InternalServerError",
+			"com.amazonaws.dynamodb.v20120810#InternalServerError",
 			"internal server error",
 		)
 		return
@@ -917,7 +1040,12 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 		)
 		if err != nil {
 			slog.Debug("Scan: invalid FilterExpression", "table", req.TableName, "err", err)
-			writeError(w, http.StatusBadRequest, "ValidationException", err.Error())
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				err.Error(),
+			)
 			return
 		}
 		if items == nil {
@@ -947,11 +1075,21 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 		} `json:"AttributeUpdates"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"invalid request body",
+		)
 		return
 	}
 	if req.TableName == "" {
-		writeError(w, http.StatusBadRequest, "ValidationException", "TableName is required")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"TableName is required",
+		)
 		return
 	}
 
@@ -961,7 +1099,7 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"ValidationException",
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
 			"Value '"+req.ReturnValues+"' at 'returnValues' failed to satisfy constraint: Member must satisfy enum value set: [ALL_NEW, UPDATED_OLD, ALL_OLD, NONE, UPDATED_NEW]",
 		)
 		return
@@ -978,7 +1116,12 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 		)
 		if err != nil {
 			slog.Debug("UpdateItem: invalid UpdateExpression", "table", req.TableName, "err", err)
-			writeError(w, http.StatusBadRequest, "ValidationException", err.Error())
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				err.Error(),
+			)
 			return
 		}
 	case len(req.AttributeUpdates) > 0:
@@ -990,8 +1133,12 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 			case "DELETE":
 				updates[name] = nil
 			default:
-				writeError(w, http.StatusBadRequest, "ValidationException",
-					"unsupported AttributeUpdates Action: "+au.Action)
+				writeError(
+					w,
+					http.StatusBadRequest,
+					"com.amazonaws.dynamodb.v20120810#ValidationException",
+					"unsupported AttributeUpdates Action: "+au.Action,
+				)
 				return
 			}
 		}
@@ -1018,20 +1165,29 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 		}
 		if errors.Is(err, ErrTableNotFound) {
 			slog.Debug("UpdateItem: table not found", "table", req.TableName)
-			writeError(w, http.StatusBadRequest, "ResourceNotFoundException",
-				"Requested resource not found: Table: "+req.TableName+" not found")
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+				"Requested resource not found: Table: "+req.TableName+" not found",
+			)
 			return
 		}
 		if errors.Is(err, ErrValidationException) {
 			slog.Debug("UpdateItem: validation error", "table", req.TableName, "err", err)
-			writeError(w, http.StatusBadRequest, "ValidationException", err.Error())
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				err.Error(),
+			)
 			return
 		}
 		slog.Error("UpdateItem failed", "table", req.TableName, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"InternalServerError",
+			"com.amazonaws.dynamodb.v20120810#InternalServerError",
 			"internal server error",
 		)
 		return
@@ -1080,15 +1236,25 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 		ExpressionAttributeValues map[string]any    `json:"ExpressionAttributeValues"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"invalid request body",
+		)
 		return
 	}
 	if req.TableName == "" {
-		writeError(w, http.StatusBadRequest, "ValidationException", "TableName is required")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"TableName is required",
+		)
 		return
 	}
 	if req.KeyConditionExpression == "" {
-		writeError(w, http.StatusBadRequest, "ValidationException",
+		writeError(w, http.StatusBadRequest, "com.amazonaws.dynamodb.v20120810#ValidationException",
 			"KeyConditionExpression is required")
 		return
 	}
@@ -1100,7 +1266,12 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 	)
 	if err != nil {
 		slog.Debug("Query: invalid KeyConditionExpression", "table", req.TableName, "err", err)
-		writeError(w, http.StatusBadRequest, "ValidationException", err.Error())
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			err.Error(),
+		)
 		return
 	}
 
@@ -1108,15 +1279,19 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 	if err != nil {
 		if errors.Is(err, ErrTableNotFound) {
 			slog.Debug("Query: table not found", "table", req.TableName)
-			writeError(w, http.StatusBadRequest, "ResourceNotFoundException",
-				"Requested resource not found: Table: "+req.TableName+" not found")
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+				"Requested resource not found: Table: "+req.TableName+" not found",
+			)
 			return
 		}
 		slog.Error("Query failed", "table", req.TableName, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"InternalServerError",
+			"com.amazonaws.dynamodb.v20120810#InternalServerError",
 			"internal server error",
 		)
 		return
@@ -1134,7 +1309,12 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 		)
 		if err != nil {
 			slog.Debug("Query: invalid FilterExpression", "table", req.TableName, "err", err)
-			writeError(w, http.StatusBadRequest, "ValidationException", err.Error())
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				err.Error(),
+			)
 			return
 		}
 		if items == nil {
@@ -1156,11 +1336,21 @@ func (ro *Router) handleBatchGetItem(w http.ResponseWriter, body []byte) {
 		} `json:"RequestItems"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"invalid request body",
+		)
 		return
 	}
 	if len(req.RequestItems) == 0 {
-		writeError(w, http.StatusBadRequest, "ValidationException", "RequestItems is required")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"RequestItems is required",
+		)
 		return
 	}
 	responses := make(map[string][]map[string]any, len(req.RequestItems))
@@ -1169,20 +1359,29 @@ func (ro *Router) handleBatchGetItem(w http.ResponseWriter, body []byte) {
 		if err != nil {
 			if errors.Is(err, ErrTableNotFound) {
 				slog.Debug("BatchGetItem: table not found", "table", tableName)
-				writeError(w, http.StatusBadRequest, "ResourceNotFoundException",
-					"Requested resource not found: Table: "+tableName+" not found")
+				writeError(
+					w,
+					http.StatusBadRequest,
+					"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+					"Requested resource not found: Table: "+tableName+" not found",
+				)
 				return
 			}
 			if errors.Is(err, ErrValidationException) {
 				slog.Debug("BatchGetItem: validation error", "table", tableName, "err", err)
-				writeError(w, http.StatusBadRequest, "ValidationException", err.Error())
+				writeError(
+					w,
+					http.StatusBadRequest,
+					"com.amazonaws.dynamodb.v20120810#ValidationException",
+					err.Error(),
+				)
 				return
 			}
 			slog.Error("BatchGetItem failed", "table", tableName, "err", err)
 			writeError(
 				w,
 				http.StatusInternalServerError,
-				"InternalServerError",
+				"com.amazonaws.dynamodb.v20120810#InternalServerError",
 				"internal server error",
 			)
 			return
@@ -1211,11 +1410,21 @@ func (ro *Router) handleBatchWriteItem(w http.ResponseWriter, body []byte) {
 		} `json:"RequestItems"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"invalid request body",
+		)
 		return
 	}
 	if len(req.RequestItems) == 0 {
-		writeError(w, http.StatusBadRequest, "ValidationException", "RequestItems is required")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"RequestItems is required",
+		)
 		return
 	}
 	for tableName, writeReqs := range req.RequestItems {
@@ -1231,20 +1440,29 @@ func (ro *Router) handleBatchWriteItem(w http.ResponseWriter, body []byte) {
 		if err := ro.storage.BatchWriteItems(tableName, puts, deletes); err != nil {
 			if errors.Is(err, ErrTableNotFound) {
 				slog.Debug("BatchWriteItem: table not found", "table", tableName)
-				writeError(w, http.StatusBadRequest, "ResourceNotFoundException",
-					"Requested resource not found: Table: "+tableName+" not found")
+				writeError(
+					w,
+					http.StatusBadRequest,
+					"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+					"Requested resource not found: Table: "+tableName+" not found",
+				)
 				return
 			}
 			if errors.Is(err, ErrValidationException) {
 				slog.Debug("BatchWriteItem: validation error", "table", tableName, "err", err)
-				writeError(w, http.StatusBadRequest, "ValidationException", err.Error())
+				writeError(
+					w,
+					http.StatusBadRequest,
+					"com.amazonaws.dynamodb.v20120810#ValidationException",
+					err.Error(),
+				)
 				return
 			}
 			slog.Error("BatchWriteItem failed", "table", tableName, "err", err)
 			writeError(
 				w,
 				http.StatusInternalServerError,
-				"InternalServerError",
+				"com.amazonaws.dynamodb.v20120810#InternalServerError",
 				"internal server error",
 			)
 			return
@@ -1288,11 +1506,21 @@ func (ro *Router) handleUpdateTable(w http.ResponseWriter, body []byte) {
 		} `json:"GlobalSecondaryIndexUpdates"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"invalid request body",
+		)
 		return
 	}
 	if req.TableName == "" {
-		writeError(w, http.StatusBadRequest, "ValidationException", "TableName is required")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"TableName is required",
+		)
 		return
 	}
 
@@ -1338,15 +1566,19 @@ func (ro *Router) handleUpdateTable(w http.ResponseWriter, body []byte) {
 	if err != nil {
 		if errors.Is(err, ErrTableNotFound) {
 			slog.Debug("UpdateTable: table not found", "table", req.TableName)
-			writeError(w, http.StatusBadRequest, "ResourceNotFoundException",
-				"Requested resource not found: Table: "+req.TableName+" not found")
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+				"Requested resource not found: Table: "+req.TableName+" not found",
+			)
 			return
 		}
 		slog.Error("UpdateTable failed", "table", req.TableName, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"InternalServerError",
+			"com.amazonaws.dynamodb.v20120810#InternalServerError",
 			"internal server error",
 		)
 		return
@@ -1364,11 +1596,21 @@ func (ro *Router) handleTagResource(w http.ResponseWriter, body []byte) {
 		} `json:"Tags"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"invalid request body",
+		)
 		return
 	}
 	if req.ResourceArn == "" {
-		writeError(w, http.StatusBadRequest, "ValidationException", "ResourceArn is required")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"ResourceArn is required",
+		)
 		return
 	}
 	tags := make(map[string]string, len(req.Tags))
@@ -1378,15 +1620,19 @@ func (ro *Router) handleTagResource(w http.ResponseWriter, body []byte) {
 	if err := ro.storage.TagResource(req.ResourceArn, tags); err != nil {
 		if errors.Is(err, ErrTableNotFound) {
 			slog.Debug("TagResource: resource not found", "arn", req.ResourceArn)
-			writeError(w, http.StatusBadRequest, "ResourceNotFoundException",
-				"Requested resource not found: "+req.ResourceArn)
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+				"Requested resource not found: "+req.ResourceArn,
+			)
 			return
 		}
 		slog.Error("TagResource failed", "arn", req.ResourceArn, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"InternalServerError",
+			"com.amazonaws.dynamodb.v20120810#InternalServerError",
 			"internal server error",
 		)
 		return
@@ -1401,25 +1647,39 @@ func (ro *Router) handleUntagResource(w http.ResponseWriter, body []byte) {
 		TagKeys     []string `json:"TagKeys"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"invalid request body",
+		)
 		return
 	}
 	if req.ResourceArn == "" {
-		writeError(w, http.StatusBadRequest, "ValidationException", "ResourceArn is required")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"ResourceArn is required",
+		)
 		return
 	}
 	if err := ro.storage.UntagResource(req.ResourceArn, req.TagKeys); err != nil {
 		if errors.Is(err, ErrTableNotFound) {
 			slog.Debug("UntagResource: resource not found", "arn", req.ResourceArn)
-			writeError(w, http.StatusBadRequest, "ResourceNotFoundException",
-				"Requested resource not found: "+req.ResourceArn)
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+				"Requested resource not found: "+req.ResourceArn,
+			)
 			return
 		}
 		slog.Error("UntagResource failed", "arn", req.ResourceArn, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"InternalServerError",
+			"com.amazonaws.dynamodb.v20120810#InternalServerError",
 			"internal server error",
 		)
 		return
@@ -1433,26 +1693,40 @@ func (ro *Router) handleListTagsOfResource(w http.ResponseWriter, body []byte) {
 		ResourceArn string `json:"ResourceArn"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"invalid request body",
+		)
 		return
 	}
 	if req.ResourceArn == "" {
-		writeError(w, http.StatusBadRequest, "ValidationException", "ResourceArn is required")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"ResourceArn is required",
+		)
 		return
 	}
 	tags, err := ro.storage.ListTagsOfResource(req.ResourceArn)
 	if err != nil {
 		if errors.Is(err, ErrTableNotFound) {
 			slog.Debug("ListTagsOfResource: resource not found", "arn", req.ResourceArn)
-			writeError(w, http.StatusBadRequest, "ResourceNotFoundException",
-				"Requested resource not found: "+req.ResourceArn)
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+				"Requested resource not found: "+req.ResourceArn,
+			)
 			return
 		}
 		slog.Error("ListTagsOfResource failed", "arn", req.ResourceArn, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"InternalServerError",
+			"com.amazonaws.dynamodb.v20120810#InternalServerError",
 			"internal server error",
 		)
 		return
@@ -1474,11 +1748,21 @@ func (ro *Router) handleUpdateTimeToLive(w http.ResponseWriter, body []byte) {
 		} `json:"TimeToLiveSpecification"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"invalid request body",
+		)
 		return
 	}
 	if req.TableName == "" {
-		writeError(w, http.StatusBadRequest, "ValidationException", "TableName is required")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"TableName is required",
+		)
 		return
 	}
 	spec, err := ro.storage.UpdateTimeToLive(req.TableName, TTLSpec{
@@ -1488,15 +1772,19 @@ func (ro *Router) handleUpdateTimeToLive(w http.ResponseWriter, body []byte) {
 	if err != nil {
 		if errors.Is(err, ErrTableNotFound) {
 			slog.Debug("UpdateTimeToLive: table not found", "table", req.TableName)
-			writeError(w, http.StatusBadRequest, "ResourceNotFoundException",
-				"Requested resource not found: Table: "+req.TableName+" not found")
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+				"Requested resource not found: Table: "+req.TableName+" not found",
+			)
 			return
 		}
 		slog.Error("UpdateTimeToLive failed", "table", req.TableName, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"InternalServerError",
+			"com.amazonaws.dynamodb.v20120810#InternalServerError",
 			"internal server error",
 		)
 		return
@@ -1515,26 +1803,40 @@ func (ro *Router) handleDescribeTimeToLive(w http.ResponseWriter, body []byte) {
 		TableName string `json:"TableName"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"invalid request body",
+		)
 		return
 	}
 	if req.TableName == "" {
-		writeError(w, http.StatusBadRequest, "ValidationException", "TableName is required")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"TableName is required",
+		)
 		return
 	}
 	status, spec, err := ro.storage.DescribeTimeToLive(req.TableName)
 	if err != nil {
 		if errors.Is(err, ErrTableNotFound) {
 			slog.Debug("DescribeTimeToLive: table not found", "table", req.TableName)
-			writeError(w, http.StatusBadRequest, "ResourceNotFoundException",
-				"Requested resource not found: Table: "+req.TableName+" not found")
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+				"Requested resource not found: Table: "+req.TableName+" not found",
+			)
 			return
 		}
 		slog.Error("DescribeTimeToLive failed", "table", req.TableName, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"InternalServerError",
+			"com.amazonaws.dynamodb.v20120810#InternalServerError",
 			"internal server error",
 		)
 		return

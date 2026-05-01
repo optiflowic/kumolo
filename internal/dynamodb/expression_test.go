@@ -279,7 +279,7 @@ func TestHandleScanWithFilterExpression(t *testing.T) {
 			"ExpressionAttributeValues":{":val":{"S":"x"}}
 		}`)
 		assert.Equal(t, 400, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 }
 
@@ -385,7 +385,7 @@ func TestHandleQueryWithFilterExpression(t *testing.T) {
 			"ExpressionAttributeValues":{":uid":{"S":"u1"},":val":{"S":"x"}}
 		}`)
 		assert.Equal(t, 400, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 }
 
