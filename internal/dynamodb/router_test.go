@@ -2398,3 +2398,162 @@ func TestHandleDescribeEndpoints(t *testing.T) {
 		assert.Equal(t, float64(1440), ep["CachePeriodInMinutes"])
 	})
 }
+
+// --- parseUpdateExpression error paths ---
+
+func TestParseUpdateExpression_ErrorPaths(t *testing.T) {
+	noNames := map[string]string{}
+	noVals := map[string]any{}
+
+	t.Run("ADD clause with invalid token count", func(t *testing.T) {
+		_, err := parseUpdateExpression("ADD attr", noNames, noVals)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid ADD clause")
+	})
+
+	t.Run("ADD clause with unknown #attrName", func(t *testing.T) {
+		_, err := parseUpdateExpression(
+			"ADD #missing :v",
+			noNames,
+			map[string]any{":v": map[string]any{"N": "1"}},
+		)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "ExpressionAttributeNames missing")
+	})
+
+	t.Run("DELETE clause with invalid token count", func(t *testing.T) {
+		_, err := parseUpdateExpression("DELETE attr", noNames, noVals)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid DELETE clause")
+	})
+
+	t.Run("DELETE clause with unknown #attrName", func(t *testing.T) {
+		_, err := parseUpdateExpression(
+			"DELETE #missing :v",
+			noNames,
+			map[string]any{":v": map[string]any{"SS": []any{"a"}}},
+		)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "ExpressionAttributeNames missing")
+	})
+
+	t.Run("DELETE clause with missing ExpressionAttributeValues placeholder", func(t *testing.T) {
+		_, err := parseUpdateExpression("DELETE attr :missing", noNames, noVals)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "ExpressionAttributeValues missing")
+	})
+}
+
+// --- applyAddOp unit tests ---
+
+func TestApplyAddOp(t *testing.T) {
+	t.Run("error when delta is not a map", func(t *testing.T) {
+		_, err := applyAddOp(nil, "raw_string")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "delta must be a DynamoDB typed value")
+	})
+
+	t.Run("error when delta N value is not a valid number", func(t *testing.T) {
+		_, err := applyAddOp(nil, map[string]any{"N": "abc"})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid number")
+	})
+
+	t.Run("error when existing attribute is not a typed value (Number path)", func(t *testing.T) {
+		_, err := applyAddOp("raw_string", map[string]any{"N": "1"})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "existing attribute is not a typed value")
+	})
+
+	t.Run("error when existing attribute is not a Number", func(t *testing.T) {
+		_, err := applyAddOp(map[string]any{"S": "x"}, map[string]any{"N": "1"})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "existing attribute is not a Number")
+	})
+
+	t.Run("error when existing N value is not a valid number", func(t *testing.T) {
+		_, err := applyAddOp(map[string]any{"N": "invalid"}, map[string]any{"N": "1"})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid existing number")
+	})
+
+	t.Run("error when existing attribute is not a typed value (Set path)", func(t *testing.T) {
+		_, err := applyAddOp("raw_string", map[string]any{"SS": []any{"a"}})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "existing attribute is not a typed value")
+	})
+
+	t.Run("error when existing attribute type mismatches set type", func(t *testing.T) {
+		_, err := applyAddOp(map[string]any{"S": "x"}, map[string]any{"SS": []any{"a"}})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "type mismatch")
+	})
+
+	t.Run("error when delta type is not supported (not N or set)", func(t *testing.T) {
+		_, err := applyAddOp(nil, map[string]any{"BOOL": true})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unsupported type")
+	})
+}
+
+// --- applyDeleteOp unit tests ---
+
+func TestApplyDeleteOp(t *testing.T) {
+	t.Run("error when delta is not a map", func(t *testing.T) {
+		_, err := applyDeleteOp(map[string]any{"SS": []any{"a"}}, "raw_string")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "delta must be a DynamoDB typed value")
+	})
+
+	t.Run("error when existing attribute is not a typed value", func(t *testing.T) {
+		_, err := applyDeleteOp("raw_string", map[string]any{"SS": []any{"a"}})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "existing attribute is not a typed value")
+	})
+
+	t.Run("error when existing attribute set type mismatches delta set type", func(t *testing.T) {
+		_, err := applyDeleteOp(map[string]any{"NS": []any{"1"}}, map[string]any{"SS": []any{"a"}})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "existing attribute is not a SS")
+	})
+
+	t.Run("error when delta type is not a set type", func(t *testing.T) {
+		_, err := applyDeleteOp(map[string]any{"SS": []any{"a"}}, map[string]any{"N": "1"})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unsupported type")
+	})
+}
+
+// --- storage.UpdateItem error paths via router ---
+
+func TestHandleUpdateItem_ApplyOpErrors(t *testing.T) {
+	t.Run("400 when ADD applied to incompatible existing attribute type", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"cnt":{"S":"not-a-number"}}}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+            "TableName": "test-table",
+            "Key": {"pk": {"S": "k1"}},
+            "UpdateExpression": "ADD cnt :delta",
+            "ExpressionAttributeValues": {":delta": {"N": "1"}}
+        }`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ValidationException")
+	})
+
+	t.Run("400 when DELETE applied to incompatible existing attribute type", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"tags":{"S":"not-a-set"}}}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+            "TableName": "test-table",
+            "Key": {"pk": {"S": "k1"}},
+            "UpdateExpression": "DELETE tags :rem",
+            "ExpressionAttributeValues": {":rem": {"SS": ["a"]}}
+        }`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ValidationException")
+	})
+}
