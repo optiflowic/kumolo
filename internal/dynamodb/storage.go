@@ -282,7 +282,7 @@ func (s *Storage) ListTables() ([]string, error) {
 	return names, nil
 }
 
-// ConditionCheck holds a parsed ConditionExpression and its placeholder maps.
+// ConditionCheck holds a ConditionExpression and its placeholder maps.
 type ConditionCheck struct {
 	Expr   string
 	Names  map[string]string

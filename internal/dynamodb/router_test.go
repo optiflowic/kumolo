@@ -272,7 +272,7 @@ func TestHandlePutItem(t *testing.T) {
 			"ConditionExpression": "attribute_not_exists(pk)"
 		}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ConditionalCheckFailedException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ConditionalCheckFailedException")
 	})
 
 	t.Run("ConditionExpression attribute_exists passes when item exists", func(t *testing.T) {
@@ -465,7 +465,7 @@ func TestHandleDeleteItem(t *testing.T) {
 			"ConditionExpression": "attribute_exists(pk)"
 		}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ConditionalCheckFailedException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ConditionalCheckFailedException")
 	})
 
 	t.Run("400 for invalid ConditionExpression", func(t *testing.T) {
@@ -1137,7 +1137,7 @@ func TestHandleUpdateItem(t *testing.T) {
 			"ExpressionAttributeValues": {":cur": {"N": "1"}, ":new": {"N": "2"}}
 		}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ConditionalCheckFailedException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ConditionalCheckFailedException")
 	})
 
 	t.Run("ConditionExpression attribute_not_exists passes for new item", func(t *testing.T) {

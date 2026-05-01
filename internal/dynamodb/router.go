@@ -723,7 +723,8 @@ func (ro *Router) handlePutItem(w http.ResponseWriter, body []byte) {
 	if err != nil {
 		if errors.Is(err, ErrConditionalCheckFailed) {
 			slog.Debug("PutItem: condition check failed", "table", req.TableName)
-			writeError(w, http.StatusBadRequest, "ConditionalCheckFailedException",
+			writeError(w, http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ConditionalCheckFailedException",
 				"The conditional request failed")
 			return
 		}
@@ -838,7 +839,8 @@ func (ro *Router) handleDeleteItem(w http.ResponseWriter, body []byte) {
 	if err != nil {
 		if errors.Is(err, ErrConditionalCheckFailed) {
 			slog.Debug("DeleteItem: condition check failed", "table", req.TableName)
-			writeError(w, http.StatusBadRequest, "ConditionalCheckFailedException",
+			writeError(w, http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ConditionalCheckFailedException",
 				"The conditional request failed")
 			return
 		}
@@ -1009,7 +1011,8 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 	if err != nil {
 		if errors.Is(err, ErrConditionalCheckFailed) {
 			slog.Debug("UpdateItem: condition check failed", "table", req.TableName)
-			writeError(w, http.StatusBadRequest, "ConditionalCheckFailedException",
+			writeError(w, http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ConditionalCheckFailedException",
 				"The conditional request failed")
 			return
 		}
