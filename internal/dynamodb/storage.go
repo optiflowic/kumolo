@@ -413,13 +413,13 @@ func (s *Storage) UpdateItem(
 		case addOp:
 			result, err := applyAddOp(item[attr], op.val)
 			if err != nil {
-				return nil, nil, fmt.Errorf("%w: %s", ErrValidationException, err.Error())
+				return nil, nil, fmt.Errorf("%w: %v", ErrValidationException, err)
 			}
 			item[attr] = result
 		case deleteOp:
 			result, err := applyDeleteOp(item[attr], op.val)
 			if err != nil {
-				return nil, nil, fmt.Errorf("%w: %s", ErrValidationException, err.Error())
+				return nil, nil, fmt.Errorf("%w: %v", ErrValidationException, err)
 			}
 			if result == nil {
 				delete(item, attr)

@@ -168,11 +168,15 @@ func applyAddOp(current, delta any) (any, error) {
 				if !ok {
 					return nil, fmt.Errorf("ADD: existing attribute is not a typed value")
 				}
-				if ce, ok := cm[setKey].([]any); ok {
-					currentElems = ce
-				} else {
-					return nil, fmt.Errorf("ADD: existing attribute is not a %s", setKey)
+				ce, ok := cm[setKey].([]any)
+				if !ok {
+					// attribute exists but has a different type (e.g. S instead of SS)
+					return nil, fmt.Errorf(
+						"ADD: existing attribute type mismatch: expected %s",
+						setKey,
+					)
 				}
+				currentElems = ce
 			}
 			deltaSlice, _ := deltaElems.([]any)
 			return map[string]any{setKey: setUnion(currentElems, deltaSlice)}, nil
