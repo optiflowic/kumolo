@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -22,9 +23,18 @@ func resolveAttrName(ref string, attrNames map[string]string) (string, error) {
 	return actual, nil
 }
 
+// addOp is a sentinel stored in the updates map for an ADD clause operation.
+type addOp struct{ val any }
+
+// deleteOp is a sentinel stored in the updates map for a DELETE clause operation.
+type deleteOp struct{ val any }
+
 // parseUpdateExpression converts an UpdateExpression + attribute maps into a
-// flat updates map (attribute name → new value; nil means remove).
-// Only SET and REMOVE clauses are supported.
+// flat updates map (attribute name → operation):
+//   - nil value   → REMOVE the attribute
+//   - addOp       → ADD (numeric increment or set union)
+//   - deleteOp    → DELETE (set difference)
+//   - other value → SET the attribute to that value
 func parseUpdateExpression(
 	expr string,
 	attrNames map[string]string,
@@ -83,11 +93,161 @@ func parseUpdateExpression(
 				}
 				updates[name] = nil
 			}
-		default:
-			return nil, fmt.Errorf("unsupported UpdateExpression clause: %s", sec.keyword)
+		case "ADD":
+			for _, pair := range strings.Split(sec.content, ",") {
+				parts := strings.Fields(strings.TrimSpace(pair))
+				if len(parts) != 2 {
+					return nil, fmt.Errorf("invalid ADD clause: %q", pair)
+				}
+				name, err := resolveAttrName(parts[0], attrNames)
+				if err != nil {
+					return nil, err
+				}
+				val, ok := attrValues[parts[1]]
+				if !ok {
+					return nil, fmt.Errorf("ExpressionAttributeValues missing %q", parts[1])
+				}
+				updates[name] = addOp{val}
+			}
+		case "DELETE":
+			for _, pair := range strings.Split(sec.content, ",") {
+				parts := strings.Fields(strings.TrimSpace(pair))
+				if len(parts) != 2 {
+					return nil, fmt.Errorf("invalid DELETE clause: %q", pair)
+				}
+				name, err := resolveAttrName(parts[0], attrNames)
+				if err != nil {
+					return nil, err
+				}
+				val, ok := attrValues[parts[1]]
+				if !ok {
+					return nil, fmt.Errorf("ExpressionAttributeValues missing %q", parts[1])
+				}
+				updates[name] = deleteOp{val}
+			}
 		}
 	}
 	return updates, nil
+}
+
+// applyAddOp applies an ADD clause delta to the current attribute value.
+// For Number types, adds the numeric delta (creates the attribute if absent).
+// For set types (SS/NS/BS), unions the current set with the delta elements.
+func applyAddOp(current, delta any) (any, error) {
+	dm, ok := delta.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("ADD: delta must be a DynamoDB typed value")
+	}
+	if dn, ok := dm["N"].(string); ok {
+		dv, err := strconv.ParseFloat(dn, 64)
+		if err != nil {
+			return nil, fmt.Errorf("ADD: invalid number %q", dn)
+		}
+		var cv float64
+		if current != nil {
+			cm, ok := current.(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("ADD: existing attribute is not a typed value")
+			}
+			cn, ok := cm["N"].(string)
+			if !ok {
+				return nil, fmt.Errorf("ADD: existing attribute is not a Number")
+			}
+			cv, err = strconv.ParseFloat(cn, 64)
+			if err != nil {
+				return nil, fmt.Errorf("ADD: invalid existing number %q", cn)
+			}
+		}
+		return map[string]any{"N": strconv.FormatFloat(cv+dv, 'f', -1, 64)}, nil
+	}
+	for _, setKey := range []string{"SS", "NS", "BS"} {
+		if deltaElems, ok := dm[setKey]; ok {
+			var currentElems []any
+			if current != nil {
+				cm, ok := current.(map[string]any)
+				if !ok {
+					return nil, fmt.Errorf("ADD: existing attribute is not a typed value")
+				}
+				if ce, ok := cm[setKey].([]any); ok {
+					currentElems = ce
+				} else {
+					return nil, fmt.Errorf("ADD: existing attribute is not a %s", setKey)
+				}
+			}
+			deltaSlice, _ := deltaElems.([]any)
+			return map[string]any{setKey: setUnion(currentElems, deltaSlice)}, nil
+		}
+	}
+	return nil, fmt.Errorf("ADD: unsupported type in delta value")
+}
+
+// applyDeleteOp applies a DELETE clause delta to the current attribute value.
+// Only set types (SS/NS/BS) are supported. Returns nil when the result is an empty set.
+func applyDeleteOp(current, delta any) (any, error) {
+	if current == nil {
+		return nil, nil
+	}
+	dm, ok := delta.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("DELETE: delta must be a DynamoDB typed value")
+	}
+	for _, setKey := range []string{"SS", "NS", "BS"} {
+		if deltaElems, ok := dm[setKey]; ok {
+			cm, ok := current.(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("DELETE: existing attribute is not a typed value")
+			}
+			ce, ok := cm[setKey].([]any)
+			if !ok {
+				return nil, fmt.Errorf("DELETE: existing attribute is not a %s", setKey)
+			}
+			deltaSlice, _ := deltaElems.([]any)
+			result := setDifference(ce, deltaSlice)
+			if len(result) == 0 {
+				return nil, nil // empty set → remove the attribute
+			}
+			return map[string]any{setKey: result}, nil
+		}
+	}
+	return nil, fmt.Errorf("DELETE: unsupported type; only set types (SS/NS/BS) are valid")
+}
+
+func setUnion(a, b []any) []any {
+	seen := make(map[string]bool, len(a)+len(b))
+	result := make([]any, 0, len(a)+len(b))
+	for _, v := range a {
+		key, _ := json.Marshal(v)
+		s := string(key)
+		if !seen[s] {
+			seen[s] = true
+			result = append(result, v)
+		}
+	}
+	for _, v := range b {
+		key, _ := json.Marshal(v)
+		s := string(key)
+		if !seen[s] {
+			seen[s] = true
+			result = append(result, v)
+		}
+	}
+	return result
+}
+
+func setDifference(a, b []any) []any {
+	remove := make(map[string]bool, len(b))
+	for _, v := range b {
+		key, _ := json.Marshal(v)
+		remove[string(key)] = true
+	}
+	result := make([]any, 0, len(a))
+	for _, v := range a {
+		key, _ := json.Marshal(v)
+		if !remove[string(key)] {
+			result = append(result, v)
+		}
+	}
+	return result
 }
 
 // parseKeyConditionExpression extracts the hash key name, its equality value,

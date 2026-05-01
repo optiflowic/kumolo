@@ -793,6 +793,154 @@ func TestHandleUpdateItem(t *testing.T) {
 		assert.Contains(t, body["message"], "INVALID")
 		assert.Contains(t, body["message"], "returnValues")
 	})
+
+	t.Run("ADD increments existing Number attribute", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"cnt":{"N":"10"}}}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+            "TableName": "test-table",
+            "Key": {"pk": {"S": "k1"}},
+            "UpdateExpression": "ADD cnt :delta",
+            "ExpressionAttributeValues": {":delta": {"N": "5"}},
+            "ReturnValues": "ALL_NEW"
+        }`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		attrs := resp["Attributes"].(map[string]any)
+		assert.Equal(t, map[string]any{"N": "15"}, attrs["cnt"])
+	})
+
+	t.Run("ADD creates Number attribute when absent", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k1"}}}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+            "TableName": "test-table",
+            "Key": {"pk": {"S": "k1"}},
+            "UpdateExpression": "ADD views :one",
+            "ExpressionAttributeValues": {":one": {"N": "1"}},
+            "ReturnValues": "ALL_NEW"
+        }`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		attrs := resp["Attributes"].(map[string]any)
+		assert.Equal(t, map[string]any{"N": "1"}, attrs["views"])
+	})
+
+	t.Run("ADD unions String Set attribute", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"tags":{"SS":["a","b"]}}}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+            "TableName": "test-table",
+            "Key": {"pk": {"S": "k1"}},
+            "UpdateExpression": "ADD tags :new",
+            "ExpressionAttributeValues": {":new": {"SS": ["c"]}},
+            "ReturnValues": "ALL_NEW"
+        }`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		attrs := resp["Attributes"].(map[string]any)
+		tags := attrs["tags"].(map[string]any)["SS"].([]any)
+		assert.ElementsMatch(t, []any{"a", "b", "c"}, tags)
+	})
+
+	t.Run("ADD ignores duplicate elements in String Set", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"tags":{"SS":["a","b"]}}}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+            "TableName": "test-table",
+            "Key": {"pk": {"S": "k1"}},
+            "UpdateExpression": "ADD tags :dup",
+            "ExpressionAttributeValues": {":dup": {"SS": ["b","c"]}},
+            "ReturnValues": "ALL_NEW"
+        }`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		attrs := resp["Attributes"].(map[string]any)
+		tags := attrs["tags"].(map[string]any)["SS"].([]any)
+		assert.ElementsMatch(t, []any{"a", "b", "c"}, tags)
+	})
+
+	t.Run("DELETE removes elements from String Set", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"tags":{"SS":["a","b","c"]}}}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+            "TableName": "test-table",
+            "Key": {"pk": {"S": "k1"}},
+            "UpdateExpression": "DELETE tags :rem",
+            "ExpressionAttributeValues": {":rem": {"SS": ["b"]}},
+            "ReturnValues": "ALL_NEW"
+        }`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		attrs := resp["Attributes"].(map[string]any)
+		tags := attrs["tags"].(map[string]any)["SS"].([]any)
+		assert.ElementsMatch(t, []any{"a", "c"}, tags)
+	})
+
+	t.Run("DELETE removes attribute when all set elements are deleted", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"tags":{"SS":["a"]}}}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+            "TableName": "test-table",
+            "Key": {"pk": {"S": "k1"}},
+            "UpdateExpression": "DELETE tags :rem",
+            "ExpressionAttributeValues": {":rem": {"SS": ["a"]}},
+            "ReturnValues": "ALL_NEW"
+        }`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		attrs := resp["Attributes"].(map[string]any)
+		assert.Nil(t, attrs["tags"])
+	})
+
+	t.Run("DELETE on absent attribute is a no-op", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k1"}}}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+            "TableName": "test-table",
+            "Key": {"pk": {"S": "k1"}},
+            "UpdateExpression": "DELETE tags :rem",
+            "ExpressionAttributeValues": {":rem": {"SS": ["a"]}},
+            "ReturnValues": "ALL_NEW"
+        }`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		attrs := resp["Attributes"].(map[string]any)
+		assert.Nil(t, attrs["tags"])
+	})
+
+	t.Run("400 for ADD with missing ExpressionAttributeValues placeholder", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+            "TableName": "test-table",
+            "Key": {"pk": {"S": "k1"}},
+            "UpdateExpression": "ADD cnt :missing"
+        }`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ValidationException")
+	})
 }
 
 func TestHandleUpdateItem_InternalErrors(t *testing.T) {
