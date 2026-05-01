@@ -407,9 +407,26 @@ func (s *Storage) UpdateItem(
 		}
 	}
 	for attr, val := range updates {
-		if val == nil {
+		switch op := val.(type) {
+		case nil:
 			delete(item, attr)
-		} else {
+		case addOp:
+			result, err := applyAddOp(item[attr], op.val)
+			if err != nil {
+				return nil, nil, fmt.Errorf("%w: %v", ErrValidationException, err)
+			}
+			item[attr] = result
+		case deleteOp:
+			result, err := applyDeleteOp(item[attr], op.val)
+			if err != nil {
+				return nil, nil, fmt.Errorf("%w: %v", ErrValidationException, err)
+			}
+			if result == nil {
+				delete(item, attr)
+			} else {
+				item[attr] = result
+			}
+		default:
 			item[attr] = val
 		}
 	}
