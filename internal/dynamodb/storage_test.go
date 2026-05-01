@@ -22,7 +22,7 @@ func newTestStorage(t *testing.T) *Storage {
 
 func mustPutItem(t *testing.T, s *Storage, tableName string, item map[string]any) {
 	t.Helper()
-	_, err := s.PutItem(tableName, item)
+	_, err := s.PutItem(tableName, item, nil)
 	require.NoError(t, err)
 }
 
@@ -256,14 +256,18 @@ func TestPutItem(t *testing.T) {
 
 	t.Run("returns ErrTableNotFound for missing table", func(t *testing.T) {
 		s := newTestStorage(t)
-		_, err := s.PutItem("no-such-table", item)
+		_, err := s.PutItem("no-such-table", item, nil)
 		assert.ErrorIs(t, err, ErrTableNotFound)
 	})
 
 	t.Run("returns ErrValidationException for missing key attribute", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		_, err := s.PutItem("test-table", map[string]any{"other": map[string]any{"S": "value"}})
+		_, err := s.PutItem(
+			"test-table",
+			map[string]any{"other": map[string]any{"S": "value"}},
+			nil,
+		)
 		assert.ErrorIs(t, err, ErrValidationException)
 	})
 
@@ -271,7 +275,7 @@ func TestPutItem(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
 		s.readAll = func(io.Reader) ([]byte, error) { return nil, errors.New("unexpected") }
-		_, err := s.PutItem("test-table", item)
+		_, err := s.PutItem("test-table", item, nil)
 		assert.Error(t, err)
 	})
 
@@ -288,7 +292,7 @@ func TestPutItem(t *testing.T) {
 			}
 			return origReadAll(r)
 		}
-		_, err := s.PutItem("test-table", item)
+		_, err := s.PutItem("test-table", item, nil)
 		assert.Error(t, err)
 	})
 
@@ -300,7 +304,7 @@ func TestPutItem(t *testing.T) {
 			"pk":  map[string]any{"S": "key1"},
 			"val": map[string]any{"S": "new"},
 		}
-		old, err := s.PutItem("test-table", updated)
+		old, err := s.PutItem("test-table", updated, nil)
 		require.NoError(t, err)
 		require.NotNil(t, old)
 		assert.Equal(t, map[string]any{"S": "hello"}, old["val"])
@@ -309,7 +313,7 @@ func TestPutItem(t *testing.T) {
 	t.Run("returns nil old item when no previous item", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		old, err := s.PutItem("test-table", item)
+		old, err := s.PutItem("test-table", item, nil)
 		require.NoError(t, err)
 		assert.Nil(t, old)
 	})
@@ -382,7 +386,7 @@ func TestDeleteItem(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
 		mustPutItem(t, s, "test-table", item)
-		_, err := s.DeleteItem("test-table", map[string]any{"pk": map[string]any{"S": "key1"}})
+		_, err := s.DeleteItem("test-table", map[string]any{"pk": map[string]any{"S": "key1"}}, nil)
 		require.NoError(t, err)
 		got, err := s.GetItem("test-table", map[string]any{"pk": map[string]any{"S": "key1"}})
 		require.NoError(t, err)
@@ -392,20 +396,28 @@ func TestDeleteItem(t *testing.T) {
 	t.Run("no error when item does not exist", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		_, err := s.DeleteItem("test-table", map[string]any{"pk": map[string]any{"S": "missing"}})
+		_, err := s.DeleteItem(
+			"test-table",
+			map[string]any{"pk": map[string]any{"S": "missing"}},
+			nil,
+		)
 		assert.NoError(t, err)
 	})
 
 	t.Run("returns ErrTableNotFound for missing table", func(t *testing.T) {
 		s := newTestStorage(t)
-		_, err := s.DeleteItem("no-such-table", map[string]any{"pk": map[string]any{"S": "key1"}})
+		_, err := s.DeleteItem(
+			"no-such-table",
+			map[string]any{"pk": map[string]any{"S": "key1"}},
+			nil,
+		)
 		assert.ErrorIs(t, err, ErrTableNotFound)
 	})
 
 	t.Run("returns ErrValidationException for missing key attribute", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		_, err := s.DeleteItem("test-table", map[string]any{})
+		_, err := s.DeleteItem("test-table", map[string]any{}, nil)
 		assert.ErrorIs(t, err, ErrValidationException)
 	})
 
@@ -413,7 +425,7 @@ func TestDeleteItem(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
 		s.readAll = func(io.Reader) ([]byte, error) { return nil, errors.New("unexpected") }
-		_, err := s.DeleteItem("test-table", map[string]any{"pk": map[string]any{"S": "k"}})
+		_, err := s.DeleteItem("test-table", map[string]any{"pk": map[string]any{"S": "k"}}, nil)
 		assert.Error(t, err)
 	})
 
@@ -422,7 +434,7 @@ func TestDeleteItem(t *testing.T) {
 		require.NoError(t, s.CreateTable(testMeta))
 		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "k"}})
 		s.removeFile = func(string) error { return errors.New("remove failed") }
-		_, err := s.DeleteItem("test-table", map[string]any{"pk": map[string]any{"S": "k"}})
+		_, err := s.DeleteItem("test-table", map[string]any{"pk": map[string]any{"S": "k"}}, nil)
 		assert.Error(t, err)
 	})
 
@@ -435,7 +447,7 @@ func TestDeleteItem(t *testing.T) {
 			"test-table",
 			map[string]any{"pk": map[string]any{"S": "k"}, "v": map[string]any{"S": "hi"}},
 		)
-		old, err := s.DeleteItem("test-table", map[string]any{"pk": map[string]any{"S": "k"}})
+		old, err := s.DeleteItem("test-table", map[string]any{"pk": map[string]any{"S": "k"}}, nil)
 		require.NoError(t, err)
 		require.NotNil(t, old)
 		assert.Equal(t, map[string]any{"S": "hi"}, old["v"])
@@ -444,7 +456,11 @@ func TestDeleteItem(t *testing.T) {
 	t.Run("returns nil when item not found", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		old, err := s.DeleteItem("test-table", map[string]any{"pk": map[string]any{"S": "missing"}})
+		old, err := s.DeleteItem(
+			"test-table",
+			map[string]any{"pk": map[string]any{"S": "missing"}},
+			nil,
+		)
 		require.NoError(t, err)
 		assert.Nil(t, old)
 	})
@@ -462,7 +478,7 @@ func TestDeleteItem(t *testing.T) {
 			}
 			return origReadAll(r)
 		}
-		_, err := s.DeleteItem("test-table", map[string]any{"pk": map[string]any{"S": "k"}})
+		_, err := s.DeleteItem("test-table", map[string]any{"pk": map[string]any{"S": "k"}}, nil)
 		assert.Error(t, err)
 	})
 }
@@ -619,7 +635,7 @@ func TestUpdateItem(t *testing.T) {
 		require.NoError(t, s.CreateTable(testMeta))
 		mustPutItem(t, s, "test-table", item1)
 		_, got, err := s.UpdateItem("test-table", map[string]any{"pk": map[string]any{"S": "k1"}},
-			map[string]any{"val": map[string]any{"S": "new"}})
+			map[string]any{"val": map[string]any{"S": "new"}}, nil)
 		require.NoError(t, err)
 		assert.Equal(t, map[string]any{"S": "new"}, got["val"])
 	})
@@ -632,6 +648,7 @@ func TestUpdateItem(t *testing.T) {
 			"test-table",
 			map[string]any{"pk": map[string]any{"S": "k1"}},
 			map[string]any{"val": map[string]any{"S": "new"}},
+			nil,
 		)
 		require.NoError(t, err)
 		assert.Equal(t, map[string]any{"S": "old"}, before["val"])
@@ -642,7 +659,7 @@ func TestUpdateItem(t *testing.T) {
 		require.NoError(t, s.CreateTable(testMeta))
 		mustPutItem(t, s, "test-table", item1)
 		_, got, err := s.UpdateItem("test-table", map[string]any{"pk": map[string]any{"S": "k1"}},
-			map[string]any{"val": nil})
+			map[string]any{"val": nil}, nil)
 		require.NoError(t, err)
 		_, present := got["val"]
 		assert.False(t, present)
@@ -652,7 +669,7 @@ func TestUpdateItem(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
 		_, got, err := s.UpdateItem("test-table", map[string]any{"pk": map[string]any{"S": "new"}},
-			map[string]any{"x": map[string]any{"N": "1"}})
+			map[string]any{"x": map[string]any{"N": "1"}}, nil)
 		require.NoError(t, err)
 		assert.NotNil(t, got["pk"])
 		assert.NotNil(t, got["x"])
@@ -665,6 +682,7 @@ func TestUpdateItem(t *testing.T) {
 			"test-table",
 			map[string]any{"pk": map[string]any{"S": "new"}},
 			map[string]any{"x": map[string]any{"N": "1"}},
+			nil,
 		)
 		require.NoError(t, err)
 		assert.Nil(t, before)
@@ -672,14 +690,19 @@ func TestUpdateItem(t *testing.T) {
 
 	t.Run("error when table not found", func(t *testing.T) {
 		s := newTestStorage(t)
-		_, _, err := s.UpdateItem("no-table", map[string]any{"pk": map[string]any{"S": "k"}}, nil)
+		_, _, err := s.UpdateItem(
+			"no-table",
+			map[string]any{"pk": map[string]any{"S": "k"}},
+			nil,
+			nil,
+		)
 		assert.ErrorIs(t, err, ErrTableNotFound)
 	})
 
 	t.Run("error when key attribute missing", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		_, _, err := s.UpdateItem("test-table", map[string]any{}, nil)
+		_, _, err := s.UpdateItem("test-table", map[string]any{}, nil, nil)
 		assert.ErrorIs(t, err, ErrValidationException)
 	})
 
@@ -691,7 +714,7 @@ func TestUpdateItem(t *testing.T) {
 			return nil, errors.New("open failed")
 		}
 		_, _, err := s.UpdateItem("test-table", map[string]any{"pk": map[string]any{"S": "k1"}},
-			map[string]any{"val": map[string]any{"S": "x"}})
+			map[string]any{"val": map[string]any{"S": "x"}}, nil)
 		assert.Error(t, err)
 	})
 
@@ -708,7 +731,7 @@ func TestUpdateItem(t *testing.T) {
 			return io.ReadAll(r)
 		}
 		_, _, err := s.UpdateItem("test-table", map[string]any{"pk": map[string]any{"S": "k1"}},
-			map[string]any{"val": map[string]any{"S": "x"}})
+			map[string]any{"val": map[string]any{"S": "x"}}, nil)
 		assert.Error(t, err)
 	})
 
@@ -722,8 +745,117 @@ func TestUpdateItem(t *testing.T) {
 			"test-table",
 			map[string]any{"pk": map[string]any{"S": "k1"}},
 			nil,
+			nil,
 		)
 		assert.Error(t, err)
+	})
+}
+
+func TestConditionCheck(t *testing.T) {
+	item := map[string]any{"pk": map[string]any{"S": "k1"}, "v": map[string]any{"N": "1"}}
+
+	t.Run("PutItem: condition passes when item absent", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		cond := &ConditionCheck{Expr: "attribute_not_exists(pk)"}
+		_, err := s.PutItem("test-table", item, cond)
+		assert.NoError(t, err)
+	})
+
+	t.Run("PutItem: condition fails when item exists", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		mustPutItem(t, s, "test-table", item)
+		cond := &ConditionCheck{Expr: "attribute_not_exists(pk)"}
+		_, err := s.PutItem("test-table", item, cond)
+		assert.ErrorIs(t, err, ErrConditionalCheckFailed)
+	})
+
+	t.Run("PutItem: condition parse error returns ValidationException", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		cond := &ConditionCheck{
+			Expr:  "attribute_not_exists(#missing)",
+			Names: map[string]string{},
+		}
+		_, err := s.PutItem("test-table", item, cond)
+		assert.ErrorIs(t, err, ErrValidationException)
+	})
+
+	t.Run("DeleteItem: condition passes when item exists", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		mustPutItem(t, s, "test-table", item)
+		cond := &ConditionCheck{Expr: "attribute_exists(pk)"}
+		_, err := s.DeleteItem("test-table", map[string]any{"pk": map[string]any{"S": "k1"}}, cond)
+		assert.NoError(t, err)
+	})
+
+	t.Run("DeleteItem: condition fails when item absent", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		cond := &ConditionCheck{Expr: "attribute_exists(pk)"}
+		_, err := s.DeleteItem("test-table", map[string]any{"pk": map[string]any{"S": "k1"}}, cond)
+		assert.ErrorIs(t, err, ErrConditionalCheckFailed)
+	})
+
+	t.Run("DeleteItem: condition parse error returns ValidationException", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		cond := &ConditionCheck{
+			Expr:  "attribute_exists(#missing)",
+			Names: map[string]string{},
+		}
+		_, err := s.DeleteItem("test-table", map[string]any{"pk": map[string]any{"S": "k1"}}, cond)
+		assert.ErrorIs(t, err, ErrValidationException)
+	})
+
+	t.Run("UpdateItem: condition passes when version matches", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		mustPutItem(t, s, "test-table", item)
+		cond := &ConditionCheck{
+			Expr:   "v = :cur",
+			Values: map[string]any{":cur": map[string]any{"N": "1"}},
+		}
+		_, _, err := s.UpdateItem("test-table", map[string]any{"pk": map[string]any{"S": "k1"}},
+			map[string]any{"v": map[string]any{"N": "2"}}, cond)
+		assert.NoError(t, err)
+	})
+
+	t.Run("UpdateItem: condition fails when version mismatches", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		mustPutItem(t, s, "test-table", item)
+		cond := &ConditionCheck{
+			Expr:   "v = :cur",
+			Values: map[string]any{":cur": map[string]any{"N": "99"}},
+		}
+		_, _, err := s.UpdateItem("test-table", map[string]any{"pk": map[string]any{"S": "k1"}},
+			map[string]any{"v": map[string]any{"N": "2"}}, cond)
+		assert.ErrorIs(t, err, ErrConditionalCheckFailed)
+	})
+
+	t.Run("UpdateItem: condition against non-existent item uses empty map", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		cond := &ConditionCheck{Expr: "attribute_not_exists(pk)"}
+		_, _, err := s.UpdateItem("test-table", map[string]any{"pk": map[string]any{"S": "new"}},
+			map[string]any{"v": map[string]any{"N": "1"}}, cond)
+		assert.NoError(t, err)
+	})
+
+	t.Run("UpdateItem: condition parse error returns ValidationException", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		mustPutItem(t, s, "test-table", item)
+		cond := &ConditionCheck{
+			Expr:  "attribute_exists(#missing)",
+			Names: map[string]string{},
+		}
+		_, _, err := s.UpdateItem("test-table", map[string]any{"pk": map[string]any{"S": "k1"}},
+			map[string]any{"v": map[string]any{"N": "2"}}, cond)
+		assert.ErrorIs(t, err, ErrValidationException)
 	})
 }
 

@@ -249,6 +249,69 @@ func TestHandlePutItem(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assertErrorType(t, w, "ValidationException")
 	})
+
+	t.Run("ConditionExpression attribute_not_exists passes when item absent", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {"pk": {"S": "k1"}},
+			"ConditionExpression": "attribute_not_exists(pk)"
+		}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("ConditionExpression attribute_not_exists fails when item exists", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k1"}}}`).Code)
+		w := dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {"pk": {"S": "k1"}},
+			"ConditionExpression": "attribute_not_exists(pk)"
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ConditionalCheckFailedException")
+	})
+
+	t.Run("ConditionExpression attribute_exists passes when item exists", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"v":{"N":"1"}}}`).Code)
+		w := dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {"pk": {"S": "k1"},"v":{"N":"2"}},
+			"ConditionExpression": "attribute_exists(pk)"
+		}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("ConditionExpression with ExpressionAttributeNames", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {"pk": {"S": "k1"}},
+			"ConditionExpression": "attribute_not_exists(#p)",
+			"ExpressionAttributeNames": {"#p": "pk"}
+		}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("400 for invalid ConditionExpression", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {"pk": {"S": "k1"}},
+			"ConditionExpression": "attribute_not_exists(#missing)",
+			"ExpressionAttributeNames": {}
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ValidationException")
+	})
 }
 
 func TestHandleGetItem(t *testing.T) {
@@ -376,6 +439,44 @@ func TestHandleDeleteItem(t *testing.T) {
 		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
 		w := dynamo(t, ro, "DeleteItem",
 			`{"TableName":"test-table","Key":{"pk":{"S":"k1"}},"ReturnValues":"UPDATED_NEW"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ValidationException")
+	})
+
+	t.Run("ConditionExpression attribute_exists passes when item present", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k1"}}}`).Code)
+		w := dynamo(t, ro, "DeleteItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "k1"}},
+			"ConditionExpression": "attribute_exists(pk)"
+		}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("ConditionExpression attribute_exists fails when item absent", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "DeleteItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "k1"}},
+			"ConditionExpression": "attribute_exists(pk)"
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ConditionalCheckFailedException")
+	})
+
+	t.Run("400 for invalid ConditionExpression", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "DeleteItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "k1"}},
+			"ConditionExpression": "attribute_exists(#missing)",
+			"ExpressionAttributeNames": {}
+		}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assertErrorType(t, w, "ValidationException")
 	})
@@ -1005,6 +1106,67 @@ func TestHandleUpdateItem(t *testing.T) {
 		labels := attrs["labels"].(map[string]any)["SS"].([]any)
 		assert.ElementsMatch(t, []any{"x", "z"}, labels)
 	})
+
+	t.Run("ConditionExpression passes when condition met", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"v":{"N":"1"}}}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "k1"}},
+			"UpdateExpression": "SET v = :new",
+			"ConditionExpression": "#v = :cur",
+			"ExpressionAttributeNames": {"#v": "v"},
+			"ExpressionAttributeValues": {":cur": {"N": "1"}, ":new": {"N": "2"}}
+		}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("ConditionExpression fails when condition not met", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"v":{"N":"5"}}}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "k1"}},
+			"UpdateExpression": "SET v = :new",
+			"ConditionExpression": "#v = :cur",
+			"ExpressionAttributeNames": {"#v": "v"},
+			"ExpressionAttributeValues": {":cur": {"N": "1"}, ":new": {"N": "2"}}
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ConditionalCheckFailedException")
+	})
+
+	t.Run("ConditionExpression attribute_not_exists passes for new item", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "new-key"}},
+			"UpdateExpression": "SET v = :v",
+			"ConditionExpression": "attribute_not_exists(pk)",
+			"ExpressionAttributeValues": {":v": {"N": "1"}}
+		}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("400 for invalid ConditionExpression", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "k1"}},
+			"UpdateExpression": "SET v = :v",
+			"ConditionExpression": "attribute_exists(#missing)",
+			"ExpressionAttributeNames": {},
+			"ExpressionAttributeValues": {":v": {"N": "1"}}
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "ValidationException")
+	})
 }
 
 func TestHandleUpdateItem_InternalErrors(t *testing.T) {
@@ -1563,7 +1725,11 @@ func (m *mockStore) ListTables() ([]string, error) {
 	return m.listTablesFn()
 }
 
-func (m *mockStore) PutItem(tableName string, item map[string]any) (map[string]any, error) {
+func (m *mockStore) PutItem(
+	tableName string,
+	item map[string]any,
+	_ *ConditionCheck,
+) (map[string]any, error) {
 	return m.putItemFn(tableName, item)
 }
 
@@ -1571,7 +1737,11 @@ func (m *mockStore) GetItem(tableName string, key map[string]any) (map[string]an
 	return m.getItemFn(tableName, key)
 }
 
-func (m *mockStore) DeleteItem(tableName string, key map[string]any) (map[string]any, error) {
+func (m *mockStore) DeleteItem(
+	tableName string,
+	key map[string]any,
+	_ *ConditionCheck,
+) (map[string]any, error) {
 	return m.deleteItemFn(tableName, key)
 }
 
@@ -1583,6 +1753,7 @@ func (m *mockStore) UpdateItem(
 	tableName string,
 	key map[string]any,
 	updates map[string]any,
+	_ *ConditionCheck,
 ) (map[string]any, map[string]any, error) {
 	return m.updateItemFn(tableName, key, updates)
 }

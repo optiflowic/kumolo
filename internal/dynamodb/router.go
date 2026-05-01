@@ -370,14 +370,15 @@ type store interface {
 	DeleteTable(name string) error
 	DescribeTable(name string) (TableMetadata, error)
 	ListTables() ([]string, error)
-	PutItem(tableName string, item map[string]any) (map[string]any, error)
+	PutItem(tableName string, item map[string]any, cond *ConditionCheck) (map[string]any, error)
 	GetItem(tableName string, key map[string]any) (map[string]any, error)
-	DeleteItem(tableName string, key map[string]any) (map[string]any, error)
+	DeleteItem(tableName string, key map[string]any, cond *ConditionCheck) (map[string]any, error)
 	Scan(tableName string) ([]map[string]any, error)
 	UpdateItem(
 		tableName string,
 		key map[string]any,
 		updates map[string]any,
+		cond *ConditionCheck,
 	) (map[string]any, map[string]any, error)
 	Query(
 		tableName, hashKeyName string,
@@ -684,9 +685,12 @@ func (ro *Router) handleListTables(w http.ResponseWriter, body []byte) {
 
 func (ro *Router) handlePutItem(w http.ResponseWriter, body []byte) {
 	var req struct {
-		TableName    string         `json:"TableName"`
-		Item         map[string]any `json:"Item"`
-		ReturnValues string         `json:"ReturnValues"`
+		TableName                 string            `json:"TableName"`
+		Item                      map[string]any    `json:"Item"`
+		ReturnValues              string            `json:"ReturnValues"`
+		ConditionExpression       string            `json:"ConditionExpression"`
+		ExpressionAttributeNames  map[string]string `json:"ExpressionAttributeNames"`
+		ExpressionAttributeValues map[string]any    `json:"ExpressionAttributeValues"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
@@ -707,8 +711,22 @@ func (ro *Router) handlePutItem(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
-	old, err := ro.storage.PutItem(req.TableName, req.Item)
+	var cond *ConditionCheck
+	if req.ConditionExpression != "" {
+		cond = &ConditionCheck{
+			Expr:   req.ConditionExpression,
+			Names:  req.ExpressionAttributeNames,
+			Values: req.ExpressionAttributeValues,
+		}
+	}
+	old, err := ro.storage.PutItem(req.TableName, req.Item, cond)
 	if err != nil {
+		if errors.Is(err, ErrConditionalCheckFailed) {
+			slog.Debug("PutItem: condition check failed", "table", req.TableName)
+			writeError(w, http.StatusBadRequest, "ConditionalCheckFailedException",
+				"The conditional request failed")
+			return
+		}
 		if errors.Is(err, ErrTableNotFound) {
 			slog.Debug("PutItem: table not found", "table", req.TableName)
 			writeError(w, http.StatusBadRequest, "ResourceNotFoundException",
@@ -782,9 +800,12 @@ func (ro *Router) handleGetItem(w http.ResponseWriter, body []byte) {
 
 func (ro *Router) handleDeleteItem(w http.ResponseWriter, body []byte) {
 	var req struct {
-		TableName    string         `json:"TableName"`
-		Key          map[string]any `json:"Key"`
-		ReturnValues string         `json:"ReturnValues"`
+		TableName                 string            `json:"TableName"`
+		Key                       map[string]any    `json:"Key"`
+		ReturnValues              string            `json:"ReturnValues"`
+		ConditionExpression       string            `json:"ConditionExpression"`
+		ExpressionAttributeNames  map[string]string `json:"ExpressionAttributeNames"`
+		ExpressionAttributeValues map[string]any    `json:"ExpressionAttributeValues"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
@@ -805,8 +826,22 @@ func (ro *Router) handleDeleteItem(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
-	old, err := ro.storage.DeleteItem(req.TableName, req.Key)
+	var cond *ConditionCheck
+	if req.ConditionExpression != "" {
+		cond = &ConditionCheck{
+			Expr:   req.ConditionExpression,
+			Names:  req.ExpressionAttributeNames,
+			Values: req.ExpressionAttributeValues,
+		}
+	}
+	old, err := ro.storage.DeleteItem(req.TableName, req.Key, cond)
 	if err != nil {
+		if errors.Is(err, ErrConditionalCheckFailed) {
+			slog.Debug("DeleteItem: condition check failed", "table", req.TableName)
+			writeError(w, http.StatusBadRequest, "ConditionalCheckFailedException",
+				"The conditional request failed")
+			return
+		}
 		if errors.Is(err, ErrTableNotFound) {
 			slog.Debug("DeleteItem: table not found", "table", req.TableName)
 			writeError(w, http.StatusBadRequest, "ResourceNotFoundException",
@@ -900,6 +935,7 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 		TableName                 string            `json:"TableName"`
 		Key                       map[string]any    `json:"Key"`
 		UpdateExpression          string            `json:"UpdateExpression"`
+		ConditionExpression       string            `json:"ConditionExpression"`
 		ExpressionAttributeNames  map[string]string `json:"ExpressionAttributeNames"`
 		ExpressionAttributeValues map[string]any    `json:"ExpressionAttributeValues"`
 		ReturnValues              string            `json:"ReturnValues"`
@@ -961,8 +997,22 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 		updates = map[string]any{}
 	}
 
-	before, after, err := ro.storage.UpdateItem(req.TableName, req.Key, updates)
+	var cond *ConditionCheck
+	if req.ConditionExpression != "" {
+		cond = &ConditionCheck{
+			Expr:   req.ConditionExpression,
+			Names:  req.ExpressionAttributeNames,
+			Values: req.ExpressionAttributeValues,
+		}
+	}
+	before, after, err := ro.storage.UpdateItem(req.TableName, req.Key, updates, cond)
 	if err != nil {
+		if errors.Is(err, ErrConditionalCheckFailed) {
+			slog.Debug("UpdateItem: condition check failed", "table", req.TableName)
+			writeError(w, http.StatusBadRequest, "ConditionalCheckFailedException",
+				"The conditional request failed")
+			return
+		}
 		if errors.Is(err, ErrTableNotFound) {
 			slog.Debug("UpdateItem: table not found", "table", req.TableName)
 			writeError(w, http.StatusBadRequest, "ResourceNotFoundException",
