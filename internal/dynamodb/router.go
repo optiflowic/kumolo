@@ -170,7 +170,6 @@ func applyAddOp(current, delta any) (any, error) {
 				}
 				ce, ok := cm[setKey].([]any)
 				if !ok {
-					// attribute exists but has a different type (e.g. S instead of SS)
 					return nil, fmt.Errorf(
 						"ADD: existing attribute type mismatch: expected %s",
 						setKey,
