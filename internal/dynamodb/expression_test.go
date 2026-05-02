@@ -22,6 +22,7 @@ func TestEvalFilterExpr(t *testing.T) {
 			"k1": map[string]any{"S": "v1"},
 			"k2": map[string]any{"S": "v2"},
 		}},
+		"boolFlag": map[string]any{"BOOL": true},
 	}
 	names := map[string]string{
 		"#n":     "name",
@@ -137,7 +138,8 @@ func TestEvalFilterExpr(t *testing.T) {
 		{"size L list length", "size(#tags) = :two", true, false},
 		{"size SS set cardinality", "size(labels) = :three", true, false},
 		{"size M map count", "size(meta) = :two", true, false},
-		{"size missing attr returns 0", "size(nonExistent) = :zero", true, false},
+		{"size missing attr is null", "size(nonExistent) = :zero", false, false},
+		{"size BOOL type is error", "size(boolFlag) = :zero", false, true},
 		{"size comparison GT", "size(name) > :four", true, false},
 		{"size resolve error", "size(#missing) = :five", false, true},
 		// size() as right-hand operand (covers parseOperand SIZE branch)
@@ -536,31 +538,44 @@ func TestExprNodesDirect(t *testing.T) {
 	})
 
 	t.Run("dynamoAttrSize nil returns 0", func(t *testing.T) {
-		assert.Equal(t, 0, dynamoAttrSize(nil))
+		n, err := dynamoAttrSize(nil)
+		require.NoError(t, err)
+		assert.Equal(t, 0, n)
 	})
 
 	t.Run("dynamoAttrSize non-map returns 0", func(t *testing.T) {
-		assert.Equal(t, 0, dynamoAttrSize("not a map"))
+		n, err := dynamoAttrSize("not a map")
+		require.NoError(t, err)
+		assert.Equal(t, 0, n)
 	})
 
 	t.Run("dynamoAttrSize N type returns digit count", func(t *testing.T) {
-		assert.Equal(t, 2, dynamoAttrSize(map[string]any{"N": "42"}))
+		n, err := dynamoAttrSize(map[string]any{"N": "42"})
+		require.NoError(t, err)
+		assert.Equal(t, 2, n)
 	})
 
 	t.Run("dynamoAttrSize BS set returns count", func(t *testing.T) {
-		assert.Equal(t, 2, dynamoAttrSize(map[string]any{"BS": []any{"a", "b"}}))
+		n, err := dynamoAttrSize(map[string]any{"BS": []any{"a", "b"}})
+		require.NoError(t, err)
+		assert.Equal(t, 2, n)
 	})
 
 	t.Run("dynamoAttrSize B type returns byte count", func(t *testing.T) {
 		// base64("abc") = "YWJj" → 3 bytes
-		assert.Equal(t, 3, dynamoAttrSize(map[string]any{"B": "YWJj"}))
+		n, err := dynamoAttrSize(map[string]any{"B": "YWJj"})
+		require.NoError(t, err)
+		assert.Equal(t, 3, n)
 	})
 
 	t.Run("dynamoAttrSize B type invalid base64 returns 0", func(t *testing.T) {
-		assert.Equal(t, 0, dynamoAttrSize(map[string]any{"B": "!!!invalid!!!"}))
+		n, err := dynamoAttrSize(map[string]any{"B": "!!!invalid!!!"})
+		require.NoError(t, err)
+		assert.Equal(t, 0, n)
 	})
 
-	t.Run("dynamoAttrSize unknown type returns 0", func(t *testing.T) {
-		assert.Equal(t, 0, dynamoAttrSize(map[string]any{"BOOL": true}))
+	t.Run("dynamoAttrSize unknown type returns error", func(t *testing.T) {
+		_, err := dynamoAttrSize(map[string]any{"BOOL": true})
+		assert.Error(t, err)
 	})
 }

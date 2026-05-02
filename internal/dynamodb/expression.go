@@ -176,44 +176,48 @@ func (o sizeOperand) resolve(
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"N": fmt.Sprintf("%d", dynamoAttrSize(val))}, nil
+	if val == nil {
+		return nil, nil
+	}
+	n, err := dynamoAttrSize(val)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"N": fmt.Sprintf("%d", n)}, nil
 }
 
 func (o sizeOperand) attrName(_ map[string]string) (string, bool) { return "", false }
 
-func dynamoAttrSize(val any) int {
-	if val == nil {
-		return 0
-	}
+func dynamoAttrSize(val any) (int, error) {
 	m, ok := val.(map[string]any)
 	if !ok {
-		return 0
+		return 0, nil
 	}
 	if s, ok := m["S"].(string); ok {
-		return len(s)
+		return len(s), nil
 	}
 	if n, ok := m["N"].(string); ok {
-		return len(n)
+		return len(n), nil
 	}
 	if b, ok := m["B"].(string); ok {
 		decoded, err := base64.StdEncoding.DecodeString(b)
 		if err != nil {
-			return 0
+			return 0, nil
 		}
-		return len(decoded)
+		return len(decoded), nil
 	}
 	for _, setKey := range []string{"SS", "NS", "BS"} {
 		if elems, ok := m[setKey].([]any); ok {
-			return len(elems)
+			return len(elems), nil
 		}
 	}
 	if elems, ok := m["L"].([]any); ok {
-		return len(elems)
+		return len(elems), nil
 	}
 	if entries, ok := m["M"].(map[string]any); ok {
-		return len(entries)
+		return len(entries), nil
 	}
-	return 0
+	return 0, fmt.Errorf("size() does not support this attribute type")
 }
 
 type condNode interface {
