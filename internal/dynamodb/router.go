@@ -527,7 +527,7 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"target",
 			target,
 		)
-		writeError(w, http.StatusNotImplemented, "NotImplemented", "Operation not implemented: "+op)
+		writeError(w, http.StatusNotImplemented, "com.amazonaws.dynamodb.v20120810#NotImplemented", "Operation not implemented: "+op)
 	}
 }
 

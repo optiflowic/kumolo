@@ -533,7 +533,7 @@ func TestUnknownOperation(t *testing.T) {
 		ro := newTestRouter(t)
 		w := dynamo(t, ro, "UnknownOperation", `{}`)
 		assert.Equal(t, http.StatusNotImplemented, w.Code)
-		assertErrorType(t, w, "NotImplemented")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#NotImplemented")
 	})
 }
 
