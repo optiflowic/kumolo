@@ -164,6 +164,48 @@ func (o plainOperand) resolve(
 
 func (o plainOperand) attrName(_ map[string]string) (string, bool) { return o.name, true }
 
+type sizeOperand struct{ path exprOperand }
+
+func (o sizeOperand) resolve(
+	item map[string]any,
+	names map[string]string,
+	values map[string]any,
+) (any, error) {
+	val, err := o.path.resolve(item, names, values)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"N": fmt.Sprintf("%d", dynamoAttrSize(val))}, nil
+}
+
+func (o sizeOperand) attrName(_ map[string]string) (string, bool) { return "", false }
+
+// dynamoAttrSize returns the number of elements or bytes in a DynamoDB typed value.
+func dynamoAttrSize(val any) int {
+	if val == nil {
+		return 0
+	}
+	m, ok := val.(map[string]any)
+	if !ok {
+		return 0
+	}
+	if s, ok := m["S"].(string); ok {
+		return len(s)
+	}
+	for _, setKey := range []string{"SS", "NS", "BS"} {
+		if elems, ok := m[setKey].([]any); ok {
+			return len(elems)
+		}
+	}
+	if elems, ok := m["L"].([]any); ok {
+		return len(elems)
+	}
+	if entries, ok := m["M"].(map[string]any); ok {
+		return len(entries)
+	}
+	return 0
+}
+
 type condNode interface {
 	eval(item map[string]any, names map[string]string, values map[string]any) (bool, error)
 }
@@ -510,6 +552,9 @@ func (p *exprParser) parseAttrPath() (exprOperand, error) {
 }
 
 func (p *exprParser) parseOperand() (exprOperand, error) {
+	if p.isKeyword("SIZE") {
+		return p.parseSizeFunc()
+	}
 	t := p.peek()
 	switch t.kind {
 	case tokValRef:
@@ -584,9 +629,30 @@ func (p *exprParser) parseContainsFunc() (condNode, error) {
 	return containsCondNode{path, val}, nil
 }
 
+func (p *exprParser) parseSizeFunc() (exprOperand, error) {
+	p.consume() // consume "size"
+	if _, err := p.expectKind(tokLParen); err != nil {
+		return nil, err
+	}
+	path, err := p.parseAttrPath()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.expectKind(tokRParen); err != nil {
+		return nil, err
+	}
+	return sizeOperand{path}, nil
+}
+
 func (p *exprParser) parseComparison() (condNode, error) {
-	// LHS of any comparison or BETWEEN must be an attribute path, not a value ref.
-	left, err := p.parseAttrPath()
+	// LHS of any comparison or BETWEEN must be an attribute path or size(), not a value ref.
+	var left exprOperand
+	var err error
+	if p.isKeyword("SIZE") {
+		left, err = p.parseSizeFunc()
+	} else {
+		left, err = p.parseAttrPath()
+	}
 	if err != nil {
 		return nil, err
 	}
