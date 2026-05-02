@@ -559,4 +559,8 @@ func TestExprNodesDirect(t *testing.T) {
 	t.Run("dynamoAttrSize B type invalid base64 returns 0", func(t *testing.T) {
 		assert.Equal(t, 0, dynamoAttrSize(map[string]any{"B": "!!!invalid!!!"}))
 	})
+
+	t.Run("dynamoAttrSize unknown type returns 0", func(t *testing.T) {
+		assert.Equal(t, 0, dynamoAttrSize(map[string]any{"BOOL": true}))
+	})
 }
