@@ -282,7 +282,17 @@ func (s *Storage) ListTables() ([]string, error) {
 	return names, nil
 }
 
-func (s *Storage) PutItem(tableName string, item map[string]any) (map[string]any, error) {
+type ConditionCheck struct {
+	Expr   string
+	Names  map[string]string
+	Values map[string]any
+}
+
+func (s *Storage) PutItem(
+	tableName string,
+	item map[string]any,
+	cond *ConditionCheck,
+) (map[string]any, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	meta, err := s.readTableMeta(tableName)
@@ -300,6 +310,19 @@ func (s *Storage) PutItem(tableName string, item map[string]any) (map[string]any
 	old, err := readJSON[map[string]any](s, path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
+	}
+	if cond != nil && cond.Expr != "" {
+		current := old
+		if current == nil {
+			current = map[string]any{}
+		}
+		ok, err := evalFilterExpr(cond.Expr, current, cond.Names, cond.Values)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrValidationException, err)
+		}
+		if !ok {
+			return nil, ErrConditionalCheckFailed
+		}
 	}
 	return old, s.writeJSON(path, item)
 }
@@ -328,7 +351,11 @@ func (s *Storage) GetItem(tableName string, key map[string]any) (map[string]any,
 	return item, nil
 }
 
-func (s *Storage) DeleteItem(tableName string, key map[string]any) (map[string]any, error) {
+func (s *Storage) DeleteItem(
+	tableName string,
+	key map[string]any,
+	cond *ConditionCheck,
+) (map[string]any, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	meta, err := s.readTableMeta(tableName)
@@ -346,6 +373,19 @@ func (s *Storage) DeleteItem(tableName string, key map[string]any) (map[string]a
 	old, err := readJSON[map[string]any](s, path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
+	}
+	if cond != nil && cond.Expr != "" {
+		current := old
+		if current == nil {
+			current = map[string]any{}
+		}
+		ok, err := evalFilterExpr(cond.Expr, current, cond.Names, cond.Values)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrValidationException, err)
+		}
+		if !ok {
+			return nil, ErrConditionalCheckFailed
+		}
 	}
 	if err := s.removeFile(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -374,6 +414,7 @@ func (s *Storage) UpdateItem(
 	tableName string,
 	key map[string]any,
 	updates map[string]any,
+	cond *ConditionCheck,
 ) (map[string]any, map[string]any, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -404,6 +445,19 @@ func (s *Storage) UpdateItem(
 		before = make(map[string]any, len(item))
 		for k, v := range item {
 			before[k] = v
+		}
+	}
+	if cond != nil && cond.Expr != "" {
+		condItem := before
+		if condItem == nil {
+			condItem = map[string]any{}
+		}
+		ok, err := evalFilterExpr(cond.Expr, condItem, cond.Names, cond.Values)
+		if err != nil {
+			return nil, nil, fmt.Errorf("%w: %v", ErrValidationException, err)
+		}
+		if !ok {
+			return nil, nil, ErrConditionalCheckFailed
 		}
 	}
 	for attr, val := range updates {

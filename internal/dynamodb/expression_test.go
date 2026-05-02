@@ -17,6 +17,12 @@ func TestEvalFilterExpr(t *testing.T) {
 		"tags": map[string]any{
 			"L": []any{map[string]any{"S": "admin"}, map[string]any{"S": "user"}},
 		},
+		"labels": map[string]any{"SS": []any{"a", "b", "c"}},
+		"meta": map[string]any{"M": map[string]any{
+			"k1": map[string]any{"S": "v1"},
+			"k2": map[string]any{"S": "v2"},
+		}},
+		"boolFlag": map[string]any{"BOOL": true},
 	}
 	names := map[string]string{
 		"#n":     "name",
@@ -35,6 +41,11 @@ func TestEvalFilterExpr(t *testing.T) {
 		":ninety": map[string]any{"N": "90"},
 		":admin":  map[string]any{"S": "admin"},
 		":ice":    map[string]any{"S": "ice"},
+		":zero":   map[string]any{"N": "0"},
+		":two":    map[string]any{"N": "2"},
+		":three":  map[string]any{"N": "3"},
+		":four":   map[string]any{"N": "4"},
+		":five":   map[string]any{"N": "5"},
 	}
 
 	tests := []struct {
@@ -121,6 +132,21 @@ func TestEvalFilterExpr(t *testing.T) {
 		{"operand as plain attr", "name = age", false, false},
 		// cmpCondNode: dynamoValueCmp type mismatch → false, no error
 		{"lt type mismatch no error", "name < :thirty", false, false},
+		// size() function
+		{"size S string length", "size(name) = :five", true, false},
+		{"size S via name ref", "size(#n) = :five", true, false},
+		{"size L list length", "size(#tags) = :two", true, false},
+		{"size SS set cardinality", "size(labels) = :three", true, false},
+		{"size M map count", "size(meta) = :two", true, false},
+		{"size missing attr is null", "size(nonExistent) = :zero", false, false},
+		{"size BOOL type is error", "size(boolFlag) = :zero", false, true},
+		{"size comparison GT", "size(name) > :four", true, false},
+		{"size resolve error", "size(#missing) = :five", false, true},
+		// size() as right-hand operand (covers parseOperand SIZE branch)
+		{"size as rhs operand", "age = size(name)", false, false},
+		{"size in between lo", "age BETWEEN size(name) AND :forty", true, false},
+		// size() as BETWEEN LHS (covers parseComparison SIZE + BETWEEN path)
+		{"size as between lhs", "size(name) BETWEEN :four AND :five", true, false},
 	}
 
 	for _, tc := range tests {
@@ -279,7 +305,7 @@ func TestHandleScanWithFilterExpression(t *testing.T) {
 			"ExpressionAttributeValues":{":val":{"S":"x"}}
 		}`)
 		assert.Equal(t, 400, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 }
 
@@ -385,7 +411,7 @@ func TestHandleQueryWithFilterExpression(t *testing.T) {
 			"ExpressionAttributeValues":{":uid":{"S":"u1"},":val":{"S":"x"}}
 		}`)
 		assert.Equal(t, 400, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 }
 
@@ -446,6 +472,10 @@ func TestParseFilterExprErrors(t *testing.T) {
 		{"between hi operand error", "age BETWEEN :lo AND ("},
 		// parseComparison: right operand error
 		{"comparison right operand error", "age = ("},
+		// parseSizeFunc errors
+		{"size no lparen", "size name) = :five"},
+		{"size attr path error", "size(:val) = :five"},
+		{"size no rparen", "size(name = :five"},
 	}
 
 	for _, tc := range tests {
@@ -492,5 +522,60 @@ func TestExprNodesDirect(t *testing.T) {
 		_, err := node.eval(item, names, values)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "unknown operator")
+	})
+
+	t.Run("sizeOperand attrName returns empty string and false", func(t *testing.T) {
+		op := sizeOperand{path: plainOperand{"name"}}
+		got, ok := op.attrName(nil)
+		assert.Equal(t, "", got)
+		assert.False(t, ok)
+	})
+
+	t.Run("sizeOperand resolve propagates path error", func(t *testing.T) {
+		op := sizeOperand{path: nameRefOperand{"#missing"}}
+		_, err := op.resolve(map[string]any{}, map[string]string{}, map[string]any{})
+		require.Error(t, err)
+	})
+
+	t.Run("dynamoAttrSize nil returns 0", func(t *testing.T) {
+		n, err := dynamoAttrSize(nil)
+		require.NoError(t, err)
+		assert.Equal(t, 0, n)
+	})
+
+	t.Run("dynamoAttrSize non-map returns 0", func(t *testing.T) {
+		n, err := dynamoAttrSize("not a map")
+		require.NoError(t, err)
+		assert.Equal(t, 0, n)
+	})
+
+	t.Run("dynamoAttrSize N type returns digit count", func(t *testing.T) {
+		n, err := dynamoAttrSize(map[string]any{"N": "42"})
+		require.NoError(t, err)
+		assert.Equal(t, 2, n)
+	})
+
+	t.Run("dynamoAttrSize BS set returns count", func(t *testing.T) {
+		n, err := dynamoAttrSize(map[string]any{"BS": []any{"a", "b"}})
+		require.NoError(t, err)
+		assert.Equal(t, 2, n)
+	})
+
+	t.Run("dynamoAttrSize B type returns byte count", func(t *testing.T) {
+		// base64("abc") = "YWJj" → 3 bytes
+		n, err := dynamoAttrSize(map[string]any{"B": "YWJj"})
+		require.NoError(t, err)
+		assert.Equal(t, 3, n)
+	})
+
+	t.Run("dynamoAttrSize B type invalid base64 returns 0", func(t *testing.T) {
+		n, err := dynamoAttrSize(map[string]any{"B": "!!!invalid!!!"})
+		require.NoError(t, err)
+		assert.Equal(t, 0, n)
+	})
+
+	t.Run("dynamoAttrSize unknown type returns error", func(t *testing.T) {
+		_, err := dynamoAttrSize(map[string]any{"BOOL": true})
+		assert.Error(t, err)
 	})
 }

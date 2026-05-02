@@ -61,14 +61,14 @@ func TestHandleCreateTable(t *testing.T) {
 		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
 		w := dynamo(t, ro, "CreateTable", createTableBody)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ResourceInUseException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ResourceInUseException")
 	})
 
 	t.Run("400 for missing TableName", func(t *testing.T) {
 		ro := newTestRouter(t)
 		w := dynamo(t, ro, "CreateTable", `{}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
 	t.Run("400 for invalid JSON", func(t *testing.T) {
@@ -94,7 +94,7 @@ func TestHandleDeleteTable(t *testing.T) {
 		ro := newTestRouter(t)
 		w := dynamo(t, ro, "DeleteTable", `{"TableName": "no-such-table"}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ResourceNotFoundException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ResourceNotFoundException")
 	})
 
 	t.Run("400 for missing TableName", func(t *testing.T) {
@@ -126,7 +126,7 @@ func TestHandleDescribeTable(t *testing.T) {
 		ro := newTestRouter(t)
 		w := dynamo(t, ro, "DescribeTable", `{"TableName": "no-such-table"}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ResourceNotFoundException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ResourceNotFoundException")
 	})
 
 	t.Run("400 for missing TableName", func(t *testing.T) {
@@ -185,7 +185,7 @@ func TestHandlePutItem(t *testing.T) {
 		ro := newTestRouter(t)
 		w := dynamo(t, ro, "PutItem", putBody)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ResourceNotFoundException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ResourceNotFoundException")
 	})
 
 	t.Run("400 for missing key attribute", func(t *testing.T) {
@@ -193,7 +193,7 @@ func TestHandlePutItem(t *testing.T) {
 		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
 		w := dynamo(t, ro, "PutItem", `{"TableName": "test-table", "Item": {"other": {"S": "x"}}}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
 	t.Run("400 for missing TableName", func(t *testing.T) {
@@ -247,7 +247,70 @@ func TestHandlePutItem(t *testing.T) {
 		w := dynamo(t, ro, "PutItem",
 			`{"TableName":"test-table","Item":{"pk":{"S":"k1"}},"ReturnValues":"ALL_NEW"}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("ConditionExpression attribute_not_exists passes when item absent", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {"pk": {"S": "k1"}},
+			"ConditionExpression": "attribute_not_exists(pk)"
+		}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("ConditionExpression attribute_not_exists fails when item exists", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k1"}}}`).Code)
+		w := dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {"pk": {"S": "k1"}},
+			"ConditionExpression": "attribute_not_exists(pk)"
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ConditionalCheckFailedException")
+	})
+
+	t.Run("ConditionExpression attribute_exists passes when item exists", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"v":{"N":"1"}}}`).Code)
+		w := dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {"pk": {"S": "k1"},"v":{"N":"2"}},
+			"ConditionExpression": "attribute_exists(pk)"
+		}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("ConditionExpression with ExpressionAttributeNames", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {"pk": {"S": "k1"}},
+			"ConditionExpression": "attribute_not_exists(#p)",
+			"ExpressionAttributeNames": {"#p": "pk"}
+		}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("400 for invalid ConditionExpression", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {"pk": {"S": "k1"}},
+			"ConditionExpression": "attribute_not_exists(#missing)",
+			"ExpressionAttributeNames": {}
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 }
 
@@ -278,7 +341,7 @@ func TestHandleGetItem(t *testing.T) {
 		ro := newTestRouter(t)
 		w := dynamo(t, ro, "GetItem", `{"TableName":"no-such-table","Key":{"pk":{"S":"k"}}}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ResourceNotFoundException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ResourceNotFoundException")
 	})
 
 	t.Run("400 for missing key attribute", func(t *testing.T) {
@@ -286,7 +349,7 @@ func TestHandleGetItem(t *testing.T) {
 		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
 		w := dynamo(t, ro, "GetItem", `{"TableName":"test-table","Key":{}}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
 	t.Run("400 for missing TableName", func(t *testing.T) {
@@ -323,7 +386,7 @@ func TestHandleDeleteItem(t *testing.T) {
 		ro := newTestRouter(t)
 		w := dynamo(t, ro, "DeleteItem", `{"TableName":"no-such-table","Key":{"pk":{"S":"k"}}}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ResourceNotFoundException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ResourceNotFoundException")
 	})
 
 	t.Run("400 for missing key attribute", func(t *testing.T) {
@@ -331,7 +394,7 @@ func TestHandleDeleteItem(t *testing.T) {
 		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
 		w := dynamo(t, ro, "DeleteItem", `{"TableName":"test-table","Key":{}}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
 	t.Run("400 for missing TableName", func(t *testing.T) {
@@ -377,7 +440,45 @@ func TestHandleDeleteItem(t *testing.T) {
 		w := dynamo(t, ro, "DeleteItem",
 			`{"TableName":"test-table","Key":{"pk":{"S":"k1"}},"ReturnValues":"UPDATED_NEW"}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("ConditionExpression attribute_exists passes when item present", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k1"}}}`).Code)
+		w := dynamo(t, ro, "DeleteItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "k1"}},
+			"ConditionExpression": "attribute_exists(pk)"
+		}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("ConditionExpression attribute_exists fails when item absent", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "DeleteItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "k1"}},
+			"ConditionExpression": "attribute_exists(pk)"
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ConditionalCheckFailedException")
+	})
+
+	t.Run("400 for invalid ConditionExpression", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "DeleteItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "k1"}},
+			"ConditionExpression": "attribute_exists(#missing)",
+			"ExpressionAttributeNames": {}
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 }
 
@@ -411,7 +512,7 @@ func TestHandleScan(t *testing.T) {
 		ro := newTestRouter(t)
 		w := dynamo(t, ro, "Scan", `{"TableName":"no-such-table"}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ResourceNotFoundException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ResourceNotFoundException")
 	})
 
 	t.Run("400 for missing TableName", func(t *testing.T) {
@@ -432,7 +533,7 @@ func TestUnknownOperation(t *testing.T) {
 		ro := newTestRouter(t)
 		w := dynamo(t, ro, "UnknownOperation", `{}`)
 		assert.Equal(t, http.StatusNotImplemented, w.Code)
-		assertErrorType(t, w, "NotImplemented")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#NotImplemented")
 	})
 }
 
@@ -563,7 +664,7 @@ func TestHandleUpdateItem(t *testing.T) {
 		ro := newTestRouter(t)
 		w := dynamo(t, ro, "UpdateItem", `{"Key":{"pk":{"S":"k"}}}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
 	t.Run("400 for invalid JSON", func(t *testing.T) {
@@ -581,7 +682,7 @@ func TestHandleUpdateItem(t *testing.T) {
             "ExpressionAttributeValues":{":v":{"S":"1"}}
         }`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ResourceNotFoundException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ResourceNotFoundException")
 	})
 
 	t.Run("400 for invalid UpdateExpression missing placeholder", func(t *testing.T) {
@@ -593,7 +694,7 @@ func TestHandleUpdateItem(t *testing.T) {
             "UpdateExpression":"SET x = :missing"
         }`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
 	t.Run("400 for unsupported AttributeUpdates Action", func(t *testing.T) {
@@ -605,7 +706,7 @@ func TestHandleUpdateItem(t *testing.T) {
             "AttributeUpdates":{"x":{"Action":"ADD","Value":{"N":"1"}}}
         }`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
 	t.Run("400 for missing key attribute", func(t *testing.T) {
@@ -618,7 +719,7 @@ func TestHandleUpdateItem(t *testing.T) {
             "ExpressionAttributeValues":{":v":{"S":"1"}}
         }`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
 	t.Run("returns old item when ReturnValues is ALL_OLD", func(t *testing.T) {
@@ -787,7 +888,7 @@ func TestHandleUpdateItem(t *testing.T) {
 		w := dynamo(t, ro, "UpdateItem",
 			`{"TableName":"test-table","Key":{"pk":{"S":"k1"}},"ReturnValues":"INVALID"}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 		var body map[string]any
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 		assert.Contains(t, body["message"], "INVALID")
@@ -939,7 +1040,7 @@ func TestHandleUpdateItem(t *testing.T) {
             "UpdateExpression": "ADD cnt :missing"
         }`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
 	t.Run("ADD decrements Number attribute with negative delta", func(t *testing.T) {
@@ -1004,6 +1105,67 @@ func TestHandleUpdateItem(t *testing.T) {
 		attrs := resp["Attributes"].(map[string]any)
 		labels := attrs["labels"].(map[string]any)["SS"].([]any)
 		assert.ElementsMatch(t, []any{"x", "z"}, labels)
+	})
+
+	t.Run("ConditionExpression passes when condition met", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"v":{"N":"1"}}}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "k1"}},
+			"UpdateExpression": "SET v = :new",
+			"ConditionExpression": "#v = :cur",
+			"ExpressionAttributeNames": {"#v": "v"},
+			"ExpressionAttributeValues": {":cur": {"N": "1"}, ":new": {"N": "2"}}
+		}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("ConditionExpression fails when condition not met", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"v":{"N":"5"}}}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "k1"}},
+			"UpdateExpression": "SET v = :new",
+			"ConditionExpression": "#v = :cur",
+			"ExpressionAttributeNames": {"#v": "v"},
+			"ExpressionAttributeValues": {":cur": {"N": "1"}, ":new": {"N": "2"}}
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ConditionalCheckFailedException")
+	})
+
+	t.Run("ConditionExpression attribute_not_exists passes for new item", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "new-key"}},
+			"UpdateExpression": "SET v = :v",
+			"ConditionExpression": "attribute_not_exists(pk)",
+			"ExpressionAttributeValues": {":v": {"N": "1"}}
+		}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("400 for invalid ConditionExpression", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "k1"}},
+			"UpdateExpression": "SET v = :v",
+			"ConditionExpression": "attribute_exists(#missing)",
+			"ExpressionAttributeNames": {},
+			"ExpressionAttributeValues": {":v": {"N": "1"}}
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 }
 
@@ -1164,7 +1326,7 @@ func TestHandleQuery(t *testing.T) {
             "ExpressionAttributeValues": {":pk":{"S":"p1"},":v":{"S":"x"}}
         }`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
 	t.Run("400 for begins_with with no comma (malformed)", func(t *testing.T) {
@@ -1176,7 +1338,7 @@ func TestHandleQuery(t *testing.T) {
             "ExpressionAttributeValues": {":pk":{"S":"p1"}}
         }`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
 	t.Run("400 for begins_with with missing ExpressionAttributeNames", func(t *testing.T) {
@@ -1188,7 +1350,7 @@ func TestHandleQuery(t *testing.T) {
             "ExpressionAttributeValues": {":pk":{"S":"p1"},":pfx":{"S":"x"}}
         }`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
 	t.Run("400 for begins_with with missing ExpressionAttributeValues", func(t *testing.T) {
@@ -1200,7 +1362,7 @@ func TestHandleQuery(t *testing.T) {
             "ExpressionAttributeValues": {":pk":{"S":"p1"}}
         }`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
 	t.Run("400 for BETWEEN with missing lower bound", func(t *testing.T) {
@@ -1212,7 +1374,7 @@ func TestHandleQuery(t *testing.T) {
             "ExpressionAttributeValues": {":pk":{"S":"p1"},":hi":{"S":"z"}}
         }`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
 	t.Run("400 for BETWEEN with missing upper bound", func(t *testing.T) {
@@ -1224,7 +1386,7 @@ func TestHandleQuery(t *testing.T) {
             "ExpressionAttributeValues": {":pk":{"S":"p1"},":lo":{"S":"a"}}
         }`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
 	t.Run("400 for BETWEEN with missing ExpressionAttributeNames", func(t *testing.T) {
@@ -1236,7 +1398,7 @@ func TestHandleQuery(t *testing.T) {
             "ExpressionAttributeValues": {":pk":{"S":"p1"},":lo":{"S":"a"},":hi":{"S":"z"}}
         }`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
 	t.Run("400 for comparison with missing ExpressionAttributeNames", func(t *testing.T) {
@@ -1248,7 +1410,7 @@ func TestHandleQuery(t *testing.T) {
             "ExpressionAttributeValues": {":pk":{"S":"p1"},":sk":{"S":"s1"}}
         }`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
 	t.Run("400 for comparison with unsupported operator", func(t *testing.T) {
@@ -1260,7 +1422,7 @@ func TestHandleQuery(t *testing.T) {
             "ExpressionAttributeValues": {":pk":{"S":"p1"},":sk":{"S":"s1"}}
         }`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
 	t.Run("400 for comparison with missing ExpressionAttributeValues", func(t *testing.T) {
@@ -1272,7 +1434,7 @@ func TestHandleQuery(t *testing.T) {
             "ExpressionAttributeValues": {":pk":{"S":"p1"}}
         }`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
 	t.Run("filters by sort key using ExpressionAttributeNames alias", func(t *testing.T) {
@@ -1315,14 +1477,14 @@ func TestHandleQuery(t *testing.T) {
             "ExpressionAttributeValues": {":pk": {"S": "a"}}
         }`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
 	t.Run("400 for missing KeyConditionExpression", func(t *testing.T) {
 		ro := newTestRouter(t)
 		w := dynamo(t, ro, "Query", `{"TableName":"test-table"}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
 	t.Run("400 for unsupported KeyConditionExpression", func(t *testing.T) {
@@ -1333,7 +1495,7 @@ func TestHandleQuery(t *testing.T) {
             "ExpressionAttributeValues": {":v": {"S": "a"}}
         }`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
 	t.Run("400 for missing table", func(t *testing.T) {
@@ -1344,7 +1506,7 @@ func TestHandleQuery(t *testing.T) {
             "ExpressionAttributeValues": {":pk": {"S": "a"}}
         }`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ResourceNotFoundException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ResourceNotFoundException")
 	})
 
 	t.Run("400 for invalid JSON", func(t *testing.T) {
@@ -1362,7 +1524,7 @@ func TestHandleQuery(t *testing.T) {
             "ExpressionAttributeValues": {":pk": {"S": "a"}}
         }`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
 	t.Run("400 for missing ExpressionAttributeValues entry", func(t *testing.T) {
@@ -1373,7 +1535,7 @@ func TestHandleQuery(t *testing.T) {
             "KeyConditionExpression": "pk = :pk"
         }`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 }
 
@@ -1563,7 +1725,11 @@ func (m *mockStore) ListTables() ([]string, error) {
 	return m.listTablesFn()
 }
 
-func (m *mockStore) PutItem(tableName string, item map[string]any) (map[string]any, error) {
+func (m *mockStore) PutItem(
+	tableName string,
+	item map[string]any,
+	_ *ConditionCheck,
+) (map[string]any, error) {
 	return m.putItemFn(tableName, item)
 }
 
@@ -1571,7 +1737,11 @@ func (m *mockStore) GetItem(tableName string, key map[string]any) (map[string]an
 	return m.getItemFn(tableName, key)
 }
 
-func (m *mockStore) DeleteItem(tableName string, key map[string]any) (map[string]any, error) {
+func (m *mockStore) DeleteItem(
+	tableName string,
+	key map[string]any,
+	_ *ConditionCheck,
+) (map[string]any, error) {
 	return m.deleteItemFn(tableName, key)
 }
 
@@ -1583,6 +1753,7 @@ func (m *mockStore) UpdateItem(
 	tableName string,
 	key map[string]any,
 	updates map[string]any,
+	_ *ConditionCheck,
 ) (map[string]any, map[string]any, error) {
 	return m.updateItemFn(tableName, key, updates)
 }
@@ -1766,7 +1937,12 @@ func (f *failResponseWriter) Write(_ []byte) (int, error) {
 func TestWriteErrorEncoderFail(t *testing.T) {
 	t.Run("writeError logs warn when encode fails", func(t *testing.T) {
 		w := &failResponseWriter{}
-		writeError(w, http.StatusBadRequest, "ValidationException", "test")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"test",
+		)
 		assert.Equal(t, http.StatusBadRequest, w.code)
 	})
 
@@ -1814,7 +1990,7 @@ func TestHandleBatchGetItem(t *testing.T) {
 		ro := newTestRouter(t)
 		w := dynamo(t, ro, "BatchGetItem", `{"RequestItems": {}}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
 	t.Run("400 for invalid JSON", func(t *testing.T) {
@@ -1829,7 +2005,7 @@ func TestHandleBatchGetItem(t *testing.T) {
 			"RequestItems": {"no-such-table": {"Keys": [{"pk": {"S": "k"}}]}}
 		}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ResourceNotFoundException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ResourceNotFoundException")
 	})
 
 	t.Run("400 for missing key attribute", func(t *testing.T) {
@@ -1839,7 +2015,7 @@ func TestHandleBatchGetItem(t *testing.T) {
 			"RequestItems": {"tbl": {"Keys": [{}]}}
 		}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
 	t.Run("500 when BatchGetItems fails with unexpected error", func(t *testing.T) {
@@ -1916,7 +2092,7 @@ func TestHandleBatchWriteItem(t *testing.T) {
 		ro := newTestRouter(t)
 		w := dynamo(t, ro, "BatchWriteItem", `{"RequestItems": {}}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
 	t.Run("400 for invalid JSON", func(t *testing.T) {
@@ -1931,7 +2107,7 @@ func TestHandleBatchWriteItem(t *testing.T) {
 			"RequestItems": {"no-such-table": [{"PutRequest": {"Item": {"pk": {"S": "k"}}}}]}
 		}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ResourceNotFoundException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ResourceNotFoundException")
 	})
 
 	t.Run("400 for missing key attribute in put", func(t *testing.T) {
@@ -1941,7 +2117,7 @@ func TestHandleBatchWriteItem(t *testing.T) {
 			"RequestItems": {"tbl": [{"PutRequest": {"Item": {}}}]}
 		}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
 	t.Run("500 when BatchWriteItems fails with unexpected error", func(t *testing.T) {
@@ -1995,7 +2171,7 @@ func TestHandleUpdateTimeToLive(t *testing.T) {
 		ro := newTestRouter(t)
 		w := dynamo(t, ro, "UpdateTimeToLive", `{}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
 	t.Run("400 for table not found", func(t *testing.T) {
@@ -2005,7 +2181,7 @@ func TestHandleUpdateTimeToLive(t *testing.T) {
 			"TimeToLiveSpecification": {"AttributeName": "exp", "Enabled": true}
 		}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ResourceNotFoundException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ResourceNotFoundException")
 	})
 
 	t.Run("400 for invalid JSON", func(t *testing.T) {
@@ -2058,14 +2234,14 @@ func TestHandleDescribeTimeToLive(t *testing.T) {
 		ro := newTestRouter(t)
 		w := dynamo(t, ro, "DescribeTimeToLive", `{}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
 	t.Run("400 for table not found", func(t *testing.T) {
 		ro := newTestRouter(t)
 		w := dynamo(t, ro, "DescribeTimeToLive", `{"TableName": "no-such"}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ResourceNotFoundException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ResourceNotFoundException")
 	})
 
 	t.Run("400 for invalid JSON", func(t *testing.T) {
@@ -2187,14 +2363,14 @@ func TestHandleUpdateTable(t *testing.T) {
 		ro := newTestRouter(t)
 		w := dynamo(t, ro, "UpdateTable", `{}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
 	t.Run("400 for table not found", func(t *testing.T) {
 		ro := newTestRouter(t)
 		w := dynamo(t, ro, "UpdateTable", `{"TableName": "no-such"}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ResourceNotFoundException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ResourceNotFoundException")
 	})
 
 	t.Run("400 for invalid JSON", func(t *testing.T) {
@@ -2236,14 +2412,14 @@ func TestHandleTagResource(t *testing.T) {
 		ro := newTestRouter(t)
 		w := dynamo(t, ro, "TagResource", `{}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
 	t.Run("400 for invalid ARN", func(t *testing.T) {
 		ro := newTestRouter(t)
 		w := dynamo(t, ro, "TagResource", `{"ResourceArn":"invalid","Tags":[]}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ResourceNotFoundException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ResourceNotFoundException")
 	})
 
 	t.Run("400 for invalid JSON", func(t *testing.T) {
@@ -2281,14 +2457,14 @@ func TestHandleUntagResource(t *testing.T) {
 		ro := newTestRouter(t)
 		w := dynamo(t, ro, "UntagResource", `{}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
 	t.Run("400 for invalid ARN", func(t *testing.T) {
 		ro := newTestRouter(t)
 		w := dynamo(t, ro, "UntagResource", `{"ResourceArn":"invalid","TagKeys":[]}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ResourceNotFoundException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ResourceNotFoundException")
 	})
 
 	t.Run("400 for invalid JSON", func(t *testing.T) {
@@ -2342,14 +2518,14 @@ func TestHandleListTagsOfResource(t *testing.T) {
 		ro := newTestRouter(t)
 		w := dynamo(t, ro, "ListTagsOfResource", `{}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
 	t.Run("400 for invalid ARN", func(t *testing.T) {
 		ro := newTestRouter(t)
 		w := dynamo(t, ro, "ListTagsOfResource", `{"ResourceArn":"invalid"}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ResourceNotFoundException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ResourceNotFoundException")
 	})
 
 	t.Run("400 for invalid JSON", func(t *testing.T) {
@@ -2539,7 +2715,7 @@ func TestHandleUpdateItem_ApplyOpErrors(t *testing.T) {
             "ExpressionAttributeValues": {":delta": {"N": "1"}}
         }`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
 	t.Run("400 when DELETE applied to incompatible existing attribute type", func(t *testing.T) {
@@ -2554,6 +2730,6 @@ func TestHandleUpdateItem_ApplyOpErrors(t *testing.T) {
             "ExpressionAttributeValues": {":rem": {"SS": ["a"]}}
         }`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 }

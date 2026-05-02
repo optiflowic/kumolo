@@ -8,9 +8,10 @@ import (
 )
 
 var (
-	ErrTableNotFound       = errors.New("table not found")
-	ErrTableAlreadyExists  = errors.New("table already exists")
-	ErrValidationException = errors.New("validation error")
+	ErrTableNotFound          = errors.New("table not found")
+	ErrTableAlreadyExists     = errors.New("table already exists")
+	ErrValidationException    = errors.New("validation error")
+	ErrConditionalCheckFailed = errors.New("conditional check failed")
 )
 
 type errResponse struct {
