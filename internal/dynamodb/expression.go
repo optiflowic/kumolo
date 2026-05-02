@@ -1,6 +1,7 @@
 package dynamodb
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -180,7 +181,6 @@ func (o sizeOperand) resolve(
 
 func (o sizeOperand) attrName(_ map[string]string) (string, bool) { return "", false }
 
-// dynamoAttrSize returns the number of elements or bytes in a DynamoDB typed value.
 func dynamoAttrSize(val any) int {
 	if val == nil {
 		return 0
@@ -191,6 +191,16 @@ func dynamoAttrSize(val any) int {
 	}
 	if s, ok := m["S"].(string); ok {
 		return len(s)
+	}
+	if n, ok := m["N"].(string); ok {
+		return len(n)
+	}
+	if b, ok := m["B"].(string); ok {
+		decoded, err := base64.StdEncoding.DecodeString(b)
+		if err != nil {
+			return 0
+		}
+		return len(decoded)
 	}
 	for _, setKey := range []string{"SS", "NS", "BS"} {
 		if elems, ok := m[setKey].([]any); ok {
@@ -630,7 +640,7 @@ func (p *exprParser) parseContainsFunc() (condNode, error) {
 }
 
 func (p *exprParser) parseSizeFunc() (exprOperand, error) {
-	p.consume() // consume "size"
+	p.consume()
 	if _, err := p.expectKind(tokLParen); err != nil {
 		return nil, err
 	}

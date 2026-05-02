@@ -790,9 +790,12 @@ func (ro *Router) handlePutItem(w http.ResponseWriter, body []byte) {
 	if err != nil {
 		if errors.Is(err, ErrConditionalCheckFailed) {
 			slog.Debug("PutItem: condition check failed", "table", req.TableName)
-			writeError(w, http.StatusBadRequest,
+			writeError(
+				w,
+				http.StatusBadRequest,
 				"com.amazonaws.dynamodb.v20120810#ConditionalCheckFailedException",
-				"The conditional request failed")
+				"The conditional request failed",
+			)
 			return
 		}
 		if errors.Is(err, ErrTableNotFound) {
@@ -944,9 +947,12 @@ func (ro *Router) handleDeleteItem(w http.ResponseWriter, body []byte) {
 	if err != nil {
 		if errors.Is(err, ErrConditionalCheckFailed) {
 			slog.Debug("DeleteItem: condition check failed", "table", req.TableName)
-			writeError(w, http.StatusBadRequest,
+			writeError(
+				w,
+				http.StatusBadRequest,
 				"com.amazonaws.dynamodb.v20120810#ConditionalCheckFailedException",
-				"The conditional request failed")
+				"The conditional request failed",
+			)
 			return
 		}
 		if errors.Is(err, ErrTableNotFound) {
@@ -1163,9 +1169,12 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 	if err != nil {
 		if errors.Is(err, ErrConditionalCheckFailed) {
 			slog.Debug("UpdateItem: condition check failed", "table", req.TableName)
-			writeError(w, http.StatusBadRequest,
+			writeError(
+				w,
+				http.StatusBadRequest,
 				"com.amazonaws.dynamodb.v20120810#ConditionalCheckFailedException",
-				"The conditional request failed")
+				"The conditional request failed",
+			)
 			return
 		}
 		if errors.Is(err, ErrTableNotFound) {
@@ -1259,8 +1268,12 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 		return
 	}
 	if req.KeyConditionExpression == "" {
-		writeError(w, http.StatusBadRequest, "com.amazonaws.dynamodb.v20120810#ValidationException",
-			"KeyConditionExpression is required")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"KeyConditionExpression is required",
+		)
 		return
 	}
 

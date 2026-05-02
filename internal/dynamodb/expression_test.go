@@ -143,6 +143,8 @@ func TestEvalFilterExpr(t *testing.T) {
 		// size() as right-hand operand (covers parseOperand SIZE branch)
 		{"size as rhs operand", "age = size(name)", false, false},
 		{"size in between lo", "age BETWEEN size(name) AND :forty", true, false},
+		// size() as BETWEEN LHS (covers parseComparison SIZE + BETWEEN path)
+		{"size as between lhs", "size(name) BETWEEN :four AND :five", true, false},
 	}
 
 	for _, tc := range tests {
@@ -541,11 +543,20 @@ func TestExprNodesDirect(t *testing.T) {
 		assert.Equal(t, 0, dynamoAttrSize("not a map"))
 	})
 
-	t.Run("dynamoAttrSize N type returns 0", func(t *testing.T) {
-		assert.Equal(t, 0, dynamoAttrSize(map[string]any{"N": "42"}))
+	t.Run("dynamoAttrSize N type returns digit count", func(t *testing.T) {
+		assert.Equal(t, 2, dynamoAttrSize(map[string]any{"N": "42"}))
 	})
 
 	t.Run("dynamoAttrSize BS set returns count", func(t *testing.T) {
 		assert.Equal(t, 2, dynamoAttrSize(map[string]any{"BS": []any{"a", "b"}}))
+	})
+
+	t.Run("dynamoAttrSize B type returns byte count", func(t *testing.T) {
+		// base64("abc") = "YWJj" → 3 bytes
+		assert.Equal(t, 3, dynamoAttrSize(map[string]any{"B": "YWJj"}))
+	})
+
+	t.Run("dynamoAttrSize B type invalid base64 returns 0", func(t *testing.T) {
+		assert.Equal(t, 0, dynamoAttrSize(map[string]any{"B": "!!!invalid!!!"}))
 	})
 }
