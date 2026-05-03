@@ -757,8 +757,6 @@ type projSegment struct {
 
 // projNode is a node in a projection tree.
 // isLeaf means "take the whole value at this level" (no further descent).
-// A node with children means descend into a Map type.
-// A node with listIdxs means descend into a List type.
 type projNode struct {
 	isLeaf   bool // set when this path was projected as a whole (e.g. "address")
 	children map[string]*projNode
@@ -802,8 +800,6 @@ func (n *projNode) addPath(segs []projSegment) {
 	}
 }
 
-// parseProjPath parses one comma-separated projection token (e.g. "address.city",
-// "tags[0]", "#n") into a slice of projSegments.
 func parseProjPath(token string, attrNames map[string]string) ([]projSegment, error) {
 	var segs []projSegment
 	dotParts := strings.Split(token, ".")
@@ -829,7 +825,6 @@ func parseProjPath(token string, attrNames map[string]string) ([]projSegment, er
 		if lb == -1 {
 			continue
 		}
-		// Parse trailing [n][m]... indexes
 		rest := part[lb:]
 		for len(rest) > 0 {
 			if rest[0] != '[' {
@@ -851,7 +846,6 @@ func parseProjPath(token string, attrNames map[string]string) ([]projSegment, er
 	return segs, nil
 }
 
-// projectValue applies a projNode to a single DynamoDB-typed attribute value.
 func projectValue(val any, n *projNode) any {
 	if len(n.children) == 0 && len(n.listIdxs) == 0 {
 		return val
@@ -861,7 +855,6 @@ func projectValue(val any, n *projNode) any {
 		return val
 	}
 	if len(n.children) > 0 {
-		// Descend into Map type {"M": {...}}
 		mRaw, ok := valMap["M"]
 		if !ok {
 			return val
@@ -880,7 +873,6 @@ func projectValue(val any, n *projNode) any {
 		}
 		return map[string]any{"M": projected}
 	}
-	// Descend into List type {"L": [...]}
 	lRaw, ok := valMap["L"]
 	if !ok {
 		return val
@@ -904,8 +896,6 @@ func projectValue(val any, n *projNode) any {
 	return map[string]any{"L": projected}
 }
 
-// parsedProjection holds a pre-compiled projection tree built from a
-// ProjectionExpression string.
 type parsedProjection struct {
 	root *projNode
 }
@@ -941,7 +931,6 @@ func (p *parsedProjection) apply(item map[string]any) map[string]any {
 	return result
 }
 
-// applyProjection filters a single item to the attributes in projExpr.
 // Returns the item unchanged when projExpr is empty.
 func applyProjection(
 	item map[string]any,
@@ -958,7 +947,6 @@ func applyProjection(
 	return parsed.apply(item), nil
 }
 
-// applyProjectionToItems applies applyProjection to each item in a slice.
 // Returns the slice unchanged when projExpr is empty.
 func applyProjectionToItems(
 	items []map[string]any,
