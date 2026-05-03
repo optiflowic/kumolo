@@ -795,6 +795,26 @@ func TestApplyProjection(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("broad path takes precedence over sub-path (broad first)", func(t *testing.T) {
+		// AWS: "address, address.city" returns full address, not just city
+		got, err := applyProjection(item, "address, address.city", noNames)
+		require.NoError(t, err)
+		addr := got["address"].(map[string]any)
+		inner := addr["M"].(map[string]any)
+		assert.NotNil(t, inner["city"])
+		assert.NotNil(t, inner["zip"]) // zip must be present because address is whole
+	})
+
+	t.Run("broad path takes precedence over sub-path (sub first)", func(t *testing.T) {
+		// Order in the expression should not matter
+		got, err := applyProjection(item, "address.city, address", noNames)
+		require.NoError(t, err)
+		addr := got["address"].(map[string]any)
+		inner := addr["M"].(map[string]any)
+		assert.NotNil(t, inner["city"])
+		assert.NotNil(t, inner["zip"])
+	})
+
 	t.Run("expression with empty comma tokens skips blanks", func(t *testing.T) {
 		got, err := applyProjection(item, "pk,,name", noNames)
 		require.NoError(t, err)

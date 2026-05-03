@@ -756,16 +756,25 @@ type projSegment struct {
 }
 
 // projNode is a node in a projection tree.
-// A leaf (children == nil, listIdxs == nil) means "take the whole value".
+// isLeaf means "take the whole value at this level" (no further descent).
 // A node with children means descend into a Map type.
 // A node with listIdxs means descend into a List type.
 type projNode struct {
+	isLeaf   bool // set when this path was projected as a whole (e.g. "address")
 	children map[string]*projNode
 	listIdxs map[int]*projNode
 }
 
 func (n *projNode) addPath(segs []projSegment) {
+	if n.isLeaf {
+		// Already projecting the whole value; sub-paths are redundant.
+		return
+	}
 	if len(segs) == 0 {
+		// This path projects the whole value; discard any narrower sub-paths.
+		n.isLeaf = true
+		n.children = nil
+		n.listIdxs = nil
 		return
 	}
 	seg := segs[0]
@@ -844,7 +853,7 @@ func parseProjPath(token string, attrNames map[string]string) ([]projSegment, er
 
 // projectValue applies a projNode to a single DynamoDB-typed attribute value.
 func projectValue(val any, n *projNode) any {
-	if len(n.children) == 0 && len(n.listIdxs) == 0 {
+	if n.isLeaf || (len(n.children) == 0 && len(n.listIdxs) == 0) {
 		return val
 	}
 	valMap, ok := val.(map[string]any)
