@@ -815,6 +815,24 @@ func TestApplyProjection(t *testing.T) {
 		assert.NotNil(t, inner["zip"])
 	})
 
+	t.Run("list broad path takes precedence over list index (broad first)", func(t *testing.T) {
+		// "tags, tags[0]" → full tags list returned
+		got, err := applyProjection(item, "tags, tags[0]", noNames)
+		require.NoError(t, err)
+		tags := got["tags"].(map[string]any)
+		elems := tags["L"].([]any)
+		assert.Len(t, elems, 3) // all elements, not just index 0
+	})
+
+	t.Run("list broad path takes precedence over list index (index first)", func(t *testing.T) {
+		// Order should not matter
+		got, err := applyProjection(item, "tags[0], tags", noNames)
+		require.NoError(t, err)
+		tags := got["tags"].(map[string]any)
+		elems := tags["L"].([]any)
+		assert.Len(t, elems, 3)
+	})
+
 	t.Run("expression with empty comma tokens skips blanks", func(t *testing.T) {
 		got, err := applyProjection(item, "pk,,name", noNames)
 		require.NoError(t, err)

@@ -853,7 +853,7 @@ func parseProjPath(token string, attrNames map[string]string) ([]projSegment, er
 
 // projectValue applies a projNode to a single DynamoDB-typed attribute value.
 func projectValue(val any, n *projNode) any {
-	if n.isLeaf || (len(n.children) == 0 && len(n.listIdxs) == 0) {
+	if len(n.children) == 0 && len(n.listIdxs) == 0 {
 		return val
 	}
 	valMap, ok := val.(map[string]any)
