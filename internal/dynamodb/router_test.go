@@ -2700,6 +2700,290 @@ func TestApplyDeleteOp(t *testing.T) {
 	})
 }
 
+// --- ProjectionExpression tests ---
+
+const projTableBody = `{
+	"TableName": "proj-table",
+	"KeySchema": [{"AttributeName": "pk", "KeyType": "HASH"}],
+	"AttributeDefinitions": [{"AttributeName": "pk", "AttributeType": "S"}],
+	"BillingMode": "PAY_PER_REQUEST"
+}`
+
+// projItem is the JSON for a rich test item with nested map and list.
+const projItemJSON = `{
+	"TableName": "proj-table",
+	"Item": {
+		"pk":   {"S": "k1"},
+		"name": {"S": "Alice"},
+		"age":  {"N": "30"},
+		"address": {"M": {
+			"city": {"S": "NYC"},
+			"zip":  {"S": "10001"}
+		}},
+		"tags": {"L": [
+			{"S": "admin"},
+			{"S": "user"},
+			{"S": "viewer"}
+		]}
+	}
+}`
+
+func setupProjTable(t *testing.T) *Router {
+	t.Helper()
+	ro := newTestRouter(t)
+	require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", projTableBody).Code)
+	require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem", projItemJSON).Code)
+	return ro
+}
+
+func TestHandleGetItem_ProjectionExpression(t *testing.T) {
+	t.Run("projects single attribute", func(t *testing.T) {
+		ro := setupProjTable(t)
+		w := dynamo(t, ro, "GetItem", `{
+			"TableName": "proj-table",
+			"Key": {"pk": {"S": "k1"}},
+			"ProjectionExpression": "name"
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		item := resp["Item"].(map[string]any)
+		assert.Equal(t, map[string]any{"S": "Alice"}, item["name"])
+		assert.Nil(t, item["pk"])
+		assert.Nil(t, item["age"])
+	})
+
+	t.Run("projects multiple attributes", func(t *testing.T) {
+		ro := setupProjTable(t)
+		w := dynamo(t, ro, "GetItem", `{
+			"TableName": "proj-table",
+			"Key": {"pk": {"S": "k1"}},
+			"ProjectionExpression": "pk, age"
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		item := resp["Item"].(map[string]any)
+		assert.NotNil(t, item["pk"])
+		assert.NotNil(t, item["age"])
+		assert.Nil(t, item["name"])
+	})
+
+	t.Run("projects nested map attribute", func(t *testing.T) {
+		ro := setupProjTable(t)
+		w := dynamo(t, ro, "GetItem", `{
+			"TableName": "proj-table",
+			"Key": {"pk": {"S": "k1"}},
+			"ProjectionExpression": "address.city"
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		item := resp["Item"].(map[string]any)
+		addr := item["address"].(map[string]any)
+		inner := addr["M"].(map[string]any)
+		assert.Equal(t, map[string]any{"S": "NYC"}, inner["city"])
+		assert.Nil(t, inner["zip"])
+	})
+
+	t.Run("projects list index", func(t *testing.T) {
+		ro := setupProjTable(t)
+		w := dynamo(t, ro, "GetItem", `{
+			"TableName": "proj-table",
+			"Key": {"pk": {"S": "k1"}},
+			"ProjectionExpression": "tags[0]"
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		item := resp["Item"].(map[string]any)
+		tags := item["tags"].(map[string]any)
+		elems := tags["L"].([]any)
+		assert.Len(t, elems, 1)
+		assert.Equal(t, map[string]any{"S": "admin"}, elems[0])
+	})
+
+	t.Run("uses ExpressionAttributeNames alias", func(t *testing.T) {
+		ro := setupProjTable(t)
+		w := dynamo(t, ro, "GetItem", `{
+			"TableName": "proj-table",
+			"Key": {"pk": {"S": "k1"}},
+			"ProjectionExpression": "#n",
+			"ExpressionAttributeNames": {"#n": "name"}
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		item := resp["Item"].(map[string]any)
+		assert.Equal(t, map[string]any{"S": "Alice"}, item["name"])
+	})
+
+	t.Run("400 for invalid ProjectionExpression", func(t *testing.T) {
+		ro := setupProjTable(t)
+		w := dynamo(t, ro, "GetItem", `{
+			"TableName": "proj-table",
+			"Key": {"pk": {"S": "k1"}},
+			"ProjectionExpression": "#missing"
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("no projection when item not found", func(t *testing.T) {
+		ro := setupProjTable(t)
+		w := dynamo(t, ro, "GetItem", `{
+			"TableName": "proj-table",
+			"Key": {"pk": {"S": "no-such-key"}},
+			"ProjectionExpression": "name"
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Nil(t, resp["Item"])
+	})
+}
+
+func TestHandleScan_ProjectionExpression(t *testing.T) {
+	t.Run("projects scanned items", func(t *testing.T) {
+		ro := setupProjTable(t)
+		w := dynamo(t, ro, "Scan", `{
+			"TableName": "proj-table",
+			"ProjectionExpression": "pk, name"
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		items := resp["Items"].([]any)
+		require.Len(t, items, 1)
+		item := items[0].(map[string]any)
+		assert.NotNil(t, item["pk"])
+		assert.NotNil(t, item["name"])
+		assert.Nil(t, item["age"])
+		assert.Nil(t, item["address"])
+	})
+
+	t.Run("projection applied after FilterExpression", func(t *testing.T) {
+		ro := setupProjTable(t)
+		w := dynamo(t, ro, "Scan", `{
+			"TableName": "proj-table",
+			"FilterExpression": "age = :a",
+			"ExpressionAttributeValues": {":a": {"N": "30"}},
+			"ProjectionExpression": "name"
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		items := resp["Items"].([]any)
+		require.Len(t, items, 1)
+		item := items[0].(map[string]any)
+		assert.NotNil(t, item["name"])
+		assert.Nil(t, item["age"])
+	})
+
+	t.Run("400 for invalid ProjectionExpression", func(t *testing.T) {
+		ro := setupProjTable(t)
+		w := dynamo(t, ro, "Scan", `{
+			"TableName": "proj-table",
+			"ProjectionExpression": "#missing"
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+}
+
+func TestHandleQuery_ProjectionExpression(t *testing.T) {
+	t.Run("projects queried items", func(t *testing.T) {
+		ro := setupProjTable(t)
+		w := dynamo(t, ro, "Query", `{
+			"TableName": "proj-table",
+			"KeyConditionExpression": "pk = :k",
+			"ExpressionAttributeValues": {":k": {"S": "k1"}},
+			"ProjectionExpression": "name, age"
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		items := resp["Items"].([]any)
+		require.Len(t, items, 1)
+		item := items[0].(map[string]any)
+		assert.NotNil(t, item["name"])
+		assert.NotNil(t, item["age"])
+		assert.Nil(t, item["pk"])
+		assert.Nil(t, item["address"])
+	})
+
+	t.Run("400 for invalid ProjectionExpression", func(t *testing.T) {
+		ro := setupProjTable(t)
+		w := dynamo(t, ro, "Query", `{
+			"TableName": "proj-table",
+			"KeyConditionExpression": "pk = :k",
+			"ExpressionAttributeValues": {":k": {"S": "k1"}},
+			"ProjectionExpression": "#missing"
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+}
+
+func TestHandleBatchGetItem_ProjectionExpression(t *testing.T) {
+	t.Run("projects items per table", func(t *testing.T) {
+		ro := setupProjTable(t)
+		w := dynamo(t, ro, "BatchGetItem", `{
+			"RequestItems": {
+				"proj-table": {
+					"Keys": [{"pk": {"S": "k1"}}],
+					"ProjectionExpression": "name"
+				}
+			}
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		responses := resp["Responses"].(map[string]any)
+		items := responses["proj-table"].([]any)
+		require.Len(t, items, 1)
+		item := items[0].(map[string]any)
+		assert.Equal(t, map[string]any{"S": "Alice"}, item["name"])
+		assert.Nil(t, item["pk"])
+		assert.Nil(t, item["age"])
+	})
+
+	t.Run("uses ExpressionAttributeNames alias", func(t *testing.T) {
+		ro := setupProjTable(t)
+		w := dynamo(t, ro, "BatchGetItem", `{
+			"RequestItems": {
+				"proj-table": {
+					"Keys": [{"pk": {"S": "k1"}}],
+					"ProjectionExpression": "#n",
+					"ExpressionAttributeNames": {"#n": "name"}
+				}
+			}
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		responses := resp["Responses"].(map[string]any)
+		items := responses["proj-table"].([]any)
+		require.Len(t, items, 1)
+		item := items[0].(map[string]any)
+		assert.Equal(t, map[string]any{"S": "Alice"}, item["name"])
+	})
+
+	t.Run("400 for invalid ProjectionExpression", func(t *testing.T) {
+		ro := setupProjTable(t)
+		w := dynamo(t, ro, "BatchGetItem", `{
+			"RequestItems": {
+				"proj-table": {
+					"Keys": [{"pk": {"S": "k1"}}],
+					"ProjectionExpression": "#missing"
+				}
+			}
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+}
+
 // --- storage.UpdateItem error paths via router ---
 
 func TestHandleUpdateItem_ApplyOpErrors(t *testing.T) {

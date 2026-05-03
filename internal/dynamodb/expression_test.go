@@ -579,3 +579,307 @@ func TestExprNodesDirect(t *testing.T) {
 		assert.Error(t, err)
 	})
 }
+
+func TestParseProjPath(t *testing.T) {
+	noNames := map[string]string{}
+	named := map[string]string{"#n": "name", "#a": "address"}
+
+	cases := []struct {
+		name      string
+		token     string
+		attrNames map[string]string
+		want      []projSegment
+		wantErr   bool
+	}{
+		{
+			name:      "simple attribute",
+			token:     "name",
+			attrNames: noNames,
+			want:      []projSegment{{attr: "name", index: -1}},
+		},
+		{
+			name:      "name alias",
+			token:     "#n",
+			attrNames: named,
+			want:      []projSegment{{attr: "name", index: -1}},
+		},
+		{
+			name:      "nested map path",
+			token:     "address.city",
+			attrNames: noNames,
+			want:      []projSegment{{attr: "address", index: -1}, {attr: "city", index: -1}},
+		},
+		{
+			name:      "nested alias path",
+			token:     "#a.city",
+			attrNames: named,
+			want:      []projSegment{{attr: "address", index: -1}, {attr: "city", index: -1}},
+		},
+		{
+			name:      "list index",
+			token:     "tags[0]",
+			attrNames: noNames,
+			want:      []projSegment{{attr: "tags", index: -1}, {attr: "", index: 0}},
+		},
+		{
+			name:      "list index nested",
+			token:     "tags[0].label",
+			attrNames: noNames,
+			want: []projSegment{
+				{attr: "tags", index: -1},
+				{attr: "", index: 0},
+				{attr: "label", index: -1},
+			},
+		},
+		{
+			name:      "multiple list indexes",
+			token:     "matrix[1][2]",
+			attrNames: noNames,
+			want: []projSegment{
+				{attr: "matrix", index: -1},
+				{attr: "", index: 1},
+				{attr: "", index: 2},
+			},
+		},
+		{
+			name:      "starts with bracket",
+			token:     "[0]",
+			attrNames: noNames,
+			wantErr:   true,
+		},
+		{
+			name:      "missing closing bracket",
+			token:     "tags[0",
+			attrNames: noNames,
+			wantErr:   true,
+		},
+		{
+			name:      "unknown name alias",
+			token:     "#missing",
+			attrNames: noNames,
+			wantErr:   true,
+		},
+		{
+			name:      "empty dot segment",
+			token:     "a..b",
+			attrNames: noNames,
+			wantErr:   true,
+		},
+		{
+			name:      "unexpected char after closing bracket",
+			token:     "tags[0]x",
+			attrNames: noNames,
+			wantErr:   true,
+		},
+		{
+			name:      "negative list index",
+			token:     "tags[-1]",
+			attrNames: noNames,
+			wantErr:   true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseProjPath(tc.token, tc.attrNames)
+			if tc.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestApplyProjection(t *testing.T) {
+	item := map[string]any{
+		"pk":   map[string]any{"S": "key1"},
+		"name": map[string]any{"S": "Alice"},
+		"age":  map[string]any{"N": "30"},
+		"address": map[string]any{"M": map[string]any{
+			"city": map[string]any{"S": "NYC"},
+			"zip":  map[string]any{"S": "10001"},
+		}},
+		"tags": map[string]any{
+			"L": []any{
+				map[string]any{"S": "admin"},
+				map[string]any{"S": "user"},
+				map[string]any{"S": "viewer"},
+			},
+		},
+	}
+	noNames := map[string]string{}
+
+	t.Run("empty expression returns item unchanged", func(t *testing.T) {
+		got, err := applyProjection(item, "", noNames)
+		require.NoError(t, err)
+		assert.Equal(t, item, got)
+	})
+
+	t.Run("single attribute", func(t *testing.T) {
+		got, err := applyProjection(item, "name", noNames)
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{
+			"name": map[string]any{"S": "Alice"},
+		}, got)
+	})
+
+	t.Run("multiple top-level attributes", func(t *testing.T) {
+		got, err := applyProjection(item, "pk, age", noNames)
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{
+			"pk":  map[string]any{"S": "key1"},
+			"age": map[string]any{"N": "30"},
+		}, got)
+	})
+
+	t.Run("nested map attribute", func(t *testing.T) {
+		got, err := applyProjection(item, "address.city", noNames)
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{
+			"address": map[string]any{"M": map[string]any{
+				"city": map[string]any{"S": "NYC"},
+			}},
+		}, got)
+	})
+
+	t.Run("multiple nested map attributes merged", func(t *testing.T) {
+		got, err := applyProjection(item, "address.city, address.zip", noNames)
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{
+			"address": map[string]any{"M": map[string]any{
+				"city": map[string]any{"S": "NYC"},
+				"zip":  map[string]any{"S": "10001"},
+			}},
+		}, got)
+	})
+
+	t.Run("list index", func(t *testing.T) {
+		got, err := applyProjection(item, "tags[0]", noNames)
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{
+			"tags": map[string]any{"L": []any{
+				map[string]any{"S": "admin"},
+			}},
+		}, got)
+	})
+
+	t.Run("multiple list indexes in order", func(t *testing.T) {
+		got, err := applyProjection(item, "tags[2], tags[0]", noNames)
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{
+			"tags": map[string]any{"L": []any{
+				map[string]any{"S": "admin"},
+				map[string]any{"S": "viewer"},
+			}},
+		}, got)
+	})
+
+	t.Run("name alias", func(t *testing.T) {
+		names := map[string]string{"#n": "name"}
+		got, err := applyProjection(item, "#n", names)
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{
+			"name": map[string]any{"S": "Alice"},
+		}, got)
+	})
+
+	t.Run("missing attribute silently omitted", func(t *testing.T) {
+		got, err := applyProjection(item, "nonexistent", noNames)
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{}, got)
+	})
+
+	t.Run("invalid expression returns error", func(t *testing.T) {
+		_, err := applyProjection(item, "#missing", noNames)
+		assert.Error(t, err)
+	})
+
+	t.Run("expression with empty comma tokens skips blanks", func(t *testing.T) {
+		got, err := applyProjection(item, "pk,,name", noNames)
+		require.NoError(t, err)
+		assert.NotNil(t, got["pk"])
+		assert.NotNil(t, got["name"])
+	})
+
+	t.Run("nested key missing in map is silently omitted", func(t *testing.T) {
+		got, err := applyProjection(item, "address.nonexistent", noNames)
+		require.NoError(t, err)
+		addr := got["address"].(map[string]any)
+		inner := addr["M"].(map[string]any)
+		assert.Empty(t, inner)
+	})
+
+	t.Run("nested path into non-map type returns outer value unchanged", func(t *testing.T) {
+		// "name" is {"S":"Alice"}, projecting "name.sub" should return name unchanged
+		got, err := applyProjection(item, "name.sub", noNames)
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{"S": "Alice"}, got["name"])
+	})
+
+	t.Run("list index into non-list type returns attribute unchanged", func(t *testing.T) {
+		// "name" is {"S":"Alice"}, projecting "name[0]" should return name unchanged
+		got, err := applyProjection(item, "name[0]", noNames)
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{"S": "Alice"}, got["name"])
+	})
+
+	t.Run("out-of-range list index silently omitted", func(t *testing.T) {
+		got, err := applyProjection(item, "tags[99]", noNames)
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{
+			"tags": map[string]any{"L": []any(nil)},
+		}, got)
+	})
+}
+
+func TestProjectValue(t *testing.T) {
+	t.Run("returns value unchanged when node is leaf", func(t *testing.T) {
+		n := &projNode{}
+		val := map[string]any{"S": "hello"}
+		assert.Equal(t, val, projectValue(val, n))
+	})
+
+	t.Run("returns value unchanged when val is not a map", func(t *testing.T) {
+		// defensive: non-map[string]any value with children node
+		n := &projNode{children: map[string]*projNode{"x": {}}}
+		assert.Equal(t, "not-a-map", projectValue("not-a-map", n))
+	})
+
+	t.Run("returns value unchanged when M key is not a map", func(t *testing.T) {
+		// defensive: M value is not map[string]any
+		n := &projNode{children: map[string]*projNode{"x": {}}}
+		val := map[string]any{"M": "not-a-map"}
+		assert.Equal(t, val, projectValue(val, n))
+	})
+
+	t.Run("returns value unchanged when L key is not a slice", func(t *testing.T) {
+		// defensive: L value is not []any
+		n := &projNode{listIdxs: map[int]*projNode{0: {}}}
+		val := map[string]any{"L": "not-a-slice"}
+		assert.Equal(t, val, projectValue(val, n))
+	})
+}
+
+func TestApplyProjectionToItems(t *testing.T) {
+	items := []map[string]any{
+		{"pk": map[string]any{"S": "a"}, "val": map[string]any{"N": "1"}},
+		{"pk": map[string]any{"S": "b"}, "val": map[string]any{"N": "2"}},
+	}
+	noNames := map[string]string{}
+
+	t.Run("empty expression returns items unchanged", func(t *testing.T) {
+		got, err := applyProjectionToItems(items, "", noNames)
+		require.NoError(t, err)
+		assert.Equal(t, items, got)
+	})
+
+	t.Run("projects each item", func(t *testing.T) {
+		got, err := applyProjectionToItems(items, "pk", noNames)
+		require.NoError(t, err)
+		assert.Equal(t, []map[string]any{
+			{"pk": map[string]any{"S": "a"}},
+			{"pk": map[string]any{"S": "b"}},
+		}, got)
+	})
+}

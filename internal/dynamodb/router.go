@@ -837,8 +837,10 @@ func (ro *Router) handlePutItem(w http.ResponseWriter, body []byte) {
 
 func (ro *Router) handleGetItem(w http.ResponseWriter, body []byte) {
 	var req struct {
-		TableName string         `json:"TableName"`
-		Key       map[string]any `json:"Key"`
+		TableName                string            `json:"TableName"`
+		Key                      map[string]any    `json:"Key"`
+		ProjectionExpression     string            `json:"ProjectionExpression"`
+		ExpressionAttributeNames map[string]string `json:"ExpressionAttributeNames"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(
@@ -888,6 +890,19 @@ func (ro *Router) handleGetItem(w http.ResponseWriter, body []byte) {
 			"internal server error",
 		)
 		return
+	}
+	if item != nil && req.ProjectionExpression != "" {
+		item, err = applyProjection(item, req.ProjectionExpression, req.ExpressionAttributeNames)
+		if err != nil {
+			slog.Debug("GetItem: invalid ProjectionExpression", "table", req.TableName, "err", err)
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				err.Error(),
+			)
+			return
+		}
 	}
 	slog.Debug("got DynamoDB item", "table", req.TableName)
 	resp := map[string]any{}
@@ -996,6 +1011,7 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 	var req struct {
 		TableName                 string            `json:"TableName"`
 		FilterExpression          string            `json:"FilterExpression"`
+		ProjectionExpression      string            `json:"ProjectionExpression"`
 		ExpressionAttributeNames  map[string]string `json:"ExpressionAttributeNames"`
 		ExpressionAttributeValues map[string]any    `json:"ExpressionAttributeValues"`
 	}
@@ -1051,6 +1067,26 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 		)
 		if err != nil {
 			slog.Debug("Scan: invalid FilterExpression", "table", req.TableName, "err", err)
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				err.Error(),
+			)
+			return
+		}
+		if items == nil {
+			items = []map[string]any{}
+		}
+	}
+	if req.ProjectionExpression != "" {
+		items, err = applyProjectionToItems(
+			items,
+			req.ProjectionExpression,
+			req.ExpressionAttributeNames,
+		)
+		if err != nil {
+			slog.Debug("Scan: invalid ProjectionExpression", "table", req.TableName, "err", err)
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -1246,6 +1282,7 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 		TableName                 string            `json:"TableName"`
 		KeyConditionExpression    string            `json:"KeyConditionExpression"`
 		FilterExpression          string            `json:"FilterExpression"`
+		ProjectionExpression      string            `json:"ProjectionExpression"`
 		ExpressionAttributeNames  map[string]string `json:"ExpressionAttributeNames"`
 		ExpressionAttributeValues map[string]any    `json:"ExpressionAttributeValues"`
 	}
@@ -1339,6 +1376,26 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 			items = []map[string]any{}
 		}
 	}
+	if req.ProjectionExpression != "" {
+		items, err = applyProjectionToItems(
+			items,
+			req.ProjectionExpression,
+			req.ExpressionAttributeNames,
+		)
+		if err != nil {
+			slog.Debug("Query: invalid ProjectionExpression", "table", req.TableName, "err", err)
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				err.Error(),
+			)
+			return
+		}
+		if items == nil {
+			items = []map[string]any{}
+		}
+	}
 	slog.Debug("queried DynamoDB table", "table", req.TableName, "count", len(items))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"Items":        items,
@@ -1350,7 +1407,9 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 func (ro *Router) handleBatchGetItem(w http.ResponseWriter, body []byte) {
 	var req struct {
 		RequestItems map[string]struct {
-			Keys []map[string]any `json:"Keys"`
+			Keys                     []map[string]any  `json:"Keys"`
+			ProjectionExpression     string            `json:"ProjectionExpression"`
+			ExpressionAttributeNames map[string]string `json:"ExpressionAttributeNames"`
 		} `json:"RequestItems"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
@@ -1406,6 +1465,32 @@ func (ro *Router) handleBatchGetItem(w http.ResponseWriter, body []byte) {
 		}
 		if items == nil {
 			items = []map[string]any{}
+		}
+		if tableReq.ProjectionExpression != "" {
+			items, err = applyProjectionToItems(
+				items,
+				tableReq.ProjectionExpression,
+				tableReq.ExpressionAttributeNames,
+			)
+			if err != nil {
+				slog.Debug(
+					"BatchGetItem: invalid ProjectionExpression",
+					"table",
+					tableName,
+					"err",
+					err,
+				)
+				writeError(
+					w,
+					http.StatusBadRequest,
+					"com.amazonaws.dynamodb.v20120810#ValidationException",
+					err.Error(),
+				)
+				return
+			}
+			if items == nil {
+				items = []map[string]any{}
+			}
 		}
 		responses[tableName] = items
 	}
