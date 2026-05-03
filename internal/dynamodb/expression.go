@@ -4,6 +4,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -744,6 +746,225 @@ func evalFilterExpr(
 		return false, err
 	}
 	return node.eval(item, attrNames, attrValues)
+}
+
+// projSegment is one step in a DynamoDB document path.
+// Either an attribute name step (attr != "") or a list-index step (attr == "").
+type projSegment struct {
+	attr  string
+	index int // only meaningful when attr == ""
+}
+
+// projNode is a node in a projection tree.
+// isLeaf means "take the whole value at this level" (no further descent).
+type projNode struct {
+	isLeaf   bool // set when this path was projected as a whole (e.g. "address")
+	children map[string]*projNode
+	listIdxs map[int]*projNode
+}
+
+func (n *projNode) addPath(segs []projSegment) {
+	if n.isLeaf {
+		// Already projecting the whole value; sub-paths are redundant.
+		return
+	}
+	if len(segs) == 0 {
+		// This path projects the whole value; discard any narrower sub-paths.
+		n.isLeaf = true
+		n.children = nil
+		n.listIdxs = nil
+		return
+	}
+	seg := segs[0]
+	rest := segs[1:]
+	if seg.attr != "" {
+		if n.children == nil {
+			n.children = map[string]*projNode{}
+		}
+		child, ok := n.children[seg.attr]
+		if !ok {
+			child = &projNode{}
+			n.children[seg.attr] = child
+		}
+		child.addPath(rest)
+	} else {
+		if n.listIdxs == nil {
+			n.listIdxs = map[int]*projNode{}
+		}
+		child, ok := n.listIdxs[seg.index]
+		if !ok {
+			child = &projNode{}
+			n.listIdxs[seg.index] = child
+		}
+		child.addPath(rest)
+	}
+}
+
+func parseProjPath(token string, attrNames map[string]string) ([]projSegment, error) {
+	var segs []projSegment
+	dotParts := strings.Split(token, ".")
+	for _, part := range dotParts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			return nil, fmt.Errorf("invalid projection path %q", token)
+		}
+		lb := strings.Index(part, "[")
+		if lb == 0 {
+			return nil, fmt.Errorf("invalid projection path %q: attribute name expected", token)
+		}
+		// Attribute name before the first '[' (or the whole part if no '[')
+		attrToken := part
+		if lb > 0 {
+			attrToken = part[:lb]
+		}
+		name, err := resolveAttrName(attrToken, attrNames)
+		if err != nil {
+			return nil, fmt.Errorf("projection expression: %w", err)
+		}
+		segs = append(segs, projSegment{attr: name})
+		if lb == -1 {
+			continue
+		}
+		rest := part[lb:]
+		for len(rest) > 0 {
+			if rest[0] != '[' {
+				return nil, fmt.Errorf("invalid projection path %q: unexpected %q", token, rest)
+			}
+			rb := strings.Index(rest, "]")
+			if rb == -1 {
+				return nil, fmt.Errorf("invalid projection path %q: missing ']'", token)
+			}
+			idxStr := rest[1:rb]
+			n, err := strconv.Atoi(idxStr)
+			if err != nil || n < 0 {
+				return nil, fmt.Errorf("invalid list index %q in projection path %q", idxStr, token)
+			}
+			segs = append(segs, projSegment{attr: "", index: n})
+			rest = rest[rb+1:]
+		}
+	}
+	return segs, nil
+}
+
+func projectValue(val any, n *projNode) any {
+	if len(n.children) == 0 && len(n.listIdxs) == 0 {
+		return val
+	}
+	valMap, ok := val.(map[string]any)
+	if !ok {
+		return val
+	}
+	if len(n.children) > 0 {
+		mRaw, ok := valMap["M"]
+		if !ok {
+			return val
+		}
+		mMap, ok := mRaw.(map[string]any)
+		if !ok {
+			return val
+		}
+		projected := make(map[string]any, len(n.children))
+		for attrName, child := range n.children {
+			subVal, ok := mMap[attrName]
+			if !ok {
+				continue
+			}
+			projected[attrName] = projectValue(subVal, child)
+		}
+		return map[string]any{"M": projected}
+	}
+	lRaw, ok := valMap["L"]
+	if !ok {
+		return val
+	}
+	lSlice, ok := lRaw.([]any)
+	if !ok {
+		return val
+	}
+	idxs := make([]int, 0, len(n.listIdxs))
+	for idx := range n.listIdxs {
+		idxs = append(idxs, idx)
+	}
+	sort.Ints(idxs)
+	projected := make([]any, 0, len(idxs))
+	for _, idx := range idxs {
+		if idx >= len(lSlice) {
+			continue
+		}
+		projected = append(projected, projectValue(lSlice[idx], n.listIdxs[idx]))
+	}
+	return map[string]any{"L": projected}
+}
+
+type parsedProjection struct {
+	root *projNode
+}
+
+func parseProjectionExpression(
+	expr string,
+	attrNames map[string]string,
+) (*parsedProjection, error) {
+	root := &projNode{}
+	for _, tok := range strings.Split(expr, ",") {
+		tok = strings.TrimSpace(tok)
+		if tok == "" {
+			continue
+		}
+		segs, err := parseProjPath(tok, attrNames)
+		if err != nil {
+			return nil, err
+		}
+		root.addPath(segs)
+	}
+	return &parsedProjection{root: root}, nil
+}
+
+func (p *parsedProjection) apply(item map[string]any) map[string]any {
+	result := make(map[string]any, len(p.root.children))
+	for attrName, child := range p.root.children {
+		val, ok := item[attrName]
+		if !ok {
+			continue
+		}
+		result[attrName] = projectValue(val, child)
+	}
+	return result
+}
+
+// Returns the item unchanged when projExpr is empty.
+func applyProjection(
+	item map[string]any,
+	projExpr string,
+	attrNames map[string]string,
+) (map[string]any, error) {
+	if projExpr == "" {
+		return item, nil
+	}
+	parsed, err := parseProjectionExpression(projExpr, attrNames)
+	if err != nil {
+		return nil, err
+	}
+	return parsed.apply(item), nil
+}
+
+// Returns the slice unchanged when projExpr is empty.
+func applyProjectionToItems(
+	items []map[string]any,
+	projExpr string,
+	attrNames map[string]string,
+) ([]map[string]any, error) {
+	if projExpr == "" {
+		return items, nil
+	}
+	parsed, err := parseProjectionExpression(projExpr, attrNames)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]map[string]any, len(items))
+	for i, item := range items {
+		result[i] = parsed.apply(item)
+	}
+	return result, nil
 }
 
 // applyFilterExpression filters items by a DynamoDB filter expression.
