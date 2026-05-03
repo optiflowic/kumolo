@@ -595,40 +595,40 @@ func TestParseProjPath(t *testing.T) {
 			name:      "simple attribute",
 			token:     "name",
 			attrNames: noNames,
-			want:      []projSegment{{attr: "name", index: -1}},
+			want:      []projSegment{{attr: "name", index: 0}},
 		},
 		{
 			name:      "name alias",
 			token:     "#n",
 			attrNames: named,
-			want:      []projSegment{{attr: "name", index: -1}},
+			want:      []projSegment{{attr: "name", index: 0}},
 		},
 		{
 			name:      "nested map path",
 			token:     "address.city",
 			attrNames: noNames,
-			want:      []projSegment{{attr: "address", index: -1}, {attr: "city", index: -1}},
+			want:      []projSegment{{attr: "address", index: 0}, {attr: "city", index: 0}},
 		},
 		{
 			name:      "nested alias path",
 			token:     "#a.city",
 			attrNames: named,
-			want:      []projSegment{{attr: "address", index: -1}, {attr: "city", index: -1}},
+			want:      []projSegment{{attr: "address", index: 0}, {attr: "city", index: 0}},
 		},
 		{
 			name:      "list index",
 			token:     "tags[0]",
 			attrNames: noNames,
-			want:      []projSegment{{attr: "tags", index: -1}, {attr: "", index: 0}},
+			want:      []projSegment{{attr: "tags", index: 0}, {attr: "", index: 0}},
 		},
-		{
+		{ //nolint:gosec // G101 false positive: "label" is not a credential
 			name:      "list index nested",
 			token:     "tags[0].label",
 			attrNames: noNames,
 			want: []projSegment{
-				{attr: "tags", index: -1},
+				{attr: "tags", index: 0},
 				{attr: "", index: 0},
-				{attr: "label", index: -1},
+				{attr: "label", index: 0},
 			},
 		},
 		{
@@ -636,7 +636,7 @@ func TestParseProjPath(t *testing.T) {
 			token:     "matrix[1][2]",
 			attrNames: noNames,
 			want: []projSegment{
-				{attr: "matrix", index: -1},
+				{attr: "matrix", index: 0},
 				{attr: "", index: 1},
 				{attr: "", index: 2},
 			},
@@ -824,11 +824,11 @@ func TestApplyProjection(t *testing.T) {
 		assert.Equal(t, map[string]any{"S": "Alice"}, got["name"])
 	})
 
-	t.Run("out-of-range list index silently omitted", func(t *testing.T) {
+	t.Run("out-of-range list index returns empty list", func(t *testing.T) {
 		got, err := applyProjection(item, "tags[99]", noNames)
 		require.NoError(t, err)
 		assert.Equal(t, map[string]any{
-			"tags": map[string]any{"L": []any(nil)},
+			"tags": map[string]any{"L": []any{}},
 		}, got)
 	})
 }

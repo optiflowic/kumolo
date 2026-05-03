@@ -748,15 +748,11 @@ func evalFilterExpr(
 	return node.eval(item, attrNames, attrValues)
 }
 
-// --------------------------------------------------------------------------
-// ProjectionExpression support
-// --------------------------------------------------------------------------
-
 // projSegment is one step in a DynamoDB document path.
 // Either an attribute name step (attr != "") or a list-index step (attr == "").
 type projSegment struct {
 	attr  string
-	index int // valid only when attr == ""
+	index int // only meaningful when attr == ""
 }
 
 // projNode is a node in a projection tree.
@@ -802,7 +798,7 @@ func (n *projNode) addPath(segs []projSegment) {
 func parseProjPath(token string, attrNames map[string]string) ([]projSegment, error) {
 	var segs []projSegment
 	dotParts := strings.Split(token, ".")
-	for partIdx, part := range dotParts {
+	for _, part := range dotParts {
 		part = strings.TrimSpace(part)
 		if part == "" {
 			return nil, fmt.Errorf("invalid projection path %q", token)
@@ -820,12 +816,7 @@ func parseProjPath(token string, attrNames map[string]string) ([]projSegment, er
 		if err != nil {
 			return nil, fmt.Errorf("projection expression: %w", err)
 		}
-		// Allow empty-string attribute names only when they originate from a name ref
-		// that resolved to ""; just reject them.
-		if name == "" && partIdx == 0 {
-			return nil, fmt.Errorf("invalid projection path %q", token)
-		}
-		segs = append(segs, projSegment{attr: name, index: -1})
+		segs = append(segs, projSegment{attr: name})
 		if lb == -1 {
 			continue
 		}
@@ -853,7 +844,7 @@ func parseProjPath(token string, attrNames map[string]string) ([]projSegment, er
 
 // projectValue applies a projNode to a single DynamoDB-typed attribute value.
 func projectValue(val any, n *projNode) any {
-	if n == nil || (len(n.children) == 0 && len(n.listIdxs) == 0) {
+	if len(n.children) == 0 && len(n.listIdxs) == 0 {
 		return val
 	}
 	valMap, ok := val.(map[string]any)
@@ -894,9 +885,9 @@ func projectValue(val any, n *projNode) any {
 		idxs = append(idxs, idx)
 	}
 	sort.Ints(idxs)
-	var projected []any
+	projected := make([]any, 0, len(idxs))
 	for _, idx := range idxs {
-		if idx < 0 || idx >= len(lSlice) {
+		if idx >= len(lSlice) {
 			continue
 		}
 		projected = append(projected, projectValue(lSlice[idx], n.listIdxs[idx]))
