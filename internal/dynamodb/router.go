@@ -1284,7 +1284,7 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 		ExpressionAttributeNames  map[string]string `json:"ExpressionAttributeNames"`
 		ExpressionAttributeValues map[string]any    `json:"ExpressionAttributeValues"`
 		ScanIndexForward          *bool             `json:"ScanIndexForward"`
-		Limit                     int               `json:"Limit"`
+		Limit                     *int              `json:"Limit"`
 		ExclusiveStartKey         map[string]any    `json:"ExclusiveStartKey"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
@@ -1331,6 +1331,15 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 		return
 	}
 
+	if req.Limit != nil && *req.Limit < 1 {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			fmt.Sprintf("Value %d for parameter limit is invalid. Limit must be > 0", *req.Limit),
+		)
+		return
+	}
 	scanIndexForward := true
 	if req.ScanIndexForward != nil {
 		scanIndexForward = *req.ScanIndexForward

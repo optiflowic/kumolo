@@ -86,7 +86,7 @@ type SortKeyCondition struct {
 // QueryOptions controls pagination and sort order for Query.
 type QueryOptions struct {
 	ScanIndexForward  bool
-	Limit             int // 0 means no limit
+	Limit             *int // nil means no limit; must be >= 1 when set
 	ExclusiveStartKey map[string]any
 }
 
@@ -573,40 +573,46 @@ func (s *Storage) Query(
 	}
 
 	if len(opts.ExclusiveStartKey) > 0 {
-		startIdx := len(matched) // default: empty if key not found
-		for i, item := range matched {
-			if itemMatchesKey(item, opts.ExclusiveStartKey) {
-				startIdx = i + 1
-				break
+		if skName == "" {
+			// Hash-only table: Query returns at most one item per hash key.
+			// Any ExclusiveStartKey means we are resuming past that item.
+			matched = matched[:0]
+		} else {
+			eskSKVal, ok := opts.ExclusiveStartKey[skName]
+			if !ok {
+				matched = matched[:0]
+			} else {
+				// Use sort key value as a position cursor, not an exact item lookup.
+				// This matches DynamoDB behavior: the cursor remains valid even when
+				// the item at that key has been deleted.
+				startIdx := len(matched)
+				for i, item := range matched {
+					c, err := dynamoValueCmp(item[skName], eskSKVal)
+					if err != nil {
+						continue
+					}
+					if opts.ScanIndexForward && c > 0 {
+						startIdx = i
+						break
+					}
+					if !opts.ScanIndexForward && c < 0 {
+						startIdx = i
+						break
+					}
+				}
+				matched = matched[startIdx:]
 			}
 		}
-		matched = matched[startIdx:]
 	}
 
 	var lastEvaluatedKey map[string]any
-	if opts.Limit > 0 && len(matched) > opts.Limit {
-		lastItem := matched[opts.Limit-1]
+	if opts.Limit != nil && len(matched) > *opts.Limit {
+		lastItem := matched[*opts.Limit-1]
 		lastEvaluatedKey = extractPrimaryKey(lastItem, meta.KeySchema)
-		matched = matched[:opts.Limit]
+		matched = matched[:*opts.Limit]
 	}
 
 	return matched, lastEvaluatedKey, nil
-}
-
-// itemMatchesKey reports whether item's key attributes equal key (DynamoDB typed values).
-func itemMatchesKey(item, key map[string]any) bool {
-	for attr, keyVal := range key {
-		itemVal, ok := item[attr]
-		if !ok {
-			return false
-		}
-		a, _ := json.Marshal(itemVal) // only fails for channels/funcs
-		b, _ := json.Marshal(keyVal)  // only fails for channels/funcs
-		if string(a) != string(b) {
-			return false
-		}
-	}
-	return true
 }
 
 // extractPrimaryKey builds a DynamoDB-typed primary key map from an item.

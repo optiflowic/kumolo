@@ -3131,7 +3131,7 @@ func TestHandleQuery_Limit(t *testing.T) {
 		assert.Nil(t, resp["LastEvaluatedKey"])
 	})
 
-	t.Run("no LastEvaluatedKey when Limit=0 (no limit)", func(t *testing.T) {
+	t.Run("no Limit field returns all items without LastEvaluatedKey", func(t *testing.T) {
 		ro := setupSkTable(t)
 		w := dynamo(t, ro, "Query", `{
 			"TableName": "sk-table",
@@ -3142,6 +3142,30 @@ func TestHandleQuery_Limit(t *testing.T) {
 		var resp map[string]any
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		assert.Nil(t, resp["LastEvaluatedKey"])
+	})
+
+	t.Run("400 for Limit=0", func(t *testing.T) {
+		ro := setupSkTable(t)
+		w := dynamo(t, ro, "Query", `{
+			"TableName": "sk-table",
+			"KeyConditionExpression": "pk = :pk",
+			"ExpressionAttributeValues": {":pk": {"S": "p"}},
+			"Limit": 0
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("400 for negative Limit", func(t *testing.T) {
+		ro := setupSkTable(t)
+		w := dynamo(t, ro, "Query", `{
+			"TableName": "sk-table",
+			"KeyConditionExpression": "pk = :pk",
+			"ExpressionAttributeValues": {":pk": {"S": "p"}},
+			"Limit": -1
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 }
 

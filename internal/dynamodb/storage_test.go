@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func intPtr(v int) *int { return &v }
+
 func newTestStorage(t *testing.T) *Storage {
 	t.Helper()
 	dir := t.TempDir()
@@ -1228,7 +1230,7 @@ func TestQueryLimit(t *testing.T) {
 			"pk",
 			map[string]any{"S": "p"},
 			nil,
-			QueryOptions{ScanIndexForward: true, Limit: 2},
+			QueryOptions{ScanIndexForward: true, Limit: intPtr(2)},
 		)
 		require.NoError(t, err)
 		require.Len(t, items, 2)
@@ -1246,21 +1248,21 @@ func TestQueryLimit(t *testing.T) {
 			"pk",
 			map[string]any{"S": "p"},
 			nil,
-			QueryOptions{ScanIndexForward: true, Limit: 10},
+			QueryOptions{ScanIndexForward: true, Limit: intPtr(10)},
 		)
 		require.NoError(t, err)
 		assert.Len(t, items, 5)
 		assert.Nil(t, lek)
 	})
 
-	t.Run("Limit=0 means no limit", func(t *testing.T) {
+	t.Run("nil Limit means no limit", func(t *testing.T) {
 		s := setup(t)
 		items, lek, err := s.Query(
 			"sk-table",
 			"pk",
 			map[string]any{"S": "p"},
 			nil,
-			QueryOptions{ScanIndexForward: true, Limit: 0},
+			QueryOptions{ScanIndexForward: true},
 		)
 		require.NoError(t, err)
 		assert.Len(t, items, 5)
@@ -1274,7 +1276,7 @@ func TestQueryLimit(t *testing.T) {
 			"pk",
 			map[string]any{"S": "p"},
 			nil,
-			QueryOptions{ScanIndexForward: false, Limit: 2},
+			QueryOptions{ScanIndexForward: false, Limit: intPtr(2)},
 		)
 		require.NoError(t, err)
 		require.Len(t, items, 2)
@@ -1310,7 +1312,7 @@ func TestQueryExclusiveStartKey(t *testing.T) {
 			"sk": map[string]any{"S": "b"},
 		}
 		items, lek, err := s.Query("sk-table", "pk", map[string]any{"S": "p"}, nil,
-			QueryOptions{ScanIndexForward: true, Limit: 2, ExclusiveStartKey: cursor})
+			QueryOptions{ScanIndexForward: true, Limit: intPtr(2), ExclusiveStartKey: cursor})
 		require.NoError(t, err)
 		require.Len(t, items, 2)
 		assert.Equal(t, "c", items[0]["sk"].(map[string]any)["S"])
@@ -1332,7 +1334,7 @@ func TestQueryExclusiveStartKey(t *testing.T) {
 		assert.Nil(t, lek)
 	})
 
-	t.Run("unknown cursor key returns empty result", func(t *testing.T) {
+	t.Run("cursor past last item returns empty", func(t *testing.T) {
 		s := setup(t)
 		cursor := map[string]any{
 			"pk": map[string]any{"S": "p"},
@@ -1344,13 +1346,49 @@ func TestQueryExclusiveStartKey(t *testing.T) {
 		assert.Empty(t, items)
 	})
 
+	t.Run("cursor item deleted: resumes from sort key position", func(t *testing.T) {
+		s := setup(t)
+		// Delete the item at sk="b" so it no longer exists.
+		_, err := s.DeleteItem("sk-table",
+			map[string]any{"pk": map[string]any{"S": "p"}, "sk": map[string]any{"S": "b"}},
+			nil)
+		require.NoError(t, err)
+		cursor := map[string]any{
+			"pk": map[string]any{"S": "p"},
+			"sk": map[string]any{"S": "b"},
+		}
+		// Even though sk="b" is gone, the cursor should resume from after "b".
+		items, _, err := s.Query("sk-table", "pk", map[string]any{"S": "p"}, nil,
+			QueryOptions{ScanIndexForward: true, ExclusiveStartKey: cursor})
+		require.NoError(t, err)
+		require.Len(t, items, 3) // "c", "d", "e"
+		assert.Equal(t, "c", items[0]["sk"].(map[string]any)["S"])
+	})
+
+	t.Run("descending: cursor item deleted resumes correctly", func(t *testing.T) {
+		s := setup(t)
+		_, err := s.DeleteItem("sk-table",
+			map[string]any{"pk": map[string]any{"S": "p"}, "sk": map[string]any{"S": "d"}},
+			nil)
+		require.NoError(t, err)
+		cursor := map[string]any{
+			"pk": map[string]any{"S": "p"},
+			"sk": map[string]any{"S": "d"},
+		}
+		items, _, err := s.Query("sk-table", "pk", map[string]any{"S": "p"}, nil,
+			QueryOptions{ScanIndexForward: false, ExclusiveStartKey: cursor})
+		require.NoError(t, err)
+		require.Len(t, items, 3) // "c", "b", "a"
+		assert.Equal(t, "c", items[0]["sk"].(map[string]any)["S"])
+	})
+
 	t.Run("paginate all items with Limit=2", func(t *testing.T) {
 		s := setup(t)
 		var allItems []map[string]any
 		var cursor map[string]any
 		for {
 			items, lek, err := s.Query("sk-table", "pk", map[string]any{"S": "p"}, nil,
-				QueryOptions{ScanIndexForward: true, Limit: 2, ExclusiveStartKey: cursor})
+				QueryOptions{ScanIndexForward: true, Limit: intPtr(2), ExclusiveStartKey: cursor})
 			require.NoError(t, err)
 			allItems = append(allItems, items...)
 			if lek == nil {
