@@ -923,6 +923,27 @@ func TestQuery(t *testing.T) {
 		assert.ErrorIs(t, err, ErrTableNotFound)
 	})
 
+	t.Run("error when readTableMeta fails", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		calls := 0
+		s.readAll = func(r io.Reader) ([]byte, error) {
+			calls++
+			if calls == 1 {
+				return nil, errors.New("metadata read failed")
+			}
+			return io.ReadAll(r)
+		}
+		_, _, err := s.Query(
+			"test-table",
+			"pk",
+			map[string]any{"S": "x"},
+			nil,
+			QueryOptions{ScanIndexForward: true},
+		)
+		assert.Error(t, err)
+	})
+
 	t.Run("error when readDir fails", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
@@ -1116,18 +1137,6 @@ func TestQuerySortKeyCondition(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, items)
 	})
-}
-
-var skNumTestMeta = TableMetadata{
-	Name: "sk-num-table",
-	KeySchema: []KeySchemaElement{
-		{AttributeName: "pk", KeyType: "HASH"},
-		{AttributeName: "sk", KeyType: "RANGE"},
-	},
-	AttributeDefinitions: []AttributeDefinition{
-		{AttributeName: "pk", AttributeType: "S"},
-		{AttributeName: "sk", AttributeType: "N"},
-	},
 }
 
 func TestQueryScanIndexForward(t *testing.T) {

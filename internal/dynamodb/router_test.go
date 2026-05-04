@@ -3184,14 +3184,20 @@ func TestHandleQuery_ExclusiveStartKey(t *testing.T) {
 	t.Run("paginate all items with Limit=2", func(t *testing.T) {
 		ro := setupSkTable(t)
 		var allSKs []string
-		var cursor string
+		var exclusiveStartKey map[string]any
 		for {
-			body := `{
-				"TableName": "sk-table",
-				"KeyConditionExpression": "pk = :pk",
-				"ExpressionAttributeValues": {":pk": {"S": "p"}},
-				"Limit": 2` + cursor + `}`
-			w := dynamo(t, ro, "Query", body)
+			req := map[string]any{
+				"TableName":                 "sk-table",
+				"KeyConditionExpression":    "pk = :pk",
+				"ExpressionAttributeValues": map[string]any{":pk": map[string]any{"S": "p"}},
+				"Limit":                     2,
+			}
+			if exclusiveStartKey != nil {
+				req["ExclusiveStartKey"] = exclusiveStartKey
+			}
+			body, err := json.Marshal(req)
+			require.NoError(t, err)
+			w := dynamo(t, ro, "Query", string(body))
 			require.Equal(t, http.StatusOK, w.Code)
 			var resp map[string]any
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
@@ -3201,9 +3207,7 @@ func TestHandleQuery_ExclusiveStartKey(t *testing.T) {
 			if resp["LastEvaluatedKey"] == nil {
 				break
 			}
-			lek := resp["LastEvaluatedKey"].(map[string]any)
-			skVal := lek["sk"].(map[string]any)["S"].(string)
-			cursor = `,"ExclusiveStartKey": {"pk": {"S": "p"}, "sk": {"S": "` + skVal + `"}}`
+			exclusiveStartKey = resp["LastEvaluatedKey"].(map[string]any)
 		}
 		assert.Equal(t, []string{"a", "b", "c", "d", "e"}, allSKs)
 	})

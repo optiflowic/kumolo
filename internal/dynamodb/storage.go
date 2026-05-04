@@ -85,13 +85,8 @@ type SortKeyCondition struct {
 
 // QueryOptions controls pagination and sort order for Query.
 type QueryOptions struct {
-	// ScanIndexForward=true sorts ascending by sort key (DynamoDB default).
-	ScanIndexForward bool
-	// Limit is the maximum number of items to evaluate before FilterExpression.
-	// 0 means no limit.
-	Limit int
-	// ExclusiveStartKey is the pagination cursor (primary key of the last item
-	// returned by the previous page). Empty map means start from the beginning.
+	ScanIndexForward  bool
+	Limit             int // 0 means no limit
 	ExclusiveStartKey map[string]any
 }
 
@@ -561,6 +556,13 @@ func (s *Storage) Query(
 		sort.SliceStable(matched, func(i, j int) bool {
 			c, err := dynamoValueCmp(matched[i][skName], matched[j][skName])
 			if err != nil {
+				slog.Warn(
+					"Query: sort key comparison failed; order undefined",
+					"table",
+					tableName,
+					"err",
+					err,
+				)
 				return false
 			}
 			if opts.ScanIndexForward {
