@@ -421,7 +421,7 @@ func (s *Storage) Scan(
 		return nil, nil, ErrTableNotFound
 	}
 
-	needsMeta := len(opts.ExclusiveStartKey) > 0 || opts.Limit != nil
+	needsMeta := len(opts.ExclusiveStartKey) > 0 || opts.Limit != nil || opts.Segment != nil
 	var meta TableMetadata
 	if needsMeta {
 		var err error
@@ -434,6 +434,19 @@ func (s *Storage) Scan(
 	all, err := s.readAllItemsLocked(tableName)
 	if err != nil {
 		return nil, nil, err
+	}
+
+	// When pagination is in use (ESK or Limit), sort items by their hash key so
+	// that order is deterministic regardless of the underlying filesystem's
+	// ReadDir order (e.g. creation order on Linux ext4 vs. alphabetical on macOS
+	// APFS). Deterministic order is required for the k > eskKey comparison that
+	// resumes scanning after a deleted item.
+	if needsMeta {
+		sort.Slice(all, func(i, j int) bool {
+			ki, _ := itemKey(all[i], meta.KeySchema)
+			kj, _ := itemKey(all[j], meta.KeySchema)
+			return ki < kj
+		})
 	}
 
 	// Segment partitioning must precede ESK so that ESK resumes within the
@@ -465,9 +478,8 @@ func (s *Storage) Scan(
 				startIdx = i + 1
 				break
 			}
-			// Items are stored as hash-named files returned in lexicographic order
-			// by ReadDir, so if the current item's hash already exceeds the ESK
-			// hash, the ESK item was deleted. Resume from this position.
+			// Items were sorted by hash above, so a hash that already exceeds
+			// eskKey means the ESK item was deleted. Resume from this position.
 			if k > eskKey {
 				startIdx = i
 				break
