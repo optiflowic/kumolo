@@ -1203,6 +1203,24 @@ func TestQueryScanIndexForward(t *testing.T) {
 		require.NoError(t, err)
 		assert.Len(t, items, 1)
 	})
+
+	t.Run("corrupt sort key value does not panic (slog.Warn path)", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(skTestMeta))
+		mustPutItem(t, s, "sk-table", mkItem("p", "a"))
+		mustPutItem(t, s, "sk-table", mkItem("p", "b"))
+		// Write an item whose sort key is a raw string, not a DynamoDB typed value.
+		// This bypasses PutItem validation to exercise the sort callback error path.
+		corrupt := map[string]any{
+			"pk": map[string]any{"S": "p"},
+			"sk": "not-a-typed-value",
+		}
+		require.NoError(t, s.writeJSON("sk-table/ffffffffffffffffffffffffffffffff.json", corrupt))
+		items, _, err := s.Query("sk-table", "pk", map[string]any{"S": "p"}, nil,
+			QueryOptions{ScanIndexForward: true})
+		require.NoError(t, err)
+		assert.Len(t, items, 3) // all items returned; sort order undefined for corrupt item
+	})
 }
 
 func TestQueryLimit(t *testing.T) {
@@ -1400,6 +1418,50 @@ func TestQueryExclusiveStartKey(t *testing.T) {
 		for i, expected := range []string{"a", "b", "c", "d", "e"} {
 			assert.Equal(t, expected, allItems[i]["sk"].(map[string]any)["S"])
 		}
+	})
+
+	t.Run("hash-only table: ExclusiveStartKey returns empty", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "x"}})
+		cursor := map[string]any{"pk": map[string]any{"S": "x"}}
+		items, _, err := s.Query("test-table", "pk", map[string]any{"S": "x"}, nil,
+			QueryOptions{ScanIndexForward: true, ExclusiveStartKey: cursor})
+		require.NoError(t, err)
+		assert.Empty(t, items)
+	})
+
+	t.Run("ExclusiveStartKey missing sort key attribute returns empty", func(t *testing.T) {
+		s := setup(t)
+		// ESK has only the hash key; no sort key attribute.
+		cursor := map[string]any{"pk": map[string]any{"S": "p"}}
+		items, _, err := s.Query("sk-table", "pk", map[string]any{"S": "p"}, nil,
+			QueryOptions{ScanIndexForward: true, ExclusiveStartKey: cursor})
+		require.NoError(t, err)
+		assert.Empty(t, items)
+	})
+
+	t.Run("corrupt sort key in matched item skipped during ESK search", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(skTestMeta))
+		// Write only a corrupt item (sort key is a raw string, not a DynamoDB typed value).
+		// With a single item in matched, sort.SliceStable makes no comparisons, so the
+		// corrupt value is only encountered in the ESK position search loop.
+		corrupt := map[string]any{
+			"pk": map[string]any{"S": "p"},
+			"sk": "not-a-typed-value",
+		}
+		require.NoError(t, s.writeJSON("sk-table/ffffffffffffffffffffffffffffffff.json", corrupt))
+		cursor := map[string]any{
+			"pk": map[string]any{"S": "p"},
+			"sk": map[string]any{"S": "a"},
+		}
+		// dynamoValueCmp("not-a-typed-value", {"S":"a"}) fails → continue.
+		// startIdx stays at len(matched); result is empty.
+		items, _, err := s.Query("sk-table", "pk", map[string]any{"S": "p"}, nil,
+			QueryOptions{ScanIndexForward: true, ExclusiveStartKey: cursor})
+		require.NoError(t, err)
+		assert.Empty(t, items)
 	})
 }
 
