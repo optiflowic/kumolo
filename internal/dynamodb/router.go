@@ -1060,24 +1060,40 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 		return
 	}
 	if req.Segment != nil {
-		if *req.Segment < 0 || *req.TotalSegments < 1 {
+		seg := *req.Segment
+		total := *req.TotalSegments
+		switch {
+		case seg < 0 || seg > 999999:
 			writeError(
 				w,
 				http.StatusBadRequest,
 				"com.amazonaws.dynamodb.v20120810#ValidationException",
-				"Segment must be non-negative and TotalSegments must be at least 1",
+				fmt.Sprintf(
+					"Value %d at 'segment' failed to satisfy constraint: Member must have value between 0 and 999999, inclusive",
+					seg,
+				),
 			)
 			return
-		}
-		if *req.Segment >= *req.TotalSegments {
+		case total < 1 || total > 1000000:
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				fmt.Sprintf(
+					"Value %d at 'totalSegments' failed to satisfy constraint: Member must have value between 1 and 1000000, inclusive",
+					total,
+				),
+			)
+			return
+		case seg >= total:
 			writeError(
 				w,
 				http.StatusBadRequest,
 				"com.amazonaws.dynamodb.v20120810#ValidationException",
 				fmt.Sprintf(
 					"Value %d at 'segment' failed to satisfy constraint: Member must have value less than TotalSegments (%d)",
-					*req.Segment,
-					*req.TotalSegments,
+					seg,
+					total,
 				),
 			)
 			return

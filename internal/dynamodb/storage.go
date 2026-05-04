@@ -448,11 +448,8 @@ func (s *Storage) Scan(
 	if len(opts.ExclusiveStartKey) > 0 {
 		eskKey, err := itemKey(opts.ExclusiveStartKey, meta.KeySchema)
 		if err != nil {
-			return nil, nil, fmt.Errorf(
-				"%w: invalid ExclusiveStartKey: %v",
-				ErrValidationException,
-				err,
-			)
+			// Invalid ESK (wrong attributes): AWS succeeds with empty result.
+			return []map[string]any{}, nil, nil
 		}
 		startIdx := len(all) // default: past end (key not found)
 		for i, item := range all {

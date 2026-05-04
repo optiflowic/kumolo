@@ -612,12 +612,15 @@ func TestScan(t *testing.T) {
 		assert.Nil(t, lek)
 	})
 
-	t.Run("ExclusiveStartKey with missing key attribute returns error", func(t *testing.T) {
+	t.Run("ExclusiveStartKey with missing key attribute returns empty", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
+		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "a"}})
 		esk := map[string]any{"wrong-attr": map[string]any{"S": "a"}}
-		_, _, err := s.Scan("test-table", ScanOptions{ExclusiveStartKey: esk})
-		assert.ErrorIs(t, err, ErrValidationException)
+		items, lek, err := s.Scan("test-table", ScanOptions{ExclusiveStartKey: esk})
+		require.NoError(t, err)
+		assert.Empty(t, items)
+		assert.Nil(t, lek)
 	})
 
 	t.Run("parallel scan distributes items across segments", func(t *testing.T) {
