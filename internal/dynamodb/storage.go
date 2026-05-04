@@ -90,7 +90,6 @@ type QueryOptions struct {
 	ExclusiveStartKey map[string]any
 }
 
-// ScanOptions controls pagination and parallel scan for Scan.
 type ScanOptions struct {
 	Limit             *int           // nil means no limit; must be >= 1 when set
 	ExclusiveStartKey map[string]any // resume from the item after this primary key
@@ -412,14 +411,6 @@ func (s *Storage) DeleteItem(
 	return old, nil
 }
 
-// Scan returns items from tableName, applying optional pagination and parallel
-// scan partitioning.
-//
-// opts.Limit caps the number of items evaluated before FilterExpression.
-// opts.ExclusiveStartKey resumes scanning from the item after the given key.
-// opts.Segment / opts.TotalSegments partition the item space for parallel scans
-// using modulo arithmetic on the sorted item list.
-// The second return value is the LastEvaluatedKey (non-nil when more pages remain).
 func (s *Storage) Scan(
 	tableName string,
 	opts ScanOptions,
@@ -445,6 +436,20 @@ func (s *Storage) Scan(
 		return nil, nil, err
 	}
 
+	// Segment partitioning must precede ESK so that ESK resumes within the
+	// correct segment, not across the global item list.
+	if opts.Segment != nil && opts.TotalSegments != nil {
+		seg := *opts.Segment
+		total := *opts.TotalSegments
+		var segItems []map[string]any
+		for i, item := range all {
+			if i%total == seg {
+				segItems = append(segItems, item)
+			}
+		}
+		all = segItems
+	}
+
 	if len(opts.ExclusiveStartKey) > 0 {
 		eskKey, err := itemKey(opts.ExclusiveStartKey, meta.KeySchema)
 		if err != nil {
@@ -463,18 +468,6 @@ func (s *Storage) Scan(
 			}
 		}
 		all = all[startIdx:]
-	}
-
-	if opts.Segment != nil && opts.TotalSegments != nil {
-		seg := *opts.Segment
-		total := *opts.TotalSegments
-		var segItems []map[string]any
-		for i, item := range all {
-			if i%total == seg {
-				segItems = append(segItems, item)
-			}
-		}
-		all = segItems
 	}
 
 	var lastEvaluatedKey map[string]any

@@ -554,6 +554,17 @@ func TestScan(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("returns error when readTableMeta fails with ESK set", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		s.readAll = func(io.Reader) ([]byte, error) {
+			return nil, errors.New("meta read failed")
+		}
+		esk := map[string]any{"pk": map[string]any{"S": "a"}}
+		_, _, err := s.Scan("test-table", ScanOptions{ExclusiveStartKey: esk})
+		assert.Error(t, err)
+	})
+
 	t.Run("Limit truncates and returns LastEvaluatedKey", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
@@ -668,6 +679,40 @@ func TestScan(t *testing.T) {
 		items1, _, err := s.Scan("test-table", ScanOptions{Segment: &seg1, TotalSegments: &total})
 		require.NoError(t, err)
 		assert.Len(t, append(items0, items1...), 4)
+	})
+
+	t.Run("parallel scan ESK resumes within segment not global list", func(t *testing.T) {
+		// Regression: segment filter must precede ESK so that ESK applies within
+		// the segment. With the old ordering (ESK first), page 2 would return
+		// items belonging to the wrong segment.
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		for i := range 4 {
+			mustPutItem(t, s, "test-table", map[string]any{
+				"pk": map[string]any{"S": fmt.Sprintf("k%d", i)},
+			})
+		}
+		total := 2
+		seg := 0
+		limit := 1
+		// First page: segment 0, limit 1.
+		page1, lek, err := s.Scan("test-table", ScanOptions{
+			Segment: &seg, TotalSegments: &total, Limit: &limit,
+		})
+		require.NoError(t, err)
+		require.Len(t, page1, 1)
+		require.NotNil(t, lek, "expected more items in segment")
+		// Second page: resume with ESK within the same segment.
+		page2, lek2, err := s.Scan("test-table", ScanOptions{
+			Segment: &seg, TotalSegments: &total, Limit: &limit, ExclusiveStartKey: lek,
+		})
+		require.NoError(t, err)
+		require.Len(t, page2, 1)
+		assert.Nil(t, lek2, "segment 0 should be exhausted after two pages")
+		// Full segment 0 (no ESK, no limit) must equal the two pages combined.
+		full, _, err := s.Scan("test-table", ScanOptions{Segment: &seg, TotalSegments: &total})
+		require.NoError(t, err)
+		assert.Equal(t, full, append(page1, page2...))
 	})
 }
 
