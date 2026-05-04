@@ -3,6 +3,7 @@ package dynamodb
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -525,6 +526,96 @@ func TestHandleScan(t *testing.T) {
 		ro := newTestRouter(t)
 		w := dynamo(t, ro, "Scan", `{bad}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("400 for Limit less than 1", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "Scan", `{"TableName":"test-table","Limit":0}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("400 when only Segment is provided without TotalSegments", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "Scan", `{"TableName":"test-table","Segment":0}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("400 when only TotalSegments is provided without Segment", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "Scan", `{"TableName":"test-table","TotalSegments":2}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("Limit returns LastEvaluatedKey when more items exist", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		for _, pk := range []string{"a", "b", "c"} {
+			require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
+				fmt.Sprintf(`{"TableName":"test-table","Item":{"pk":{"S":%q}}}`, pk)).Code)
+		}
+		w := dynamo(t, ro, "Scan", `{"TableName":"test-table","Limit":2}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, float64(2), resp["Count"])
+		assert.NotNil(t, resp["LastEvaluatedKey"])
+	})
+
+	t.Run("paginated scan covers all items", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		for _, pk := range []string{"a", "b", "c"} {
+			require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
+				fmt.Sprintf(`{"TableName":"test-table","Item":{"pk":{"S":%q}}}`, pk)).Code)
+		}
+		var allItems []any
+		var esk string
+		for {
+			body := `{"TableName":"test-table","Limit":1}`
+			if esk != "" {
+				body = fmt.Sprintf(
+					`{"TableName":"test-table","Limit":1,"ExclusiveStartKey":%s}`,
+					esk,
+				)
+			}
+			w := dynamo(t, ro, "Scan", body)
+			require.Equal(t, http.StatusOK, w.Code)
+			var resp map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+			allItems = append(allItems, resp["Items"].([]any)...)
+			lek := resp["LastEvaluatedKey"]
+			if lek == nil {
+				break
+			}
+			b, _ := json.Marshal(lek)
+			esk = string(b)
+		}
+		assert.Len(t, allItems, 3)
+	})
+
+	t.Run("parallel scan covers all items across segments", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		for i := range 6 {
+			require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
+				fmt.Sprintf(`{"TableName":"test-table","Item":{"pk":{"S":"item%d"}}}`, i)).Code)
+		}
+		var allItems []any
+		for seg := range 3 {
+			w := dynamo(t, ro, "Scan",
+				fmt.Sprintf(`{"TableName":"test-table","Segment":%d,"TotalSegments":3}`, seg))
+			require.Equal(t, http.StatusOK, w.Code)
+			var resp map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+			allItems = append(allItems, resp["Items"].([]any)...)
+		}
+		assert.Len(t, allItems, 6)
 	})
 }
 
@@ -1696,7 +1787,7 @@ type mockStore struct {
 	putItemFn            func(tableName string, item map[string]any) (map[string]any, error)
 	getItemFn            func(tableName string, key map[string]any) (map[string]any, error)
 	deleteItemFn         func(tableName string, key map[string]any) (map[string]any, error)
-	scanFn               func(tableName string) ([]map[string]any, error)
+	scanFn               func(tableName string, opts ScanOptions) ([]map[string]any, map[string]any, error)
 	updateItemFn         func(tableName string, key map[string]any, updates map[string]any) (map[string]any, map[string]any, error)
 	queryFn              func(tableName, hashKeyName string, hashKeyValue any) ([]map[string]any, error)
 	batchGetItemsFn      func(tableName string, keys []map[string]any) ([]map[string]any, error)
@@ -1745,8 +1836,11 @@ func (m *mockStore) DeleteItem(
 	return m.deleteItemFn(tableName, key)
 }
 
-func (m *mockStore) Scan(tableName string) ([]map[string]any, error) {
-	return m.scanFn(tableName)
+func (m *mockStore) Scan(
+	tableName string,
+	opts ScanOptions,
+) ([]map[string]any, map[string]any, error) {
+	return m.scanFn(tableName, opts)
 }
 
 func (m *mockStore) UpdateItem(
@@ -1910,7 +2004,9 @@ func TestHandleDeleteItem_InternalErrors(t *testing.T) {
 func TestHandleScan_InternalErrors(t *testing.T) {
 	t.Run("500 when Scan fails with unexpected error", func(t *testing.T) {
 		ro := &Router{storage: &mockStore{
-			scanFn: func(string) ([]map[string]any, error) { return nil, errInternal },
+			scanFn: func(string, ScanOptions) ([]map[string]any, map[string]any, error) {
+				return nil, nil, errInternal
+			},
 		}}
 		w := dynamo(t, ro, "Scan", `{"TableName":"t"}`)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
