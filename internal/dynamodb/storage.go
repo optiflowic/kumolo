@@ -447,23 +447,28 @@ func (s *Storage) Scan(
 
 	if len(opts.ExclusiveStartKey) > 0 {
 		eskKey, err := itemKey(opts.ExclusiveStartKey, meta.KeySchema)
-		if err == nil {
-			startIdx := len(all) // default: past end (key not found)
-			for i, item := range all {
-				k, kErr := itemKey(item, meta.KeySchema)
-				if kErr != nil {
-					continue
-				}
-				if k == eskKey {
-					startIdx = i + 1
-					break
-				}
-			}
-			all = all[startIdx:]
+		if err != nil {
+			return nil, nil, fmt.Errorf(
+				"%w: invalid ExclusiveStartKey: %v",
+				ErrValidationException,
+				err,
+			)
 		}
+		startIdx := len(all) // default: past end (key not found)
+		for i, item := range all {
+			k, kErr := itemKey(item, meta.KeySchema)
+			if kErr != nil {
+				continue
+			}
+			if k == eskKey {
+				startIdx = i + 1
+				break
+			}
+		}
+		all = all[startIdx:]
 	}
 
-	if opts.Segment != nil && opts.TotalSegments != nil && *opts.TotalSegments > 1 {
+	if opts.Segment != nil && opts.TotalSegments != nil {
 		seg := *opts.Segment
 		total := *opts.TotalSegments
 		var segItems []map[string]any

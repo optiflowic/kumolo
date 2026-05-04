@@ -594,7 +594,10 @@ func TestScan(t *testing.T) {
 		require.Len(t, page3, 1)
 		assert.Nil(t, lek3)
 		// all pages together cover all items without duplicates
-		combined := append(append(page1, page2...), page3...)
+		combined := make([]map[string]any, 0, 3)
+		combined = append(combined, page1...)
+		combined = append(combined, page2...)
+		combined = append(combined, page3...)
 		assert.Len(t, combined, 3)
 	})
 
@@ -607,6 +610,14 @@ func TestScan(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, items)
 		assert.Nil(t, lek)
+	})
+
+	t.Run("ExclusiveStartKey with missing key attribute returns error", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		esk := map[string]any{"wrong-attr": map[string]any{"S": "a"}}
+		_, _, err := s.Scan("test-table", ScanOptions{ExclusiveStartKey: esk})
+		assert.ErrorIs(t, err, ErrValidationException)
 	})
 
 	t.Run("parallel scan distributes items across segments", func(t *testing.T) {

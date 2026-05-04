@@ -1059,6 +1059,30 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
+	if req.Segment != nil {
+		if *req.Segment < 0 || *req.TotalSegments < 1 {
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				"Segment must be non-negative and TotalSegments must be at least 1",
+			)
+			return
+		}
+		if *req.Segment >= *req.TotalSegments {
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				fmt.Sprintf(
+					"Value %d at 'segment' failed to satisfy constraint: Member must have value less than TotalSegments (%d)",
+					*req.Segment,
+					*req.TotalSegments,
+				),
+			)
+			return
+		}
+	}
 	opts := ScanOptions{
 		Limit:             req.Limit,
 		ExclusiveStartKey: req.ExclusiveStartKey,
