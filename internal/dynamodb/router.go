@@ -373,7 +373,7 @@ type store interface {
 	PutItem(tableName string, item map[string]any, cond *ConditionCheck) (map[string]any, error)
 	GetItem(tableName string, key map[string]any) (map[string]any, error)
 	DeleteItem(tableName string, key map[string]any, cond *ConditionCheck) (map[string]any, error)
-	Scan(tableName string) ([]map[string]any, error)
+	Scan(tableName string, opts ScanOptions) ([]map[string]any, map[string]any, error)
 	UpdateItem(
 		tableName string,
 		key map[string]any,
@@ -1015,6 +1015,10 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 		ProjectionExpression      string            `json:"ProjectionExpression"`
 		ExpressionAttributeNames  map[string]string `json:"ExpressionAttributeNames"`
 		ExpressionAttributeValues map[string]any    `json:"ExpressionAttributeValues"`
+		Limit                     *int              `json:"Limit"`
+		ExclusiveStartKey         map[string]any    `json:"ExclusiveStartKey"`
+		Segment                   *int              `json:"Segment"`
+		TotalSegments             *int              `json:"TotalSegments"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(
@@ -1034,7 +1038,74 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
-	items, err := ro.storage.Scan(req.TableName)
+	if req.Limit != nil && *req.Limit < 1 {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			fmt.Sprintf(
+				"Value %d at 'limit' failed to satisfy constraint: Member must have value greater than or equal to 1",
+				*req.Limit,
+			),
+		)
+		return
+	}
+	if (req.Segment == nil) != (req.TotalSegments == nil) {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"Segment and TotalSegments must both be specified for parallel scan",
+		)
+		return
+	}
+	if req.Segment != nil {
+		seg := *req.Segment
+		total := *req.TotalSegments
+		switch {
+		case seg < 0 || seg > 999999:
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				fmt.Sprintf(
+					"Value %d at 'segment' failed to satisfy constraint: Member must have value between 0 and 999999, inclusive",
+					seg,
+				),
+			)
+			return
+		case total < 1 || total > 1000000:
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				fmt.Sprintf(
+					"Value %d at 'totalSegments' failed to satisfy constraint: Member must have value between 1 and 1000000, inclusive",
+					total,
+				),
+			)
+			return
+		case seg >= total:
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				fmt.Sprintf(
+					"Value %d at 'segment' failed to satisfy constraint: Member must have value less than TotalSegments (%d)",
+					seg,
+					total,
+				),
+			)
+			return
+		}
+	}
+	opts := ScanOptions{
+		Limit:             req.Limit,
+		ExclusiveStartKey: req.ExclusiveStartKey,
+		Segment:           req.Segment,
+		TotalSegments:     req.TotalSegments,
+	}
+	items, lastEvaluatedKey, err := ro.storage.Scan(req.TableName, opts)
 	if err != nil {
 		if errors.Is(err, ErrTableNotFound) {
 			slog.Debug("Scan: table not found", "table", req.TableName)
@@ -1043,6 +1114,16 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 				http.StatusBadRequest,
 				"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
 				"Requested resource not found: Table: "+req.TableName+" not found",
+			)
+			return
+		}
+		if errors.Is(err, ErrValidationException) {
+			slog.Debug("Scan: validation error", "table", req.TableName, "err", err)
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				err.Error(),
 			)
 			return
 		}
@@ -1098,11 +1179,15 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 		}
 	}
 	slog.Debug("scanned DynamoDB table", "table", req.TableName, "count", len(items))
-	writeJSON(w, http.StatusOK, map[string]any{
+	resp := map[string]any{
 		"Items":        items,
 		"Count":        len(items),
 		"ScannedCount": scannedCount,
-	})
+	}
+	if lastEvaluatedKey != nil {
+		resp["LastEvaluatedKey"] = lastEvaluatedKey
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {

@@ -491,7 +491,7 @@ func TestScan(t *testing.T) {
 		require.NoError(t, s.CreateTable(testMeta))
 		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "a"}})
 		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "b"}})
-		items, err := s.Scan("test-table")
+		items, _, err := s.Scan("test-table", ScanOptions{})
 		require.NoError(t, err)
 		assert.Len(t, items, 2)
 	})
@@ -499,14 +499,14 @@ func TestScan(t *testing.T) {
 	t.Run("returns empty slice for empty table", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		items, err := s.Scan("test-table")
+		items, _, err := s.Scan("test-table", ScanOptions{})
 		require.NoError(t, err)
 		assert.Empty(t, items)
 	})
 
 	t.Run("returns ErrTableNotFound for missing table", func(t *testing.T) {
 		s := newTestStorage(t)
-		_, err := s.Scan("no-such-table")
+		_, _, err := s.Scan("no-such-table", ScanOptions{})
 		assert.ErrorIs(t, err, ErrTableNotFound)
 	})
 
@@ -516,7 +516,7 @@ func TestScan(t *testing.T) {
 		s.listDirFn = func(string) ([]os.DirEntry, error) {
 			return nil, errors.New("read dir failed")
 		}
-		_, err := s.Scan("test-table")
+		_, _, err := s.Scan("test-table", ScanOptions{})
 		assert.Error(t, err)
 	})
 
@@ -526,7 +526,7 @@ func TestScan(t *testing.T) {
 		f, err := s.root.OpenFile("test-table/other.txt", os.O_CREATE|os.O_WRONLY, 0o600)
 		require.NoError(t, err)
 		require.NoError(t, f.Close())
-		items, err := s.Scan("test-table")
+		items, _, err := s.Scan("test-table", ScanOptions{})
 		require.NoError(t, err)
 		assert.Empty(t, items)
 	})
@@ -538,9 +538,192 @@ func TestScan(t *testing.T) {
 		s.readAll = func(io.Reader) ([]byte, error) {
 			return []byte("not-json"), nil
 		}
-		items, err := s.Scan("test-table")
+		items, _, err := s.Scan("test-table", ScanOptions{})
 		require.NoError(t, err)
 		assert.Empty(t, items)
+	})
+
+	t.Run("returns error when readTableMeta fails with Limit set", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		s.readAll = func(io.Reader) ([]byte, error) {
+			return nil, errors.New("meta read failed")
+		}
+		limit := 1
+		_, _, err := s.Scan("test-table", ScanOptions{Limit: &limit})
+		assert.Error(t, err)
+	})
+
+	t.Run("returns error when readTableMeta fails with ESK set", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		s.readAll = func(io.Reader) ([]byte, error) {
+			return nil, errors.New("meta read failed")
+		}
+		esk := map[string]any{"pk": map[string]any{"S": "a"}}
+		_, _, err := s.Scan("test-table", ScanOptions{ExclusiveStartKey: esk})
+		assert.Error(t, err)
+	})
+
+	t.Run("Limit truncates and returns LastEvaluatedKey", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "a"}})
+		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "b"}})
+		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "c"}})
+		limit := 2
+		items, lek, err := s.Scan("test-table", ScanOptions{Limit: &limit})
+		require.NoError(t, err)
+		assert.Len(t, items, 2)
+		assert.NotNil(t, lek)
+	})
+
+	t.Run("Limit equal to count returns no LastEvaluatedKey", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "a"}})
+		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "b"}})
+		limit := 2
+		items, lek, err := s.Scan("test-table", ScanOptions{Limit: &limit})
+		require.NoError(t, err)
+		assert.Len(t, items, 2)
+		assert.Nil(t, lek)
+	})
+
+	t.Run("ExclusiveStartKey resumes after the given key", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "a"}})
+		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "b"}})
+		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "c"}})
+		limit := 1
+		// first page
+		page1, lek, err := s.Scan("test-table", ScanOptions{Limit: &limit})
+		require.NoError(t, err)
+		require.Len(t, page1, 1)
+		require.NotNil(t, lek)
+		// second page
+		page2, lek2, err := s.Scan("test-table", ScanOptions{Limit: &limit, ExclusiveStartKey: lek})
+		require.NoError(t, err)
+		require.Len(t, page2, 1)
+		require.NotNil(t, lek2)
+		// third page
+		page3, lek3, err := s.Scan(
+			"test-table",
+			ScanOptions{Limit: &limit, ExclusiveStartKey: lek2},
+		)
+		require.NoError(t, err)
+		require.Len(t, page3, 1)
+		assert.Nil(t, lek3)
+		// all pages together cover all items without duplicates
+		combined := make([]map[string]any, 0, 3)
+		combined = append(combined, page1...)
+		combined = append(combined, page2...)
+		combined = append(combined, page3...)
+		assert.Len(t, combined, 3)
+	})
+
+	t.Run("ExclusiveStartKey resumes from hash position when item was deleted", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "a"}})
+		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "b"}})
+		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "c"}})
+		// Establish scan order and get LEK for the first item.
+		limit := 1
+		page1, lek, err := s.Scan("test-table", ScanOptions{Limit: &limit})
+		require.NoError(t, err)
+		require.Len(t, page1, 1)
+		require.NotNil(t, lek)
+		// Delete the first-scanned item to simulate a stale ESK.
+		_, err = s.DeleteItem("test-table", page1[0], nil)
+		require.NoError(t, err)
+		// Scanning with the stale ESK must resume from the correct hash position.
+		remaining, _, err := s.Scan("test-table", ScanOptions{ExclusiveStartKey: lek})
+		require.NoError(t, err)
+		assert.Len(t, remaining, 2)
+	})
+
+	t.Run(
+		"ExclusiveStartKey with missing key attribute returns ErrValidationException",
+		func(t *testing.T) {
+			s := newTestStorage(t)
+			require.NoError(t, s.CreateTable(testMeta))
+			mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "a"}})
+			esk := map[string]any{"wrong-attr": map[string]any{"S": "a"}}
+			_, _, err := s.Scan("test-table", ScanOptions{ExclusiveStartKey: esk})
+			assert.ErrorIs(t, err, ErrValidationException)
+		},
+	)
+
+	t.Run("parallel scan distributes items across segments", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		for i := range 6 {
+			mustPutItem(t, s, "test-table", map[string]any{
+				"pk": map[string]any{"S": fmt.Sprintf("item%d", i)},
+			})
+		}
+		total := 3
+		var allItems []map[string]any
+		for seg := range total {
+			items, _, err := s.Scan("test-table", ScanOptions{Segment: &seg, TotalSegments: &total})
+			require.NoError(t, err)
+			allItems = append(allItems, items...)
+		}
+		assert.Len(t, allItems, 6)
+	})
+
+	t.Run("parallel scan single segment returns subset", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		for i := range 4 {
+			mustPutItem(t, s, "test-table", map[string]any{
+				"pk": map[string]any{"S": fmt.Sprintf("k%d", i)},
+			})
+		}
+		total := 2
+		seg0 := 0
+		seg1 := 1
+		items0, _, err := s.Scan("test-table", ScanOptions{Segment: &seg0, TotalSegments: &total})
+		require.NoError(t, err)
+		items1, _, err := s.Scan("test-table", ScanOptions{Segment: &seg1, TotalSegments: &total})
+		require.NoError(t, err)
+		assert.Len(t, append(items0, items1...), 4)
+	})
+
+	t.Run("parallel scan ESK resumes within segment not global list", func(t *testing.T) {
+		// Regression: segment filter must precede ESK so that ESK applies within
+		// the segment. With the old ordering (ESK first), page 2 would return
+		// items belonging to the wrong segment.
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		for i := range 4 {
+			mustPutItem(t, s, "test-table", map[string]any{
+				"pk": map[string]any{"S": fmt.Sprintf("k%d", i)},
+			})
+		}
+		total := 2
+		seg := 0
+		limit := 1
+		// First page: segment 0, limit 1.
+		page1, lek, err := s.Scan("test-table", ScanOptions{
+			Segment: &seg, TotalSegments: &total, Limit: &limit,
+		})
+		require.NoError(t, err)
+		require.Len(t, page1, 1)
+		require.NotNil(t, lek, "expected more items in segment")
+		// Second page: resume with ESK within the same segment.
+		page2, lek2, err := s.Scan("test-table", ScanOptions{
+			Segment: &seg, TotalSegments: &total, Limit: &limit, ExclusiveStartKey: lek,
+		})
+		require.NoError(t, err)
+		require.Len(t, page2, 1)
+		assert.Nil(t, lek2, "segment 0 should be exhausted after two pages")
+		// Full segment 0 (no ESK, no limit) must equal the two pages combined.
+		full, _, err := s.Scan("test-table", ScanOptions{Segment: &seg, TotalSegments: &total})
+		require.NoError(t, err)
+		assert.Equal(t, full, append(page1, page2...))
 	})
 }
 
@@ -1611,7 +1794,7 @@ func TestBatchWriteItems(t *testing.T) {
 			{"pk": map[string]any{"S": "k2"}},
 		}
 		require.NoError(t, s.BatchWriteItems("test-table", puts, nil))
-		items, err := s.Scan("test-table")
+		items, _, err := s.Scan("test-table", ScanOptions{})
 		require.NoError(t, err)
 		assert.Len(t, items, 2)
 	})
@@ -1626,7 +1809,7 @@ func TestBatchWriteItems(t *testing.T) {
 			{"pk": map[string]any{"S": "k2"}},
 		}
 		require.NoError(t, s.BatchWriteItems("test-table", nil, deletes))
-		items, err := s.Scan("test-table")
+		items, _, err := s.Scan("test-table", ScanOptions{})
 		require.NoError(t, err)
 		assert.Empty(t, items)
 	})
@@ -1645,7 +1828,7 @@ func TestBatchWriteItems(t *testing.T) {
 		puts := []map[string]any{{"pk": map[string]any{"S": "new"}}}
 		deletes := []map[string]any{{"pk": map[string]any{"S": "old"}}}
 		require.NoError(t, s.BatchWriteItems("test-table", puts, deletes))
-		items, err := s.Scan("test-table")
+		items, _, err := s.Scan("test-table", ScanOptions{})
 		require.NoError(t, err)
 		assert.Len(t, items, 1)
 	})

@@ -90,6 +90,13 @@ type QueryOptions struct {
 	ExclusiveStartKey map[string]any
 }
 
+type ScanOptions struct {
+	Limit             *int           // nil means no limit; must be >= 1 when set
+	ExclusiveStartKey map[string]any // resume from the item after this primary key
+	Segment           *int           // parallel scan: 0-based segment index
+	TotalSegments     *int           // parallel scan: total number of segments
+}
+
 // dynamoValueCmp compares two DynamoDB typed attribute values.
 // Returns negative, zero, or positive like strings.Compare.
 func dynamoValueCmp(a, b any) (int, error) {
@@ -404,13 +411,91 @@ func (s *Storage) DeleteItem(
 	return old, nil
 }
 
-func (s *Storage) Scan(tableName string) ([]map[string]any, error) {
+func (s *Storage) Scan(
+	tableName string,
+	opts ScanOptions,
+) ([]map[string]any, map[string]any, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if !s.tableExistsLocked(tableName) {
-		return nil, ErrTableNotFound
+		return nil, nil, ErrTableNotFound
 	}
-	return s.readAllItemsLocked(tableName)
+
+	needsMeta := len(opts.ExclusiveStartKey) > 0 || opts.Limit != nil || opts.Segment != nil
+	var meta TableMetadata
+	if needsMeta {
+		var err error
+		meta, err = s.readTableMeta(tableName)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
+	all, err := s.readAllItemsLocked(tableName)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// When pagination is in use (ESK or Limit), sort items by their hash key so
+	// that order is deterministic regardless of the underlying filesystem's
+	// ReadDir order (e.g. creation order on Linux ext4 vs. alphabetical on macOS
+	// APFS). Deterministic order is required for the k > eskKey comparison that
+	// resumes scanning after a deleted item.
+	if needsMeta {
+		sort.Slice(all, func(i, j int) bool {
+			ki, _ := itemKey(all[i], meta.KeySchema)
+			kj, _ := itemKey(all[j], meta.KeySchema)
+			return ki < kj
+		})
+	}
+
+	// Segment partitioning must precede ESK so that ESK resumes within the
+	// correct segment, not across the global item list.
+	if opts.Segment != nil && opts.TotalSegments != nil {
+		seg := *opts.Segment
+		total := *opts.TotalSegments
+		var segItems []map[string]any
+		for i, item := range all {
+			if i%total == seg {
+				segItems = append(segItems, item)
+			}
+		}
+		all = segItems
+	}
+
+	if len(opts.ExclusiveStartKey) > 0 {
+		eskKey, err := itemKey(opts.ExclusiveStartKey, meta.KeySchema)
+		if err != nil {
+			return nil, nil, err
+		}
+		startIdx := len(all) // default: past end
+		for i, item := range all {
+			k, kErr := itemKey(item, meta.KeySchema)
+			if kErr != nil {
+				continue // defensive: skip data-corrupted items missing required key attributes
+			}
+			if k == eskKey {
+				startIdx = i + 1
+				break
+			}
+			// Items were sorted by hash above, so a hash that already exceeds
+			// eskKey means the ESK item was deleted. Resume from this position.
+			if k > eskKey {
+				startIdx = i
+				break
+			}
+		}
+		all = all[startIdx:]
+	}
+
+	var lastEvaluatedKey map[string]any
+	if opts.Limit != nil && len(all) > *opts.Limit {
+		lastItem := all[*opts.Limit-1]
+		lastEvaluatedKey = extractPrimaryKey(lastItem, meta.KeySchema)
+		all = all[:*opts.Limit]
+	}
+
+	return all, lastEvaluatedKey, nil
 }
 
 // UpdateItem reads an existing item (or seeds one from the key), applies the
