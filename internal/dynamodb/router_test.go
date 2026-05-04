@@ -597,6 +597,15 @@ func TestHandleScan(t *testing.T) {
 		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
+	t.Run("400 for ExclusiveStartKey with missing key attribute", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "Scan",
+			`{"TableName":"test-table","ExclusiveStartKey":{"wrong-attr":{"S":"a"}}}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
 	t.Run("Limit returns LastEvaluatedKey when more items exist", func(t *testing.T) {
 		ro := newTestRouter(t)
 		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)

@@ -1117,6 +1117,16 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 			)
 			return
 		}
+		if errors.Is(err, ErrValidationException) {
+			slog.Debug("Scan: validation error", "table", req.TableName, "err", err)
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				err.Error(),
+			)
+			return
+		}
 		slog.Error("Scan failed", "table", req.TableName, "err", err)
 		writeError(
 			w,
