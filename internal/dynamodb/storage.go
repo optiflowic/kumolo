@@ -455,7 +455,7 @@ func (s *Storage) Scan(
 		if err != nil {
 			return nil, nil, err
 		}
-		startIdx := len(all) // default: past end (key not found)
+		startIdx := len(all) // default: past end
 		for i, item := range all {
 			k, kErr := itemKey(item, meta.KeySchema)
 			if kErr != nil {
@@ -463,6 +463,13 @@ func (s *Storage) Scan(
 			}
 			if k == eskKey {
 				startIdx = i + 1
+				break
+			}
+			// Items are stored as hash-named files returned in lexicographic order
+			// by ReadDir, so if the current item's hash already exceeds the ESK
+			// hash, the ESK item was deleted. Resume from this position.
+			if k > eskKey {
+				startIdx = i
 				break
 			}
 		}

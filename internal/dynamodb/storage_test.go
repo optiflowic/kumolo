@@ -623,15 +623,25 @@ func TestScan(t *testing.T) {
 		assert.Len(t, combined, 3)
 	})
 
-	t.Run("ExclusiveStartKey not found returns empty", func(t *testing.T) {
+	t.Run("ExclusiveStartKey resumes from hash position when item was deleted", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
 		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "a"}})
-		esk := map[string]any{"pk": map[string]any{"S": "z"}}
-		items, lek, err := s.Scan("test-table", ScanOptions{ExclusiveStartKey: esk})
+		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "b"}})
+		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "c"}})
+		// Establish scan order and get LEK for the first item.
+		limit := 1
+		page1, lek, err := s.Scan("test-table", ScanOptions{Limit: &limit})
 		require.NoError(t, err)
-		assert.Empty(t, items)
-		assert.Nil(t, lek)
+		require.Len(t, page1, 1)
+		require.NotNil(t, lek)
+		// Delete the first-scanned item to simulate a stale ESK.
+		_, err = s.DeleteItem("test-table", page1[0], nil)
+		require.NoError(t, err)
+		// Scanning with the stale ESK must resume from the correct hash position.
+		remaining, _, err := s.Scan("test-table", ScanOptions{ExclusiveStartKey: lek})
+		require.NoError(t, err)
+		assert.Len(t, remaining, 2)
 	})
 
 	t.Run(
