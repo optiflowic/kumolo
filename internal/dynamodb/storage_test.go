@@ -867,7 +867,13 @@ func TestQuery(t *testing.T) {
 			map[string]any{"pk": map[string]any{"S": "a"}, "v": map[string]any{"N": "1"}})
 		mustPutItem(t, s, "test-table",
 			map[string]any{"pk": map[string]any{"S": "b"}, "v": map[string]any{"N": "2"}})
-		items, err := s.Query("test-table", "pk", map[string]any{"S": "a"}, nil)
+		items, _, err := s.Query(
+			"test-table",
+			"pk",
+			map[string]any{"S": "a"},
+			nil,
+			QueryOptions{ScanIndexForward: true},
+		)
 		require.NoError(t, err)
 		require.Len(t, items, 1)
 		assert.Equal(t, map[string]any{"S": "a"}, items[0]["pk"])
@@ -878,7 +884,13 @@ func TestQuery(t *testing.T) {
 		require.NoError(t, s.CreateTable(testMeta))
 		mustPutItem(t, s, "test-table",
 			map[string]any{"pk": map[string]any{"S": "x"}})
-		items, err := s.Query("test-table", "pk", map[string]any{"S": "notfound"}, nil)
+		items, _, err := s.Query(
+			"test-table",
+			"pk",
+			map[string]any{"S": "notfound"},
+			nil,
+			QueryOptions{ScanIndexForward: true},
+		)
 		require.NoError(t, err)
 		assert.Empty(t, items)
 	})
@@ -888,14 +900,26 @@ func TestQuery(t *testing.T) {
 		require.NoError(t, s.CreateTable(testMeta))
 		mustPutItem(t, s, "test-table",
 			map[string]any{"pk": map[string]any{"S": "k1"}})
-		items, err := s.Query("test-table", "other", map[string]any{"S": "k1"}, nil)
+		items, _, err := s.Query(
+			"test-table",
+			"other",
+			map[string]any{"S": "k1"},
+			nil,
+			QueryOptions{ScanIndexForward: true},
+		)
 		require.NoError(t, err)
 		assert.Empty(t, items)
 	})
 
 	t.Run("error when table not found", func(t *testing.T) {
 		s := newTestStorage(t)
-		_, err := s.Query("no-table", "pk", map[string]any{"S": "x"}, nil)
+		_, _, err := s.Query(
+			"no-table",
+			"pk",
+			map[string]any{"S": "x"},
+			nil,
+			QueryOptions{ScanIndexForward: true},
+		)
 		assert.ErrorIs(t, err, ErrTableNotFound)
 	})
 
@@ -905,7 +929,13 @@ func TestQuery(t *testing.T) {
 		s.listDirFn = func(string) ([]os.DirEntry, error) {
 			return nil, errors.New("list failed")
 		}
-		_, err := s.Query("test-table", "pk", map[string]any{"S": "x"}, nil)
+		_, _, err := s.Query(
+			"test-table",
+			"pk",
+			map[string]any{"S": "x"},
+			nil,
+			QueryOptions{ScanIndexForward: true},
+		)
 		assert.Error(t, err)
 	})
 }
@@ -941,8 +971,9 @@ func TestQuerySortKeyCondition(t *testing.T) {
 		require.NoError(t, s.CreateTable(skTestMeta))
 		mustPutItem(t, s, "sk-table", mkItem("p", "a"))
 		mustPutItem(t, s, "sk-table", mkItem("p", "b"))
-		items, err := s.Query("sk-table", "pk", map[string]any{"S": "p"},
-			&SortKeyCondition{Name: "sk", Operator: OpEQ, Value: map[string]any{"S": "a"}})
+		items, _, err := s.Query("sk-table", "pk", map[string]any{"S": "p"},
+			&SortKeyCondition{Name: "sk", Operator: OpEQ, Value: map[string]any{"S": "a"}},
+			QueryOptions{ScanIndexForward: true})
 		require.NoError(t, err)
 		assert.Len(t, items, 1)
 	})
@@ -953,8 +984,9 @@ func TestQuerySortKeyCondition(t *testing.T) {
 		for _, v := range []string{"a", "b", "c"} {
 			mustPutItem(t, s, "sk-table", mkItem("p", v))
 		}
-		items, err := s.Query("sk-table", "pk", map[string]any{"S": "p"},
-			&SortKeyCondition{Name: "sk", Operator: OpLT, Value: map[string]any{"S": "b"}})
+		items, _, err := s.Query("sk-table", "pk", map[string]any{"S": "p"},
+			&SortKeyCondition{Name: "sk", Operator: OpLT, Value: map[string]any{"S": "b"}},
+			QueryOptions{ScanIndexForward: true})
 		require.NoError(t, err)
 		assert.Len(t, items, 1)
 	})
@@ -965,8 +997,9 @@ func TestQuerySortKeyCondition(t *testing.T) {
 		for _, v := range []string{"a", "b", "c"} {
 			mustPutItem(t, s, "sk-table", mkItem("p", v))
 		}
-		items, err := s.Query("sk-table", "pk", map[string]any{"S": "p"},
-			&SortKeyCondition{Name: "sk", Operator: OpLTE, Value: map[string]any{"S": "b"}})
+		items, _, err := s.Query("sk-table", "pk", map[string]any{"S": "p"},
+			&SortKeyCondition{Name: "sk", Operator: OpLTE, Value: map[string]any{"S": "b"}},
+			QueryOptions{ScanIndexForward: true})
 		require.NoError(t, err)
 		assert.Len(t, items, 2)
 	})
@@ -977,8 +1010,9 @@ func TestQuerySortKeyCondition(t *testing.T) {
 		for _, v := range []string{"a", "b", "c"} {
 			mustPutItem(t, s, "sk-table", mkItem("p", v))
 		}
-		items, err := s.Query("sk-table", "pk", map[string]any{"S": "p"},
-			&SortKeyCondition{Name: "sk", Operator: OpGT, Value: map[string]any{"S": "b"}})
+		items, _, err := s.Query("sk-table", "pk", map[string]any{"S": "p"},
+			&SortKeyCondition{Name: "sk", Operator: OpGT, Value: map[string]any{"S": "b"}},
+			QueryOptions{ScanIndexForward: true})
 		require.NoError(t, err)
 		assert.Len(t, items, 1)
 	})
@@ -989,8 +1023,9 @@ func TestQuerySortKeyCondition(t *testing.T) {
 		for _, v := range []string{"a", "b", "c"} {
 			mustPutItem(t, s, "sk-table", mkItem("p", v))
 		}
-		items, err := s.Query("sk-table", "pk", map[string]any{"S": "p"},
-			&SortKeyCondition{Name: "sk", Operator: OpGTE, Value: map[string]any{"S": "b"}})
+		items, _, err := s.Query("sk-table", "pk", map[string]any{"S": "p"},
+			&SortKeyCondition{Name: "sk", Operator: OpGTE, Value: map[string]any{"S": "b"}},
+			QueryOptions{ScanIndexForward: true})
 		require.NoError(t, err)
 		assert.Len(t, items, 2)
 	})
@@ -1001,13 +1036,14 @@ func TestQuerySortKeyCondition(t *testing.T) {
 		for _, v := range []string{"a", "b", "c", "d"} {
 			mustPutItem(t, s, "sk-table", mkItem("p", v))
 		}
-		items, err := s.Query("sk-table", "pk", map[string]any{"S": "p"},
+		items, _, err := s.Query("sk-table", "pk", map[string]any{"S": "p"},
 			&SortKeyCondition{
 				Name:     "sk",
 				Operator: OpBETWEEN,
 				Value:    map[string]any{"S": "b"},
 				Value2:   map[string]any{"S": "c"},
-			})
+			},
+			QueryOptions{ScanIndexForward: true})
 		require.NoError(t, err)
 		assert.Len(t, items, 2)
 	})
@@ -1018,7 +1054,7 @@ func TestQuerySortKeyCondition(t *testing.T) {
 		for _, v := range []string{"foo1", "foo2", "bar"} {
 			mustPutItem(t, s, "sk-table", mkItem("p", v))
 		}
-		items, err := s.Query(
+		items, _, err := s.Query(
 			"sk-table",
 			"pk",
 			map[string]any{"S": "p"},
@@ -1027,6 +1063,7 @@ func TestQuerySortKeyCondition(t *testing.T) {
 				Operator: OpBeginsWith,
 				Value:    map[string]any{"S": "foo"},
 			},
+			QueryOptions{ScanIndexForward: true},
 		)
 		require.NoError(t, err)
 		assert.Len(t, items, 2)
@@ -1037,8 +1074,9 @@ func TestQuerySortKeyCondition(t *testing.T) {
 		require.NoError(t, s.CreateTable(skTestMeta))
 		mustPutItem(t, s, "sk-table",
 			map[string]any{"pk": map[string]any{"S": "p"}, "sk": map[string]any{"N": "1"}})
-		items, err := s.Query("sk-table", "pk", map[string]any{"S": "p"},
-			&SortKeyCondition{Name: "sk", Operator: OpBeginsWith, Value: map[string]any{"N": "1"}})
+		items, _, err := s.Query("sk-table", "pk", map[string]any{"S": "p"},
+			&SortKeyCondition{Name: "sk", Operator: OpBeginsWith, Value: map[string]any{"N": "1"}},
+			QueryOptions{ScanIndexForward: true})
 		require.NoError(t, err)
 		assert.Empty(t, items)
 	})
@@ -1049,8 +1087,9 @@ func TestQuerySortKeyCondition(t *testing.T) {
 		for _, v := range []int{1, 2, 3, 4, 5} {
 			mustPutItem(t, s, "sk-table", mkNumItem("p", v))
 		}
-		items, err := s.Query("sk-table", "pk", map[string]any{"S": "p"},
-			&SortKeyCondition{Name: "sk", Operator: OpGTE, Value: map[string]any{"N": "3"}})
+		items, _, err := s.Query("sk-table", "pk", map[string]any{"S": "p"},
+			&SortKeyCondition{Name: "sk", Operator: OpGTE, Value: map[string]any{"N": "3"}},
+			QueryOptions{ScanIndexForward: true})
 		require.NoError(t, err)
 		assert.Len(t, items, 3)
 	})
@@ -1060,8 +1099,9 @@ func TestQuerySortKeyCondition(t *testing.T) {
 		require.NoError(t, s.CreateTable(skTestMeta))
 		mustPutItem(t, s, "sk-table",
 			map[string]any{"pk": map[string]any{"S": "p"}, "sk": map[string]any{"S": "x"}})
-		items, err := s.Query("sk-table", "pk", map[string]any{"S": "p"},
-			&SortKeyCondition{Name: "other", Operator: OpEQ, Value: map[string]any{"S": "x"}})
+		items, _, err := s.Query("sk-table", "pk", map[string]any{"S": "p"},
+			&SortKeyCondition{Name: "other", Operator: OpEQ, Value: map[string]any{"S": "x"}},
+			QueryOptions{ScanIndexForward: true})
 		require.NoError(t, err)
 		assert.Empty(t, items)
 	})
@@ -1070,10 +1110,249 @@ func TestQuerySortKeyCondition(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(skTestMeta))
 		mustPutItem(t, s, "sk-table", mkItem("p", "x"))
-		items, err := s.Query("sk-table", "pk", map[string]any{"S": "p"},
-			&SortKeyCondition{Name: "sk", Operator: "contains", Value: map[string]any{"S": "x"}})
+		items, _, err := s.Query("sk-table", "pk", map[string]any{"S": "p"},
+			&SortKeyCondition{Name: "sk", Operator: "contains", Value: map[string]any{"S": "x"}},
+			QueryOptions{ScanIndexForward: true})
 		require.NoError(t, err)
 		assert.Empty(t, items)
+	})
+}
+
+var skNumTestMeta = TableMetadata{
+	Name: "sk-num-table",
+	KeySchema: []KeySchemaElement{
+		{AttributeName: "pk", KeyType: "HASH"},
+		{AttributeName: "sk", KeyType: "RANGE"},
+	},
+	AttributeDefinitions: []AttributeDefinition{
+		{AttributeName: "pk", AttributeType: "S"},
+		{AttributeName: "sk", AttributeType: "N"},
+	},
+}
+
+func TestQueryScanIndexForward(t *testing.T) {
+	mkItem := func(pk, sk string) map[string]any {
+		return map[string]any{
+			"pk": map[string]any{"S": pk},
+			"sk": map[string]any{"S": sk},
+		}
+	}
+
+	setup := func(t *testing.T) *Storage {
+		t.Helper()
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(skTestMeta))
+		for _, v := range []string{"a", "b", "c", "d"} {
+			mustPutItem(t, s, "sk-table", mkItem("p", v))
+		}
+		return s
+	}
+
+	t.Run("ascending order (ScanIndexForward=true)", func(t *testing.T) {
+		s := setup(t)
+		items, _, err := s.Query(
+			"sk-table",
+			"pk",
+			map[string]any{"S": "p"},
+			nil,
+			QueryOptions{ScanIndexForward: true},
+		)
+		require.NoError(t, err)
+		require.Len(t, items, 4)
+		assert.Equal(t, "a", items[0]["sk"].(map[string]any)["S"])
+		assert.Equal(t, "d", items[3]["sk"].(map[string]any)["S"])
+	})
+
+	t.Run("descending order (ScanIndexForward=false)", func(t *testing.T) {
+		s := setup(t)
+		items, _, err := s.Query(
+			"sk-table",
+			"pk",
+			map[string]any{"S": "p"},
+			nil,
+			QueryOptions{ScanIndexForward: false},
+		)
+		require.NoError(t, err)
+		require.Len(t, items, 4)
+		assert.Equal(t, "d", items[0]["sk"].(map[string]any)["S"])
+		assert.Equal(t, "a", items[3]["sk"].(map[string]any)["S"])
+	})
+
+	t.Run("no sort key schema: order is stable without panic", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta)) // hash-only table
+		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "x"}})
+		items, _, err := s.Query(
+			"test-table",
+			"pk",
+			map[string]any{"S": "x"},
+			nil,
+			QueryOptions{ScanIndexForward: false},
+		)
+		require.NoError(t, err)
+		assert.Len(t, items, 1)
+	})
+}
+
+func TestQueryLimit(t *testing.T) {
+	mkItem := func(pk, sk string) map[string]any {
+		return map[string]any{
+			"pk": map[string]any{"S": pk},
+			"sk": map[string]any{"S": sk},
+		}
+	}
+
+	setup := func(t *testing.T) *Storage {
+		t.Helper()
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(skTestMeta))
+		for _, v := range []string{"a", "b", "c", "d", "e"} {
+			mustPutItem(t, s, "sk-table", mkItem("p", v))
+		}
+		return s
+	}
+
+	t.Run("Limit=2 returns first 2 items and LastEvaluatedKey", func(t *testing.T) {
+		s := setup(t)
+		items, lek, err := s.Query(
+			"sk-table",
+			"pk",
+			map[string]any{"S": "p"},
+			nil,
+			QueryOptions{ScanIndexForward: true, Limit: 2},
+		)
+		require.NoError(t, err)
+		require.Len(t, items, 2)
+		assert.Equal(t, "a", items[0]["sk"].(map[string]any)["S"])
+		assert.Equal(t, "b", items[1]["sk"].(map[string]any)["S"])
+		require.NotNil(t, lek)
+		assert.Equal(t, map[string]any{"S": "b"}, lek["sk"])
+		assert.Equal(t, map[string]any{"S": "p"}, lek["pk"])
+	})
+
+	t.Run("Limit >= total items returns no LastEvaluatedKey", func(t *testing.T) {
+		s := setup(t)
+		items, lek, err := s.Query(
+			"sk-table",
+			"pk",
+			map[string]any{"S": "p"},
+			nil,
+			QueryOptions{ScanIndexForward: true, Limit: 10},
+		)
+		require.NoError(t, err)
+		assert.Len(t, items, 5)
+		assert.Nil(t, lek)
+	})
+
+	t.Run("Limit=0 means no limit", func(t *testing.T) {
+		s := setup(t)
+		items, lek, err := s.Query(
+			"sk-table",
+			"pk",
+			map[string]any{"S": "p"},
+			nil,
+			QueryOptions{ScanIndexForward: true, Limit: 0},
+		)
+		require.NoError(t, err)
+		assert.Len(t, items, 5)
+		assert.Nil(t, lek)
+	})
+
+	t.Run("Limit with ScanIndexForward=false returns last items", func(t *testing.T) {
+		s := setup(t)
+		items, lek, err := s.Query(
+			"sk-table",
+			"pk",
+			map[string]any{"S": "p"},
+			nil,
+			QueryOptions{ScanIndexForward: false, Limit: 2},
+		)
+		require.NoError(t, err)
+		require.Len(t, items, 2)
+		assert.Equal(t, "e", items[0]["sk"].(map[string]any)["S"])
+		assert.Equal(t, "d", items[1]["sk"].(map[string]any)["S"])
+		require.NotNil(t, lek)
+		assert.Equal(t, map[string]any{"S": "d"}, lek["sk"])
+	})
+}
+
+func TestQueryExclusiveStartKey(t *testing.T) {
+	mkItem := func(pk, sk string) map[string]any {
+		return map[string]any{
+			"pk": map[string]any{"S": pk},
+			"sk": map[string]any{"S": sk},
+		}
+	}
+
+	setup := func(t *testing.T) *Storage {
+		t.Helper()
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(skTestMeta))
+		for _, v := range []string{"a", "b", "c", "d", "e"} {
+			mustPutItem(t, s, "sk-table", mkItem("p", v))
+		}
+		return s
+	}
+
+	t.Run("resumes after cursor", func(t *testing.T) {
+		s := setup(t)
+		cursor := map[string]any{
+			"pk": map[string]any{"S": "p"},
+			"sk": map[string]any{"S": "b"},
+		}
+		items, lek, err := s.Query("sk-table", "pk", map[string]any{"S": "p"}, nil,
+			QueryOptions{ScanIndexForward: true, Limit: 2, ExclusiveStartKey: cursor})
+		require.NoError(t, err)
+		require.Len(t, items, 2)
+		assert.Equal(t, "c", items[0]["sk"].(map[string]any)["S"])
+		assert.Equal(t, "d", items[1]["sk"].(map[string]any)["S"])
+		require.NotNil(t, lek)
+		assert.Equal(t, map[string]any{"S": "d"}, lek["sk"])
+	})
+
+	t.Run("cursor at last page returns no LastEvaluatedKey", func(t *testing.T) {
+		s := setup(t)
+		cursor := map[string]any{
+			"pk": map[string]any{"S": "p"},
+			"sk": map[string]any{"S": "c"},
+		}
+		items, lek, err := s.Query("sk-table", "pk", map[string]any{"S": "p"}, nil,
+			QueryOptions{ScanIndexForward: true, ExclusiveStartKey: cursor})
+		require.NoError(t, err)
+		assert.Len(t, items, 2) // "d" and "e"
+		assert.Nil(t, lek)
+	})
+
+	t.Run("unknown cursor key returns empty result", func(t *testing.T) {
+		s := setup(t)
+		cursor := map[string]any{
+			"pk": map[string]any{"S": "p"},
+			"sk": map[string]any{"S": "z"},
+		}
+		items, _, err := s.Query("sk-table", "pk", map[string]any{"S": "p"}, nil,
+			QueryOptions{ScanIndexForward: true, ExclusiveStartKey: cursor})
+		require.NoError(t, err)
+		assert.Empty(t, items)
+	})
+
+	t.Run("paginate all items with Limit=2", func(t *testing.T) {
+		s := setup(t)
+		var allItems []map[string]any
+		var cursor map[string]any
+		for {
+			items, lek, err := s.Query("sk-table", "pk", map[string]any{"S": "p"}, nil,
+				QueryOptions{ScanIndexForward: true, Limit: 2, ExclusiveStartKey: cursor})
+			require.NoError(t, err)
+			allItems = append(allItems, items...)
+			if lek == nil {
+				break
+			}
+			cursor = lek
+		}
+		require.Len(t, allItems, 5)
+		for i, expected := range []string{"a", "b", "c", "d", "e"} {
+			assert.Equal(t, expected, allItems[i]["sk"].(map[string]any)["S"])
+		}
 	})
 }
 

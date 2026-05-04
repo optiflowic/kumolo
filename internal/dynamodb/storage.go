@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -80,6 +81,18 @@ type SortKeyCondition struct {
 	Operator string // one of the Op* constants
 	Value    any    // comparison value (DynamoDB typed)
 	Value2   any    // upper bound for BETWEEN
+}
+
+// QueryOptions controls pagination and sort order for Query.
+type QueryOptions struct {
+	// ScanIndexForward=true sorts ascending by sort key (DynamoDB default).
+	ScanIndexForward bool
+	// Limit is the maximum number of items to evaluate before FilterExpression.
+	// 0 means no limit.
+	Limit int
+	// ExclusiveStartKey is the pagination cursor (primary key of the last item
+	// returned by the previous page). Empty map means start from the beginning.
+	ExclusiveStartKey map[string]any
 }
 
 // dynamoValueCmp compares two DynamoDB typed attribute values.
@@ -493,32 +506,45 @@ func (s *Storage) UpdateItem(
 // Query returns items in tableName matching the hash key equality and the optional
 // sort key condition. Hash key comparison uses JSON encoding; sort key comparison
 // is type-aware (S: lexicographic, N: numeric).
+//
+// opts.ScanIndexForward controls ascending (true) vs descending (false) sort order.
+// opts.Limit caps the number of items evaluated before FilterExpression.
+// opts.ExclusiveStartKey resumes from the item after the given primary key.
+// The second return value is the LastEvaluatedKey (non-nil when more pages remain).
 func (s *Storage) Query(
 	tableName, hashKeyName string,
 	hashKeyValue any,
 	skCond *SortKeyCondition,
-) ([]map[string]any, error) {
+	opts QueryOptions,
+) ([]map[string]any, map[string]any, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if !s.tableExistsLocked(tableName) {
-		return nil, ErrTableNotFound
+		return nil, nil, ErrTableNotFound
+	}
+	meta, err := s.readTableMeta(tableName)
+	if err != nil {
+		return nil, nil, err
+	}
+	var skName string
+	for _, k := range meta.KeySchema {
+		if k.KeyType == "RANGE" {
+			skName = k.AttributeName
+			break
+		}
 	}
 	all, err := s.readAllItemsLocked(tableName)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	wantJSON, _ := json.Marshal(
-		hashKeyValue,
-	) // json.Marshal only fails for unmarshalable types (channels, funcs)
-	var items []map[string]any
+	wantJSON, _ := json.Marshal(hashKeyValue) // only fails for channels/funcs
+	var matched []map[string]any
 	for _, item := range all {
 		val, ok := item[hashKeyName]
 		if !ok {
 			continue
 		}
-		gotJSON, _ := json.Marshal(
-			val,
-		) // json.Marshal only fails for unmarshalable types (channels, funcs)
+		gotJSON, _ := json.Marshal(val) // only fails for channels/funcs
 		if string(gotJSON) != string(wantJSON) {
 			continue
 		}
@@ -528,9 +554,66 @@ func (s *Storage) Query(
 				continue
 			}
 		}
-		items = append(items, item)
+		matched = append(matched, item)
 	}
-	return items, nil
+
+	if skName != "" {
+		sort.SliceStable(matched, func(i, j int) bool {
+			c, err := dynamoValueCmp(matched[i][skName], matched[j][skName])
+			if err != nil {
+				return false
+			}
+			if opts.ScanIndexForward {
+				return c < 0
+			}
+			return c > 0
+		})
+	}
+
+	if len(opts.ExclusiveStartKey) > 0 {
+		startIdx := len(matched) // default: empty if key not found
+		for i, item := range matched {
+			if itemMatchesKey(item, opts.ExclusiveStartKey) {
+				startIdx = i + 1
+				break
+			}
+		}
+		matched = matched[startIdx:]
+	}
+
+	var lastEvaluatedKey map[string]any
+	if opts.Limit > 0 && len(matched) > opts.Limit {
+		lastItem := matched[opts.Limit-1]
+		lastEvaluatedKey = extractPrimaryKey(lastItem, meta.KeySchema)
+		matched = matched[:opts.Limit]
+	}
+
+	return matched, lastEvaluatedKey, nil
+}
+
+// itemMatchesKey reports whether item's key attributes equal key (DynamoDB typed values).
+func itemMatchesKey(item, key map[string]any) bool {
+	for attr, keyVal := range key {
+		itemVal, ok := item[attr]
+		if !ok {
+			return false
+		}
+		a, _ := json.Marshal(itemVal) // only fails for channels/funcs
+		b, _ := json.Marshal(keyVal)  // only fails for channels/funcs
+		if string(a) != string(b) {
+			return false
+		}
+	}
+	return true
+}
+
+// extractPrimaryKey builds a DynamoDB-typed primary key map from an item.
+func extractPrimaryKey(item map[string]any, keySchema []KeySchemaElement) map[string]any {
+	key := make(map[string]any, len(keySchema))
+	for _, k := range keySchema {
+		key[k.AttributeName] = item[k.AttributeName]
+	}
+	return key
 }
 
 // BatchGetItems retrieves items by their primary keys from tableName.

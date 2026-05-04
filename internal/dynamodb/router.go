@@ -384,7 +384,8 @@ type store interface {
 		tableName, hashKeyName string,
 		hashKeyValue any,
 		skCond *SortKeyCondition,
-	) ([]map[string]any, error)
+		opts QueryOptions,
+	) ([]map[string]any, map[string]any, error)
 	BatchGetItems(tableName string, keys []map[string]any) ([]map[string]any, error)
 	BatchWriteItems(tableName string, puts []map[string]any, deletes []map[string]any) error
 	UpdateTimeToLive(tableName string, spec TTLSpec) (TTLSpec, error)
@@ -1282,6 +1283,9 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 		ProjectionExpression      string            `json:"ProjectionExpression"`
 		ExpressionAttributeNames  map[string]string `json:"ExpressionAttributeNames"`
 		ExpressionAttributeValues map[string]any    `json:"ExpressionAttributeValues"`
+		ScanIndexForward          *bool             `json:"ScanIndexForward"`
+		Limit                     int               `json:"Limit"`
+		ExclusiveStartKey         map[string]any    `json:"ExclusiveStartKey"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(
@@ -1327,7 +1331,23 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	items, err := ro.storage.Query(req.TableName, hashKeyName, hashKeyValue, skCond)
+	scanIndexForward := true
+	if req.ScanIndexForward != nil {
+		scanIndexForward = *req.ScanIndexForward
+	}
+	opts := QueryOptions{
+		ScanIndexForward:  scanIndexForward,
+		Limit:             req.Limit,
+		ExclusiveStartKey: req.ExclusiveStartKey,
+	}
+
+	items, lastEvaluatedKey, err := ro.storage.Query(
+		req.TableName,
+		hashKeyName,
+		hashKeyValue,
+		skCond,
+		opts,
+	)
 	if err != nil {
 		if errors.Is(err, ErrTableNotFound) {
 			slog.Debug("Query: table not found", "table", req.TableName)
@@ -1391,11 +1411,15 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 		}
 	}
 	slog.Debug("queried DynamoDB table", "table", req.TableName, "count", len(items))
-	writeJSON(w, http.StatusOK, map[string]any{
+	resp := map[string]any{
 		"Items":        items,
 		"Count":        len(items),
 		"ScannedCount": scannedCount,
-	})
+	}
+	if lastEvaluatedKey != nil {
+		resp["LastEvaluatedKey"] = lastEvaluatedKey
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (ro *Router) handleBatchGetItem(w http.ResponseWriter, body []byte) {
