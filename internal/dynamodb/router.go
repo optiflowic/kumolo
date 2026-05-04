@@ -1336,7 +1336,10 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 			w,
 			http.StatusBadRequest,
 			"com.amazonaws.dynamodb.v20120810#ValidationException",
-			fmt.Sprintf("Value %d for parameter limit is invalid. Limit must be > 0", *req.Limit),
+			fmt.Sprintf(
+				"Value %d at 'limit' failed to satisfy constraint: Member must have value greater than or equal to 1",
+				*req.Limit,
+			),
 		)
 		return
 	}

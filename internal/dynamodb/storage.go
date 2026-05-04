@@ -615,7 +615,6 @@ func (s *Storage) Query(
 	return matched, lastEvaluatedKey, nil
 }
 
-// extractPrimaryKey builds a DynamoDB-typed primary key map from an item.
 func extractPrimaryKey(item map[string]any, keySchema []KeySchemaElement) map[string]any {
 	key := make(map[string]any, len(keySchema))
 	for _, k := range keySchema {
