@@ -1762,8 +1762,10 @@ func (m *mockStore) Query(
 	tableName, hashKeyName string,
 	hashKeyValue any,
 	_ *SortKeyCondition,
-) ([]map[string]any, error) {
-	return m.queryFn(tableName, hashKeyName, hashKeyValue)
+	_ QueryOptions,
+) ([]map[string]any, map[string]any, error) {
+	items, err := m.queryFn(tableName, hashKeyName, hashKeyValue)
+	return items, nil, err
 }
 
 func (m *mockStore) BatchGetItems(
@@ -3015,5 +3017,222 @@ func TestHandleUpdateItem_ApplyOpErrors(t *testing.T) {
         }`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+}
+
+const createSkTableBody = `{
+	"TableName": "sk-table",
+	"KeySchema": [
+		{"AttributeName": "pk", "KeyType": "HASH"},
+		{"AttributeName": "sk", "KeyType": "RANGE"}
+	],
+	"AttributeDefinitions": [
+		{"AttributeName": "pk", "AttributeType": "S"},
+		{"AttributeName": "sk", "AttributeType": "S"}
+	],
+	"BillingMode": "PAY_PER_REQUEST"
+}`
+
+func setupSkTable(t *testing.T) *Router {
+	t.Helper()
+	ro := newTestRouter(t)
+	require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createSkTableBody).Code)
+	for _, sk := range []string{"a", "b", "c", "d", "e"} {
+		body := `{"TableName":"sk-table","Item":{"pk":{"S":"p"},"sk":{"S":"` + sk + `"}}}`
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem", body).Code)
+	}
+	return ro
+}
+
+func TestHandleQuery_ScanIndexForward(t *testing.T) {
+	t.Run("ascending order by default", func(t *testing.T) {
+		ro := setupSkTable(t)
+		w := dynamo(t, ro, "Query", `{
+			"TableName": "sk-table",
+			"KeyConditionExpression": "pk = :pk",
+			"ExpressionAttributeValues": {":pk": {"S": "p"}}
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		items := resp["Items"].([]any)
+		require.Len(t, items, 5)
+		assert.Equal(t, "a", items[0].(map[string]any)["sk"].(map[string]any)["S"])
+		assert.Equal(t, "e", items[4].(map[string]any)["sk"].(map[string]any)["S"])
+	})
+
+	t.Run("ScanIndexForward=true gives ascending order", func(t *testing.T) {
+		ro := setupSkTable(t)
+		w := dynamo(t, ro, "Query", `{
+			"TableName": "sk-table",
+			"KeyConditionExpression": "pk = :pk",
+			"ExpressionAttributeValues": {":pk": {"S": "p"}},
+			"ScanIndexForward": true
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		items := resp["Items"].([]any)
+		require.Len(t, items, 5)
+		assert.Equal(t, "a", items[0].(map[string]any)["sk"].(map[string]any)["S"])
+	})
+
+	t.Run("ScanIndexForward=false gives descending order", func(t *testing.T) {
+		ro := setupSkTable(t)
+		w := dynamo(t, ro, "Query", `{
+			"TableName": "sk-table",
+			"KeyConditionExpression": "pk = :pk",
+			"ExpressionAttributeValues": {":pk": {"S": "p"}},
+			"ScanIndexForward": false
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		items := resp["Items"].([]any)
+		require.Len(t, items, 5)
+		assert.Equal(t, "e", items[0].(map[string]any)["sk"].(map[string]any)["S"])
+		assert.Equal(t, "a", items[4].(map[string]any)["sk"].(map[string]any)["S"])
+	})
+}
+
+func TestHandleQuery_Limit(t *testing.T) {
+	t.Run("Limit caps returned items and sets LastEvaluatedKey", func(t *testing.T) {
+		ro := setupSkTable(t)
+		w := dynamo(t, ro, "Query", `{
+			"TableName": "sk-table",
+			"KeyConditionExpression": "pk = :pk",
+			"ExpressionAttributeValues": {":pk": {"S": "p"}},
+			"Limit": 2
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		items := resp["Items"].([]any)
+		require.Len(t, items, 2)
+		assert.Equal(t, float64(2), resp["Count"])
+		assert.Equal(t, float64(2), resp["ScannedCount"])
+		require.NotNil(t, resp["LastEvaluatedKey"])
+		lek := resp["LastEvaluatedKey"].(map[string]any)
+		assert.Equal(t, map[string]any{"S": "b"}, lek["sk"])
+	})
+
+	t.Run("Limit >= total returns no LastEvaluatedKey", func(t *testing.T) {
+		ro := setupSkTable(t)
+		w := dynamo(t, ro, "Query", `{
+			"TableName": "sk-table",
+			"KeyConditionExpression": "pk = :pk",
+			"ExpressionAttributeValues": {":pk": {"S": "p"}},
+			"Limit": 100
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Len(t, resp["Items"].([]any), 5)
+		assert.Nil(t, resp["LastEvaluatedKey"])
+	})
+
+	t.Run("no Limit field returns all items without LastEvaluatedKey", func(t *testing.T) {
+		ro := setupSkTable(t)
+		w := dynamo(t, ro, "Query", `{
+			"TableName": "sk-table",
+			"KeyConditionExpression": "pk = :pk",
+			"ExpressionAttributeValues": {":pk": {"S": "p"}}
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Nil(t, resp["LastEvaluatedKey"])
+	})
+
+	t.Run("400 for Limit=0", func(t *testing.T) {
+		ro := setupSkTable(t)
+		w := dynamo(t, ro, "Query", `{
+			"TableName": "sk-table",
+			"KeyConditionExpression": "pk = :pk",
+			"ExpressionAttributeValues": {":pk": {"S": "p"}},
+			"Limit": 0
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("400 for negative Limit", func(t *testing.T) {
+		ro := setupSkTable(t)
+		w := dynamo(t, ro, "Query", `{
+			"TableName": "sk-table",
+			"KeyConditionExpression": "pk = :pk",
+			"ExpressionAttributeValues": {":pk": {"S": "p"}},
+			"Limit": -1
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+}
+
+func TestHandleQuery_ExclusiveStartKey(t *testing.T) {
+	t.Run("second page returns correct items", func(t *testing.T) {
+		ro := setupSkTable(t)
+		w := dynamo(t, ro, "Query", `{
+			"TableName": "sk-table",
+			"KeyConditionExpression": "pk = :pk",
+			"ExpressionAttributeValues": {":pk": {"S": "p"}},
+			"Limit": 2,
+			"ExclusiveStartKey": {"pk": {"S": "p"}, "sk": {"S": "b"}}
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		items := resp["Items"].([]any)
+		require.Len(t, items, 2)
+		assert.Equal(t, "c", items[0].(map[string]any)["sk"].(map[string]any)["S"])
+		assert.Equal(t, "d", items[1].(map[string]any)["sk"].(map[string]any)["S"])
+		require.NotNil(t, resp["LastEvaluatedKey"])
+	})
+
+	t.Run("last page has no LastEvaluatedKey", func(t *testing.T) {
+		ro := setupSkTable(t)
+		w := dynamo(t, ro, "Query", `{
+			"TableName": "sk-table",
+			"KeyConditionExpression": "pk = :pk",
+			"ExpressionAttributeValues": {":pk": {"S": "p"}},
+			"ExclusiveStartKey": {"pk": {"S": "p"}, "sk": {"S": "c"}}
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		items := resp["Items"].([]any)
+		assert.Len(t, items, 2) // "d" and "e"
+		assert.Nil(t, resp["LastEvaluatedKey"])
+	})
+
+	t.Run("paginate all items with Limit=2", func(t *testing.T) {
+		ro := setupSkTable(t)
+		var allSKs []string
+		var exclusiveStartKey map[string]any
+		for {
+			req := map[string]any{
+				"TableName":                 "sk-table",
+				"KeyConditionExpression":    "pk = :pk",
+				"ExpressionAttributeValues": map[string]any{":pk": map[string]any{"S": "p"}},
+				"Limit":                     2,
+			}
+			if exclusiveStartKey != nil {
+				req["ExclusiveStartKey"] = exclusiveStartKey
+			}
+			body, err := json.Marshal(req)
+			require.NoError(t, err)
+			w := dynamo(t, ro, "Query", string(body))
+			require.Equal(t, http.StatusOK, w.Code)
+			var resp map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+			for _, it := range resp["Items"].([]any) {
+				allSKs = append(allSKs, it.(map[string]any)["sk"].(map[string]any)["S"].(string))
+			}
+			if resp["LastEvaluatedKey"] == nil {
+				break
+			}
+			exclusiveStartKey = resp["LastEvaluatedKey"].(map[string]any)
+		}
+		assert.Equal(t, []string{"a", "b", "c", "d", "e"}, allSKs)
 	})
 }
