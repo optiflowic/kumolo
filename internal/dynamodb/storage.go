@@ -455,7 +455,7 @@ func (s *Storage) Scan(
 		for i, item := range all {
 			k, kErr := itemKey(item, meta.KeySchema)
 			if kErr != nil {
-				continue
+				continue // defensive: skip data-corrupted items missing required key attributes
 			}
 			if k == eskKey {
 				startIdx = i + 1

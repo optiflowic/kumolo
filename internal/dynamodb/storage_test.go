@@ -543,6 +543,17 @@ func TestScan(t *testing.T) {
 		assert.Empty(t, items)
 	})
 
+	t.Run("returns error when readTableMeta fails with Limit set", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		s.readAll = func(io.Reader) ([]byte, error) {
+			return nil, errors.New("meta read failed")
+		}
+		limit := 1
+		_, _, err := s.Scan("test-table", ScanOptions{Limit: &limit})
+		assert.Error(t, err)
+	})
+
 	t.Run("Limit truncates and returns LastEvaluatedKey", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
