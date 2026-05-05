@@ -50,7 +50,6 @@ type GlobalSecondaryIndex struct {
 }
 
 // LocalSecondaryIndex holds the definition of an LSI.
-// LSIs share the table's partition key and add an alternate sort key.
 type LocalSecondaryIndex struct {
 	IndexName  string             `json:"indexName"`
 	KeySchema  []KeySchemaElement `json:"keySchema"`
@@ -616,7 +615,6 @@ func (s *Storage) Query(
 	if err != nil {
 		return nil, nil, err
 	}
-	// Resolve key schema: use index schema when IndexName is given, else table schema.
 	var skName string
 	lekSchema := meta.KeySchema // key schema used for LastEvaluatedKey
 	if opts.IndexName != "" {
@@ -751,7 +749,13 @@ func findIndexKeySchema(meta TableMetadata, indexName string) ([]KeySchemaElemen
 func mergeKeySchemas(tableSchema, indexSchema []KeySchemaElement) []KeySchemaElement {
 	seen := make(map[string]bool, len(tableSchema)+len(indexSchema))
 	merged := make([]KeySchemaElement, 0, len(tableSchema)+len(indexSchema))
-	for _, k := range append(indexSchema, tableSchema...) {
+	for _, k := range indexSchema {
+		if !seen[k.AttributeName] {
+			seen[k.AttributeName] = true
+			merged = append(merged, k)
+		}
+	}
+	for _, k := range tableSchema {
 		if !seen[k.AttributeName] {
 			seen[k.AttributeName] = true
 			merged = append(merged, k)

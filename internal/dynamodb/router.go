@@ -427,10 +427,11 @@ type gsiDescription struct {
 }
 
 type lsiDescription struct {
-	IndexName   string             `json:"IndexName"`
-	IndexStatus string             `json:"IndexStatus"`
-	KeySchema   []KeySchemaElement `json:"KeySchema"`
-	Projection  map[string]any     `json:"Projection,omitempty"`
+	IndexName             string                 `json:"IndexName"`
+	IndexStatus           string                 `json:"IndexStatus"`
+	KeySchema             []KeySchemaElement     `json:"KeySchema"`
+	Projection            map[string]any         `json:"Projection,omitempty"`
+	ProvisionedThroughput *ProvisionedThroughput `json:"ProvisionedThroughput,omitempty"`
 }
 
 func toTableDescription(m TableMetadata) tableDescription {
@@ -464,10 +465,11 @@ func toTableDescription(m TableMetadata) tableDescription {
 	}
 	for _, lsi := range m.LocalSecondaryIndexes {
 		desc.LocalSecondaryIndexes = append(desc.LocalSecondaryIndexes, lsiDescription{
-			IndexName:   lsi.IndexName,
-			IndexStatus: "ACTIVE",
-			KeySchema:   lsi.KeySchema,
-			Projection:  lsi.Projection,
+			IndexName:             lsi.IndexName,
+			IndexStatus:           "ACTIVE",
+			KeySchema:             lsi.KeySchema,
+			Projection:            lsi.Projection,
+			ProvisionedThroughput: m.ProvisionedThroughput,
 		})
 	}
 	return desc

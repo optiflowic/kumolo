@@ -3432,13 +3432,17 @@ func setupGSITable(t *testing.T) *Router {
 		{"p2", "s3", "g2", "c"},
 	}
 	for _, it := range items {
-		body := `{"TableName":"gsi-table","Item":{` +
-			`"pk":{"S":"` + it.pk + `"},` +
-			`"sk":{"S":"` + it.sk + `"},` +
-			`"gsi_pk":{"S":"` + it.gsiPK + `"},` +
-			`"gsi_sk":{"S":"` + it.gsiSK + `"}` +
-			`}}`
-		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem", body).Code)
+		body, err := json.Marshal(map[string]any{
+			"TableName": "gsi-table",
+			"Item": map[string]any{
+				"pk":     map[string]any{"S": it.pk},
+				"sk":     map[string]any{"S": it.sk},
+				"gsi_pk": map[string]any{"S": it.gsiPK},
+				"gsi_sk": map[string]any{"S": it.gsiSK},
+			},
+		})
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem", string(body)).Code)
 	}
 	return ro
 }

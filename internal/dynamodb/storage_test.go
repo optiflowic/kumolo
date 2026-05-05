@@ -1851,6 +1851,27 @@ func TestQueryGSI(t *testing.T) {
 			QueryOptions{ScanIndexForward: true, IndexName: "no-such-index"})
 		assert.ErrorIs(t, err, ErrValidationException)
 	})
+
+	t.Run(
+		"sparse GSI: items without GSI sort key are included but sorted stably",
+		func(t *testing.T) {
+			s := newTestStorage(t)
+			require.NoError(t, s.CreateTable(gsiTestMeta))
+			// item without gsi_sk attribute — sparse GSI participant
+			mustPutItem(t, s, "gsi-table", map[string]any{
+				"pk":     map[string]any{"S": "p1"},
+				"sk":     map[string]any{"S": "s1"},
+				"gsi_pk": map[string]any{"S": "g1"},
+			})
+			mustPutItem(t, s, "gsi-table", mkItem("p2", "s2", "g1", "b"))
+
+			items, _, err := s.Query("gsi-table", "gsi_pk", map[string]any{"S": "g1"}, nil,
+				QueryOptions{ScanIndexForward: true, IndexName: "gsi-index"})
+			require.NoError(t, err)
+			// both items appear — the one without gsi_sk is included (sparse index behaviour)
+			assert.Len(t, items, 2)
+		},
+	)
 }
 
 func TestQueryLSI(t *testing.T) {
