@@ -1916,36 +1916,42 @@ func TestQueryLSI(t *testing.T) {
 	})
 }
 
-func TestFindIndexKeySchema(t *testing.T) {
+func TestFindIndexDef(t *testing.T) {
+	gsiProj := map[string]any{"ProjectionType": "ALL"}
+	lsiProj := map[string]any{"ProjectionType": "KEYS_ONLY"}
 	meta := TableMetadata{
 		GlobalSecondaryIndexes: []GlobalSecondaryIndex{
 			{
-				IndexName: "gsi-1",
-				KeySchema: []KeySchemaElement{{AttributeName: "a", KeyType: "HASH"}},
+				IndexName:  "gsi-1",
+				KeySchema:  []KeySchemaElement{{AttributeName: "a", KeyType: "HASH"}},
+				Projection: gsiProj,
 			},
 		},
 		LocalSecondaryIndexes: []LocalSecondaryIndex{
 			{
-				IndexName: "lsi-1",
-				KeySchema: []KeySchemaElement{{AttributeName: "b", KeyType: "RANGE"}},
+				IndexName:  "lsi-1",
+				KeySchema:  []KeySchemaElement{{AttributeName: "b", KeyType: "RANGE"}},
+				Projection: lsiProj,
 			},
 		},
 	}
 
-	t.Run("finds GSI", func(t *testing.T) {
-		ks, err := findIndexKeySchema(meta, "gsi-1")
+	t.Run("finds GSI key schema and projection", func(t *testing.T) {
+		ks, proj, err := findIndexDef(meta, "gsi-1")
 		require.NoError(t, err)
 		assert.Equal(t, "a", ks[0].AttributeName)
+		assert.Equal(t, gsiProj, proj)
 	})
 
-	t.Run("finds LSI", func(t *testing.T) {
-		ks, err := findIndexKeySchema(meta, "lsi-1")
+	t.Run("finds LSI key schema and projection", func(t *testing.T) {
+		ks, proj, err := findIndexDef(meta, "lsi-1")
 		require.NoError(t, err)
 		assert.Equal(t, "b", ks[0].AttributeName)
+		assert.Equal(t, lsiProj, proj)
 	})
 
 	t.Run("returns error for unknown index", func(t *testing.T) {
-		_, err := findIndexKeySchema(meta, "no-index")
+		_, _, err := findIndexDef(meta, "no-index")
 		assert.ErrorIs(t, err, ErrValidationException)
 	})
 }

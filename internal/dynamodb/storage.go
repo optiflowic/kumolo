@@ -617,11 +617,13 @@ func (s *Storage) Query(
 	}
 	var skName string
 	lekSchema := meta.KeySchema // key schema used for LastEvaluatedKey
+	var indexProjection map[string]any
 	if opts.IndexName != "" {
-		idxSchema, err := findIndexKeySchema(meta, opts.IndexName)
+		idxSchema, proj, err := findIndexDef(meta, opts.IndexName)
 		if err != nil {
 			return nil, nil, err
 		}
+		indexProjection = proj
 		var idxHashKey string
 		for _, k := range idxSchema {
 			switch k.KeyType {
@@ -734,30 +736,32 @@ func (s *Storage) Query(
 	}
 
 	if opts.IndexName != "" {
-		projection := findIndexProjection(meta, opts.IndexName)
 		keyAttrNames := make([]string, len(lekSchema))
 		for i, k := range lekSchema {
 			keyAttrNames[i] = k.AttributeName
 		}
-		matched = applyIndexProjection(matched, projection, keyAttrNames)
+		matched = applyIndexProjection(matched, indexProjection, keyAttrNames)
 	}
 
 	return matched, lastEvaluatedKey, nil
 }
 
-// findIndexKeySchema returns the key schema of the named GSI or LSI.
-func findIndexKeySchema(meta TableMetadata, indexName string) ([]KeySchemaElement, error) {
+// findIndexDef returns the key schema and projection of the named GSI or LSI.
+func findIndexDef(
+	meta TableMetadata,
+	indexName string,
+) (keySchema []KeySchemaElement, projection map[string]any, err error) {
 	for _, gsi := range meta.GlobalSecondaryIndexes {
 		if gsi.IndexName == indexName {
-			return gsi.KeySchema, nil
+			return gsi.KeySchema, gsi.Projection, nil
 		}
 	}
 	for _, lsi := range meta.LocalSecondaryIndexes {
 		if lsi.IndexName == indexName {
-			return lsi.KeySchema, nil
+			return lsi.KeySchema, lsi.Projection, nil
 		}
 	}
-	return nil, fmt.Errorf(
+	return nil, nil, fmt.Errorf(
 		"%w: index %q does not exist on table",
 		ErrValidationException,
 		indexName,
@@ -783,20 +787,6 @@ func mergeKeySchemas(tableSchema, indexSchema []KeySchemaElement) []KeySchemaEle
 		}
 	}
 	return merged
-}
-
-func findIndexProjection(meta TableMetadata, indexName string) map[string]any {
-	for _, gsi := range meta.GlobalSecondaryIndexes {
-		if gsi.IndexName == indexName {
-			return gsi.Projection
-		}
-	}
-	for _, lsi := range meta.LocalSecondaryIndexes {
-		if lsi.IndexName == indexName {
-			return lsi.Projection
-		}
-	}
-	return nil
 }
 
 // applyIndexProjection filters item attributes based on the index Projection definition.
