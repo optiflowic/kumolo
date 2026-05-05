@@ -1648,6 +1648,291 @@ func TestQueryExclusiveStartKey(t *testing.T) {
 	})
 }
 
+var gsiTestMeta = TableMetadata{
+	Name: "gsi-table",
+	KeySchema: []KeySchemaElement{
+		{AttributeName: "pk", KeyType: "HASH"},
+		{AttributeName: "sk", KeyType: "RANGE"},
+	},
+	AttributeDefinitions: []AttributeDefinition{
+		{AttributeName: "pk", AttributeType: "S"},
+		{AttributeName: "sk", AttributeType: "S"},
+		{AttributeName: "gsi_pk", AttributeType: "S"},
+		{AttributeName: "gsi_sk", AttributeType: "S"},
+	},
+	GlobalSecondaryIndexes: []GlobalSecondaryIndex{
+		{
+			IndexName: "gsi-index",
+			KeySchema: []KeySchemaElement{
+				{AttributeName: "gsi_pk", KeyType: "HASH"},
+				{AttributeName: "gsi_sk", KeyType: "RANGE"},
+			},
+		},
+		{
+			IndexName: "gsi-hash-only",
+			KeySchema: []KeySchemaElement{
+				{AttributeName: "gsi_pk", KeyType: "HASH"},
+			},
+		},
+	},
+	LocalSecondaryIndexes: []LocalSecondaryIndex{
+		{
+			IndexName: "lsi-index",
+			KeySchema: []KeySchemaElement{
+				{AttributeName: "pk", KeyType: "HASH"},
+				{AttributeName: "gsi_sk", KeyType: "RANGE"},
+			},
+		},
+	},
+}
+
+func TestQueryGSI(t *testing.T) {
+	mkItem := func(pk, sk, gsiPK, gsiSK string) map[string]any {
+		return map[string]any{
+			"pk":     map[string]any{"S": pk},
+			"sk":     map[string]any{"S": sk},
+			"gsi_pk": map[string]any{"S": gsiPK},
+			"gsi_sk": map[string]any{"S": gsiSK},
+		}
+	}
+
+	t.Run("query by GSI hash key", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(gsiTestMeta))
+		mustPutItem(t, s, "gsi-table", mkItem("p1", "s1", "g1", "a"))
+		mustPutItem(t, s, "gsi-table", mkItem("p2", "s2", "g1", "b"))
+		mustPutItem(t, s, "gsi-table", mkItem("p3", "s3", "g2", "c"))
+
+		items, _, err := s.Query("gsi-table", "gsi_pk", map[string]any{"S": "g1"}, nil,
+			QueryOptions{ScanIndexForward: true, IndexName: "gsi-index"})
+		require.NoError(t, err)
+		require.Len(t, items, 2)
+		pks := []string{
+			items[0]["pk"].(map[string]any)["S"].(string),
+			items[1]["pk"].(map[string]any)["S"].(string),
+		}
+		assert.ElementsMatch(t, []string{"p1", "p2"}, pks)
+	})
+
+	t.Run("GSI results sorted by GSI sort key ascending", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(gsiTestMeta))
+		mustPutItem(t, s, "gsi-table", mkItem("p1", "s1", "g1", "z"))
+		mustPutItem(t, s, "gsi-table", mkItem("p2", "s2", "g1", "a"))
+		mustPutItem(t, s, "gsi-table", mkItem("p3", "s3", "g1", "m"))
+
+		items, _, err := s.Query("gsi-table", "gsi_pk", map[string]any{"S": "g1"}, nil,
+			QueryOptions{ScanIndexForward: true, IndexName: "gsi-index"})
+		require.NoError(t, err)
+		require.Len(t, items, 3)
+		assert.Equal(t, "a", items[0]["gsi_sk"].(map[string]any)["S"])
+		assert.Equal(t, "m", items[1]["gsi_sk"].(map[string]any)["S"])
+		assert.Equal(t, "z", items[2]["gsi_sk"].(map[string]any)["S"])
+	})
+
+	t.Run("GSI results sorted by GSI sort key descending", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(gsiTestMeta))
+		mustPutItem(t, s, "gsi-table", mkItem("p1", "s1", "g1", "a"))
+		mustPutItem(t, s, "gsi-table", mkItem("p2", "s2", "g1", "z"))
+
+		items, _, err := s.Query("gsi-table", "gsi_pk", map[string]any{"S": "g1"}, nil,
+			QueryOptions{ScanIndexForward: false, IndexName: "gsi-index"})
+		require.NoError(t, err)
+		require.Len(t, items, 2)
+		assert.Equal(t, "z", items[0]["gsi_sk"].(map[string]any)["S"])
+		assert.Equal(t, "a", items[1]["gsi_sk"].(map[string]any)["S"])
+	})
+
+	t.Run("GSI with sort key condition", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(gsiTestMeta))
+		mustPutItem(t, s, "gsi-table", mkItem("p1", "s1", "g1", "a"))
+		mustPutItem(t, s, "gsi-table", mkItem("p2", "s2", "g1", "b"))
+		mustPutItem(t, s, "gsi-table", mkItem("p3", "s3", "g1", "c"))
+
+		skCond := &SortKeyCondition{Name: "gsi_sk", Operator: OpGTE, Value: map[string]any{"S": "b"}}
+		items, _, err := s.Query("gsi-table", "gsi_pk", map[string]any{"S": "g1"}, skCond,
+			QueryOptions{ScanIndexForward: true, IndexName: "gsi-index"})
+		require.NoError(t, err)
+		require.Len(t, items, 2)
+		assert.Equal(t, "b", items[0]["gsi_sk"].(map[string]any)["S"])
+		assert.Equal(t, "c", items[1]["gsi_sk"].(map[string]any)["S"])
+	})
+
+	t.Run("GSI LastEvaluatedKey includes both index and primary keys", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(gsiTestMeta))
+		mustPutItem(t, s, "gsi-table", mkItem("p1", "s1", "g1", "a"))
+		mustPutItem(t, s, "gsi-table", mkItem("p2", "s2", "g1", "b"))
+		mustPutItem(t, s, "gsi-table", mkItem("p3", "s3", "g1", "c"))
+
+		items, lek, err := s.Query("gsi-table", "gsi_pk", map[string]any{"S": "g1"}, nil,
+			QueryOptions{ScanIndexForward: true, Limit: intPtr(2), IndexName: "gsi-index"})
+		require.NoError(t, err)
+		require.Len(t, items, 2)
+		require.NotNil(t, lek)
+		// LastEvaluatedKey must contain both table primary key and GSI key attributes
+		assert.Contains(t, lek, "pk")
+		assert.Contains(t, lek, "gsi_pk")
+		assert.Contains(t, lek, "gsi_sk")
+	})
+
+	t.Run("GSI pagination with ExclusiveStartKey", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(gsiTestMeta))
+		mustPutItem(t, s, "gsi-table", mkItem("p1", "s1", "g1", "a"))
+		mustPutItem(t, s, "gsi-table", mkItem("p2", "s2", "g1", "b"))
+		mustPutItem(t, s, "gsi-table", mkItem("p3", "s3", "g1", "c"))
+
+		// Page 1
+		page1, lek, err := s.Query("gsi-table", "gsi_pk", map[string]any{"S": "g1"}, nil,
+			QueryOptions{ScanIndexForward: true, Limit: intPtr(2), IndexName: "gsi-index"})
+		require.NoError(t, err)
+		require.Len(t, page1, 2)
+		require.NotNil(t, lek)
+
+		// Page 2
+		page2, lek2, err := s.Query("gsi-table", "gsi_pk", map[string]any{"S": "g1"}, nil,
+			QueryOptions{ScanIndexForward: true, Limit: intPtr(2), ExclusiveStartKey: lek, IndexName: "gsi-index"})
+		require.NoError(t, err)
+		require.Len(t, page2, 1)
+		assert.Nil(t, lek2)
+		assert.Equal(t, "c", page2[0]["gsi_sk"].(map[string]any)["S"])
+	})
+
+	t.Run("GSI hash-only index pagination returns empty after ExclusiveStartKey", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(gsiTestMeta))
+		mustPutItem(t, s, "gsi-table", mkItem("p1", "s1", "g1", "a"))
+
+		cursor := map[string]any{
+			"pk":     map[string]any{"S": "p1"},
+			"sk":     map[string]any{"S": "s1"},
+			"gsi_pk": map[string]any{"S": "g1"},
+		}
+		items, _, err := s.Query("gsi-table", "gsi_pk", map[string]any{"S": "g1"}, nil,
+			QueryOptions{ScanIndexForward: true, ExclusiveStartKey: cursor, IndexName: "gsi-hash-only"})
+		require.NoError(t, err)
+		assert.Empty(t, items)
+	})
+
+	t.Run("error when index not found", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(gsiTestMeta))
+
+		_, _, err := s.Query("gsi-table", "gsi_pk", map[string]any{"S": "g1"}, nil,
+			QueryOptions{ScanIndexForward: true, IndexName: "no-such-index"})
+		assert.ErrorIs(t, err, ErrValidationException)
+	})
+}
+
+func TestQueryLSI(t *testing.T) {
+	mkItem := func(pk, sk, gsiSK string) map[string]any {
+		return map[string]any{
+			"pk":     map[string]any{"S": pk},
+			"sk":     map[string]any{"S": sk},
+			"gsi_sk": map[string]any{"S": gsiSK},
+		}
+	}
+
+	t.Run("query by LSI hash key with LSI sort key", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(gsiTestMeta))
+		mustPutItem(t, s, "gsi-table", mkItem("p1", "s1", "z"))
+		mustPutItem(t, s, "gsi-table", mkItem("p1", "s2", "a"))
+		mustPutItem(t, s, "gsi-table", mkItem("p2", "s3", "m"))
+
+		items, _, err := s.Query("gsi-table", "pk", map[string]any{"S": "p1"}, nil,
+			QueryOptions{ScanIndexForward: true, IndexName: "lsi-index"})
+		require.NoError(t, err)
+		require.Len(t, items, 2)
+		// sorted by LSI sort key (gsi_sk), not table sort key (sk)
+		assert.Equal(t, "a", items[0]["gsi_sk"].(map[string]any)["S"])
+		assert.Equal(t, "z", items[1]["gsi_sk"].(map[string]any)["S"])
+	})
+
+	t.Run("LSI LastEvaluatedKey contains table primary key and LSI sort key", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(gsiTestMeta))
+		mustPutItem(t, s, "gsi-table", mkItem("p1", "s1", "a"))
+		mustPutItem(t, s, "gsi-table", mkItem("p1", "s2", "b"))
+		mustPutItem(t, s, "gsi-table", mkItem("p1", "s3", "c"))
+
+		_, lek, err := s.Query("gsi-table", "pk", map[string]any{"S": "p1"}, nil,
+			QueryOptions{ScanIndexForward: true, Limit: intPtr(2), IndexName: "lsi-index"})
+		require.NoError(t, err)
+		require.NotNil(t, lek)
+		assert.Contains(t, lek, "pk")
+		assert.Contains(t, lek, "sk")
+		assert.Contains(t, lek, "gsi_sk")
+	})
+}
+
+func TestFindIndexKeySchema(t *testing.T) {
+	meta := TableMetadata{
+		GlobalSecondaryIndexes: []GlobalSecondaryIndex{
+			{IndexName: "gsi-1", KeySchema: []KeySchemaElement{{AttributeName: "a", KeyType: "HASH"}}},
+		},
+		LocalSecondaryIndexes: []LocalSecondaryIndex{
+			{IndexName: "lsi-1", KeySchema: []KeySchemaElement{{AttributeName: "b", KeyType: "RANGE"}}},
+		},
+	}
+
+	t.Run("finds GSI", func(t *testing.T) {
+		ks, err := findIndexKeySchema(meta, "gsi-1")
+		require.NoError(t, err)
+		assert.Equal(t, "a", ks[0].AttributeName)
+	})
+
+	t.Run("finds LSI", func(t *testing.T) {
+		ks, err := findIndexKeySchema(meta, "lsi-1")
+		require.NoError(t, err)
+		assert.Equal(t, "b", ks[0].AttributeName)
+	})
+
+	t.Run("returns error for unknown index", func(t *testing.T) {
+		_, err := findIndexKeySchema(meta, "no-index")
+		assert.ErrorIs(t, err, ErrValidationException)
+	})
+}
+
+func TestMergeKeySchemas(t *testing.T) {
+	tableSchema := []KeySchemaElement{
+		{AttributeName: "pk", KeyType: "HASH"},
+		{AttributeName: "sk", KeyType: "RANGE"},
+	}
+	indexSchema := []KeySchemaElement{
+		{AttributeName: "gsi_pk", KeyType: "HASH"},
+		{AttributeName: "gsi_sk", KeyType: "RANGE"},
+	}
+
+	t.Run("merges without duplicates", func(t *testing.T) {
+		merged := mergeKeySchemas(tableSchema, indexSchema)
+		require.Len(t, merged, 4)
+		names := make([]string, len(merged))
+		for i, k := range merged {
+			names[i] = k.AttributeName
+		}
+		// index keys come first
+		assert.Equal(t, []string{"gsi_pk", "gsi_sk", "pk", "sk"}, names)
+	})
+
+	t.Run("LSI shares partition key with table", func(t *testing.T) {
+		lsiSchema := []KeySchemaElement{
+			{AttributeName: "pk", KeyType: "HASH"},  // same as table
+			{AttributeName: "lsi_sk", KeyType: "RANGE"},
+		}
+		merged := mergeKeySchemas(tableSchema, lsiSchema)
+		require.Len(t, merged, 3) // pk deduped
+		names := make([]string, len(merged))
+		for i, k := range merged {
+			names[i] = k.AttributeName
+		}
+		assert.Equal(t, []string{"pk", "lsi_sk", "sk"}, names)
+	})
+}
+
 func TestMatchesSortKey(t *testing.T) {
 	t.Run("begins_with returns false when itemVal is not a map", func(t *testing.T) {
 		cond := SortKeyCondition{
