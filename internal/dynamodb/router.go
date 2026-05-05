@@ -424,6 +424,8 @@ type gsiDescription struct {
 	KeySchema             []KeySchemaElement     `json:"KeySchema"`
 	Projection            map[string]any         `json:"Projection,omitempty"`
 	ProvisionedThroughput *ProvisionedThroughput `json:"ProvisionedThroughput,omitempty"`
+	IndexSizeBytes        int64                  `json:"IndexSizeBytes"`
+	ItemCount             int64                  `json:"ItemCount"`
 }
 
 type lsiDescription struct {
@@ -432,6 +434,8 @@ type lsiDescription struct {
 	KeySchema             []KeySchemaElement     `json:"KeySchema"`
 	Projection            map[string]any         `json:"Projection,omitempty"`
 	ProvisionedThroughput *ProvisionedThroughput `json:"ProvisionedThroughput,omitempty"`
+	IndexSizeBytes        int64                  `json:"IndexSizeBytes"`
+	ItemCount             int64                  `json:"ItemCount"`
 }
 
 func toTableDescription(m TableMetadata) tableDescription {
@@ -555,6 +559,89 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func validateTableIndexes(
+	tableKeySchema []KeySchemaElement,
+	attrDefs []AttributeDefinition,
+	gsis []GlobalSecondaryIndex,
+	lsis []LocalSecondaryIndex,
+) error {
+	defined := make(map[string]bool, len(attrDefs))
+	for _, a := range attrDefs {
+		defined[a.AttributeName] = true
+	}
+
+	tableHashKey := ""
+	for _, k := range tableKeySchema {
+		if !defined[k.AttributeName] {
+			return fmt.Errorf(
+				"%w: attribute '%s' is used in table key schema but not defined in AttributeDefinitions",
+				ErrValidationException,
+				k.AttributeName,
+			)
+		}
+		if k.KeyType == "HASH" {
+			tableHashKey = k.AttributeName
+		}
+	}
+
+	if len(lsis) > 5 {
+		return fmt.Errorf(
+			"%w: number of local secondary indexes exceeds per-table limit of 5",
+			ErrValidationException,
+		)
+	}
+
+	for _, gsi := range gsis {
+		hasHash := false
+		for _, k := range gsi.KeySchema {
+			if k.KeyType == "HASH" {
+				hasHash = true
+			}
+			if !defined[k.AttributeName] {
+				return fmt.Errorf(
+					"%w: attribute '%s' is used in index '%s' but not defined in AttributeDefinitions",
+					ErrValidationException,
+					k.AttributeName,
+					gsi.IndexName,
+				)
+			}
+		}
+		if !hasHash {
+			return fmt.Errorf(
+				"%w: GlobalSecondaryIndex '%s' must have a HASH key element",
+				ErrValidationException, gsi.IndexName,
+			)
+		}
+	}
+
+	for _, lsi := range lsis {
+		lsiHashKey := ""
+		for _, k := range lsi.KeySchema {
+			if k.KeyType == "HASH" {
+				lsiHashKey = k.AttributeName
+			}
+			if !defined[k.AttributeName] {
+				return fmt.Errorf(
+					"%w: attribute '%s' is used in index '%s' but not defined in AttributeDefinitions",
+					ErrValidationException,
+					k.AttributeName,
+					lsi.IndexName,
+				)
+			}
+		}
+		if lsiHashKey != tableHashKey {
+			return fmt.Errorf(
+				"%w: LocalSecondaryIndex '%s' must have the same HASH key as the table (expected '%s')",
+				ErrValidationException,
+				lsi.IndexName,
+				tableHashKey,
+			)
+		}
+	}
+
+	return nil
+}
+
 func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 	var req struct {
 		TableName              string                `json:"TableName"`
@@ -611,6 +698,16 @@ func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 			KeySchema:  l.KeySchema,
 			Projection: l.Projection,
 		})
+	}
+	if err := validateTableIndexes(meta.KeySchema, meta.AttributeDefinitions, meta.GlobalSecondaryIndexes, meta.LocalSecondaryIndexes); err != nil {
+		slog.Debug("CreateTable: validation failed", "table", req.TableName, "err", err)
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			err.Error(),
+		)
+		return
 	}
 	if err := ro.storage.CreateTable(meta); err != nil {
 		if errors.Is(err, ErrTableAlreadyExists) {

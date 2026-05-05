@@ -622,11 +622,23 @@ func (s *Storage) Query(
 		if err != nil {
 			return nil, nil, err
 		}
+		var idxHashKey string
 		for _, k := range idxSchema {
-			if k.KeyType == "RANGE" {
+			switch k.KeyType {
+			case "HASH":
+				idxHashKey = k.AttributeName
+			case "RANGE":
 				skName = k.AttributeName
-				break
 			}
+		}
+		if hashKeyName != idxHashKey {
+			return nil, nil, fmt.Errorf(
+				"%w: query key condition attribute '%s' does not match the HASH key of index '%s' (expected '%s')",
+				ErrValidationException,
+				hashKeyName,
+				opts.IndexName,
+				idxHashKey,
+			)
 		}
 		lekSchema = mergeKeySchemas(meta.KeySchema, idxSchema)
 	} else {
@@ -721,6 +733,15 @@ func (s *Storage) Query(
 		matched = matched[:*opts.Limit]
 	}
 
+	if opts.IndexName != "" {
+		projection := findIndexProjection(meta, opts.IndexName)
+		keyAttrNames := make([]string, len(lekSchema))
+		for i, k := range lekSchema {
+			keyAttrNames[i] = k.AttributeName
+		}
+		matched = applyIndexProjection(matched, projection, keyAttrNames)
+	}
+
 	return matched, lastEvaluatedKey, nil
 }
 
@@ -762,6 +783,63 @@ func mergeKeySchemas(tableSchema, indexSchema []KeySchemaElement) []KeySchemaEle
 		}
 	}
 	return merged
+}
+
+func findIndexProjection(meta TableMetadata, indexName string) map[string]any {
+	for _, gsi := range meta.GlobalSecondaryIndexes {
+		if gsi.IndexName == indexName {
+			return gsi.Projection
+		}
+	}
+	for _, lsi := range meta.LocalSecondaryIndexes {
+		if lsi.IndexName == indexName {
+			return lsi.Projection
+		}
+	}
+	return nil
+}
+
+// applyIndexProjection filters item attributes based on the index Projection definition.
+// ProjectionType ALL (or absent) returns all attributes unchanged.
+// KEYS_ONLY returns only key attributes; INCLUDE additionally keeps NonKeyAttributes.
+func applyIndexProjection(
+	items []map[string]any,
+	projection map[string]any,
+	keyAttrNames []string,
+) []map[string]any {
+	if projection == nil {
+		return items
+	}
+	projType, _ := projection["ProjectionType"].(string)
+	if projType == "" || projType == "ALL" {
+		return items
+	}
+
+	keep := make(map[string]bool, len(keyAttrNames))
+	for _, k := range keyAttrNames {
+		keep[k] = true
+	}
+	if projType == "INCLUDE" {
+		if nonKeyAttrs, ok := projection["NonKeyAttributes"].([]any); ok {
+			for _, a := range nonKeyAttrs {
+				if s, ok := a.(string); ok {
+					keep[s] = true
+				}
+			}
+		}
+	}
+
+	result := make([]map[string]any, len(items))
+	for i, item := range items {
+		projected := make(map[string]any, len(keep))
+		for attr := range keep {
+			if v, ok := item[attr]; ok {
+				projected[attr] = v
+			}
+		}
+		result[i] = projected
+	}
+	return result
 }
 
 func extractPrimaryKey(item map[string]any, keySchema []KeySchemaElement) map[string]any {

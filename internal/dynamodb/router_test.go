@@ -79,6 +79,149 @@ func TestHandleCreateTable(t *testing.T) {
 	})
 }
 
+func TestHandleCreateTable_IndexValidation(t *testing.T) {
+	assertValidationError := func(t *testing.T, w *httptest.ResponseRecorder) {
+		t.Helper()
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	}
+
+	t.Run("GSI without HASH key rejected", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "CreateTable", `{
+			"TableName": "t",
+			"KeySchema": [{"AttributeName":"pk","KeyType":"HASH"}],
+			"AttributeDefinitions": [
+				{"AttributeName":"pk","AttributeType":"S"},
+				{"AttributeName":"sk","AttributeType":"S"}
+			],
+			"BillingMode": "PAY_PER_REQUEST",
+			"GlobalSecondaryIndexes": [{
+				"IndexName": "gsi",
+				"KeySchema": [{"AttributeName":"sk","KeyType":"RANGE"}],
+				"Projection": {"ProjectionType":"ALL"}
+			}]
+		}`)
+		assertValidationError(t, w)
+	})
+
+	t.Run("GSI key attribute missing from AttributeDefinitions rejected", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "CreateTable", `{
+			"TableName": "t",
+			"KeySchema": [{"AttributeName":"pk","KeyType":"HASH"}],
+			"AttributeDefinitions": [
+				{"AttributeName":"pk","AttributeType":"S"}
+			],
+			"BillingMode": "PAY_PER_REQUEST",
+			"GlobalSecondaryIndexes": [{
+				"IndexName": "gsi",
+				"KeySchema": [{"AttributeName":"gsi_pk","KeyType":"HASH"}],
+				"Projection": {"ProjectionType":"ALL"}
+			}]
+		}`)
+		assertValidationError(t, w)
+	})
+
+	t.Run("LSI with different HASH key rejected", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "CreateTable", `{
+			"TableName": "t",
+			"KeySchema": [
+				{"AttributeName":"pk","KeyType":"HASH"},
+				{"AttributeName":"sk","KeyType":"RANGE"}
+			],
+			"AttributeDefinitions": [
+				{"AttributeName":"pk","AttributeType":"S"},
+				{"AttributeName":"sk","AttributeType":"S"},
+				{"AttributeName":"other","AttributeType":"S"}
+			],
+			"BillingMode": "PAY_PER_REQUEST",
+			"LocalSecondaryIndexes": [{
+				"IndexName": "lsi",
+				"KeySchema": [
+					{"AttributeName":"other","KeyType":"HASH"},
+					{"AttributeName":"sk","KeyType":"RANGE"}
+				],
+				"Projection": {"ProjectionType":"ALL"}
+			}]
+		}`)
+		assertValidationError(t, w)
+	})
+
+	t.Run("LSI key attribute missing from AttributeDefinitions rejected", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "CreateTable", `{
+			"TableName": "t",
+			"KeySchema": [
+				{"AttributeName":"pk","KeyType":"HASH"},
+				{"AttributeName":"sk","KeyType":"RANGE"}
+			],
+			"AttributeDefinitions": [
+				{"AttributeName":"pk","AttributeType":"S"},
+				{"AttributeName":"sk","AttributeType":"S"}
+			],
+			"BillingMode": "PAY_PER_REQUEST",
+			"LocalSecondaryIndexes": [{
+				"IndexName": "lsi",
+				"KeySchema": [
+					{"AttributeName":"pk","KeyType":"HASH"},
+					{"AttributeName":"undefined_attr","KeyType":"RANGE"}
+				],
+				"Projection": {"ProjectionType":"ALL"}
+			}]
+		}`)
+		assertValidationError(t, w)
+	})
+
+	t.Run("more than 5 LSIs rejected", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "CreateTable", `{
+			"TableName": "t",
+			"KeySchema": [
+				{"AttributeName":"pk","KeyType":"HASH"},
+				{"AttributeName":"sk","KeyType":"RANGE"}
+			],
+			"AttributeDefinitions": [
+				{"AttributeName":"pk","AttributeType":"S"},
+				{"AttributeName":"sk","AttributeType":"S"},
+				{"AttributeName":"s1","AttributeType":"S"},
+				{"AttributeName":"s2","AttributeType":"S"},
+				{"AttributeName":"s3","AttributeType":"S"},
+				{"AttributeName":"s4","AttributeType":"S"},
+				{"AttributeName":"s5","AttributeType":"S"},
+				{"AttributeName":"s6","AttributeType":"S"}
+			],
+			"BillingMode": "PAY_PER_REQUEST",
+			"LocalSecondaryIndexes": [
+				{"IndexName":"l1","KeySchema":[{"AttributeName":"pk","KeyType":"HASH"},{"AttributeName":"s1","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}},
+				{"IndexName":"l2","KeySchema":[{"AttributeName":"pk","KeyType":"HASH"},{"AttributeName":"s2","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}},
+				{"IndexName":"l3","KeySchema":[{"AttributeName":"pk","KeyType":"HASH"},{"AttributeName":"s3","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}},
+				{"IndexName":"l4","KeySchema":[{"AttributeName":"pk","KeyType":"HASH"},{"AttributeName":"s4","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}},
+				{"IndexName":"l5","KeySchema":[{"AttributeName":"pk","KeyType":"HASH"},{"AttributeName":"s5","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}},
+				{"IndexName":"l6","KeySchema":[{"AttributeName":"pk","KeyType":"HASH"},{"AttributeName":"s6","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}}
+			]
+		}`)
+		assertValidationError(t, w)
+	})
+
+	t.Run("table key attribute missing from AttributeDefinitions rejected", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "CreateTable", `{
+			"TableName": "t",
+			"KeySchema": [
+				{"AttributeName":"pk","KeyType":"HASH"},
+				{"AttributeName":"sk","KeyType":"RANGE"}
+			],
+			"AttributeDefinitions": [
+				{"AttributeName":"pk","AttributeType":"S"}
+			],
+			"BillingMode": "PAY_PER_REQUEST"
+		}`)
+		assertValidationError(t, w)
+	})
+}
+
 func TestHandleDeleteTable(t *testing.T) {
 	t.Run("deletes table and returns DELETING status", func(t *testing.T) {
 		ro := newTestRouter(t)
@@ -3605,6 +3748,18 @@ func TestHandleQuery_GSI(t *testing.T) {
 		var resp map[string]any
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		assert.Contains(t, resp["__type"].(string), "ValidationException")
+	})
+
+	t.Run("wrong hash key name for GSI returns ValidationException", func(t *testing.T) {
+		ro := setupGSITable(t)
+		w := dynamo(t, ro, "Query", `{
+			"TableName": "gsi-table",
+			"IndexName": "gsi-index",
+			"KeyConditionExpression": "pk = :v",
+			"ExpressionAttributeValues": {":v": {"S": "p1"}}
+		}`)
+		require.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 }
 

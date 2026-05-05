@@ -1986,6 +1986,158 @@ func TestMergeKeySchemas(t *testing.T) {
 	})
 }
 
+func TestApplyIndexProjection(t *testing.T) {
+	items := []map[string]any{
+		{
+			"pk":     map[string]any{"S": "p1"},
+			"sk":     map[string]any{"S": "s1"},
+			"gsi_pk": map[string]any{"S": "g1"},
+			"gsi_sk": map[string]any{"S": "a"},
+			"extra":  map[string]any{"S": "extra-val"},
+		},
+	}
+	keyAttrs := []string{"pk", "sk", "gsi_pk", "gsi_sk"}
+
+	t.Run("nil projection returns all attributes", func(t *testing.T) {
+		got := applyIndexProjection(items, nil, keyAttrs)
+		assert.Len(t, got[0], 5)
+	})
+
+	t.Run("ALL projection returns all attributes", func(t *testing.T) {
+		proj := map[string]any{"ProjectionType": "ALL"}
+		got := applyIndexProjection(items, proj, keyAttrs)
+		assert.Len(t, got[0], 5)
+	})
+
+	t.Run("KEYS_ONLY projection returns only key attributes", func(t *testing.T) {
+		proj := map[string]any{"ProjectionType": "KEYS_ONLY"}
+		got := applyIndexProjection(items, proj, keyAttrs)
+		require.Len(t, got[0], 4)
+		assert.Contains(t, got[0], "pk")
+		assert.Contains(t, got[0], "sk")
+		assert.Contains(t, got[0], "gsi_pk")
+		assert.Contains(t, got[0], "gsi_sk")
+		assert.NotContains(t, got[0], "extra")
+	})
+
+	t.Run("INCLUDE projection returns key attributes plus named extras", func(t *testing.T) {
+		proj := map[string]any{
+			"ProjectionType":   "INCLUDE",
+			"NonKeyAttributes": []any{"extra"},
+		}
+		got := applyIndexProjection(items, proj, keyAttrs)
+		require.Len(t, got[0], 5)
+		assert.Contains(t, got[0], "extra")
+		assert.NotContains(t, got[0], "nonexistent")
+	})
+
+	t.Run("INCLUDE projection omits attributes not in NonKeyAttributes", func(t *testing.T) {
+		items2 := []map[string]any{
+			{
+				"pk":     map[string]any{"S": "p1"},
+				"sk":     map[string]any{"S": "s1"},
+				"gsi_pk": map[string]any{"S": "g1"},
+				"gsi_sk": map[string]any{"S": "a"},
+				"extra":  map[string]any{"S": "extra-val"},
+				"other":  map[string]any{"S": "other-val"},
+			},
+		}
+		proj := map[string]any{
+			"ProjectionType":   "INCLUDE",
+			"NonKeyAttributes": []any{"extra"},
+		}
+		got := applyIndexProjection(items2, proj, keyAttrs)
+		assert.Contains(t, got[0], "extra")
+		assert.NotContains(t, got[0], "other")
+	})
+}
+
+func TestQueryGSI_Projection(t *testing.T) {
+	mkMeta := func(projType string, nonKeyAttrs []string) TableMetadata {
+		proj := map[string]any{"ProjectionType": projType}
+		if len(nonKeyAttrs) > 0 {
+			attrs := make([]any, len(nonKeyAttrs))
+			for i, a := range nonKeyAttrs {
+				attrs[i] = a
+			}
+			proj["NonKeyAttributes"] = attrs
+		}
+		m := gsiTestMeta
+		m.GlobalSecondaryIndexes = []GlobalSecondaryIndex{
+			{
+				IndexName: "gsi-index",
+				KeySchema: []KeySchemaElement{
+					{AttributeName: "gsi_pk", KeyType: "HASH"},
+					{AttributeName: "gsi_sk", KeyType: "RANGE"},
+				},
+				Projection: proj,
+			},
+		}
+		m.LocalSecondaryIndexes = nil
+		return m
+	}
+
+	mkItem := func(pk, sk, gsiPK, gsiSK string) map[string]any {
+		return map[string]any{
+			"pk":     map[string]any{"S": pk},
+			"sk":     map[string]any{"S": sk},
+			"gsi_pk": map[string]any{"S": gsiPK},
+			"gsi_sk": map[string]any{"S": gsiSK},
+			"extra":  map[string]any{"S": "extra-val"},
+		}
+	}
+
+	t.Run("KEYS_ONLY: only key attributes returned", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(mkMeta("KEYS_ONLY", nil)))
+		mustPutItem(t, s, "gsi-table", mkItem("p1", "s1", "g1", "a"))
+
+		items, _, err := s.Query("gsi-table", "gsi_pk", map[string]any{"S": "g1"}, nil,
+			QueryOptions{ScanIndexForward: true, IndexName: "gsi-index"})
+		require.NoError(t, err)
+		require.Len(t, items, 1)
+		assert.Contains(t, items[0], "pk")
+		assert.Contains(t, items[0], "sk")
+		assert.Contains(t, items[0], "gsi_pk")
+		assert.Contains(t, items[0], "gsi_sk")
+		assert.NotContains(t, items[0], "extra")
+	})
+
+	t.Run("INCLUDE: key attrs plus NonKeyAttributes returned", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(mkMeta("INCLUDE", []string{"extra"})))
+		mustPutItem(t, s, "gsi-table", mkItem("p1", "s1", "g1", "a"))
+
+		items, _, err := s.Query("gsi-table", "gsi_pk", map[string]any{"S": "g1"}, nil,
+			QueryOptions{ScanIndexForward: true, IndexName: "gsi-index"})
+		require.NoError(t, err)
+		require.Len(t, items, 1)
+		assert.Contains(t, items[0], "extra")
+	})
+
+	t.Run("ALL: all attributes returned", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(mkMeta("ALL", nil)))
+		mustPutItem(t, s, "gsi-table", mkItem("p1", "s1", "g1", "a"))
+
+		items, _, err := s.Query("gsi-table", "gsi_pk", map[string]any{"S": "g1"}, nil,
+			QueryOptions{ScanIndexForward: true, IndexName: "gsi-index"})
+		require.NoError(t, err)
+		require.Len(t, items, 1)
+		assert.Contains(t, items[0], "extra")
+	})
+
+	t.Run("wrong hash key name returns ValidationException", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(mkMeta("ALL", nil)))
+		mustPutItem(t, s, "gsi-table", mkItem("p1", "s1", "g1", "a"))
+
+		_, _, err := s.Query("gsi-table", "pk", map[string]any{"S": "p1"}, nil,
+			QueryOptions{ScanIndexForward: true, IndexName: "gsi-index"})
+		assert.ErrorIs(t, err, ErrValidationException)
+	})
+}
+
 func TestMatchesSortKey(t *testing.T) {
 	t.Run("begins_with returns false when itemVal is not a map", func(t *testing.T) {
 		cond := SortKeyCondition{
