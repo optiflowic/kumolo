@@ -220,6 +220,85 @@ func TestHandleCreateTable_IndexValidation(t *testing.T) {
 		}`)
 		assertValidationError(t, w)
 	})
+
+	t.Run("LSI without RANGE key rejected", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "CreateTable", `{
+			"TableName": "t",
+			"KeySchema": [
+				{"AttributeName":"pk","KeyType":"HASH"},
+				{"AttributeName":"sk","KeyType":"RANGE"}
+			],
+			"AttributeDefinitions": [
+				{"AttributeName":"pk","AttributeType":"S"},
+				{"AttributeName":"sk","AttributeType":"S"}
+			],
+			"BillingMode": "PAY_PER_REQUEST",
+			"LocalSecondaryIndexes": [{
+				"IndexName": "lsi",
+				"KeySchema": [{"AttributeName":"pk","KeyType":"HASH"}],
+				"Projection": {"ProjectionType":"ALL"}
+			}]
+		}`)
+		assertValidationError(t, w)
+	})
+
+	t.Run("duplicate index name across GSI and LSI rejected", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "CreateTable", `{
+			"TableName": "t",
+			"KeySchema": [
+				{"AttributeName":"pk","KeyType":"HASH"},
+				{"AttributeName":"sk","KeyType":"RANGE"}
+			],
+			"AttributeDefinitions": [
+				{"AttributeName":"pk","AttributeType":"S"},
+				{"AttributeName":"sk","AttributeType":"S"},
+				{"AttributeName":"gsi_pk","AttributeType":"S"}
+			],
+			"BillingMode": "PAY_PER_REQUEST",
+			"GlobalSecondaryIndexes": [{
+				"IndexName": "my-index",
+				"KeySchema": [{"AttributeName":"gsi_pk","KeyType":"HASH"}],
+				"Projection": {"ProjectionType":"ALL"}
+			}],
+			"LocalSecondaryIndexes": [{
+				"IndexName": "my-index",
+				"KeySchema": [
+					{"AttributeName":"pk","KeyType":"HASH"},
+					{"AttributeName":"sk","KeyType":"RANGE"}
+				],
+				"Projection": {"ProjectionType":"ALL"}
+			}]
+		}`)
+		assertValidationError(t, w)
+	})
+
+	t.Run("duplicate GSI names rejected", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "CreateTable", `{
+			"TableName": "t",
+			"KeySchema": [{"AttributeName":"pk","KeyType":"HASH"}],
+			"AttributeDefinitions": [
+				{"AttributeName":"pk","AttributeType":"S"},
+				{"AttributeName":"gsi_pk","AttributeType":"S"}
+			],
+			"BillingMode": "PAY_PER_REQUEST",
+			"GlobalSecondaryIndexes": [
+				{
+					"IndexName": "same-name",
+					"KeySchema": [{"AttributeName":"gsi_pk","KeyType":"HASH"}],
+					"Projection": {"ProjectionType":"ALL"}
+				},
+				{
+					"IndexName": "same-name",
+					"KeySchema": [{"AttributeName":"gsi_pk","KeyType":"HASH"}],
+					"Projection": {"ProjectionType":"ALL"}
+				}
+			]
+		}`)
+		assertValidationError(t, w)
+	})
 }
 
 func TestHandleDeleteTable(t *testing.T) {
@@ -3745,9 +3824,7 @@ func TestHandleQuery_GSI(t *testing.T) {
 			"ExpressionAttributeValues": {":gk": {"S": "g1"}}
 		}`)
 		require.Equal(t, http.StatusBadRequest, w.Code)
-		var resp map[string]any
-		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-		assert.Contains(t, resp["__type"].(string), "ValidationException")
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
 	t.Run("wrong hash key name for GSI returns ValidationException", func(t *testing.T) {

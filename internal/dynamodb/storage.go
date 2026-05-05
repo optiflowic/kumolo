@@ -616,7 +616,7 @@ func (s *Storage) Query(
 		return nil, nil, err
 	}
 	var skName string
-	lekSchema := meta.KeySchema // key schema used for LastEvaluatedKey
+	lekSchema := meta.KeySchema
 	var indexProjection map[string]any
 	if opts.IndexName != "" {
 		idxSchema, proj, err := findIndexDef(meta, opts.IndexName)
@@ -768,9 +768,7 @@ func findIndexDef(
 	)
 }
 
-// mergeKeySchemas returns a deduped union of indexSchema and tableSchema,
-// preserving index keys first. Used to build LastEvaluatedKey for index queries
-// (AWS requires both the index key and the table primary key in the cursor).
+// mergeKeySchemas returns a deduped union of indexSchema then tableSchema, index keys first.
 func mergeKeySchemas(tableSchema, indexSchema []KeySchemaElement) []KeySchemaElement {
 	seen := make(map[string]bool, len(tableSchema)+len(indexSchema))
 	merged := make([]KeySchemaElement, 0, len(tableSchema)+len(indexSchema))
@@ -789,9 +787,7 @@ func mergeKeySchemas(tableSchema, indexSchema []KeySchemaElement) []KeySchemaEle
 	return merged
 }
 
-// applyIndexProjection filters item attributes based on the index Projection definition.
-// ProjectionType ALL (or absent) returns all attributes unchanged.
-// KEYS_ONLY returns only key attributes; INCLUDE additionally keeps NonKeyAttributes.
+// applyIndexProjection filters item attributes per the index ProjectionType (ALL/KEYS_ONLY/INCLUDE).
 func applyIndexProjection(
 	items []map[string]any,
 	projection map[string]any,

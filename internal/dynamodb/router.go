@@ -614,11 +614,34 @@ func validateTableIndexes(
 		}
 	}
 
+	indexNames := make(map[string]bool, len(gsis)+len(lsis))
+	for _, gsi := range gsis {
+		if indexNames[gsi.IndexName] {
+			return fmt.Errorf(
+				"%w: duplicate index name '%s'",
+				ErrValidationException, gsi.IndexName,
+			)
+		}
+		indexNames[gsi.IndexName] = true
+	}
+
 	for _, lsi := range lsis {
+		if indexNames[lsi.IndexName] {
+			return fmt.Errorf(
+				"%w: duplicate index name '%s'",
+				ErrValidationException, lsi.IndexName,
+			)
+		}
+		indexNames[lsi.IndexName] = true
+
 		lsiHashKey := ""
+		hasRange := false
 		for _, k := range lsi.KeySchema {
-			if k.KeyType == "HASH" {
+			switch k.KeyType {
+			case "HASH":
 				lsiHashKey = k.AttributeName
+			case "RANGE":
+				hasRange = true
 			}
 			if !defined[k.AttributeName] {
 				return fmt.Errorf(
@@ -635,6 +658,12 @@ func validateTableIndexes(
 				ErrValidationException,
 				lsi.IndexName,
 				tableHashKey,
+			)
+		}
+		if !hasRange {
+			return fmt.Errorf(
+				"%w: LocalSecondaryIndex '%s' must have a RANGE key element",
+				ErrValidationException, lsi.IndexName,
 			)
 		}
 	}
