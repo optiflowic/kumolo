@@ -413,6 +413,7 @@ type tableDescription struct {
 	BillingModeSummary     *billingModeSummary    `json:"BillingModeSummary,omitempty"`
 	ProvisionedThroughput  *ProvisionedThroughput `json:"ProvisionedThroughput,omitempty"`
 	GlobalSecondaryIndexes []gsiDescription       `json:"GlobalSecondaryIndexes,omitempty"`
+	LocalSecondaryIndexes  []lsiDescription       `json:"LocalSecondaryIndexes,omitempty"`
 	ItemCount              int64                  `json:"ItemCount"`
 	TableSizeBytes         int64                  `json:"TableSizeBytes"`
 }
@@ -423,6 +424,13 @@ type gsiDescription struct {
 	KeySchema             []KeySchemaElement     `json:"KeySchema"`
 	Projection            map[string]any         `json:"Projection,omitempty"`
 	ProvisionedThroughput *ProvisionedThroughput `json:"ProvisionedThroughput,omitempty"`
+}
+
+type lsiDescription struct {
+	IndexName   string             `json:"IndexName"`
+	IndexStatus string             `json:"IndexStatus"`
+	KeySchema   []KeySchemaElement `json:"KeySchema"`
+	Projection  map[string]any     `json:"Projection,omitempty"`
 }
 
 func toTableDescription(m TableMetadata) tableDescription {
@@ -452,6 +460,14 @@ func toTableDescription(m TableMetadata) tableDescription {
 			KeySchema:             gsi.KeySchema,
 			Projection:            gsi.Projection,
 			ProvisionedThroughput: gsi.ProvisionedThroughput,
+		})
+	}
+	for _, lsi := range m.LocalSecondaryIndexes {
+		desc.LocalSecondaryIndexes = append(desc.LocalSecondaryIndexes, lsiDescription{
+			IndexName:   lsi.IndexName,
+			IndexStatus: "ACTIVE",
+			KeySchema:   lsi.KeySchema,
+			Projection:  lsi.Projection,
 		})
 	}
 	return desc
@@ -539,10 +555,21 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 	var req struct {
-		TableName            string                `json:"TableName"`
-		KeySchema            []KeySchemaElement    `json:"KeySchema"`
-		AttributeDefinitions []AttributeDefinition `json:"AttributeDefinitions"`
-		BillingMode          string                `json:"BillingMode"`
+		TableName              string                `json:"TableName"`
+		KeySchema              []KeySchemaElement    `json:"KeySchema"`
+		AttributeDefinitions   []AttributeDefinition `json:"AttributeDefinitions"`
+		BillingMode            string                `json:"BillingMode"`
+		GlobalSecondaryIndexes []struct {
+			IndexName             string                 `json:"IndexName"`
+			KeySchema             []KeySchemaElement     `json:"KeySchema"`
+			Projection            map[string]any         `json:"Projection,omitempty"`
+			ProvisionedThroughput *ProvisionedThroughput `json:"ProvisionedThroughput,omitempty"`
+		} `json:"GlobalSecondaryIndexes"`
+		LocalSecondaryIndexes []struct {
+			IndexName  string             `json:"IndexName"`
+			KeySchema  []KeySchemaElement `json:"KeySchema"`
+			Projection map[string]any     `json:"Projection,omitempty"`
+		} `json:"LocalSecondaryIndexes"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(
@@ -567,6 +594,21 @@ func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 		KeySchema:            req.KeySchema,
 		AttributeDefinitions: req.AttributeDefinitions,
 		BillingMode:          req.BillingMode,
+	}
+	for _, g := range req.GlobalSecondaryIndexes {
+		meta.GlobalSecondaryIndexes = append(meta.GlobalSecondaryIndexes, GlobalSecondaryIndex{
+			IndexName:             g.IndexName,
+			KeySchema:             g.KeySchema,
+			Projection:            g.Projection,
+			ProvisionedThroughput: g.ProvisionedThroughput,
+		})
+	}
+	for _, l := range req.LocalSecondaryIndexes {
+		meta.LocalSecondaryIndexes = append(meta.LocalSecondaryIndexes, LocalSecondaryIndex{
+			IndexName:  l.IndexName,
+			KeySchema:  l.KeySchema,
+			Projection: l.Projection,
+		})
 	}
 	if err := ro.storage.CreateTable(meta); err != nil {
 		if errors.Is(err, ErrTableAlreadyExists) {
@@ -1363,6 +1405,7 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 	var req struct {
 		TableName                 string            `json:"TableName"`
+		IndexName                 string            `json:"IndexName"`
 		KeyConditionExpression    string            `json:"KeyConditionExpression"`
 		FilterExpression          string            `json:"FilterExpression"`
 		ProjectionExpression      string            `json:"ProjectionExpression"`
@@ -1436,6 +1479,7 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 		ScanIndexForward:  scanIndexForward,
 		Limit:             req.Limit,
 		ExclusiveStartKey: req.ExclusiveStartKey,
+		IndexName:         req.IndexName,
 	}
 
 	items, lastEvaluatedKey, err := ro.storage.Query(
@@ -1453,6 +1497,16 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 				http.StatusBadRequest,
 				"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
 				"Requested resource not found: Table: "+req.TableName+" not found",
+			)
+			return
+		}
+		if errors.Is(err, ErrValidationException) {
+			slog.Debug("Query: validation error", "table", req.TableName, "err", err)
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				err.Error(),
 			)
 			return
 		}

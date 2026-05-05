@@ -49,6 +49,14 @@ type GlobalSecondaryIndex struct {
 	ProvisionedThroughput *ProvisionedThroughput `json:"provisionedThroughput,omitempty"`
 }
 
+// LocalSecondaryIndex holds the definition of an LSI.
+// LSIs share the table's partition key and add an alternate sort key.
+type LocalSecondaryIndex struct {
+	IndexName  string             `json:"indexName"`
+	KeySchema  []KeySchemaElement `json:"keySchema"`
+	Projection map[string]any     `json:"projection,omitempty"`
+}
+
 // TableMetadata is stored as <table>.table.json at the storage root.
 type TableMetadata struct {
 	Name                   string                 `json:"name"`
@@ -58,6 +66,7 @@ type TableMetadata struct {
 	BillingModeUpdatedAt   *time.Time             `json:"billingModeUpdatedAt,omitempty"`
 	ProvisionedThroughput  *ProvisionedThroughput `json:"provisionedThroughput,omitempty"`
 	GlobalSecondaryIndexes []GlobalSecondaryIndex `json:"globalSecondaryIndexes,omitempty"`
+	LocalSecondaryIndexes  []LocalSecondaryIndex  `json:"localSecondaryIndexes,omitempty"`
 	Status                 string                 `json:"status"`
 	CreatedAt              time.Time              `json:"createdAt"`
 	TTL                    *TTLSpec               `json:"ttl,omitempty"`
@@ -88,6 +97,7 @@ type QueryOptions struct {
 	ScanIndexForward  bool
 	Limit             *int // nil means no limit; must be >= 1 when set
 	ExclusiveStartKey map[string]any
+	IndexName         string // non-empty to query a GSI or LSI
 }
 
 type ScanOptions struct {
@@ -606,13 +616,30 @@ func (s *Storage) Query(
 	if err != nil {
 		return nil, nil, err
 	}
+	// Resolve key schema: use index schema when IndexName is given, else table schema.
 	var skName string
-	for _, k := range meta.KeySchema {
-		if k.KeyType == "RANGE" {
-			skName = k.AttributeName
-			break
+	lekSchema := meta.KeySchema // key schema used for LastEvaluatedKey
+	if opts.IndexName != "" {
+		idxSchema, err := findIndexKeySchema(meta, opts.IndexName)
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, k := range idxSchema {
+			if k.KeyType == "RANGE" {
+				skName = k.AttributeName
+				break
+			}
+		}
+		lekSchema = mergeKeySchemas(meta.KeySchema, idxSchema)
+	} else {
+		for _, k := range meta.KeySchema {
+			if k.KeyType == "RANGE" {
+				skName = k.AttributeName
+				break
+			}
 		}
 	}
+
 	all, err := s.readAllItemsLocked(tableName)
 	if err != nil {
 		return nil, nil, err
@@ -659,8 +686,7 @@ func (s *Storage) Query(
 
 	if len(opts.ExclusiveStartKey) > 0 {
 		if skName == "" {
-			// Hash-only table: Query returns at most one item per hash key.
-			// Any ExclusiveStartKey means we are resuming past that item.
+			// Hash-only index: any ExclusiveStartKey means we are resuming past that item.
 			matched = matched[:0]
 		} else {
 			eskSKVal, ok := opts.ExclusiveStartKey[skName]
@@ -693,11 +719,45 @@ func (s *Storage) Query(
 	var lastEvaluatedKey map[string]any
 	if opts.Limit != nil && len(matched) > *opts.Limit {
 		lastItem := matched[*opts.Limit-1]
-		lastEvaluatedKey = extractPrimaryKey(lastItem, meta.KeySchema)
+		lastEvaluatedKey = extractPrimaryKey(lastItem, lekSchema)
 		matched = matched[:*opts.Limit]
 	}
 
 	return matched, lastEvaluatedKey, nil
+}
+
+// findIndexKeySchema returns the key schema of the named GSI or LSI.
+func findIndexKeySchema(meta TableMetadata, indexName string) ([]KeySchemaElement, error) {
+	for _, gsi := range meta.GlobalSecondaryIndexes {
+		if gsi.IndexName == indexName {
+			return gsi.KeySchema, nil
+		}
+	}
+	for _, lsi := range meta.LocalSecondaryIndexes {
+		if lsi.IndexName == indexName {
+			return lsi.KeySchema, nil
+		}
+	}
+	return nil, fmt.Errorf(
+		"%w: index %q does not exist on table",
+		ErrValidationException,
+		indexName,
+	)
+}
+
+// mergeKeySchemas returns a deduped union of indexSchema and tableSchema,
+// preserving index keys first. Used to build LastEvaluatedKey for index queries
+// (AWS requires both the index key and the table primary key in the cursor).
+func mergeKeySchemas(tableSchema, indexSchema []KeySchemaElement) []KeySchemaElement {
+	seen := make(map[string]bool, len(tableSchema)+len(indexSchema))
+	merged := make([]KeySchemaElement, 0, len(tableSchema)+len(indexSchema))
+	for _, k := range append(indexSchema, tableSchema...) {
+		if !seen[k.AttributeName] {
+			seen[k.AttributeName] = true
+			merged = append(merged, k)
+		}
+	}
+	return merged
 }
 
 func extractPrimaryKey(item map[string]any, keySchema []KeySchemaElement) map[string]any {
