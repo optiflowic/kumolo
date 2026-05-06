@@ -1776,7 +1776,6 @@ func TestQueryGSI(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, items, 2)
 		require.NotNil(t, lek)
-		// LastEvaluatedKey must contain both table primary key and GSI key attributes
 		assert.Contains(t, lek, "pk")
 		assert.Contains(t, lek, "gsi_pk")
 		assert.Contains(t, lek, "gsi_sk")
@@ -1789,14 +1788,12 @@ func TestQueryGSI(t *testing.T) {
 		mustPutItem(t, s, "gsi-table", mkItem("p2", "s2", "g1", "b"))
 		mustPutItem(t, s, "gsi-table", mkItem("p3", "s3", "g1", "c"))
 
-		// Page 1
 		page1, lek, err := s.Query("gsi-table", "gsi_pk", map[string]any{"S": "g1"}, nil,
 			QueryOptions{ScanIndexForward: true, Limit: intPtr(2), IndexName: "gsi-index"})
 		require.NoError(t, err)
 		require.Len(t, page1, 2)
 		require.NotNil(t, lek)
 
-		// Page 2
 		page2, lek2, err := s.Query(
 			"gsi-table",
 			"gsi_pk",
@@ -1857,7 +1854,6 @@ func TestQueryGSI(t *testing.T) {
 		func(t *testing.T) {
 			s := newTestStorage(t)
 			require.NoError(t, s.CreateTable(gsiTestMeta))
-			// item without gsi_sk attribute — sparse GSI participant
 			mustPutItem(t, s, "gsi-table", map[string]any{
 				"pk":     map[string]any{"S": "p1"},
 				"sk":     map[string]any{"S": "s1"},
@@ -1868,7 +1864,6 @@ func TestQueryGSI(t *testing.T) {
 			items, _, err := s.Query("gsi-table", "gsi_pk", map[string]any{"S": "g1"}, nil,
 				QueryOptions{ScanIndexForward: true, IndexName: "gsi-index"})
 			require.NoError(t, err)
-			// both items appear — the one without gsi_sk is included (sparse index behaviour)
 			assert.Len(t, items, 2)
 		},
 	)
@@ -1894,7 +1889,6 @@ func TestQueryLSI(t *testing.T) {
 			QueryOptions{ScanIndexForward: true, IndexName: "lsi-index"})
 		require.NoError(t, err)
 		require.Len(t, items, 2)
-		// sorted by LSI sort key (gsi_sk), not table sort key (sk)
 		assert.Equal(t, "a", items[0]["gsi_sk"].(map[string]any)["S"])
 		assert.Equal(t, "z", items[1]["gsi_sk"].(map[string]any)["S"])
 	})
@@ -1973,17 +1967,16 @@ func TestMergeKeySchemas(t *testing.T) {
 		for i, k := range merged {
 			names[i] = k.AttributeName
 		}
-		// index keys come first
 		assert.Equal(t, []string{"gsi_pk", "gsi_sk", "pk", "sk"}, names)
 	})
 
 	t.Run("LSI shares partition key with table", func(t *testing.T) {
 		lsiSchema := []KeySchemaElement{
-			{AttributeName: "pk", KeyType: "HASH"}, // same as table
+			{AttributeName: "pk", KeyType: "HASH"},
 			{AttributeName: "lsi_sk", KeyType: "RANGE"},
 		}
 		merged := mergeKeySchemas(tableSchema, lsiSchema)
-		require.Len(t, merged, 3) // pk deduped
+		require.Len(t, merged, 3)
 		names := make([]string, len(merged))
 		for i, k := range merged {
 			names[i] = k.AttributeName

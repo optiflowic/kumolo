@@ -3855,7 +3855,6 @@ func TestHandleQuery_LSI(t *testing.T) {
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		items := resp["Items"].([]any)
 		require.Len(t, items, 2)
-		// sorted by lsi sort key (gsi_sk), ascending: "a" < "b"
 		assert.Equal(t, "a", items[0].(map[string]any)["gsi_sk"].(map[string]any)["S"])
 		assert.Equal(t, "b", items[1].(map[string]any)["gsi_sk"].(map[string]any)["S"])
 	})
