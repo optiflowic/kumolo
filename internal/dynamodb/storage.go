@@ -1181,31 +1181,35 @@ type TransactGetInput struct {
 
 // TransactPut is the Put action within TransactWriteItems.
 type TransactPut struct {
-	TableName string
-	Item      map[string]any
-	Cond      *ConditionCheck
+	TableName                      string
+	Item                           map[string]any
+	Cond                           *ConditionCheck
+	ReturnValuesOnConditionFailure string // "ALL_OLD" or ""
 }
 
 // TransactUpdate is the Update action within TransactWriteItems.
 type TransactUpdate struct {
-	TableName string
-	Key       map[string]any
-	Updates   map[string]any // pre-parsed by parseUpdateExpression
-	Cond      *ConditionCheck
+	TableName                      string
+	Key                            map[string]any
+	Updates                        map[string]any // pre-parsed by parseUpdateExpression
+	Cond                           *ConditionCheck
+	ReturnValuesOnConditionFailure string // "ALL_OLD" or ""
 }
 
 // TransactDelete is the Delete action within TransactWriteItems.
 type TransactDelete struct {
-	TableName string
-	Key       map[string]any
-	Cond      *ConditionCheck
+	TableName                      string
+	Key                            map[string]any
+	Cond                           *ConditionCheck
+	ReturnValuesOnConditionFailure string // "ALL_OLD" or ""
 }
 
 // TransactConditionCheck is the ConditionCheck action within TransactWriteItems.
 type TransactConditionCheck struct {
-	TableName string
-	Key       map[string]any
-	Cond      *ConditionCheck
+	TableName                      string
+	Key                            map[string]any
+	Cond                           *ConditionCheck
+	ReturnValuesOnConditionFailure string // "ALL_OLD" or ""
 }
 
 // TransactWriteAction is one action within a TransactWriteItems call.
@@ -1287,11 +1291,17 @@ func evalCondition(current map[string]any, cond *ConditionCheck) error {
 
 // TransactWriteItems executes all write actions atomically under a single write lock.
 //
+// Phase 0: reject requests with duplicate primary key targets (ValidationException).
 // Phase 1: evaluate every ConditionExpression; collect failures.
 // Phase 2: apply all writes only if every condition passed.
 func (s *Storage) TransactWriteItems(actions []TransactWriteAction) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// Phase 0: duplicate primary key detection
+	if err := s.checkDuplicateKeysLocked(actions); err != nil {
+		return err
+	}
 
 	// Phase 1: condition checks
 	reasons := make([]CancellationReason, len(actions))
@@ -1300,12 +1310,16 @@ func (s *Storage) TransactWriteItems(actions []TransactWriteAction) error {
 	}
 	hasFailed := false
 	for i, action := range actions {
-		condErr := s.checkTransactActionCondLocked(action)
+		current, condErr := s.checkTransactActionCondLocked(action)
 		if errors.Is(condErr, ErrConditionalCheckFailed) {
-			reasons[i] = CancellationReason{
+			reason := CancellationReason{
 				Code:    "ConditionalCheckFailed",
 				Message: "The conditional request failed",
 			}
+			if transactActionReturnsOldOnFailure(action) && current != nil {
+				reason.Item = current
+			}
+			reasons[i] = reason
 			hasFailed = true
 		} else if condErr != nil {
 			return condErr
@@ -1324,59 +1338,128 @@ func (s *Storage) TransactWriteItems(actions []TransactWriteAction) error {
 	return nil
 }
 
+// transactActionReturnsOldOnFailure reports whether an action requests the
+// current item state to be included in CancellationReasons on condition failure.
+func transactActionReturnsOldOnFailure(action TransactWriteAction) bool {
+	switch {
+	case action.Put != nil:
+		return action.Put.ReturnValuesOnConditionFailure == "ALL_OLD"
+	case action.Delete != nil:
+		return action.Delete.ReturnValuesOnConditionFailure == "ALL_OLD"
+	case action.Update != nil:
+		return action.Update.ReturnValuesOnConditionFailure == "ALL_OLD"
+	case action.ConditionCheck != nil:
+		return action.ConditionCheck.ReturnValuesOnConditionFailure == "ALL_OLD"
+	}
+	return false
+}
+
+// checkDuplicateKeysLocked returns ValidationException if any two actions target
+// the same item (same table + same primary key). Must be called with mu held.
+func (s *Storage) checkDuplicateKeysLocked(actions []TransactWriteAction) error {
+	type itemRef struct {
+		tableName string
+		keyHash   string
+	}
+	seen := make(map[itemRef]bool, len(actions))
+	for _, action := range actions {
+		var tableName string
+		var keyMap map[string]any
+		switch {
+		case action.Put != nil:
+			tableName = action.Put.TableName
+			keyMap = action.Put.Item
+		case action.Delete != nil:
+			tableName = action.Delete.TableName
+			keyMap = action.Delete.Key
+		case action.Update != nil:
+			tableName = action.Update.TableName
+			keyMap = action.Update.Key
+		case action.ConditionCheck != nil:
+			tableName = action.ConditionCheck.TableName
+			keyMap = action.ConditionCheck.Key
+		default:
+			continue
+		}
+		meta, err := s.readTableMeta(tableName)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return ErrTableNotFound
+			}
+			return err
+		}
+		k, err := itemKey(keyMap, meta.KeySchema)
+		if err != nil {
+			return fmt.Errorf("%w: %v", ErrValidationException, err)
+		}
+		ref := itemRef{tableName: tableName, keyHash: k}
+		if seen[ref] {
+			return fmt.Errorf(
+				"%w: Transaction request cannot include multiple operations on one item",
+				ErrValidationException,
+			)
+		}
+		seen[ref] = true
+	}
+	return nil
+}
+
 // checkTransactActionCondLocked evaluates the ConditionExpression for a single action.
+// Returns the item's current state (before any write) and any condition error.
 // Must be called with mu held.
-func (s *Storage) checkTransactActionCondLocked(action TransactWriteAction) error {
+func (s *Storage) checkTransactActionCondLocked(
+	action TransactWriteAction,
+) (map[string]any, error) {
 	switch {
 	case action.Put != nil:
 		meta, err := s.readTableMeta(action.Put.TableName)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
-				return ErrTableNotFound
+				return nil, ErrTableNotFound
 			}
-			return err
+			return nil, err
 		}
 		current, err := s.readExistingItemLocked(action.Put.TableName, action.Put.Item, meta)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		return evalCondition(current, action.Put.Cond)
+		return current, evalCondition(current, action.Put.Cond)
 
 	case action.Delete != nil:
 		meta, err := s.readTableMeta(action.Delete.TableName)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
-				return ErrTableNotFound
+				return nil, ErrTableNotFound
 			}
-			return err
+			return nil, err
 		}
 		current, err := s.readExistingItemLocked(action.Delete.TableName, action.Delete.Key, meta)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		return evalCondition(current, action.Delete.Cond)
+		return current, evalCondition(current, action.Delete.Cond)
 
 	case action.Update != nil:
 		meta, err := s.readTableMeta(action.Update.TableName)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
-				return ErrTableNotFound
+				return nil, ErrTableNotFound
 			}
-			return err
+			return nil, err
 		}
 		current, err := s.readExistingItemLocked(action.Update.TableName, action.Update.Key, meta)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		return evalCondition(current, action.Update.Cond)
+		return current, evalCondition(current, action.Update.Cond)
 
 	case action.ConditionCheck != nil:
 		meta, err := s.readTableMeta(action.ConditionCheck.TableName)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
-				return ErrTableNotFound
+				return nil, ErrTableNotFound
 			}
-			return err
+			return nil, err
 		}
 		current, err := s.readExistingItemLocked(
 			action.ConditionCheck.TableName,
@@ -1384,11 +1467,11 @@ func (s *Storage) checkTransactActionCondLocked(action TransactWriteAction) erro
 			meta,
 		)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		return evalCondition(current, action.ConditionCheck.Cond)
+		return current, evalCondition(current, action.ConditionCheck.Cond)
 	}
-	return nil
+	return nil, nil
 }
 
 // applyTransactActionLocked applies the write for a single action (no condition checks).

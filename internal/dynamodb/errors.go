@@ -16,8 +16,9 @@ var (
 
 // CancellationReason describes why a single TransactWriteItems action was cancelled.
 type CancellationReason struct {
-	Code    string `json:"Code"`
-	Message string `json:"Message,omitempty"`
+	Code    string         `json:"Code"`
+	Message string         `json:"Message,omitempty"`
+	Item    map[string]any `json:"Item,omitempty"`
 }
 
 // TransactionCanceledError is returned by TransactWriteItems when one or more

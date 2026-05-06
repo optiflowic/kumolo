@@ -4081,6 +4081,8 @@ func TestHandleTransactWriteItems(t *testing.T) {
 		require.Len(t, reasons, 2)
 		assert.Equal(t, "ConditionalCheckFailed", reasons[0].(map[string]any)["Code"])
 		assert.Equal(t, "None", reasons[1].(map[string]any)["Code"])
+		// message must include reason codes in brackets
+		assert.Contains(t, resp["message"], "[ConditionalCheckFailed, None]")
 		// side-effect item must NOT have been written
 		assert.Nil(t, getItem(t, ro, "side-effect"))
 	})
@@ -4168,6 +4170,87 @@ func TestHandleTransactWriteItems(t *testing.T) {
 		w := dynamo(t, ro, "TransactWriteItems", `{"TransactItems":[`+strings.Join(items, ",")+`]}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
+
+	t.Run("400 for duplicate primary key across actions", func(t *testing.T) {
+		ro := newTestRouter(t)
+		createTable(t, ro)
+		w := dynamo(t, ro, "TransactWriteItems", `{
+			"TransactItems": [
+				{"Put":    {"TableName":"txn-table","Item":{"pk":{"S":"dup"}}}},
+				{"Delete": {"TableName":"txn-table","Key":{"pk":{"S":"dup"}}}}
+			]
+		}`)
+		require.Equal(t, http.StatusBadRequest, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Contains(t, resp["__type"], "ValidationException")
+	})
+
+	t.Run(
+		"ReturnValuesOnConditionCheckFailure ALL_OLD returns existing item in reasons",
+		func(t *testing.T) {
+			ro := newTestRouter(t)
+			createTable(t, ro)
+			dynamo(
+				t,
+				ro,
+				"PutItem",
+				`{"TableName":"txn-table","Item":{"pk":{"S":"existing"},"val":{"S":"old"}}}`,
+			)
+
+			w := dynamo(t, ro, "TransactWriteItems", `{
+			"TransactItems": [{
+				"Put": {
+					"TableName": "txn-table",
+					"Item": {"pk": {"S": "existing"}},
+					"ConditionExpression": "attribute_not_exists(pk)",
+					"ReturnValuesOnConditionCheckFailure": "ALL_OLD"
+				}
+			}]
+		}`)
+			require.Equal(t, http.StatusBadRequest, w.Code)
+			var resp map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+			assert.Equal(
+				t,
+				"com.amazonaws.dynamodb.v20120810#TransactionCanceledException",
+				resp["__type"],
+			)
+			reasons := resp["CancellationReasons"].([]any)
+			require.Len(t, reasons, 1)
+			reason := reasons[0].(map[string]any)
+			assert.Equal(t, "ConditionalCheckFailed", reason["Code"])
+			// old item must be present
+			item := reason["Item"].(map[string]any)
+			assert.Equal(t, "existing", item["pk"].(map[string]any)["S"])
+			assert.Equal(t, "old", item["val"].(map[string]any)["S"])
+		},
+	)
+
+	t.Run(
+		"ReturnValuesOnConditionCheckFailure omitted → Item absent in reasons",
+		func(t *testing.T) {
+			ro := newTestRouter(t)
+			createTable(t, ro)
+			dynamo(t, ro, "PutItem", `{"TableName":"txn-table","Item":{"pk":{"S":"g2"}}}`)
+
+			w := dynamo(t, ro, "TransactWriteItems", `{
+			"TransactItems": [{
+				"Put": {
+					"TableName": "txn-table",
+					"Item": {"pk": {"S": "g2"}},
+					"ConditionExpression": "attribute_not_exists(pk)"
+				}
+			}]
+		}`)
+			require.Equal(t, http.StatusBadRequest, w.Code)
+			var resp map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+			reasons := resp["CancellationReasons"].([]any)
+			reason := reasons[0].(map[string]any)
+			assert.Nil(t, reason["Item"])
+		},
+	)
 
 	t.Run("400 for empty TransactItems", func(t *testing.T) {
 		ro := newTestRouter(t)

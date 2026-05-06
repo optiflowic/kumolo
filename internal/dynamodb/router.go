@@ -2366,33 +2366,37 @@ func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 	var req struct {
 		TransactItems []struct {
 			Put *struct {
-				TableName                 string            `json:"TableName"`
-				Item                      map[string]any    `json:"Item"`
-				ConditionExpression       string            `json:"ConditionExpression"`
-				ExpressionAttributeNames  map[string]string `json:"ExpressionAttributeNames"`
-				ExpressionAttributeValues map[string]any    `json:"ExpressionAttributeValues"`
+				TableName                           string            `json:"TableName"`
+				Item                                map[string]any    `json:"Item"`
+				ConditionExpression                 string            `json:"ConditionExpression"`
+				ExpressionAttributeNames            map[string]string `json:"ExpressionAttributeNames"`
+				ExpressionAttributeValues           map[string]any    `json:"ExpressionAttributeValues"`
+				ReturnValuesOnConditionCheckFailure string            `json:"ReturnValuesOnConditionCheckFailure"`
 			} `json:"Put"`
 			Delete *struct {
-				TableName                 string            `json:"TableName"`
-				Key                       map[string]any    `json:"Key"`
-				ConditionExpression       string            `json:"ConditionExpression"`
-				ExpressionAttributeNames  map[string]string `json:"ExpressionAttributeNames"`
-				ExpressionAttributeValues map[string]any    `json:"ExpressionAttributeValues"`
+				TableName                           string            `json:"TableName"`
+				Key                                 map[string]any    `json:"Key"`
+				ConditionExpression                 string            `json:"ConditionExpression"`
+				ExpressionAttributeNames            map[string]string `json:"ExpressionAttributeNames"`
+				ExpressionAttributeValues           map[string]any    `json:"ExpressionAttributeValues"`
+				ReturnValuesOnConditionCheckFailure string            `json:"ReturnValuesOnConditionCheckFailure"`
 			} `json:"Delete"`
 			Update *struct {
-				TableName                 string            `json:"TableName"`
-				Key                       map[string]any    `json:"Key"`
-				UpdateExpression          string            `json:"UpdateExpression"`
-				ConditionExpression       string            `json:"ConditionExpression"`
-				ExpressionAttributeNames  map[string]string `json:"ExpressionAttributeNames"`
-				ExpressionAttributeValues map[string]any    `json:"ExpressionAttributeValues"`
+				TableName                           string            `json:"TableName"`
+				Key                                 map[string]any    `json:"Key"`
+				UpdateExpression                    string            `json:"UpdateExpression"`
+				ConditionExpression                 string            `json:"ConditionExpression"`
+				ExpressionAttributeNames            map[string]string `json:"ExpressionAttributeNames"`
+				ExpressionAttributeValues           map[string]any    `json:"ExpressionAttributeValues"`
+				ReturnValuesOnConditionCheckFailure string            `json:"ReturnValuesOnConditionCheckFailure"`
 			} `json:"Update"`
 			ConditionCheck *struct {
-				TableName                 string            `json:"TableName"`
-				Key                       map[string]any    `json:"Key"`
-				ConditionExpression       string            `json:"ConditionExpression"`
-				ExpressionAttributeNames  map[string]string `json:"ExpressionAttributeNames"`
-				ExpressionAttributeValues map[string]any    `json:"ExpressionAttributeValues"`
+				TableName                           string            `json:"TableName"`
+				Key                                 map[string]any    `json:"Key"`
+				ConditionExpression                 string            `json:"ConditionExpression"`
+				ExpressionAttributeNames            map[string]string `json:"ExpressionAttributeNames"`
+				ExpressionAttributeValues           map[string]any    `json:"ExpressionAttributeValues"`
+				ReturnValuesOnConditionCheckFailure string            `json:"ReturnValuesOnConditionCheckFailure"`
 			} `json:"ConditionCheck"`
 		} `json:"TransactItems"`
 	}
@@ -2441,9 +2445,10 @@ func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 			}
 			actions = append(actions, TransactWriteAction{
 				Put: &TransactPut{
-					TableName: ti.Put.TableName,
-					Item:      ti.Put.Item,
-					Cond:      cond,
+					TableName:                      ti.Put.TableName,
+					Item:                           ti.Put.Item,
+					Cond:                           cond,
+					ReturnValuesOnConditionFailure: ti.Put.ReturnValuesOnConditionCheckFailure,
 				},
 			})
 
@@ -2458,9 +2463,10 @@ func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 			}
 			actions = append(actions, TransactWriteAction{
 				Delete: &TransactDelete{
-					TableName: ti.Delete.TableName,
-					Key:       ti.Delete.Key,
-					Cond:      cond,
+					TableName:                      ti.Delete.TableName,
+					Key:                            ti.Delete.Key,
+					Cond:                           cond,
+					ReturnValuesOnConditionFailure: ti.Delete.ReturnValuesOnConditionCheckFailure,
 				},
 			})
 
@@ -2490,10 +2496,11 @@ func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 			}
 			actions = append(actions, TransactWriteAction{
 				Update: &TransactUpdate{
-					TableName: ti.Update.TableName,
-					Key:       ti.Update.Key,
-					Updates:   updates,
-					Cond:      cond,
+					TableName:                      ti.Update.TableName,
+					Key:                            ti.Update.Key,
+					Updates:                        updates,
+					Cond:                           cond,
+					ReturnValuesOnConditionFailure: ti.Update.ReturnValuesOnConditionCheckFailure,
 				},
 			})
 
@@ -2514,9 +2521,10 @@ func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 			}
 			actions = append(actions, TransactWriteAction{
 				ConditionCheck: &TransactConditionCheck{
-					TableName: ti.ConditionCheck.TableName,
-					Key:       ti.ConditionCheck.Key,
-					Cond:      cond,
+					TableName:                      ti.ConditionCheck.TableName,
+					Key:                            ti.ConditionCheck.Key,
+					Cond:                           cond,
+					ReturnValuesOnConditionFailure: ti.ConditionCheck.ReturnValuesOnConditionCheckFailure,
 				},
 			})
 
@@ -2536,6 +2544,10 @@ func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 		var txErr *TransactionCanceledError
 		if errors.As(err, &txErr) {
 			slog.Debug("TransactWriteItems: transaction canceled", "reasons", len(txErr.Reasons))
+			codes := make([]string, len(txErr.Reasons))
+			for i, r := range txErr.Reasons {
+				codes[i] = r.Code
+			}
 			type cancelResp struct {
 				Type                string               `json:"__type"`
 				Message             string               `json:"message"`
@@ -2544,8 +2556,9 @@ func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 			w.Header().Set("Content-Type", "application/x-amz-json-1.0")
 			w.WriteHeader(http.StatusBadRequest)
 			if encErr := json.NewEncoder(w).Encode(cancelResp{
-				Type:                "com.amazonaws.dynamodb.v20120810#TransactionCanceledException",
-				Message:             "Transaction cancelled, please refer cancellation reasons for specific reasons",
+				Type: "com.amazonaws.dynamodb.v20120810#TransactionCanceledException",
+				Message: "Transaction cancelled, please refer cancellation reasons for specific reasons [" +
+					strings.Join(codes, ", ") + "]",
 				CancellationReasons: txErr.Reasons,
 			}); encErr != nil {
 				slog.Warn("failed to encode TransactionCanceledException", "err", encErr)
