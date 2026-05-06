@@ -2327,6 +2327,16 @@ func (ro *Router) handleTransactGetItems(w http.ResponseWriter, body []byte) {
 			)
 			return
 		}
+		if errors.Is(err, ErrValidationException) {
+			slog.Debug("TransactGetItems: validation error", "err", err)
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				err.Error(),
+			)
+			return
+		}
 		slog.Error("TransactGetItems failed", "err", err)
 		writeError(
 			w,

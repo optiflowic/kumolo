@@ -4002,6 +4002,35 @@ func TestHandleTransactGetItems(t *testing.T) {
 		w := dynamo(t, ro, "TransactGetItems", `{"TransactItems":[`+strings.Join(items, ",")+`]}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
+
+	t.Run("400 ValidationException for duplicate item", func(t *testing.T) {
+		ro := newTestRouter(t)
+		createTable(t, ro)
+		w := dynamo(t, ro, "TransactGetItems", `{
+			"TransactItems": [
+				{"Get": {"TableName": "txn-table", "Key": {"pk": {"S": "same"}}}},
+				{"Get": {"TableName": "txn-table", "Key": {"pk": {"S": "same"}}}}
+			]
+		}`)
+		require.Equal(t, http.StatusBadRequest, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Contains(t, resp["__type"], "ValidationException")
+	})
+
+	t.Run("400 ValidationException for malformed key", func(t *testing.T) {
+		ro := newTestRouter(t)
+		createTable(t, ro)
+		w := dynamo(t, ro, "TransactGetItems", `{
+			"TransactItems": [
+				{"Get": {"TableName": "txn-table", "Key": {"not-pk": {"S": "x"}}}}
+			]
+		}`)
+		require.Equal(t, http.StatusBadRequest, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Contains(t, resp["__type"], "ValidationException")
+	})
 }
 
 // --- TransactWriteItems ---

@@ -2763,13 +2763,23 @@ func TestTransactGetItems(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("propagates itemKey error for malformed key", func(t *testing.T) {
+	t.Run("returns ErrValidationException for malformed key", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
 		_, err := s.TransactGetItems([]TransactGetInput{
 			{TableName: "test-table", Key: map[string]any{"not-pk": map[string]any{"S": "x"}}},
 		})
-		assert.Error(t, err)
+		assert.ErrorIs(t, err, ErrValidationException)
+	})
+
+	t.Run("returns ErrValidationException for duplicate item", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		_, err := s.TransactGetItems([]TransactGetInput{
+			{TableName: "test-table", Key: map[string]any{"pk": map[string]any{"S": "k"}}},
+			{TableName: "test-table", Key: map[string]any{"pk": map[string]any{"S": "k"}}},
+		})
+		assert.ErrorIs(t, err, ErrValidationException)
 	})
 
 	t.Run("propagates non-ErrNotExist error on item read", func(t *testing.T) {

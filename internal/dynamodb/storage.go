@@ -1226,6 +1226,11 @@ type TransactWriteAction struct {
 func (s *Storage) TransactGetItems(gets []TransactGetInput) ([]map[string]any, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	type itemRef struct {
+		tableName string
+		keyHash   string
+	}
+	seen := make(map[itemRef]bool, len(gets))
 	results := make([]map[string]any, len(gets))
 	for i, g := range gets {
 		meta, err := s.readTableMeta(g.TableName)
@@ -1237,8 +1242,16 @@ func (s *Storage) TransactGetItems(gets []TransactGetInput) ([]map[string]any, e
 		}
 		k, err := itemKey(g.Key, meta.KeySchema)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w: %v", ErrValidationException, err)
 		}
+		ref := itemRef{tableName: g.TableName, keyHash: k}
+		if seen[ref] {
+			return nil, fmt.Errorf(
+				"%w: Transaction request cannot include multiple operations on one item",
+				ErrValidationException,
+			)
+		}
+		seen[ref] = true
 		item, err := readJSON[map[string]any](s, filepath.Join(g.TableName, k+".json"))
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return nil, err
