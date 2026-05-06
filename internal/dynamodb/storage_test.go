@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -2750,6 +2751,17 @@ func TestTransactGetItems(t *testing.T) {
 		})
 		assert.ErrorIs(t, err, ErrTableNotFound)
 	})
+
+	t.Run("propagates readJSON error that is not ErrNotExist", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "k"}})
+		s.readAll = func(io.Reader) ([]byte, error) { return nil, errors.New("disk read error") }
+		_, err := s.TransactGetItems([]TransactGetInput{
+			{TableName: "test-table", Key: map[string]any{"pk": map[string]any{"S": "k"}}},
+		})
+		assert.Error(t, err)
+	})
 }
 
 func TestTransactWriteItems(t *testing.T) {
@@ -2866,5 +2878,25 @@ func TestTransactWriteItems(t *testing.T) {
 			},
 		})
 		assert.ErrorIs(t, err, ErrTableNotFound)
+	})
+
+	t.Run("propagates Phase 2 write error from openFile failure", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		// inject openFile failure only for item writes (not table meta reads)
+		origOpen := s.openFile
+		s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+			if strings.HasSuffix(name, ".json") && !strings.HasSuffix(name, ".table.json") {
+				return nil, errors.New("simulated disk full")
+			}
+			return origOpen(name, flag, perm)
+		}
+		err := s.TransactWriteItems([]TransactWriteAction{
+			{Put: &TransactPut{
+				TableName: "test-table",
+				Item:      map[string]any{"pk": map[string]any{"S": "x"}},
+			}},
+		})
+		assert.Error(t, err)
 	})
 }

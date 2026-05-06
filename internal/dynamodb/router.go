@@ -2281,6 +2281,18 @@ func (ro *Router) handleTransactGetItems(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
+	if len(req.TransactItems) > 100 {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			fmt.Sprintf(
+				"Member must have length less than or equal to 100, but received length %d",
+				len(req.TransactItems),
+			),
+		)
+		return
+	}
 	gets := make([]TransactGetInput, 0, len(req.TransactItems))
 	projections := make([]struct {
 		expr  string
@@ -2402,6 +2414,18 @@ func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
+	if len(req.TransactItems) > 100 {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			fmt.Sprintf(
+				"Member must have length less than or equal to 100, but received length %d",
+				len(req.TransactItems),
+			),
+		)
+		return
+	}
 
 	actions := make([]TransactWriteAction, 0, len(req.TransactItems))
 	for _, ti := range req.TransactItems {
@@ -2474,6 +2498,15 @@ func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 			})
 
 		case ti.ConditionCheck != nil:
+			if ti.ConditionCheck.ConditionExpression == "" {
+				writeError(
+					w,
+					http.StatusBadRequest,
+					"com.amazonaws.dynamodb.v20120810#ValidationException",
+					"ConditionExpression is required for ConditionCheck",
+				)
+				return
+			}
 			cond := &ConditionCheck{
 				Expr:   ti.ConditionCheck.ConditionExpression,
 				Names:  ti.ConditionCheck.ExpressionAttributeNames,

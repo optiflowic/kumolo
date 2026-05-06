@@ -4117,6 +4117,58 @@ func TestHandleTransactWriteItems(t *testing.T) {
 		assert.Equal(t, "ConditionalCheckFailed", reasons[1].(map[string]any)["Code"])
 	})
 
+	t.Run("400 for invalid UpdateExpression in Update action", func(t *testing.T) {
+		ro := newTestRouter(t)
+		createTable(t, ro)
+		w := dynamo(t, ro, "TransactWriteItems", `{
+			"TransactItems": [{
+				"Update": {
+					"TableName": "txn-table",
+					"Key": {"pk": {"S": "u"}},
+					"UpdateExpression": "INVALID EXPR"
+				}
+			}]
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("400 for ConditionCheck with empty ConditionExpression", func(t *testing.T) {
+		ro := newTestRouter(t)
+		createTable(t, ro)
+		w := dynamo(t, ro, "TransactWriteItems", `{
+			"TransactItems": [{
+				"ConditionCheck": {
+					"TableName": "txn-table",
+					"Key": {"pk": {"S": "cc"}},
+					"ConditionExpression": ""
+				}
+			}]
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("400 when TransactGetItems exceeds 100 items", func(t *testing.T) {
+		ro := newTestRouter(t)
+		createTable(t, ro)
+		items := make([]string, 101)
+		for i := range items {
+			items[i] = fmt.Sprintf(`{"Get":{"TableName":"txn-table","Key":{"pk":{"S":"%d"}}}}`, i)
+		}
+		w := dynamo(t, ro, "TransactGetItems", `{"TransactItems":[`+strings.Join(items, ",")+`]}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("400 when TransactWriteItems exceeds 100 items", func(t *testing.T) {
+		ro := newTestRouter(t)
+		createTable(t, ro)
+		items := make([]string, 101)
+		for i := range items {
+			items[i] = fmt.Sprintf(`{"Put":{"TableName":"txn-table","Item":{"pk":{"S":"%d"}}}}`, i)
+		}
+		w := dynamo(t, ro, "TransactWriteItems", `{"TransactItems":[`+strings.Join(items, ",")+`]}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
 	t.Run("400 for empty TransactItems", func(t *testing.T) {
 		ro := newTestRouter(t)
 		w := dynamo(t, ro, "TransactWriteItems", `{"TransactItems": []}`)
