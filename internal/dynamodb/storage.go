@@ -1431,7 +1431,10 @@ func (s *Storage) checkTransactActionCondLocked(
 	case action.Delete != nil:
 		meta, err := s.readTableMeta(action.Delete.TableName)
 		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
+			if errors.Is(
+				err,
+				os.ErrNotExist,
+			) { // unreachable: Phase 0 verified table exists under write lock
 				return nil, ErrTableNotFound
 			}
 			return nil, err
@@ -1445,7 +1448,10 @@ func (s *Storage) checkTransactActionCondLocked(
 	case action.Update != nil:
 		meta, err := s.readTableMeta(action.Update.TableName)
 		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
+			if errors.Is(
+				err,
+				os.ErrNotExist,
+			) { // unreachable: Phase 0 verified table exists under write lock
 				return nil, ErrTableNotFound
 			}
 			return nil, err
@@ -1459,7 +1465,10 @@ func (s *Storage) checkTransactActionCondLocked(
 	case action.ConditionCheck != nil:
 		meta, err := s.readTableMeta(action.ConditionCheck.TableName)
 		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
+			if errors.Is(
+				err,
+				os.ErrNotExist,
+			) { // unreachable: Phase 0 verified table exists under write lock
 				return nil, ErrTableNotFound
 			}
 			return nil, err
@@ -1483,11 +1492,11 @@ func (s *Storage) applyTransactActionLocked(action TransactWriteAction) error {
 	switch {
 	case action.Put != nil:
 		meta, err := s.readTableMeta(action.Put.TableName)
-		if err != nil {
+		if err != nil { // unreachable: Phase 0 verified table exists under write lock
 			return err
 		}
 		k, err := itemKey(action.Put.Item, meta.KeySchema)
-		if err != nil {
+		if err != nil { // unreachable: Phase 0 validated same key
 			return err
 		}
 		return s.writeJSON(filepath.Join(action.Put.TableName, k+".json"), action.Put.Item)
@@ -1497,11 +1506,8 @@ func (s *Storage) applyTransactActionLocked(action TransactWriteAction) error {
 		if err != nil {
 			return err
 		}
-		k, err := itemKey(
-			action.Delete.Key,
-			meta.KeySchema,
-		) // unreachable: Phase 0 validated same key
-		if err != nil {
+		k, err := itemKey(action.Delete.Key, meta.KeySchema)
+		if err != nil { // unreachable: Phase 0 validated same key
 			return err
 		}
 		err = s.removeFile(filepath.Join(action.Delete.TableName, k+".json"))
@@ -1515,11 +1521,8 @@ func (s *Storage) applyTransactActionLocked(action TransactWriteAction) error {
 		if err != nil {
 			return err
 		}
-		k, err := itemKey(
-			action.Update.Key,
-			meta.KeySchema,
-		) // unreachable: Phase 0 validated same key
-		if err != nil {
+		k, err := itemKey(action.Update.Key, meta.KeySchema)
+		if err != nil { // unreachable: Phase 0 validated same key
 			return err
 		}
 		itemPath := filepath.Join(action.Update.TableName, k+".json")
