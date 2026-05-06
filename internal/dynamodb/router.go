@@ -2555,7 +2555,7 @@ func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 			}
 			w.Header().Set("Content-Type", "application/x-amz-json-1.0")
 			w.WriteHeader(http.StatusBadRequest)
-			if encErr := json.NewEncoder(w).Encode(cancelResp{
+			if encErr := json.NewEncoder(w).Encode(cancelResp{ // encErr unreachable: cancelResp contains no unencodable types
 				Type: "com.amazonaws.dynamodb.v20120810#TransactionCanceledException",
 				Message: "Transaction cancelled, please refer cancellation reasons for specific reasons [" +
 					strings.Join(codes, ", ") + "]",

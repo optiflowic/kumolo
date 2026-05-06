@@ -3952,6 +3952,45 @@ func TestHandleTransactGetItems(t *testing.T) {
 		}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
+
+	t.Run("400 for malformed JSON body", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "TransactGetItems", `{bad json`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("400 when entry has no Get field", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "TransactGetItems", `{"TransactItems": [{"Put": {}}]}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("500 for internal storage error", func(t *testing.T) {
+		ro := &Router{storage: &mockStore{
+			transactGetItemsFn: func(gets []TransactGetInput) ([]map[string]any, error) {
+				return nil, errors.New("disk failure")
+			},
+		}}
+		w := dynamo(t, ro, "TransactGetItems", `{
+			"TransactItems": [{"Get": {"TableName": "t", "Key": {"pk": {"S": "k"}}}}]
+		}`)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+
+	t.Run("400 for invalid ProjectionExpression", func(t *testing.T) {
+		ro := newTestRouter(t)
+		createTable(t, ro)
+		putItem(t, ro, "k3", "v3")
+		// #ref without ExpressionAttributeNames triggers a resolution error
+		w := dynamo(t, ro, "TransactGetItems", `{
+			"TransactItems": [{"Get": {
+				"TableName": "txn-table",
+				"Key": {"pk": {"S": "k3"}},
+				"ProjectionExpression": "#ref"
+			}}]
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
 }
 
 // --- TransactWriteItems ---
@@ -4264,5 +4303,54 @@ func TestHandleTransactWriteItems(t *testing.T) {
 			"TransactItems": [{"Put": {"TableName":"no-table","Item":{"pk":{"S":"x"}}}}]
 		}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("400 for malformed JSON body", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "TransactWriteItems", `{bad json`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("Update with ConditionExpression passes when condition holds", func(t *testing.T) {
+		ro := newTestRouter(t)
+		createTable(t, ro)
+		dynamo(
+			t,
+			ro,
+			"PutItem",
+			`{"TableName":"txn-table","Item":{"pk":{"S":"upd-cond"},"n":{"N":"5"}}}`,
+		)
+		w := dynamo(t, ro, "TransactWriteItems", `{
+			"TransactItems": [{
+				"Update": {
+					"TableName": "txn-table",
+					"Key": {"pk": {"S": "upd-cond"}},
+					"UpdateExpression": "SET n = :v",
+					"ConditionExpression": "attribute_exists(pk)",
+					"ExpressionAttributeValues": {":v": {"N": "99"}}
+				}
+			}]
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		item := getItem(t, ro, "upd-cond")
+		assert.Equal(t, "99", item["n"].(map[string]any)["N"])
+	})
+
+	t.Run("400 for entry with no recognized action type", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "TransactWriteItems", `{"TransactItems": [{}]}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("500 for unexpected storage error", func(t *testing.T) {
+		ro := &Router{storage: &mockStore{
+			transactWriteItemsFn: func(actions []TransactWriteAction) error {
+				return errors.New("disk failure")
+			},
+		}}
+		w := dynamo(t, ro, "TransactWriteItems", `{
+			"TransactItems": [{"Put": {"TableName": "t", "Item": {"pk": {"S": "x"}}}}]
+		}`)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
 }

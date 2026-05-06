@@ -2762,6 +2762,34 @@ func TestTransactGetItems(t *testing.T) {
 		})
 		assert.Error(t, err)
 	})
+
+	t.Run("propagates itemKey error for malformed key", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		_, err := s.TransactGetItems([]TransactGetInput{
+			{TableName: "test-table", Key: map[string]any{"not-pk": map[string]any{"S": "x"}}},
+		})
+		assert.Error(t, err)
+	})
+
+	t.Run("propagates non-ErrNotExist error on item read", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "k2"}})
+		orig := s.readAll
+		count := 0
+		s.readAll = func(r io.Reader) ([]byte, error) {
+			count++
+			if count == 2 { // 1st call: meta read; 2nd call: item read
+				return nil, errors.New("disk read error")
+			}
+			return orig(r)
+		}
+		_, err := s.TransactGetItems([]TransactGetInput{
+			{TableName: "test-table", Key: map[string]any{"pk": map[string]any{"S": "k2"}}},
+		})
+		assert.Error(t, err)
+	})
 }
 
 func TestTransactWriteItems(t *testing.T) {
@@ -2899,4 +2927,579 @@ func TestTransactWriteItems(t *testing.T) {
 		})
 		assert.Error(t, err)
 	})
+
+	t.Run("Delete of non-existent item is a no-op", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		err := s.TransactWriteItems([]TransactWriteAction{
+			{Delete: &TransactDelete{
+				TableName: "test-table",
+				Key:       map[string]any{"pk": map[string]any{"S": "does-not-exist"}},
+			}},
+		})
+		require.NoError(t, err)
+	})
+
+	t.Run("Delete condition failure returns CancellationReason", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "del-guard"}})
+		err := s.TransactWriteItems([]TransactWriteAction{
+			{Delete: &TransactDelete{
+				TableName: "test-table",
+				Key:       map[string]any{"pk": map[string]any{"S": "del-guard"}},
+				Cond:      &ConditionCheck{Expr: "attribute_not_exists(pk)"},
+			}},
+		})
+		var txErr *TransactionCanceledError
+		require.ErrorAs(t, err, &txErr)
+		assert.Equal(t, "ConditionalCheckFailed", txErr.Reasons[0].Code)
+		assert.Equal(t, "transaction canceled", txErr.Error())
+	})
+
+	t.Run("Delete condition failure with ALL_OLD returns existing item", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "del-old"}})
+		err := s.TransactWriteItems([]TransactWriteAction{
+			{Delete: &TransactDelete{
+				TableName: "test-table",
+				Key: map[string]any{
+					"pk": map[string]any{"S": "del-old"},
+				},
+				Cond:                           &ConditionCheck{Expr: "attribute_not_exists(pk)"},
+				ReturnValuesOnConditionFailure: "ALL_OLD",
+			}},
+		})
+		var txErr *TransactionCanceledError
+		require.ErrorAs(t, err, &txErr)
+		assert.Equal(t, "ConditionalCheckFailed", txErr.Reasons[0].Code)
+		assert.NotNil(t, txErr.Reasons[0].Item)
+	})
+
+	t.Run("Update condition failure returns CancellationReason", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "upd-guard"}})
+		err := s.TransactWriteItems([]TransactWriteAction{
+			{Update: &TransactUpdate{
+				TableName: "test-table",
+				Key:       map[string]any{"pk": map[string]any{"S": "upd-guard"}},
+				Updates:   map[string]any{"x": map[string]any{"S": "y"}},
+				Cond:      &ConditionCheck{Expr: "attribute_not_exists(pk)"},
+			}},
+		})
+		var txErr *TransactionCanceledError
+		require.ErrorAs(t, err, &txErr)
+		assert.Equal(t, "ConditionalCheckFailed", txErr.Reasons[0].Code)
+	})
+
+	t.Run("Update condition failure with ALL_OLD returns existing item", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "upd-old"}})
+		err := s.TransactWriteItems([]TransactWriteAction{
+			{Update: &TransactUpdate{
+				TableName: "test-table",
+				Key: map[string]any{
+					"pk": map[string]any{"S": "upd-old"},
+				},
+				Updates:                        map[string]any{"x": map[string]any{"S": "y"}},
+				Cond:                           &ConditionCheck{Expr: "attribute_not_exists(pk)"},
+				ReturnValuesOnConditionFailure: "ALL_OLD",
+			}},
+		})
+		var txErr *TransactionCanceledError
+		require.ErrorAs(t, err, &txErr)
+		assert.Equal(t, "ConditionalCheckFailed", txErr.Reasons[0].Code)
+		assert.NotNil(t, txErr.Reasons[0].Item)
+	})
+
+	t.Run("ConditionCheck condition failure returns CancellationReason", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		// item does not exist, so attribute_exists(pk) fails
+		err := s.TransactWriteItems([]TransactWriteAction{
+			{ConditionCheck: &TransactConditionCheck{
+				TableName: "test-table",
+				Key:       map[string]any{"pk": map[string]any{"S": "cc-fail"}},
+				Cond:      &ConditionCheck{Expr: "attribute_exists(pk)"},
+			}},
+		})
+		var txErr *TransactionCanceledError
+		require.ErrorAs(t, err, &txErr)
+		assert.Equal(t, "ConditionalCheckFailed", txErr.Reasons[0].Code)
+	})
+
+	t.Run(
+		"ConditionCheck condition failure with ALL_OLD includes existing item",
+		func(t *testing.T) {
+			s := newTestStorage(t)
+			require.NoError(t, s.CreateTable(testMeta))
+			mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "cc-old"}})
+			err := s.TransactWriteItems([]TransactWriteAction{
+				{ConditionCheck: &TransactConditionCheck{
+					TableName: "test-table",
+					Key: map[string]any{
+						"pk": map[string]any{"S": "cc-old"},
+					},
+					Cond: &ConditionCheck{
+						Expr: "attribute_not_exists(pk)",
+					},
+					ReturnValuesOnConditionFailure: "ALL_OLD",
+				}},
+			})
+			var txErr *TransactionCanceledError
+			require.ErrorAs(t, err, &txErr)
+			assert.Equal(t, "ConditionalCheckFailed", txErr.Reasons[0].Code)
+			assert.NotNil(t, txErr.Reasons[0].Item)
+		},
+	)
+
+	t.Run("invalid ConditionExpression returns ErrValidationException", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		err := s.TransactWriteItems([]TransactWriteAction{
+			{ConditionCheck: &TransactConditionCheck{
+				TableName: "test-table",
+				Key:       map[string]any{"pk": map[string]any{"S": "x"}},
+				Cond:      &ConditionCheck{Expr: "%%not-valid%%"},
+			}},
+		})
+		assert.ErrorIs(t, err, ErrValidationException)
+	})
+
+	t.Run("Update on non-existent item creates it", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		err := s.TransactWriteItems([]TransactWriteAction{
+			{Update: &TransactUpdate{
+				TableName: "test-table",
+				Key:       map[string]any{"pk": map[string]any{"S": "brand-new"}},
+				Updates:   map[string]any{"attr": map[string]any{"S": "val"}},
+			}},
+		})
+		require.NoError(t, err)
+		item, getErr := s.GetItem(
+			"test-table",
+			map[string]any{"pk": map[string]any{"S": "brand-new"}},
+		)
+		require.NoError(t, getErr)
+		assert.NotNil(t, item)
+	})
+
+	t.Run("Update with REMOVE op deletes attribute", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		mustPutItem(t, s, "test-table", map[string]any{
+			"pk":    map[string]any{"S": "remove-target"},
+			"extra": map[string]any{"S": "bye"},
+		})
+		err := s.TransactWriteItems([]TransactWriteAction{
+			{Update: &TransactUpdate{
+				TableName: "test-table",
+				Key:       map[string]any{"pk": map[string]any{"S": "remove-target"}},
+				Updates:   map[string]any{"extra": nil}, // nil means REMOVE
+			}},
+		})
+		require.NoError(t, err)
+		item, getErr := s.GetItem(
+			"test-table",
+			map[string]any{"pk": map[string]any{"S": "remove-target"}},
+		)
+		require.NoError(t, getErr)
+		assert.NotContains(t, item, "extra")
+	})
+
+	t.Run("Update with ADD op increments number", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		mustPutItem(t, s, "test-table", map[string]any{
+			"pk": map[string]any{"S": "add-target"},
+			"n":  map[string]any{"N": "10"},
+		})
+		err := s.TransactWriteItems([]TransactWriteAction{
+			{Update: &TransactUpdate{
+				TableName: "test-table",
+				Key:       map[string]any{"pk": map[string]any{"S": "add-target"}},
+				Updates:   map[string]any{"n": addOp{val: map[string]any{"N": "5"}}},
+			}},
+		})
+		require.NoError(t, err)
+		item, getErr := s.GetItem(
+			"test-table",
+			map[string]any{"pk": map[string]any{"S": "add-target"}},
+		)
+		require.NoError(t, getErr)
+		assert.Equal(t, "15", item["n"].(map[string]any)["N"])
+	})
+
+	t.Run("Update with DELETE op removes element from set", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		mustPutItem(t, s, "test-table", map[string]any{
+			"pk": map[string]any{"S": "delete-op-target"},
+			"ss": map[string]any{"SS": []any{"a", "b", "c"}},
+		})
+		err := s.TransactWriteItems([]TransactWriteAction{
+			{Update: &TransactUpdate{
+				TableName: "test-table",
+				Key:       map[string]any{"pk": map[string]any{"S": "delete-op-target"}},
+				Updates:   map[string]any{"ss": deleteOp{val: map[string]any{"SS": []any{"b"}}}},
+			}},
+		})
+		require.NoError(t, err)
+		item, getErr := s.GetItem(
+			"test-table",
+			map[string]any{"pk": map[string]any{"S": "delete-op-target"}},
+		)
+		require.NoError(t, getErr)
+		ss := item["ss"].(map[string]any)["SS"].([]any)
+		assert.ElementsMatch(t, []any{"a", "c"}, ss)
+	})
+
+	t.Run("Phase 0 rejects item missing partition key", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		err := s.TransactWriteItems([]TransactWriteAction{
+			{Put: &TransactPut{
+				TableName: "test-table",
+				Item:      map[string]any{"not-pk": map[string]any{"S": "x"}},
+			}},
+		})
+		assert.ErrorIs(t, err, ErrValidationException)
+	})
+
+	t.Run("Phase 0 propagates non-ErrNotExist readTableMeta error", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		s.readAll = func(io.Reader) ([]byte, error) { return nil, errors.New("disk failure") }
+		err := s.TransactWriteItems([]TransactWriteAction{
+			{Put: &TransactPut{
+				TableName: "test-table",
+				Item:      map[string]any{"pk": map[string]any{"S": "x"}},
+			}},
+		})
+		assert.Error(t, err)
+		assert.NotErrorIs(t, err, ErrTableNotFound)
+	})
+
+	t.Run("empty action in slice is a no-op", func(t *testing.T) {
+		// TransactWriteAction{} has all-nil fields: Phase 0 hits default:continue,
+		// Phase 1 hits return nil nil, Phase 2 hits the trailing return nil.
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		err := s.TransactWriteItems([]TransactWriteAction{
+			{Put: &TransactPut{
+				TableName: "test-table",
+				Item:      map[string]any{"pk": map[string]any{"S": "real"}},
+			}},
+			{}, // empty
+		})
+		require.NoError(t, err)
+	})
+
+	// Phase 1 readTableMeta error: fail the 2nd readAll call so Phase 0 succeeds
+	// but Phase 1's meta read encounters a non-ErrNotExist disk error.
+	for _, tc := range []struct {
+		name   string
+		action func() TransactWriteAction
+	}{
+		{"Put arm", func() TransactWriteAction {
+			return TransactWriteAction{Put: &TransactPut{
+				TableName: "test-table",
+				Item:      map[string]any{"pk": map[string]any{"S": "x"}},
+			}}
+		}},
+		{"Delete arm", func() TransactWriteAction {
+			return TransactWriteAction{Delete: &TransactDelete{
+				TableName: "test-table",
+				Key:       map[string]any{"pk": map[string]any{"S": "x"}},
+			}}
+		}},
+		{"Update arm", func() TransactWriteAction {
+			return TransactWriteAction{Update: &TransactUpdate{
+				TableName: "test-table",
+				Key:       map[string]any{"pk": map[string]any{"S": "x"}},
+				Updates:   map[string]any{"v": map[string]any{"S": "y"}},
+			}}
+		}},
+		{"ConditionCheck arm", func() TransactWriteAction {
+			return TransactWriteAction{ConditionCheck: &TransactConditionCheck{
+				TableName: "test-table",
+				Key:       map[string]any{"pk": map[string]any{"S": "x"}},
+				Cond:      &ConditionCheck{Expr: "attribute_exists(pk)"},
+			}}
+		}},
+	} {
+		tc := tc
+		t.Run("Phase 1 readTableMeta error for "+tc.name, func(t *testing.T) {
+			s := newTestStorage(t)
+			require.NoError(t, s.CreateTable(testMeta))
+			orig := s.readAll
+			count := 0
+			s.readAll = func(r io.Reader) ([]byte, error) {
+				count++
+				if count == 2 { // Phase 0 meta (1) succeeds; Phase 1 meta (2) fails
+					return nil, errors.New("injected disk error")
+				}
+				return orig(r)
+			}
+			err := s.TransactWriteItems([]TransactWriteAction{tc.action()})
+			assert.Error(t, err)
+			assert.NotErrorIs(t, err, ErrTableNotFound)
+		})
+	}
+
+	// Phase 1 readExistingItemLocked error: fail the 3rd readAll call so Phase 0
+	// and Phase 1's meta read both succeed, but the item read hits a disk error.
+	for _, tc := range []struct {
+		name   string
+		action func() TransactWriteAction
+	}{
+		{"Put arm", func() TransactWriteAction {
+			return TransactWriteAction{Put: &TransactPut{
+				TableName: "test-table",
+				Item:      map[string]any{"pk": map[string]any{"S": "existing"}},
+			}}
+		}},
+		{"Delete arm", func() TransactWriteAction {
+			return TransactWriteAction{Delete: &TransactDelete{
+				TableName: "test-table",
+				Key:       map[string]any{"pk": map[string]any{"S": "existing"}},
+			}}
+		}},
+		{"Update arm", func() TransactWriteAction {
+			return TransactWriteAction{Update: &TransactUpdate{
+				TableName: "test-table",
+				Key:       map[string]any{"pk": map[string]any{"S": "existing"}},
+				Updates:   map[string]any{"v": map[string]any{"S": "y"}},
+			}}
+		}},
+		{"ConditionCheck arm", func() TransactWriteAction {
+			return TransactWriteAction{ConditionCheck: &TransactConditionCheck{
+				TableName: "test-table",
+				Key:       map[string]any{"pk": map[string]any{"S": "existing"}},
+				Cond:      &ConditionCheck{Expr: "attribute_exists(pk)"},
+			}}
+		}},
+	} {
+		tc := tc
+		t.Run("Phase 1 readExistingItemLocked error for "+tc.name, func(t *testing.T) {
+			s := newTestStorage(t)
+			require.NoError(t, s.CreateTable(testMeta))
+			mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "existing"}})
+			orig := s.readAll
+			count := 0
+			s.readAll = func(r io.Reader) ([]byte, error) {
+				count++
+				if count == 3 { // 1: Phase 0 meta, 2: Phase 1 meta, 3: Phase 1 item
+					return nil, errors.New("injected disk error")
+				}
+				return orig(r)
+			}
+			err := s.TransactWriteItems([]TransactWriteAction{tc.action()})
+			assert.Error(t, err)
+		})
+	}
+}
+
+func TestReadExistingItemLocked(t *testing.T) {
+	t.Run("returns error when key is missing required attribute", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		_, err := s.readExistingItemLocked(
+			"test-table",
+			map[string]any{"not-pk": map[string]any{"S": "x"}},
+			testMeta,
+		)
+		assert.Error(t, err)
+	})
+
+	t.Run("propagates non-ErrNotExist readJSON error", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "k"}})
+		s.readAll = func(io.Reader) ([]byte, error) { return nil, errors.New("disk error") }
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		_, err := s.readExistingItemLocked(
+			"test-table",
+			map[string]any{"pk": map[string]any{"S": "k"}},
+			testMeta,
+		)
+		assert.Error(t, err)
+	})
+}
+
+func TestApplyTransactActionLockedErrors(t *testing.T) {
+	// Phase 2 readTableMeta error: fail the 3rd readAll call so both Phase 0
+	// and Phase 1 meta reads succeed but Phase 2's meta read hits a disk error.
+	// Items do not exist, so Phase 1 skips the item readAll (root.Open → ErrNotExist).
+	for _, tc := range []struct {
+		name   string
+		action func() TransactWriteAction
+	}{
+		{"Delete arm", func() TransactWriteAction {
+			return TransactWriteAction{Delete: &TransactDelete{
+				TableName: "test-table",
+				Key:       map[string]any{"pk": map[string]any{"S": "nonexistent"}},
+			}}
+		}},
+		{"Update arm", func() TransactWriteAction {
+			return TransactWriteAction{Update: &TransactUpdate{
+				TableName: "test-table",
+				Key:       map[string]any{"pk": map[string]any{"S": "nonexistent"}},
+				Updates:   map[string]any{"v": map[string]any{"S": "y"}},
+			}}
+		}},
+	} {
+		tc := tc
+		t.Run("Phase 2 readTableMeta error for "+tc.name, func(t *testing.T) {
+			s := newTestStorage(t)
+			require.NoError(t, s.CreateTable(testMeta))
+			orig := s.readAll
+			count := 0
+			s.readAll = func(r io.Reader) ([]byte, error) {
+				count++
+				if count == 3 { // Phase 0(1), Phase 1(2), Phase 2(3)←fail
+					return nil, errors.New("injected disk error")
+				}
+				return orig(r)
+			}
+			err := s.TransactWriteItems([]TransactWriteAction{tc.action()})
+			assert.Error(t, err)
+		})
+	}
+
+	t.Run("Phase 2 Update readJSON non-ErrNotExist error", func(t *testing.T) {
+		// Item exists, so Phase 1 reads it (call 3). Phase 2 then reads meta (call 4)
+		// and item (call 5); failing on call 5 covers the !errors.Is(err, ErrNotExist) branch.
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "x"}})
+		orig := s.readAll
+		count := 0
+		s.readAll = func(r io.Reader) ([]byte, error) {
+			count++
+			if count == 5 { // Phase 0(1), Phase 1 meta(2), Phase 1 item(3), Phase 2 meta(4), Phase 2 item(5)←fail
+				return nil, errors.New("injected disk error")
+			}
+			return orig(r)
+		}
+		err := s.TransactWriteItems([]TransactWriteAction{
+			{Update: &TransactUpdate{
+				TableName: "test-table",
+				Key:       map[string]any{"pk": map[string]any{"S": "x"}},
+				Updates:   map[string]any{"v": map[string]any{"S": "y"}},
+			}},
+		})
+		assert.Error(t, err)
+	})
+
+	t.Run("Update with ADD op error returns ErrValidationException", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		mustPutItem(t, s, "test-table", map[string]any{
+			"pk":  map[string]any{"S": "add-err"},
+			"str": map[string]any{"S": "hello"},
+		})
+		err := s.TransactWriteItems([]TransactWriteAction{
+			{Update: &TransactUpdate{
+				TableName: "test-table",
+				Key:       map[string]any{"pk": map[string]any{"S": "add-err"}},
+				Updates:   map[string]any{"str": addOp{val: map[string]any{"N": "5"}}},
+			}},
+		})
+		assert.ErrorIs(t, err, ErrValidationException)
+	})
+
+	t.Run("Update with DELETE op empties set removes attribute", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		mustPutItem(t, s, "test-table", map[string]any{
+			"pk": map[string]any{"S": "del-empty"},
+			"ss": map[string]any{"SS": []any{"only"}},
+		})
+		err := s.TransactWriteItems([]TransactWriteAction{
+			{Update: &TransactUpdate{
+				TableName: "test-table",
+				Key:       map[string]any{"pk": map[string]any{"S": "del-empty"}},
+				Updates:   map[string]any{"ss": deleteOp{val: map[string]any{"SS": []any{"only"}}}},
+			}},
+		})
+		require.NoError(t, err)
+		item, getErr := s.GetItem(
+			"test-table",
+			map[string]any{"pk": map[string]any{"S": "del-empty"}},
+		)
+		require.NoError(t, getErr)
+		assert.NotContains(t, item, "ss")
+	})
+
+	t.Run("Update with DELETE op type mismatch returns ErrValidationException", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		mustPutItem(t, s, "test-table", map[string]any{
+			"pk":  map[string]any{"S": "del-err"},
+			"str": map[string]any{"S": "hello"},
+		})
+		err := s.TransactWriteItems([]TransactWriteAction{
+			{Update: &TransactUpdate{
+				TableName: "test-table",
+				Key:       map[string]any{"pk": map[string]any{"S": "del-err"}},
+				// str is S type, but deleteOp expects SS/NS/BS → error
+				Updates: map[string]any{"str": deleteOp{val: map[string]any{"SS": []any{"hello"}}}},
+			}},
+		})
+		assert.ErrorIs(t, err, ErrValidationException)
+	})
+}
+
+func TestTransactActionReturnsOldOnFailure(t *testing.T) {
+	tests := []struct {
+		name   string
+		action TransactWriteAction
+		want   bool
+	}{
+		{
+			"Put with ALL_OLD",
+			TransactWriteAction{Put: &TransactPut{ReturnValuesOnConditionFailure: "ALL_OLD"}},
+			true,
+		},
+		{
+			"Put without flag",
+			TransactWriteAction{Put: &TransactPut{}},
+			false,
+		},
+		{
+			"Delete with ALL_OLD",
+			TransactWriteAction{Delete: &TransactDelete{ReturnValuesOnConditionFailure: "ALL_OLD"}},
+			true,
+		},
+		{
+			"Update with ALL_OLD",
+			TransactWriteAction{Update: &TransactUpdate{ReturnValuesOnConditionFailure: "ALL_OLD"}},
+			true,
+		},
+		{
+			"ConditionCheck with ALL_OLD",
+			TransactWriteAction{
+				ConditionCheck: &TransactConditionCheck{ReturnValuesOnConditionFailure: "ALL_OLD"},
+			},
+			true,
+		},
+		{
+			"empty action returns false",
+			TransactWriteAction{},
+			false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, transactActionReturnsOldOnFailure(tc.action))
+		})
+	}
 }
