@@ -14,6 +14,20 @@ var (
 	ErrConditionalCheckFailed = errors.New("conditional check failed")
 )
 
+// CancellationReason describes why a single TransactWriteItems action was cancelled.
+type CancellationReason struct {
+	Code    string `json:"Code"`
+	Message string `json:"Message,omitempty"`
+}
+
+// TransactionCanceledError is returned by TransactWriteItems when one or more
+// ConditionExpression evaluations fail.
+type TransactionCanceledError struct {
+	Reasons []CancellationReason
+}
+
+func (e *TransactionCanceledError) Error() string { return "transaction canceled" }
+
 type errResponse struct {
 	Type    string `json:"__type"`
 	Message string `json:"message"`

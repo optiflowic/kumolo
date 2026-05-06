@@ -394,6 +394,8 @@ type store interface {
 	UntagResource(resourceARN string, tagKeys []string) error
 	ListTagsOfResource(resourceARN string) (map[string]string, error)
 	UpdateTable(tableName string, in UpdateTableInput) (TableMetadata, error)
+	TransactGetItems(gets []TransactGetInput) ([]map[string]any, error)
+	TransactWriteItems(actions []TransactWriteAction) error
 }
 
 // billingModeSummary mirrors the AWS BillingModeSummary shape.
@@ -540,6 +542,10 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ro.handleUntagResource(w, body)
 	case "ListTagsOfResource":
 		ro.handleListTagsOfResource(w, body)
+	case "TransactGetItems":
+		ro.handleTransactGetItems(w, body)
+	case "TransactWriteItems":
+		ro.handleTransactWriteItems(w, body)
 	case "DescribeLimits":
 		ro.handleDescribeLimits(w)
 	case "DescribeEndpoints":
@@ -2244,6 +2250,306 @@ func (ro *Router) handleDescribeTimeToLive(w http.ResponseWriter, body []byte) {
 	}
 	slog.Debug("described TTL", "table", req.TableName, "status", status)
 	writeJSON(w, http.StatusOK, map[string]any{"TimeToLiveDescription": ttlDesc})
+}
+
+func (ro *Router) handleTransactGetItems(w http.ResponseWriter, body []byte) {
+	var req struct {
+		TransactItems []struct {
+			Get *struct {
+				TableName                string            `json:"TableName"`
+				Key                      map[string]any    `json:"Key"`
+				ProjectionExpression     string            `json:"ProjectionExpression"`
+				ExpressionAttributeNames map[string]string `json:"ExpressionAttributeNames"`
+			} `json:"Get"`
+		} `json:"TransactItems"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"invalid request body",
+		)
+		return
+	}
+	if len(req.TransactItems) == 0 {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"TransactItems is required",
+		)
+		return
+	}
+	gets := make([]TransactGetInput, 0, len(req.TransactItems))
+	projections := make([]struct {
+		expr  string
+		names map[string]string
+	}, len(req.TransactItems))
+	for i, ti := range req.TransactItems {
+		if ti.Get == nil {
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				"each TransactItems entry must contain a Get",
+			)
+			return
+		}
+		gets = append(gets, TransactGetInput{
+			TableName: ti.Get.TableName,
+			Key:       ti.Get.Key,
+		})
+		projections[i].expr = ti.Get.ProjectionExpression
+		projections[i].names = ti.Get.ExpressionAttributeNames
+	}
+	items, err := ro.storage.TransactGetItems(gets)
+	if err != nil {
+		if errors.Is(err, ErrTableNotFound) {
+			slog.Debug("TransactGetItems: table not found")
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+				"Requested resource not found",
+			)
+			return
+		}
+		slog.Error("TransactGetItems failed", "err", err)
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			"com.amazonaws.dynamodb.v20120810#InternalServerError",
+			"internal server error",
+		)
+		return
+	}
+	responses := make([]map[string]any, len(items))
+	for i, item := range items {
+		if item == nil {
+			responses[i] = map[string]any{}
+			continue
+		}
+		if projections[i].expr != "" {
+			var projErr error
+			item, projErr = applyProjection(item, projections[i].expr, projections[i].names)
+			if projErr != nil {
+				slog.Debug("TransactGetItems: invalid ProjectionExpression", "err", projErr)
+				writeError(
+					w,
+					http.StatusBadRequest,
+					"com.amazonaws.dynamodb.v20120810#ValidationException",
+					projErr.Error(),
+				)
+				return
+			}
+		}
+		responses[i] = map[string]any{"Item": item}
+	}
+	slog.Debug("TransactGetItems", "count", len(items))
+	writeJSON(w, http.StatusOK, map[string]any{"Responses": responses})
+}
+
+func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
+	var req struct {
+		TransactItems []struct {
+			Put *struct {
+				TableName                 string            `json:"TableName"`
+				Item                      map[string]any    `json:"Item"`
+				ConditionExpression       string            `json:"ConditionExpression"`
+				ExpressionAttributeNames  map[string]string `json:"ExpressionAttributeNames"`
+				ExpressionAttributeValues map[string]any    `json:"ExpressionAttributeValues"`
+			} `json:"Put"`
+			Delete *struct {
+				TableName                 string            `json:"TableName"`
+				Key                       map[string]any    `json:"Key"`
+				ConditionExpression       string            `json:"ConditionExpression"`
+				ExpressionAttributeNames  map[string]string `json:"ExpressionAttributeNames"`
+				ExpressionAttributeValues map[string]any    `json:"ExpressionAttributeValues"`
+			} `json:"Delete"`
+			Update *struct {
+				TableName                 string            `json:"TableName"`
+				Key                       map[string]any    `json:"Key"`
+				UpdateExpression          string            `json:"UpdateExpression"`
+				ConditionExpression       string            `json:"ConditionExpression"`
+				ExpressionAttributeNames  map[string]string `json:"ExpressionAttributeNames"`
+				ExpressionAttributeValues map[string]any    `json:"ExpressionAttributeValues"`
+			} `json:"Update"`
+			ConditionCheck *struct {
+				TableName                 string            `json:"TableName"`
+				Key                       map[string]any    `json:"Key"`
+				ConditionExpression       string            `json:"ConditionExpression"`
+				ExpressionAttributeNames  map[string]string `json:"ExpressionAttributeNames"`
+				ExpressionAttributeValues map[string]any    `json:"ExpressionAttributeValues"`
+			} `json:"ConditionCheck"`
+		} `json:"TransactItems"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"invalid request body",
+		)
+		return
+	}
+	if len(req.TransactItems) == 0 {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"TransactItems is required",
+		)
+		return
+	}
+
+	actions := make([]TransactWriteAction, 0, len(req.TransactItems))
+	for _, ti := range req.TransactItems {
+		switch {
+		case ti.Put != nil:
+			var cond *ConditionCheck
+			if ti.Put.ConditionExpression != "" {
+				cond = &ConditionCheck{
+					Expr:   ti.Put.ConditionExpression,
+					Names:  ti.Put.ExpressionAttributeNames,
+					Values: ti.Put.ExpressionAttributeValues,
+				}
+			}
+			actions = append(actions, TransactWriteAction{
+				Put: &TransactPut{
+					TableName: ti.Put.TableName,
+					Item:      ti.Put.Item,
+					Cond:      cond,
+				},
+			})
+
+		case ti.Delete != nil:
+			var cond *ConditionCheck
+			if ti.Delete.ConditionExpression != "" {
+				cond = &ConditionCheck{
+					Expr:   ti.Delete.ConditionExpression,
+					Names:  ti.Delete.ExpressionAttributeNames,
+					Values: ti.Delete.ExpressionAttributeValues,
+				}
+			}
+			actions = append(actions, TransactWriteAction{
+				Delete: &TransactDelete{
+					TableName: ti.Delete.TableName,
+					Key:       ti.Delete.Key,
+					Cond:      cond,
+				},
+			})
+
+		case ti.Update != nil:
+			updates, err := parseUpdateExpression(
+				ti.Update.UpdateExpression,
+				ti.Update.ExpressionAttributeNames,
+				ti.Update.ExpressionAttributeValues,
+			)
+			if err != nil {
+				slog.Debug("TransactWriteItems: invalid UpdateExpression", "err", err)
+				writeError(
+					w,
+					http.StatusBadRequest,
+					"com.amazonaws.dynamodb.v20120810#ValidationException",
+					err.Error(),
+				)
+				return
+			}
+			var cond *ConditionCheck
+			if ti.Update.ConditionExpression != "" {
+				cond = &ConditionCheck{
+					Expr:   ti.Update.ConditionExpression,
+					Names:  ti.Update.ExpressionAttributeNames,
+					Values: ti.Update.ExpressionAttributeValues,
+				}
+			}
+			actions = append(actions, TransactWriteAction{
+				Update: &TransactUpdate{
+					TableName: ti.Update.TableName,
+					Key:       ti.Update.Key,
+					Updates:   updates,
+					Cond:      cond,
+				},
+			})
+
+		case ti.ConditionCheck != nil:
+			cond := &ConditionCheck{
+				Expr:   ti.ConditionCheck.ConditionExpression,
+				Names:  ti.ConditionCheck.ExpressionAttributeNames,
+				Values: ti.ConditionCheck.ExpressionAttributeValues,
+			}
+			actions = append(actions, TransactWriteAction{
+				ConditionCheck: &TransactConditionCheck{
+					TableName: ti.ConditionCheck.TableName,
+					Key:       ti.ConditionCheck.Key,
+					Cond:      cond,
+				},
+			})
+
+		default:
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				"each TransactItems entry must contain Put, Delete, Update, or ConditionCheck",
+			)
+			return
+		}
+	}
+
+	err := ro.storage.TransactWriteItems(actions)
+	if err != nil {
+		var txErr *TransactionCanceledError
+		if errors.As(err, &txErr) {
+			slog.Debug("TransactWriteItems: transaction canceled", "reasons", len(txErr.Reasons))
+			type cancelResp struct {
+				Type                string               `json:"__type"`
+				Message             string               `json:"message"`
+				CancellationReasons []CancellationReason `json:"CancellationReasons"`
+			}
+			w.Header().Set("Content-Type", "application/x-amz-json-1.0")
+			w.WriteHeader(http.StatusBadRequest)
+			if encErr := json.NewEncoder(w).Encode(cancelResp{
+				Type:                "com.amazonaws.dynamodb.v20120810#TransactionCanceledException",
+				Message:             "Transaction cancelled, please refer cancellation reasons for specific reasons",
+				CancellationReasons: txErr.Reasons,
+			}); encErr != nil {
+				slog.Warn("failed to encode TransactionCanceledException", "err", encErr)
+			}
+			return
+		}
+		if errors.Is(err, ErrTableNotFound) {
+			slog.Debug("TransactWriteItems: table not found")
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+				"Requested resource not found",
+			)
+			return
+		}
+		if errors.Is(err, ErrValidationException) {
+			slog.Debug("TransactWriteItems: validation error", "err", err)
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				err.Error(),
+			)
+			return
+		}
+		slog.Error("TransactWriteItems failed", "err", err)
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			"com.amazonaws.dynamodb.v20120810#InternalServerError",
+			"internal server error",
+		)
+		return
+	}
+	slog.Info("TransactWriteItems succeeded", "count", len(actions))
+	writeJSON(w, http.StatusOK, map[string]any{})
 }
 
 func (ro *Router) handleDescribeLimits(w http.ResponseWriter) {

@@ -1172,3 +1172,300 @@ func readJSON[T any](s *Storage, path string) (T, error) {
 func (s *Storage) readDir(name string) ([]os.DirEntry, error) {
 	return s.listDirFn(name)
 }
+
+// TransactGetInput is one Get request within TransactGetItems.
+type TransactGetInput struct {
+	TableName string
+	Key       map[string]any
+}
+
+// TransactPut is the Put action within TransactWriteItems.
+type TransactPut struct {
+	TableName string
+	Item      map[string]any
+	Cond      *ConditionCheck
+}
+
+// TransactUpdate is the Update action within TransactWriteItems.
+type TransactUpdate struct {
+	TableName string
+	Key       map[string]any
+	Updates   map[string]any // pre-parsed by parseUpdateExpression
+	Cond      *ConditionCheck
+}
+
+// TransactDelete is the Delete action within TransactWriteItems.
+type TransactDelete struct {
+	TableName string
+	Key       map[string]any
+	Cond      *ConditionCheck
+}
+
+// TransactConditionCheck is the ConditionCheck action within TransactWriteItems.
+type TransactConditionCheck struct {
+	TableName string
+	Key       map[string]any
+	Cond      *ConditionCheck
+}
+
+// TransactWriteAction is one action within a TransactWriteItems call.
+// Exactly one field must be non-nil.
+type TransactWriteAction struct {
+	Put            *TransactPut
+	Update         *TransactUpdate
+	Delete         *TransactDelete
+	ConditionCheck *TransactConditionCheck
+}
+
+// TransactGetItems reads multiple items across tables under a single read lock.
+// Missing items are represented as nil in the returned slice.
+func (s *Storage) TransactGetItems(gets []TransactGetInput) ([]map[string]any, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	results := make([]map[string]any, len(gets))
+	for i, g := range gets {
+		meta, err := s.readTableMeta(g.TableName)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil, ErrTableNotFound
+			}
+			return nil, err
+		}
+		k, err := itemKey(g.Key, meta.KeySchema)
+		if err != nil {
+			return nil, err
+		}
+		item, err := readJSON[map[string]any](s, filepath.Join(g.TableName, k+".json"))
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+		results[i] = item // nil when not found
+	}
+	return results, nil
+}
+
+// readExistingItemLocked reads an item by its raw key map.
+// Returns nil (not an error) when the item does not exist.
+// Must be called with mu held.
+func (s *Storage) readExistingItemLocked(
+	tableName string,
+	keyMap map[string]any,
+	meta TableMetadata,
+) (map[string]any, error) {
+	k, err := itemKey(keyMap, meta.KeySchema)
+	if err != nil {
+		return nil, err
+	}
+	item, err := readJSON[map[string]any](s, filepath.Join(tableName, k+".json"))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return item, nil
+}
+
+// evalCondition evaluates a ConditionExpression against current item state.
+// current may be nil when the item does not exist.
+func evalCondition(current map[string]any, cond *ConditionCheck) error {
+	if cond == nil || cond.Expr == "" {
+		return nil
+	}
+	if current == nil {
+		current = map[string]any{}
+	}
+	ok, err := evalFilterExpr(cond.Expr, current, cond.Names, cond.Values)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrValidationException, err)
+	}
+	if !ok {
+		return ErrConditionalCheckFailed
+	}
+	return nil
+}
+
+// TransactWriteItems executes all write actions atomically under a single write lock.
+//
+// Phase 1: evaluate every ConditionExpression; collect failures.
+// Phase 2: apply all writes only if every condition passed.
+func (s *Storage) TransactWriteItems(actions []TransactWriteAction) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Phase 1: condition checks
+	reasons := make([]CancellationReason, len(actions))
+	for i := range reasons {
+		reasons[i] = CancellationReason{Code: "None"}
+	}
+	hasFailed := false
+	for i, action := range actions {
+		condErr := s.checkTransactActionCondLocked(action)
+		if errors.Is(condErr, ErrConditionalCheckFailed) {
+			reasons[i] = CancellationReason{
+				Code:    "ConditionalCheckFailed",
+				Message: "The conditional request failed",
+			}
+			hasFailed = true
+		} else if condErr != nil {
+			return condErr
+		}
+	}
+	if hasFailed {
+		return &TransactionCanceledError{Reasons: reasons}
+	}
+
+	// Phase 2: apply writes
+	for _, action := range actions {
+		if err := s.applyTransactActionLocked(action); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkTransactActionCondLocked evaluates the ConditionExpression for a single action.
+// Must be called with mu held.
+func (s *Storage) checkTransactActionCondLocked(action TransactWriteAction) error {
+	switch {
+	case action.Put != nil:
+		meta, err := s.readTableMeta(action.Put.TableName)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return ErrTableNotFound
+			}
+			return err
+		}
+		current, err := s.readExistingItemLocked(action.Put.TableName, action.Put.Item, meta)
+		if err != nil {
+			return err
+		}
+		return evalCondition(current, action.Put.Cond)
+
+	case action.Delete != nil:
+		meta, err := s.readTableMeta(action.Delete.TableName)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return ErrTableNotFound
+			}
+			return err
+		}
+		current, err := s.readExistingItemLocked(action.Delete.TableName, action.Delete.Key, meta)
+		if err != nil {
+			return err
+		}
+		return evalCondition(current, action.Delete.Cond)
+
+	case action.Update != nil:
+		meta, err := s.readTableMeta(action.Update.TableName)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return ErrTableNotFound
+			}
+			return err
+		}
+		current, err := s.readExistingItemLocked(action.Update.TableName, action.Update.Key, meta)
+		if err != nil {
+			return err
+		}
+		return evalCondition(current, action.Update.Cond)
+
+	case action.ConditionCheck != nil:
+		meta, err := s.readTableMeta(action.ConditionCheck.TableName)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return ErrTableNotFound
+			}
+			return err
+		}
+		current, err := s.readExistingItemLocked(
+			action.ConditionCheck.TableName,
+			action.ConditionCheck.Key,
+			meta,
+		)
+		if err != nil {
+			return err
+		}
+		return evalCondition(current, action.ConditionCheck.Cond)
+	}
+	return nil
+}
+
+// applyTransactActionLocked applies the write for a single action (no condition checks).
+// Must be called with mu held.
+func (s *Storage) applyTransactActionLocked(action TransactWriteAction) error {
+	switch {
+	case action.Put != nil:
+		meta, err := s.readTableMeta(action.Put.TableName)
+		if err != nil {
+			return err
+		}
+		k, err := itemKey(action.Put.Item, meta.KeySchema)
+		if err != nil {
+			return err
+		}
+		return s.writeJSON(filepath.Join(action.Put.TableName, k+".json"), action.Put.Item)
+
+	case action.Delete != nil:
+		meta, err := s.readTableMeta(action.Delete.TableName)
+		if err != nil {
+			return err
+		}
+		k, err := itemKey(action.Delete.Key, meta.KeySchema)
+		if err != nil {
+			return err
+		}
+		err = s.removeFile(filepath.Join(action.Delete.TableName, k+".json"))
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+
+	case action.Update != nil:
+		meta, err := s.readTableMeta(action.Update.TableName)
+		if err != nil {
+			return err
+		}
+		k, err := itemKey(action.Update.Key, meta.KeySchema)
+		if err != nil {
+			return err
+		}
+		itemPath := filepath.Join(action.Update.TableName, k+".json")
+		item, err := readJSON[map[string]any](s, itemPath)
+		if err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+			item = make(map[string]any, len(action.Update.Key))
+			for kk, v := range action.Update.Key {
+				item[kk] = v
+			}
+		}
+		for attr, val := range action.Update.Updates {
+			switch op := val.(type) {
+			case nil:
+				delete(item, attr)
+			case addOp:
+				result, err := applyAddOp(item[attr], op.val)
+				if err != nil {
+					return fmt.Errorf("%w: %v", ErrValidationException, err)
+				}
+				item[attr] = result
+			case deleteOp:
+				result, err := applyDeleteOp(item[attr], op.val)
+				if err != nil {
+					return fmt.Errorf("%w: %v", ErrValidationException, err)
+				}
+				if result == nil {
+					delete(item, attr)
+				} else {
+					item[attr] = result
+				}
+			default:
+				item[attr] = val
+			}
+		}
+		return s.writeJSON(itemPath, item)
+	}
+	return nil // ConditionCheck: no write needed
+}

@@ -2074,6 +2074,8 @@ type mockStore struct {
 	untagResourceFn      func(resourceARN string, tagKeys []string) error
 	listTagsOfResourceFn func(resourceARN string) (map[string]string, error)
 	updateTableFn        func(tableName string, in UpdateTableInput) (TableMetadata, error)
+	transactGetItemsFn   func(gets []TransactGetInput) ([]map[string]any, error)
+	transactWriteItemsFn func(actions []TransactWriteAction) error
 }
 
 func (m *mockStore) CreateTable(meta TableMetadata) error {
@@ -2175,6 +2177,14 @@ func (m *mockStore) ListTagsOfResource(resourceARN string) (map[string]string, e
 
 func (m *mockStore) UpdateTable(tableName string, in UpdateTableInput) (TableMetadata, error) {
 	return m.updateTableFn(tableName, in)
+}
+
+func (m *mockStore) TransactGetItems(gets []TransactGetInput) ([]map[string]any, error) {
+	return m.transactGetItemsFn(gets)
+}
+
+func (m *mockStore) TransactWriteItems(actions []TransactWriteAction) error {
+	return m.transactWriteItemsFn(actions)
 }
 
 var errInternal = errors.New("internal error")
@@ -3857,5 +3867,267 @@ func TestHandleQuery_LSI(t *testing.T) {
 		require.Len(t, items, 2)
 		assert.Equal(t, "a", items[0].(map[string]any)["gsi_sk"].(map[string]any)["S"])
 		assert.Equal(t, "b", items[1].(map[string]any)["gsi_sk"].(map[string]any)["S"])
+	})
+}
+
+// --- TransactGetItems ---
+
+func TestHandleTransactGetItems(t *testing.T) {
+	createTable := func(t *testing.T, ro *Router) {
+		t.Helper()
+		w := dynamo(t, ro, "CreateTable", `{
+			"TableName": "txn-table",
+			"KeySchema": [{"AttributeName": "pk", "KeyType": "HASH"}],
+			"AttributeDefinitions": [{"AttributeName": "pk", "AttributeType": "S"}],
+			"BillingMode": "PAY_PER_REQUEST"
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+	}
+	putItem := func(t *testing.T, ro *Router, pk, val string) {
+		t.Helper()
+		w := dynamo(t, ro, "PutItem", fmt.Sprintf(`{
+			"TableName": "txn-table",
+			"Item": {"pk": {"S": %q}, "val": {"S": %q}}
+		}`, pk, val))
+		require.Equal(t, http.StatusOK, w.Code)
+	}
+
+	t.Run("returns found and missing items", func(t *testing.T) {
+		ro := newTestRouter(t)
+		createTable(t, ro)
+		putItem(t, ro, "k1", "v1")
+
+		w := dynamo(t, ro, "TransactGetItems", `{
+			"TransactItems": [
+				{"Get": {"TableName": "txn-table", "Key": {"pk": {"S": "k1"}}}},
+				{"Get": {"TableName": "txn-table", "Key": {"pk": {"S": "missing"}}}}
+			]
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		responses := resp["Responses"].([]any)
+		require.Len(t, responses, 2)
+		// first item found
+		r0 := responses[0].(map[string]any)
+		assert.NotNil(t, r0["Item"])
+		// second item missing → empty map
+		r1 := responses[1].(map[string]any)
+		assert.Nil(t, r1["Item"])
+	})
+
+	t.Run("applies ProjectionExpression", func(t *testing.T) {
+		ro := newTestRouter(t)
+		createTable(t, ro)
+		putItem(t, ro, "k2", "v2")
+
+		w := dynamo(t, ro, "TransactGetItems", `{
+			"TransactItems": [
+				{"Get": {
+					"TableName": "txn-table",
+					"Key": {"pk": {"S": "k2"}},
+					"ProjectionExpression": "pk"
+				}}
+			]
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		responses := resp["Responses"].([]any)
+		item := responses[0].(map[string]any)["Item"].(map[string]any)
+		assert.Contains(t, item, "pk")
+		assert.NotContains(t, item, "val")
+	})
+
+	t.Run("400 for empty TransactItems", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "TransactGetItems", `{"TransactItems": []}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("400 for missing table", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "TransactGetItems", `{
+			"TransactItems": [{"Get": {"TableName": "no-such-table", "Key": {"pk": {"S": "k"}}}}]
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+// --- TransactWriteItems ---
+
+func TestHandleTransactWriteItems(t *testing.T) {
+	createTable := func(t *testing.T, ro *Router) {
+		t.Helper()
+		w := dynamo(t, ro, "CreateTable", `{
+			"TableName": "txn-table",
+			"KeySchema": [{"AttributeName": "pk", "KeyType": "HASH"}],
+			"AttributeDefinitions": [{"AttributeName": "pk", "AttributeType": "S"}],
+			"BillingMode": "PAY_PER_REQUEST"
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+	}
+	getItem := func(t *testing.T, ro *Router, pk string) map[string]any {
+		t.Helper()
+		w := dynamo(t, ro, "GetItem", fmt.Sprintf(`{
+			"TableName": "txn-table",
+			"Key": {"pk": {"S": %q}}
+		}`, pk))
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		if item, ok := resp["Item"].(map[string]any); ok {
+			return item
+		}
+		return nil
+	}
+
+	t.Run("Put and Delete applied atomically", func(t *testing.T) {
+		ro := newTestRouter(t)
+		createTable(t, ro)
+		// seed an item to delete
+		dynamo(
+			t,
+			ro,
+			"PutItem",
+			`{"TableName":"txn-table","Item":{"pk":{"S":"del-me"},"x":{"S":"1"}}}`,
+		)
+
+		w := dynamo(t, ro, "TransactWriteItems", `{
+			"TransactItems": [
+				{"Put":    {"TableName":"txn-table","Item":{"pk":{"S":"new-item"},"val":{"S":"hello"}}}},
+				{"Delete": {"TableName":"txn-table","Key":{"pk":{"S":"del-me"}}}}
+			]
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		assert.NotNil(t, getItem(t, ro, "new-item"))
+		assert.Nil(t, getItem(t, ro, "del-me"))
+	})
+
+	t.Run("Update modifies existing item", func(t *testing.T) {
+		ro := newTestRouter(t)
+		createTable(t, ro)
+		dynamo(
+			t,
+			ro,
+			"PutItem",
+			`{"TableName":"txn-table","Item":{"pk":{"S":"u1"},"cnt":{"N":"5"}}}`,
+		)
+
+		w := dynamo(t, ro, "TransactWriteItems", `{
+			"TransactItems": [{
+				"Update": {
+					"TableName": "txn-table",
+					"Key": {"pk": {"S": "u1"}},
+					"UpdateExpression": "SET cnt = :v",
+					"ExpressionAttributeValues": {":v": {"N": "99"}}
+				}
+			}]
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		item := getItem(t, ro, "u1")
+		assert.Equal(t, "99", item["cnt"].(map[string]any)["N"])
+	})
+
+	t.Run("ConditionCheck passes when condition holds", func(t *testing.T) {
+		ro := newTestRouter(t)
+		createTable(t, ro)
+		dynamo(
+			t,
+			ro,
+			"PutItem",
+			`{"TableName":"txn-table","Item":{"pk":{"S":"cc1"},"status":{"S":"ok"}}}`,
+		)
+
+		w := dynamo(t, ro, "TransactWriteItems", `{
+			"TransactItems": [
+				{"ConditionCheck": {
+					"TableName": "txn-table",
+					"Key": {"pk": {"S": "cc1"}},
+					"ConditionExpression": "attribute_exists(pk)"
+				}},
+				{"Put": {"TableName":"txn-table","Item":{"pk":{"S":"new2"},"val":{"S":"x"}}}}
+			]
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		assert.NotNil(t, getItem(t, ro, "new2"))
+	})
+
+	t.Run("TransactionCanceledException when Put condition fails", func(t *testing.T) {
+		ro := newTestRouter(t)
+		createTable(t, ro)
+		// "guard" item exists, so attribute_not_exists(pk) should fail
+		dynamo(t, ro, "PutItem", `{"TableName":"txn-table","Item":{"pk":{"S":"guard"}}}`)
+
+		w := dynamo(t, ro, "TransactWriteItems", `{
+			"TransactItems": [
+				{"Put": {
+					"TableName": "txn-table",
+					"Item": {"pk": {"S": "guard"}},
+					"ConditionExpression": "attribute_not_exists(pk)"
+				}},
+				{"Put": {"TableName":"txn-table","Item":{"pk":{"S":"side-effect"}}}}
+			]
+		}`)
+		require.Equal(t, http.StatusBadRequest, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(
+			t,
+			"com.amazonaws.dynamodb.v20120810#TransactionCanceledException",
+			resp["__type"],
+		)
+		reasons := resp["CancellationReasons"].([]any)
+		require.Len(t, reasons, 2)
+		assert.Equal(t, "ConditionalCheckFailed", reasons[0].(map[string]any)["Code"])
+		assert.Equal(t, "None", reasons[1].(map[string]any)["Code"])
+		// side-effect item must NOT have been written
+		assert.Nil(t, getItem(t, ro, "side-effect"))
+	})
+
+	t.Run("all actions cancelled when multiple conditions fail", func(t *testing.T) {
+		ro := newTestRouter(t)
+		createTable(t, ro)
+
+		w := dynamo(t, ro, "TransactWriteItems", `{
+			"TransactItems": [
+				{"Put": {
+					"TableName": "txn-table",
+					"Item": {"pk": {"S": "x"}},
+					"ConditionExpression": "attribute_exists(pk)"
+				}},
+				{"Delete": {
+					"TableName": "txn-table",
+					"Key": {"pk": {"S": "y"}},
+					"ConditionExpression": "attribute_exists(pk)"
+				}}
+			]
+		}`)
+		require.Equal(t, http.StatusBadRequest, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(
+			t,
+			"com.amazonaws.dynamodb.v20120810#TransactionCanceledException",
+			resp["__type"],
+		)
+		reasons := resp["CancellationReasons"].([]any)
+		require.Len(t, reasons, 2)
+		assert.Equal(t, "ConditionalCheckFailed", reasons[0].(map[string]any)["Code"])
+		assert.Equal(t, "ConditionalCheckFailed", reasons[1].(map[string]any)["Code"])
+	})
+
+	t.Run("400 for empty TransactItems", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "TransactWriteItems", `{"TransactItems": []}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("400 for missing table", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "TransactWriteItems", `{
+			"TransactItems": [{"Put": {"TableName":"no-table","Item":{"pk":{"S":"x"}}}}]
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 }

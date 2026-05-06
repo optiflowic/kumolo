@@ -2721,3 +2721,150 @@ func TestDescribeTimeToLive(t *testing.T) {
 		assert.Error(t, err)
 	})
 }
+
+func TestTransactGetItems(t *testing.T) {
+	t.Run("returns items and nil for missing", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		mustPutItem(
+			t,
+			s,
+			"test-table",
+			map[string]any{"pk": map[string]any{"S": "k1"}, "val": map[string]any{"S": "v1"}},
+		)
+
+		results, err := s.TransactGetItems([]TransactGetInput{
+			{TableName: "test-table", Key: map[string]any{"pk": map[string]any{"S": "k1"}}},
+			{TableName: "test-table", Key: map[string]any{"pk": map[string]any{"S": "missing"}}},
+		})
+		require.NoError(t, err)
+		require.Len(t, results, 2)
+		assert.NotNil(t, results[0])
+		assert.Nil(t, results[1])
+	})
+
+	t.Run("returns ErrTableNotFound for unknown table", func(t *testing.T) {
+		s := newTestStorage(t)
+		_, err := s.TransactGetItems([]TransactGetInput{
+			{TableName: "no-table", Key: map[string]any{"pk": map[string]any{"S": "k"}}},
+		})
+		assert.ErrorIs(t, err, ErrTableNotFound)
+	})
+}
+
+func TestTransactWriteItems(t *testing.T) {
+	t.Run("applies Put and Delete atomically when all conditions pass", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "del-me"}})
+
+		err := s.TransactWriteItems([]TransactWriteAction{
+			{Put: &TransactPut{
+				TableName: "test-table",
+				Item: map[string]any{
+					"pk": map[string]any{"S": "new-item"},
+					"v":  map[string]any{"S": "hello"},
+				},
+			}},
+			{Delete: &TransactDelete{
+				TableName: "test-table",
+				Key:       map[string]any{"pk": map[string]any{"S": "del-me"}},
+			}},
+		})
+		require.NoError(t, err)
+
+		got, err := s.GetItem("test-table", map[string]any{"pk": map[string]any{"S": "new-item"}})
+		require.NoError(t, err)
+		assert.NotNil(t, got)
+
+		gone, err := s.GetItem("test-table", map[string]any{"pk": map[string]any{"S": "del-me"}})
+		require.NoError(t, err)
+		assert.Nil(t, gone)
+	})
+
+	t.Run("cancels all writes when one condition fails", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "guard"}})
+
+		err := s.TransactWriteItems([]TransactWriteAction{
+			{Put: &TransactPut{
+				TableName: "test-table",
+				Item:      map[string]any{"pk": map[string]any{"S": "guard"}},
+				Cond: &ConditionCheck{
+					Expr: "attribute_not_exists(pk)",
+				},
+			}},
+			{Put: &TransactPut{
+				TableName: "test-table",
+				Item:      map[string]any{"pk": map[string]any{"S": "side-effect"}},
+			}},
+		})
+		var txErr *TransactionCanceledError
+		require.ErrorAs(t, err, &txErr)
+		require.Len(t, txErr.Reasons, 2)
+		assert.Equal(t, "ConditionalCheckFailed", txErr.Reasons[0].Code)
+		assert.Equal(t, "None", txErr.Reasons[1].Code)
+
+		// side-effect must NOT have been written
+		item, err := s.GetItem(
+			"test-table",
+			map[string]any{"pk": map[string]any{"S": "side-effect"}},
+		)
+		require.NoError(t, err)
+		assert.Nil(t, item)
+	})
+
+	t.Run("Update modifies item under transaction", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		mustPutItem(
+			t,
+			s,
+			"test-table",
+			map[string]any{"pk": map[string]any{"S": "u1"}, "n": map[string]any{"N": "5"}},
+		)
+
+		err := s.TransactWriteItems([]TransactWriteAction{
+			{Update: &TransactUpdate{
+				TableName: "test-table",
+				Key:       map[string]any{"pk": map[string]any{"S": "u1"}},
+				Updates:   map[string]any{"n": map[string]any{"N": "99"}},
+			}},
+		})
+		require.NoError(t, err)
+		item, err := s.GetItem("test-table", map[string]any{"pk": map[string]any{"S": "u1"}})
+		require.NoError(t, err)
+		assert.Equal(t, "99", item["n"].(map[string]any)["N"])
+	})
+
+	t.Run("ConditionCheck with no write succeeds when condition holds", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "cc"}})
+
+		err := s.TransactWriteItems([]TransactWriteAction{
+			{ConditionCheck: &TransactConditionCheck{
+				TableName: "test-table",
+				Key:       map[string]any{"pk": map[string]any{"S": "cc"}},
+				Cond: &ConditionCheck{
+					Expr: "attribute_exists(pk)",
+				},
+			}},
+		})
+		require.NoError(t, err)
+	})
+
+	t.Run("returns ErrTableNotFound for unknown table", func(t *testing.T) {
+		s := newTestStorage(t)
+		err := s.TransactWriteItems([]TransactWriteAction{
+			{
+				Put: &TransactPut{
+					TableName: "no-table",
+					Item:      map[string]any{"pk": map[string]any{"S": "x"}},
+				},
+			},
+		})
+		assert.ErrorIs(t, err, ErrTableNotFound)
+	})
+}
