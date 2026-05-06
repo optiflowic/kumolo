@@ -3991,6 +3991,17 @@ func TestHandleTransactGetItems(t *testing.T) {
 		}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
+
+	t.Run("400 when TransactGetItems exceeds 100 items", func(t *testing.T) {
+		ro := newTestRouter(t)
+		createTable(t, ro)
+		items := make([]string, 101)
+		for i := range items {
+			items[i] = fmt.Sprintf(`{"Get":{"TableName":"txn-table","Key":{"pk":{"S":"%d"}}}}`, i)
+		}
+		w := dynamo(t, ro, "TransactGetItems", `{"TransactItems":[`+strings.Join(items, ",")+`]}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
 }
 
 // --- TransactWriteItems ---
@@ -4185,17 +4196,6 @@ func TestHandleTransactWriteItems(t *testing.T) {
 				}
 			}]
 		}`)
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-	})
-
-	t.Run("400 when TransactGetItems exceeds 100 items", func(t *testing.T) {
-		ro := newTestRouter(t)
-		createTable(t, ro)
-		items := make([]string, 101)
-		for i := range items {
-			items[i] = fmt.Sprintf(`{"Get":{"TableName":"txn-table","Key":{"pk":{"S":"%d"}}}}`, i)
-		}
-		w := dynamo(t, ro, "TransactGetItems", `{"TransactItems":[`+strings.Join(items, ",")+`]}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 

@@ -2293,7 +2293,7 @@ func (ro *Router) handleTransactGetItems(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
-	gets := make([]TransactGetInput, 0, len(req.TransactItems))
+	gets := make([]TransactGetInput, len(req.TransactItems))
 	projections := make([]struct {
 		expr  string
 		names map[string]string
@@ -2308,10 +2308,10 @@ func (ro *Router) handleTransactGetItems(w http.ResponseWriter, body []byte) {
 			)
 			return
 		}
-		gets = append(gets, TransactGetInput{
+		gets[i] = TransactGetInput{
 			TableName: ti.Get.TableName,
 			Key:       ti.Get.Key,
-		})
+		}
 		projections[i].expr = ti.Get.ProjectionExpression
 		projections[i].names = ti.Get.ExpressionAttributeNames
 	}

@@ -1431,10 +1431,7 @@ func (s *Storage) checkTransactActionCondLocked(
 	case action.Delete != nil:
 		meta, err := s.readTableMeta(action.Delete.TableName)
 		if err != nil {
-			if errors.Is(
-				err,
-				os.ErrNotExist,
-			) { // unreachable: Phase 0 verified table exists under write lock
+			if errors.Is(err, os.ErrNotExist) {
 				return nil, ErrTableNotFound
 			}
 			return nil, err
@@ -1448,10 +1445,7 @@ func (s *Storage) checkTransactActionCondLocked(
 	case action.Update != nil:
 		meta, err := s.readTableMeta(action.Update.TableName)
 		if err != nil {
-			if errors.Is(
-				err,
-				os.ErrNotExist,
-			) { // unreachable: Phase 0 verified table exists under write lock
+			if errors.Is(err, os.ErrNotExist) {
 				return nil, ErrTableNotFound
 			}
 			return nil, err
@@ -1465,10 +1459,7 @@ func (s *Storage) checkTransactActionCondLocked(
 	case action.ConditionCheck != nil:
 		meta, err := s.readTableMeta(action.ConditionCheck.TableName)
 		if err != nil {
-			if errors.Is(
-				err,
-				os.ErrNotExist,
-			) { // unreachable: Phase 0 verified table exists under write lock
+			if errors.Is(err, os.ErrNotExist) {
 				return nil, ErrTableNotFound
 			}
 			return nil, err
