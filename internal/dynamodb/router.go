@@ -413,6 +413,7 @@ type tableDescription struct {
 	BillingModeSummary     *billingModeSummary    `json:"BillingModeSummary,omitempty"`
 	ProvisionedThroughput  *ProvisionedThroughput `json:"ProvisionedThroughput,omitempty"`
 	GlobalSecondaryIndexes []gsiDescription       `json:"GlobalSecondaryIndexes,omitempty"`
+	LocalSecondaryIndexes  []lsiDescription       `json:"LocalSecondaryIndexes,omitempty"`
 	ItemCount              int64                  `json:"ItemCount"`
 	TableSizeBytes         int64                  `json:"TableSizeBytes"`
 }
@@ -423,6 +424,18 @@ type gsiDescription struct {
 	KeySchema             []KeySchemaElement     `json:"KeySchema"`
 	Projection            map[string]any         `json:"Projection,omitempty"`
 	ProvisionedThroughput *ProvisionedThroughput `json:"ProvisionedThroughput,omitempty"`
+	IndexSizeBytes        int64                  `json:"IndexSizeBytes"`
+	ItemCount             int64                  `json:"ItemCount"`
+}
+
+type lsiDescription struct {
+	IndexName             string                 `json:"IndexName"`
+	IndexStatus           string                 `json:"IndexStatus"`
+	KeySchema             []KeySchemaElement     `json:"KeySchema"`
+	Projection            map[string]any         `json:"Projection,omitempty"`
+	ProvisionedThroughput *ProvisionedThroughput `json:"ProvisionedThroughput,omitempty"`
+	IndexSizeBytes        int64                  `json:"IndexSizeBytes"`
+	ItemCount             int64                  `json:"ItemCount"`
 }
 
 func toTableDescription(m TableMetadata) tableDescription {
@@ -452,6 +465,15 @@ func toTableDescription(m TableMetadata) tableDescription {
 			KeySchema:             gsi.KeySchema,
 			Projection:            gsi.Projection,
 			ProvisionedThroughput: gsi.ProvisionedThroughput,
+		})
+	}
+	for _, lsi := range m.LocalSecondaryIndexes {
+		desc.LocalSecondaryIndexes = append(desc.LocalSecondaryIndexes, lsiDescription{
+			IndexName:             lsi.IndexName,
+			IndexStatus:           "ACTIVE",
+			KeySchema:             lsi.KeySchema,
+			Projection:            lsi.Projection,
+			ProvisionedThroughput: m.ProvisionedThroughput,
 		})
 	}
 	return desc
@@ -537,12 +559,135 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func validateTableIndexes(
+	tableKeySchema []KeySchemaElement,
+	attrDefs []AttributeDefinition,
+	gsis []GlobalSecondaryIndex,
+	lsis []LocalSecondaryIndex,
+) error {
+	defined := make(map[string]bool, len(attrDefs))
+	for _, a := range attrDefs {
+		defined[a.AttributeName] = true
+	}
+
+	tableHashKey := ""
+	for _, k := range tableKeySchema {
+		if !defined[k.AttributeName] {
+			return fmt.Errorf(
+				"%w: attribute '%s' is used in table key schema but not defined in AttributeDefinitions",
+				ErrValidationException,
+				k.AttributeName,
+			)
+		}
+		if k.KeyType == "HASH" {
+			tableHashKey = k.AttributeName
+		}
+	}
+
+	if len(lsis) > 5 {
+		return fmt.Errorf(
+			"%w: number of local secondary indexes exceeds per-table limit of 5",
+			ErrValidationException,
+		)
+	}
+
+	for _, gsi := range gsis {
+		hasHash := false
+		for _, k := range gsi.KeySchema {
+			if k.KeyType == "HASH" {
+				hasHash = true
+			}
+			if !defined[k.AttributeName] {
+				return fmt.Errorf(
+					"%w: attribute '%s' is used in index '%s' but not defined in AttributeDefinitions",
+					ErrValidationException,
+					k.AttributeName,
+					gsi.IndexName,
+				)
+			}
+		}
+		if !hasHash {
+			return fmt.Errorf(
+				"%w: GlobalSecondaryIndex '%s' must have a HASH key element",
+				ErrValidationException, gsi.IndexName,
+			)
+		}
+	}
+
+	indexNames := make(map[string]bool, len(gsis)+len(lsis))
+	for _, gsi := range gsis {
+		if indexNames[gsi.IndexName] {
+			return fmt.Errorf(
+				"%w: duplicate index name '%s'",
+				ErrValidationException, gsi.IndexName,
+			)
+		}
+		indexNames[gsi.IndexName] = true
+	}
+
+	for _, lsi := range lsis {
+		if indexNames[lsi.IndexName] {
+			return fmt.Errorf(
+				"%w: duplicate index name '%s'",
+				ErrValidationException, lsi.IndexName,
+			)
+		}
+		indexNames[lsi.IndexName] = true
+
+		lsiHashKey := ""
+		hasRange := false
+		for _, k := range lsi.KeySchema {
+			switch k.KeyType {
+			case "HASH":
+				lsiHashKey = k.AttributeName
+			case "RANGE":
+				hasRange = true
+			}
+			if !defined[k.AttributeName] {
+				return fmt.Errorf(
+					"%w: attribute '%s' is used in index '%s' but not defined in AttributeDefinitions",
+					ErrValidationException,
+					k.AttributeName,
+					lsi.IndexName,
+				)
+			}
+		}
+		if lsiHashKey != tableHashKey {
+			return fmt.Errorf(
+				"%w: LocalSecondaryIndex '%s' must have the same HASH key as the table (expected '%s')",
+				ErrValidationException,
+				lsi.IndexName,
+				tableHashKey,
+			)
+		}
+		if !hasRange {
+			return fmt.Errorf(
+				"%w: LocalSecondaryIndex '%s' must have a RANGE key element",
+				ErrValidationException, lsi.IndexName,
+			)
+		}
+	}
+
+	return nil
+}
+
 func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 	var req struct {
-		TableName            string                `json:"TableName"`
-		KeySchema            []KeySchemaElement    `json:"KeySchema"`
-		AttributeDefinitions []AttributeDefinition `json:"AttributeDefinitions"`
-		BillingMode          string                `json:"BillingMode"`
+		TableName              string                `json:"TableName"`
+		KeySchema              []KeySchemaElement    `json:"KeySchema"`
+		AttributeDefinitions   []AttributeDefinition `json:"AttributeDefinitions"`
+		BillingMode            string                `json:"BillingMode"`
+		GlobalSecondaryIndexes []struct {
+			IndexName             string                 `json:"IndexName"`
+			KeySchema             []KeySchemaElement     `json:"KeySchema"`
+			Projection            map[string]any         `json:"Projection,omitempty"`
+			ProvisionedThroughput *ProvisionedThroughput `json:"ProvisionedThroughput,omitempty"`
+		} `json:"GlobalSecondaryIndexes"`
+		LocalSecondaryIndexes []struct {
+			IndexName  string             `json:"IndexName"`
+			KeySchema  []KeySchemaElement `json:"KeySchema"`
+			Projection map[string]any     `json:"Projection,omitempty"`
+		} `json:"LocalSecondaryIndexes"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(
@@ -567,6 +712,31 @@ func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 		KeySchema:            req.KeySchema,
 		AttributeDefinitions: req.AttributeDefinitions,
 		BillingMode:          req.BillingMode,
+	}
+	for _, g := range req.GlobalSecondaryIndexes {
+		meta.GlobalSecondaryIndexes = append(meta.GlobalSecondaryIndexes, GlobalSecondaryIndex{
+			IndexName:             g.IndexName,
+			KeySchema:             g.KeySchema,
+			Projection:            g.Projection,
+			ProvisionedThroughput: g.ProvisionedThroughput,
+		})
+	}
+	for _, l := range req.LocalSecondaryIndexes {
+		meta.LocalSecondaryIndexes = append(meta.LocalSecondaryIndexes, LocalSecondaryIndex{
+			IndexName:  l.IndexName,
+			KeySchema:  l.KeySchema,
+			Projection: l.Projection,
+		})
+	}
+	if err := validateTableIndexes(meta.KeySchema, meta.AttributeDefinitions, meta.GlobalSecondaryIndexes, meta.LocalSecondaryIndexes); err != nil {
+		slog.Debug("CreateTable: validation failed", "table", req.TableName, "err", err)
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			err.Error(),
+		)
+		return
 	}
 	if err := ro.storage.CreateTable(meta); err != nil {
 		if errors.Is(err, ErrTableAlreadyExists) {
@@ -1363,6 +1533,7 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 	var req struct {
 		TableName                 string            `json:"TableName"`
+		IndexName                 string            `json:"IndexName"`
 		KeyConditionExpression    string            `json:"KeyConditionExpression"`
 		FilterExpression          string            `json:"FilterExpression"`
 		ProjectionExpression      string            `json:"ProjectionExpression"`
@@ -1436,6 +1607,7 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 		ScanIndexForward:  scanIndexForward,
 		Limit:             req.Limit,
 		ExclusiveStartKey: req.ExclusiveStartKey,
+		IndexName:         req.IndexName,
 	}
 
 	items, lastEvaluatedKey, err := ro.storage.Query(
@@ -1453,6 +1625,16 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 				http.StatusBadRequest,
 				"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
 				"Requested resource not found: Table: "+req.TableName+" not found",
+			)
+			return
+		}
+		if errors.Is(err, ErrValidationException) {
+			slog.Debug("Query: validation error", "table", req.TableName, "err", err)
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				err.Error(),
 			)
 			return
 		}

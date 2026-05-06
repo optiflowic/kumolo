@@ -79,6 +79,228 @@ func TestHandleCreateTable(t *testing.T) {
 	})
 }
 
+func TestHandleCreateTable_IndexValidation(t *testing.T) {
+	assertValidationError := func(t *testing.T, w *httptest.ResponseRecorder) {
+		t.Helper()
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	}
+
+	t.Run("GSI without HASH key rejected", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "CreateTable", `{
+			"TableName": "t",
+			"KeySchema": [{"AttributeName":"pk","KeyType":"HASH"}],
+			"AttributeDefinitions": [
+				{"AttributeName":"pk","AttributeType":"S"},
+				{"AttributeName":"sk","AttributeType":"S"}
+			],
+			"BillingMode": "PAY_PER_REQUEST",
+			"GlobalSecondaryIndexes": [{
+				"IndexName": "gsi",
+				"KeySchema": [{"AttributeName":"sk","KeyType":"RANGE"}],
+				"Projection": {"ProjectionType":"ALL"}
+			}]
+		}`)
+		assertValidationError(t, w)
+	})
+
+	t.Run("GSI key attribute missing from AttributeDefinitions rejected", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "CreateTable", `{
+			"TableName": "t",
+			"KeySchema": [{"AttributeName":"pk","KeyType":"HASH"}],
+			"AttributeDefinitions": [
+				{"AttributeName":"pk","AttributeType":"S"}
+			],
+			"BillingMode": "PAY_PER_REQUEST",
+			"GlobalSecondaryIndexes": [{
+				"IndexName": "gsi",
+				"KeySchema": [{"AttributeName":"gsi_pk","KeyType":"HASH"}],
+				"Projection": {"ProjectionType":"ALL"}
+			}]
+		}`)
+		assertValidationError(t, w)
+	})
+
+	t.Run("LSI with different HASH key rejected", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "CreateTable", `{
+			"TableName": "t",
+			"KeySchema": [
+				{"AttributeName":"pk","KeyType":"HASH"},
+				{"AttributeName":"sk","KeyType":"RANGE"}
+			],
+			"AttributeDefinitions": [
+				{"AttributeName":"pk","AttributeType":"S"},
+				{"AttributeName":"sk","AttributeType":"S"},
+				{"AttributeName":"other","AttributeType":"S"}
+			],
+			"BillingMode": "PAY_PER_REQUEST",
+			"LocalSecondaryIndexes": [{
+				"IndexName": "lsi",
+				"KeySchema": [
+					{"AttributeName":"other","KeyType":"HASH"},
+					{"AttributeName":"sk","KeyType":"RANGE"}
+				],
+				"Projection": {"ProjectionType":"ALL"}
+			}]
+		}`)
+		assertValidationError(t, w)
+	})
+
+	t.Run("LSI key attribute missing from AttributeDefinitions rejected", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "CreateTable", `{
+			"TableName": "t",
+			"KeySchema": [
+				{"AttributeName":"pk","KeyType":"HASH"},
+				{"AttributeName":"sk","KeyType":"RANGE"}
+			],
+			"AttributeDefinitions": [
+				{"AttributeName":"pk","AttributeType":"S"},
+				{"AttributeName":"sk","AttributeType":"S"}
+			],
+			"BillingMode": "PAY_PER_REQUEST",
+			"LocalSecondaryIndexes": [{
+				"IndexName": "lsi",
+				"KeySchema": [
+					{"AttributeName":"pk","KeyType":"HASH"},
+					{"AttributeName":"undefined_attr","KeyType":"RANGE"}
+				],
+				"Projection": {"ProjectionType":"ALL"}
+			}]
+		}`)
+		assertValidationError(t, w)
+	})
+
+	t.Run("more than 5 LSIs rejected", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "CreateTable", `{
+			"TableName": "t",
+			"KeySchema": [
+				{"AttributeName":"pk","KeyType":"HASH"},
+				{"AttributeName":"sk","KeyType":"RANGE"}
+			],
+			"AttributeDefinitions": [
+				{"AttributeName":"pk","AttributeType":"S"},
+				{"AttributeName":"sk","AttributeType":"S"},
+				{"AttributeName":"s1","AttributeType":"S"},
+				{"AttributeName":"s2","AttributeType":"S"},
+				{"AttributeName":"s3","AttributeType":"S"},
+				{"AttributeName":"s4","AttributeType":"S"},
+				{"AttributeName":"s5","AttributeType":"S"},
+				{"AttributeName":"s6","AttributeType":"S"}
+			],
+			"BillingMode": "PAY_PER_REQUEST",
+			"LocalSecondaryIndexes": [
+				{"IndexName":"l1","KeySchema":[{"AttributeName":"pk","KeyType":"HASH"},{"AttributeName":"s1","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}},
+				{"IndexName":"l2","KeySchema":[{"AttributeName":"pk","KeyType":"HASH"},{"AttributeName":"s2","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}},
+				{"IndexName":"l3","KeySchema":[{"AttributeName":"pk","KeyType":"HASH"},{"AttributeName":"s3","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}},
+				{"IndexName":"l4","KeySchema":[{"AttributeName":"pk","KeyType":"HASH"},{"AttributeName":"s4","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}},
+				{"IndexName":"l5","KeySchema":[{"AttributeName":"pk","KeyType":"HASH"},{"AttributeName":"s5","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}},
+				{"IndexName":"l6","KeySchema":[{"AttributeName":"pk","KeyType":"HASH"},{"AttributeName":"s6","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}}
+			]
+		}`)
+		assertValidationError(t, w)
+	})
+
+	t.Run("table key attribute missing from AttributeDefinitions rejected", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "CreateTable", `{
+			"TableName": "t",
+			"KeySchema": [
+				{"AttributeName":"pk","KeyType":"HASH"},
+				{"AttributeName":"sk","KeyType":"RANGE"}
+			],
+			"AttributeDefinitions": [
+				{"AttributeName":"pk","AttributeType":"S"}
+			],
+			"BillingMode": "PAY_PER_REQUEST"
+		}`)
+		assertValidationError(t, w)
+	})
+
+	t.Run("LSI without RANGE key rejected", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "CreateTable", `{
+			"TableName": "t",
+			"KeySchema": [
+				{"AttributeName":"pk","KeyType":"HASH"},
+				{"AttributeName":"sk","KeyType":"RANGE"}
+			],
+			"AttributeDefinitions": [
+				{"AttributeName":"pk","AttributeType":"S"},
+				{"AttributeName":"sk","AttributeType":"S"}
+			],
+			"BillingMode": "PAY_PER_REQUEST",
+			"LocalSecondaryIndexes": [{
+				"IndexName": "lsi",
+				"KeySchema": [{"AttributeName":"pk","KeyType":"HASH"}],
+				"Projection": {"ProjectionType":"ALL"}
+			}]
+		}`)
+		assertValidationError(t, w)
+	})
+
+	t.Run("duplicate index name across GSI and LSI rejected", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "CreateTable", `{
+			"TableName": "t",
+			"KeySchema": [
+				{"AttributeName":"pk","KeyType":"HASH"},
+				{"AttributeName":"sk","KeyType":"RANGE"}
+			],
+			"AttributeDefinitions": [
+				{"AttributeName":"pk","AttributeType":"S"},
+				{"AttributeName":"sk","AttributeType":"S"},
+				{"AttributeName":"gsi_pk","AttributeType":"S"}
+			],
+			"BillingMode": "PAY_PER_REQUEST",
+			"GlobalSecondaryIndexes": [{
+				"IndexName": "my-index",
+				"KeySchema": [{"AttributeName":"gsi_pk","KeyType":"HASH"}],
+				"Projection": {"ProjectionType":"ALL"}
+			}],
+			"LocalSecondaryIndexes": [{
+				"IndexName": "my-index",
+				"KeySchema": [
+					{"AttributeName":"pk","KeyType":"HASH"},
+					{"AttributeName":"sk","KeyType":"RANGE"}
+				],
+				"Projection": {"ProjectionType":"ALL"}
+			}]
+		}`)
+		assertValidationError(t, w)
+	})
+
+	t.Run("duplicate GSI names rejected", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "CreateTable", `{
+			"TableName": "t",
+			"KeySchema": [{"AttributeName":"pk","KeyType":"HASH"}],
+			"AttributeDefinitions": [
+				{"AttributeName":"pk","AttributeType":"S"},
+				{"AttributeName":"gsi_pk","AttributeType":"S"}
+			],
+			"BillingMode": "PAY_PER_REQUEST",
+			"GlobalSecondaryIndexes": [
+				{
+					"IndexName": "same-name",
+					"KeySchema": [{"AttributeName":"gsi_pk","KeyType":"HASH"}],
+					"Projection": {"ProjectionType":"ALL"}
+				},
+				{
+					"IndexName": "same-name",
+					"KeySchema": [{"AttributeName":"gsi_pk","KeyType":"HASH"}],
+					"Projection": {"ProjectionType":"ALL"}
+				}
+			]
+		}`)
+		assertValidationError(t, w)
+	})
+}
+
 func TestHandleDeleteTable(t *testing.T) {
 	t.Run("deletes table and returns DELETING status", func(t *testing.T) {
 		ro := newTestRouter(t)
@@ -3384,5 +3606,256 @@ func TestHandleQuery_ExclusiveStartKey(t *testing.T) {
 			exclusiveStartKey = resp["LastEvaluatedKey"].(map[string]any)
 		}
 		assert.Equal(t, []string{"a", "b", "c", "d", "e"}, allSKs)
+	})
+}
+
+const createGSITableBody = `{
+	"TableName": "gsi-table",
+	"KeySchema": [
+		{"AttributeName": "pk", "KeyType": "HASH"},
+		{"AttributeName": "sk", "KeyType": "RANGE"}
+	],
+	"AttributeDefinitions": [
+		{"AttributeName": "pk", "AttributeType": "S"},
+		{"AttributeName": "sk", "AttributeType": "S"},
+		{"AttributeName": "gsi_pk", "AttributeType": "S"},
+		{"AttributeName": "gsi_sk", "AttributeType": "S"}
+	],
+	"BillingMode": "PAY_PER_REQUEST",
+	"GlobalSecondaryIndexes": [
+		{
+			"IndexName": "gsi-index",
+			"KeySchema": [
+				{"AttributeName": "gsi_pk", "KeyType": "HASH"},
+				{"AttributeName": "gsi_sk", "KeyType": "RANGE"}
+			],
+			"Projection": {"ProjectionType": "ALL"}
+		}
+	],
+	"LocalSecondaryIndexes": [
+		{
+			"IndexName": "lsi-index",
+			"KeySchema": [
+				{"AttributeName": "pk", "KeyType": "HASH"},
+				{"AttributeName": "gsi_sk", "KeyType": "RANGE"}
+			],
+			"Projection": {"ProjectionType": "ALL"}
+		}
+	]
+}`
+
+func setupGSITable(t *testing.T) *Router {
+	t.Helper()
+	ro := newTestRouter(t)
+	require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createGSITableBody).Code)
+	items := []struct{ pk, sk, gsiPK, gsiSK string }{
+		{"p1", "s1", "g1", "a"},
+		{"p1", "s2", "g1", "b"},
+		{"p2", "s3", "g2", "c"},
+	}
+	for _, it := range items {
+		body, err := json.Marshal(map[string]any{
+			"TableName": "gsi-table",
+			"Item": map[string]any{
+				"pk":     map[string]any{"S": it.pk},
+				"sk":     map[string]any{"S": it.sk},
+				"gsi_pk": map[string]any{"S": it.gsiPK},
+				"gsi_sk": map[string]any{"S": it.gsiSK},
+			},
+		})
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem", string(body)).Code)
+	}
+	return ro
+}
+
+func TestHandleCreateTable_GSIAndLSI(t *testing.T) {
+	t.Run("CreateTable stores GSI and LSI definitions", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "CreateTable", createGSITableBody)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		desc := resp["TableDescription"].(map[string]any)
+		gsiList := desc["GlobalSecondaryIndexes"].([]any)
+		require.Len(t, gsiList, 1)
+		assert.Equal(t, "gsi-index", gsiList[0].(map[string]any)["IndexName"])
+		lsiList := desc["LocalSecondaryIndexes"].([]any)
+		require.Len(t, lsiList, 1)
+		assert.Equal(t, "lsi-index", lsiList[0].(map[string]any)["IndexName"])
+	})
+}
+
+func TestHandleDescribeTable_GSIAndLSI(t *testing.T) {
+	t.Run("DescribeTable returns GSI and LSI definitions", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createGSITableBody).Code)
+		w := dynamo(t, ro, "DescribeTable", `{"TableName":"gsi-table"}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		desc := resp["Table"].(map[string]any)
+		gsiList := desc["GlobalSecondaryIndexes"].([]any)
+		require.Len(t, gsiList, 1)
+		gsi := gsiList[0].(map[string]any)
+		assert.Equal(t, "gsi-index", gsi["IndexName"])
+		assert.Equal(t, "ACTIVE", gsi["IndexStatus"])
+		lsiList := desc["LocalSecondaryIndexes"].([]any)
+		require.Len(t, lsiList, 1)
+		lsi := lsiList[0].(map[string]any)
+		assert.Equal(t, "lsi-index", lsi["IndexName"])
+		assert.Equal(t, "ACTIVE", lsi["IndexStatus"])
+	})
+}
+
+func TestHandleQuery_GSI(t *testing.T) {
+	t.Run("query by GSI returns matching items", func(t *testing.T) {
+		ro := setupGSITable(t)
+		w := dynamo(t, ro, "Query", `{
+			"TableName": "gsi-table",
+			"IndexName": "gsi-index",
+			"KeyConditionExpression": "gsi_pk = :gk",
+			"ExpressionAttributeValues": {":gk": {"S": "g1"}}
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		items := resp["Items"].([]any)
+		require.Len(t, items, 2)
+	})
+
+	t.Run("GSI results sorted by GSI sort key ascending", func(t *testing.T) {
+		ro := setupGSITable(t)
+		w := dynamo(t, ro, "Query", `{
+			"TableName": "gsi-table",
+			"IndexName": "gsi-index",
+			"KeyConditionExpression": "gsi_pk = :gk",
+			"ExpressionAttributeValues": {":gk": {"S": "g1"}},
+			"ScanIndexForward": true
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		items := resp["Items"].([]any)
+		require.Len(t, items, 2)
+		assert.Equal(t, "a", items[0].(map[string]any)["gsi_sk"].(map[string]any)["S"])
+		assert.Equal(t, "b", items[1].(map[string]any)["gsi_sk"].(map[string]any)["S"])
+	})
+
+	t.Run("GSI results sorted descending with ScanIndexForward=false", func(t *testing.T) {
+		ro := setupGSITable(t)
+		w := dynamo(t, ro, "Query", `{
+			"TableName": "gsi-table",
+			"IndexName": "gsi-index",
+			"KeyConditionExpression": "gsi_pk = :gk",
+			"ExpressionAttributeValues": {":gk": {"S": "g1"}},
+			"ScanIndexForward": false
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		items := resp["Items"].([]any)
+		require.Len(t, items, 2)
+		assert.Equal(t, "b", items[0].(map[string]any)["gsi_sk"].(map[string]any)["S"])
+		assert.Equal(t, "a", items[1].(map[string]any)["gsi_sk"].(map[string]any)["S"])
+	})
+
+	t.Run("GSI LastEvaluatedKey includes GSI and primary key attributes", func(t *testing.T) {
+		ro := setupGSITable(t)
+		w := dynamo(t, ro, "Query", `{
+			"TableName": "gsi-table",
+			"IndexName": "gsi-index",
+			"KeyConditionExpression": "gsi_pk = :gk",
+			"ExpressionAttributeValues": {":gk": {"S": "g1"}},
+			"Limit": 1
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		items := resp["Items"].([]any)
+		require.Len(t, items, 1)
+		lek := resp["LastEvaluatedKey"].(map[string]any)
+		assert.Contains(t, lek, "pk")
+		assert.Contains(t, lek, "gsi_pk")
+		assert.Contains(t, lek, "gsi_sk")
+	})
+
+	t.Run("GSI pagination returns all items across pages", func(t *testing.T) {
+		ro := setupGSITable(t)
+		var allGSISKs []string
+		var exclusiveStartKey map[string]any
+		for {
+			req := map[string]any{
+				"TableName":                 "gsi-table",
+				"IndexName":                 "gsi-index",
+				"KeyConditionExpression":    "gsi_pk = :gk",
+				"ExpressionAttributeValues": map[string]any{":gk": map[string]any{"S": "g1"}},
+				"Limit":                     1,
+			}
+			if exclusiveStartKey != nil {
+				req["ExclusiveStartKey"] = exclusiveStartKey
+			}
+			body, err := json.Marshal(req)
+			require.NoError(t, err)
+			w := dynamo(t, ro, "Query", string(body))
+			require.Equal(t, http.StatusOK, w.Code)
+			var resp map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+			for _, it := range resp["Items"].([]any) {
+				allGSISKs = append(
+					allGSISKs,
+					it.(map[string]any)["gsi_sk"].(map[string]any)["S"].(string),
+				)
+			}
+			if resp["LastEvaluatedKey"] == nil {
+				break
+			}
+			exclusiveStartKey = resp["LastEvaluatedKey"].(map[string]any)
+		}
+		assert.Equal(t, []string{"a", "b"}, allGSISKs)
+	})
+
+	t.Run("invalid IndexName returns ValidationException", func(t *testing.T) {
+		ro := setupGSITable(t)
+		w := dynamo(t, ro, "Query", `{
+			"TableName": "gsi-table",
+			"IndexName": "no-such-index",
+			"KeyConditionExpression": "gsi_pk = :gk",
+			"ExpressionAttributeValues": {":gk": {"S": "g1"}}
+		}`)
+		require.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("wrong hash key name for GSI returns ValidationException", func(t *testing.T) {
+		ro := setupGSITable(t)
+		w := dynamo(t, ro, "Query", `{
+			"TableName": "gsi-table",
+			"IndexName": "gsi-index",
+			"KeyConditionExpression": "pk = :v",
+			"ExpressionAttributeValues": {":v": {"S": "p1"}}
+		}`)
+		require.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+}
+
+func TestHandleQuery_LSI(t *testing.T) {
+	t.Run("query by LSI sorts by LSI sort key not table sort key", func(t *testing.T) {
+		ro := setupGSITable(t)
+		w := dynamo(t, ro, "Query", `{
+			"TableName": "gsi-table",
+			"IndexName": "lsi-index",
+			"KeyConditionExpression": "pk = :pk",
+			"ExpressionAttributeValues": {":pk": {"S": "p1"}},
+			"ScanIndexForward": true
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		items := resp["Items"].([]any)
+		require.Len(t, items, 2)
+		assert.Equal(t, "a", items[0].(map[string]any)["gsi_sk"].(map[string]any)["S"])
+		assert.Equal(t, "b", items[1].(map[string]any)["gsi_sk"].(map[string]any)["S"])
 	})
 }

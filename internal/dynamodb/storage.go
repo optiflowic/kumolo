@@ -49,6 +49,13 @@ type GlobalSecondaryIndex struct {
 	ProvisionedThroughput *ProvisionedThroughput `json:"provisionedThroughput,omitempty"`
 }
 
+// LocalSecondaryIndex holds the definition of an LSI.
+type LocalSecondaryIndex struct {
+	IndexName  string             `json:"indexName"`
+	KeySchema  []KeySchemaElement `json:"keySchema"`
+	Projection map[string]any     `json:"projection,omitempty"`
+}
+
 // TableMetadata is stored as <table>.table.json at the storage root.
 type TableMetadata struct {
 	Name                   string                 `json:"name"`
@@ -58,6 +65,7 @@ type TableMetadata struct {
 	BillingModeUpdatedAt   *time.Time             `json:"billingModeUpdatedAt,omitempty"`
 	ProvisionedThroughput  *ProvisionedThroughput `json:"provisionedThroughput,omitempty"`
 	GlobalSecondaryIndexes []GlobalSecondaryIndex `json:"globalSecondaryIndexes,omitempty"`
+	LocalSecondaryIndexes  []LocalSecondaryIndex  `json:"localSecondaryIndexes,omitempty"`
 	Status                 string                 `json:"status"`
 	CreatedAt              time.Time              `json:"createdAt"`
 	TTL                    *TTLSpec               `json:"ttl,omitempty"`
@@ -88,6 +96,7 @@ type QueryOptions struct {
 	ScanIndexForward  bool
 	Limit             *int // nil means no limit; must be >= 1 when set
 	ExclusiveStartKey map[string]any
+	IndexName         string // non-empty to query a GSI or LSI
 }
 
 type ScanOptions struct {
@@ -607,12 +616,42 @@ func (s *Storage) Query(
 		return nil, nil, err
 	}
 	var skName string
-	for _, k := range meta.KeySchema {
-		if k.KeyType == "RANGE" {
-			skName = k.AttributeName
-			break
+	lekSchema := meta.KeySchema
+	var indexProjection map[string]any
+	if opts.IndexName != "" {
+		idxSchema, proj, err := findIndexDef(meta, opts.IndexName)
+		if err != nil {
+			return nil, nil, err
+		}
+		indexProjection = proj
+		var idxHashKey string
+		for _, k := range idxSchema {
+			switch k.KeyType {
+			case "HASH":
+				idxHashKey = k.AttributeName
+			case "RANGE":
+				skName = k.AttributeName
+			}
+		}
+		if hashKeyName != idxHashKey {
+			return nil, nil, fmt.Errorf(
+				"%w: query key condition attribute '%s' does not match the HASH key of index '%s' (expected '%s')",
+				ErrValidationException,
+				hashKeyName,
+				opts.IndexName,
+				idxHashKey,
+			)
+		}
+		lekSchema = mergeKeySchemas(meta.KeySchema, idxSchema)
+	} else {
+		for _, k := range meta.KeySchema {
+			if k.KeyType == "RANGE" {
+				skName = k.AttributeName
+				break
+			}
 		}
 	}
+
 	all, err := s.readAllItemsLocked(tableName)
 	if err != nil {
 		return nil, nil, err
@@ -659,8 +698,7 @@ func (s *Storage) Query(
 
 	if len(opts.ExclusiveStartKey) > 0 {
 		if skName == "" {
-			// Hash-only table: Query returns at most one item per hash key.
-			// Any ExclusiveStartKey means we are resuming past that item.
+			// Hash-only index: any ExclusiveStartKey means we are resuming past that item.
 			matched = matched[:0]
 		} else {
 			eskSKVal, ok := opts.ExclusiveStartKey[skName]
@@ -693,11 +731,101 @@ func (s *Storage) Query(
 	var lastEvaluatedKey map[string]any
 	if opts.Limit != nil && len(matched) > *opts.Limit {
 		lastItem := matched[*opts.Limit-1]
-		lastEvaluatedKey = extractPrimaryKey(lastItem, meta.KeySchema)
+		lastEvaluatedKey = extractPrimaryKey(lastItem, lekSchema)
 		matched = matched[:*opts.Limit]
 	}
 
+	if opts.IndexName != "" {
+		keyAttrNames := make([]string, len(lekSchema))
+		for i, k := range lekSchema {
+			keyAttrNames[i] = k.AttributeName
+		}
+		matched = applyIndexProjection(matched, indexProjection, keyAttrNames)
+	}
+
 	return matched, lastEvaluatedKey, nil
+}
+
+// findIndexDef returns the key schema and projection of the named GSI or LSI.
+func findIndexDef(
+	meta TableMetadata,
+	indexName string,
+) (keySchema []KeySchemaElement, projection map[string]any, err error) {
+	for _, gsi := range meta.GlobalSecondaryIndexes {
+		if gsi.IndexName == indexName {
+			return gsi.KeySchema, gsi.Projection, nil
+		}
+	}
+	for _, lsi := range meta.LocalSecondaryIndexes {
+		if lsi.IndexName == indexName {
+			return lsi.KeySchema, lsi.Projection, nil
+		}
+	}
+	return nil, nil, fmt.Errorf(
+		"%w: index %q does not exist on table",
+		ErrValidationException,
+		indexName,
+	)
+}
+
+// mergeKeySchemas returns a deduped union of indexSchema then tableSchema, index keys first.
+func mergeKeySchemas(tableSchema, indexSchema []KeySchemaElement) []KeySchemaElement {
+	seen := make(map[string]bool, len(tableSchema)+len(indexSchema))
+	merged := make([]KeySchemaElement, 0, len(tableSchema)+len(indexSchema))
+	for _, k := range indexSchema {
+		if !seen[k.AttributeName] {
+			seen[k.AttributeName] = true
+			merged = append(merged, k)
+		}
+	}
+	for _, k := range tableSchema {
+		if !seen[k.AttributeName] {
+			seen[k.AttributeName] = true
+			merged = append(merged, k)
+		}
+	}
+	return merged
+}
+
+// applyIndexProjection filters item attributes per the index ProjectionType (ALL/KEYS_ONLY/INCLUDE).
+func applyIndexProjection(
+	items []map[string]any,
+	projection map[string]any,
+	keyAttrNames []string,
+) []map[string]any {
+	if projection == nil {
+		return items
+	}
+	projType, _ := projection["ProjectionType"].(string)
+	if projType == "" || projType == "ALL" {
+		return items
+	}
+
+	keep := make(map[string]bool, len(keyAttrNames))
+	for _, k := range keyAttrNames {
+		keep[k] = true
+	}
+	if projType == "INCLUDE" {
+		if nonKeyAttrs, ok := projection["NonKeyAttributes"].([]any); ok {
+			for _, a := range nonKeyAttrs {
+				if s, ok := a.(string); ok {
+					keep[s] = true
+				}
+			}
+		}
+	}
+
+	result := make([]map[string]any, len(items))
+	for i, item := range items {
+		projected := make(map[string]any, len(keep))
+		for attr := range keep {
+			if v, ok := item[attr]; ok {
+				projected[attr] = v
+			}
+		}
+		result[i] = projected
+	}
+	return result
 }
 
 func extractPrimaryKey(item map[string]any, keySchema []KeySchemaElement) map[string]any {
