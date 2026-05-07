@@ -1505,7 +1505,7 @@ func (s *Storage) applyTransactActionLocked(action TransactWriteAction) error {
 	switch {
 	case action.Put != nil:
 		meta, err := s.readTableMeta(action.Put.TableName)
-		if err != nil { // unreachable: Phase 0 verified table exists under write lock
+		if err != nil {
 			return err
 		}
 		k, err := itemKey(action.Put.Item, meta.KeySchema)

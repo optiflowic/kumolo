@@ -3352,6 +3352,12 @@ func TestApplyTransactActionLockedErrors(t *testing.T) {
 		name   string
 		action func() TransactWriteAction
 	}{
+		{"Put arm", func() TransactWriteAction {
+			return TransactWriteAction{Put: &TransactPut{
+				TableName: "test-table",
+				Item:      map[string]any{"pk": map[string]any{"S": "nonexistent"}},
+			}}
+		}},
 		{"Delete arm", func() TransactWriteAction {
 			return TransactWriteAction{Delete: &TransactDelete{
 				TableName: "test-table",
