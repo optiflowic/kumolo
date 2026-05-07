@@ -1,0 +1,32 @@
+language: en
+
+reviews:
+  profile: assertive
+  request_changes_workflow: true
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+
+  path_instructions:
+    - path: "internal/**/*.go"
+      instructions: |
+        - Enforce 100% test coverage per package. Flag any new code paths not covered by tests.
+        - Use testify (require/assert) for assertions. Flag usage of standard library testing assertions.
+        - Prefer table-driven tests for similar cases.
+        - Logging conventions: reads→Debug, writes→Info, 4xx→Debug, 5xx→Error.
+        - Do not add godoc comments to unchanged code.
+        - Do not refactor beyond task scope.
+
+    - path: "**/*_test.go"
+      instructions: |
+        - Verify testify (require/assert) is used, not t.Fatal/t.Error.
+        - Check table-driven test structure for repeated similar cases.
+        - Confirm all new exported functions and branches are covered.
+
+  finishing_touches:
+    docstrings:
+      enabled: false
+
+chat:
+  auto_reply: true
