@@ -14,6 +14,18 @@ var (
 	ErrConditionalCheckFailed = errors.New("conditional check failed")
 )
 
+type CancellationReason struct {
+	Code    string         `json:"Code"`
+	Message string         `json:"Message,omitempty"`
+	Item    map[string]any `json:"Item,omitempty"`
+}
+
+type TransactionCanceledError struct {
+	Reasons []CancellationReason
+}
+
+func (e *TransactionCanceledError) Error() string { return "transaction canceled" }
+
 type errResponse struct {
 	Type    string `json:"__type"`
 	Message string `json:"message"`
