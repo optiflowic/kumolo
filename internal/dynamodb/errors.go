@@ -8,10 +8,12 @@ import (
 )
 
 var (
-	ErrTableNotFound          = errors.New("table not found")
-	ErrTableAlreadyExists     = errors.New("table already exists")
-	ErrValidationException    = errors.New("validation error")
-	ErrConditionalCheckFailed = errors.New("conditional check failed")
+	ErrTableNotFound              = errors.New("table not found")
+	ErrTableAlreadyExists         = errors.New("table already exists")
+	ErrValidationException        = errors.New("validation error")
+	ErrConditionalCheckFailed     = errors.New("conditional check failed")
+	ErrKinesisLimitExceeded       = errors.New("kinesis destinations limit exceeded")
+	ErrKinesisDestinationNotFound = errors.New("kinesis destination not found")
 )
 
 type CancellationReason struct {

@@ -39,6 +39,13 @@ type store interface {
 	UpdateTable(tableName string, in UpdateTableInput) (TableMetadata, error)
 	TransactGetItems(gets []TransactGetInput) ([]map[string]any, error)
 	TransactWriteItems(actions []TransactWriteAction) error
+	DescribeContinuousBackups(tableName string) (TableMetadata, error)
+	UpdateContinuousBackups(tableName string, enabled bool) (TableMetadata, error)
+	DescribeKinesisStreamingDestination(tableName string) ([]KinesisDestination, error)
+	EnableKinesisStreamingDestination(
+		tableName, streamARN, precision string,
+	) (KinesisDestination, bool, error)
+	DisableKinesisStreamingDestination(tableName, streamARN string) (KinesisDestination, error)
 }
 
 // billingModeSummary mirrors the AWS BillingModeSummary shape.
@@ -189,6 +196,16 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ro.handleTransactGetItems(w, body)
 	case "TransactWriteItems":
 		ro.handleTransactWriteItems(w, body)
+	case "DescribeContinuousBackups":
+		ro.handleDescribeContinuousBackups(w, body)
+	case "UpdateContinuousBackups":
+		ro.handleUpdateContinuousBackups(w, body)
+	case "DescribeKinesisStreamingDestination":
+		ro.handleDescribeKinesisStreamingDestination(w, body)
+	case "EnableKinesisStreamingDestination":
+		ro.handleEnableKinesisStreamingDestination(w, body)
+	case "DisableKinesisStreamingDestination":
+		ro.handleDisableKinesisStreamingDestination(w, body)
 	case "DescribeLimits":
 		ro.handleDescribeLimits(w)
 	case "DescribeEndpoints":
