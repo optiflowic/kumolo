@@ -11,11 +11,11 @@ const (
 	requestID = "00000000-0000-0000-0000-000000000000"
 
 	fixedAccount      = "000000000000"
-	fixedUserID       = "AKIAIOSFODNN7EXAMPLE"
+	fixedUserID       = "AKIAIOSFODNN7EXAMPLE" // #nosec G101 -- well-known AWS docs example key, not a real credential
 	fixedARN          = "arn:aws:iam::000000000000:root"
-	fixedAccessKeyID  = "AKIAIOSFODNN7EXAMPLE"
-	fixedSecretKey    = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
-	fixedSessionToken = "AQoDYXdzEJr"
+	fixedAccessKeyID  = "AKIAIOSFODNN7EXAMPLE"                     // #nosec G101 -- well-known AWS docs example key, not a real credential
+	fixedSecretKey    = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" // #nosec G101 -- well-known AWS docs example key, not a real credential
+	fixedSessionToken = "AQoDYXdzEJr"                              // #nosec G101 -- fixed placeholder token for local emulator
 	fixedExpiration   = "2099-01-01T00:00:00Z"
 	fixedRoleARN      = "arn:aws:sts::000000000000:assumed-role/kumolo-role/session"
 	fixedRoleID       = "AROAIOSFODNN7EXAMPLE:session"
@@ -101,7 +101,11 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "GetSessionToken":
 		ro.handleGetSessionToken(w)
 	default:
-		slog.Debug("STS operation not implemented", "action", action)
+		slog.Debug( // #nosec G706 -- action comes from the Action query parameter; log injection risk accepted for a local dev emulator
+			"STS operation not implemented",
+			"action",
+			action,
+		)
 		writeError(w, http.StatusBadRequest, "InvalidAction",
 			"Could not find operation for the given action: "+action)
 	}
