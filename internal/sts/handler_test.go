@@ -2,6 +2,7 @@ package sts
 
 import (
 	"encoding/xml"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -9,6 +10,27 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// failWriter is an http.ResponseWriter whose Write fails after failAfter successful calls.
+type failWriter struct {
+	header     http.Header
+	failAfter  int
+	writeCount int
+}
+
+func newFailWriter(failAfter int) *failWriter {
+	return &failWriter{header: http.Header{}, failAfter: failAfter}
+}
+
+func (w *failWriter) Header() http.Header { return w.header }
+func (w *failWriter) WriteHeader(int)     {}
+func (w *failWriter) Write(b []byte) (int, error) {
+	w.writeCount++
+	if w.writeCount > w.failAfter {
+		return 0, errors.New("write error")
+	}
+	return len(b), nil
+}
 
 func stsRequest(t *testing.T, action string) *httptest.ResponseRecorder {
 	t.Helper()
@@ -57,6 +79,15 @@ func TestHandleGetSessionToken(t *testing.T) {
 	assert.Equal(t, fixedSecretKey, creds.SecretAccessKey)
 	assert.Equal(t, fixedSessionToken, creds.SessionToken)
 	assert.Equal(t, fixedExpiration, creds.Expiration)
+}
+
+func TestWriteXMLErrors(t *testing.T) {
+	t.Run("write header fails", func(t *testing.T) {
+		writeXML(newFailWriter(0), http.StatusOK, getCallerIdentityResponse{})
+	})
+	t.Run("encode fails", func(t *testing.T) {
+		writeXML(newFailWriter(1), http.StatusOK, getCallerIdentityResponse{})
+	})
 }
 
 func TestUnknownAction(t *testing.T) {
