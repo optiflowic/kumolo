@@ -72,10 +72,11 @@ func (s *Storage) EnableKinesisStreamingDestination(
 			wasActive := d.Status == "ACTIVE"
 			meta.KinesisDestinations[i].Precision = precision
 			meta.KinesisDestinations[i].Status = "ACTIVE"
+			dest := meta.KinesisDestinations[i]
 			if err := s.writeTableMeta(tableName, meta); err != nil {
 				return KinesisDestination{}, false, err
 			}
-			return meta.KinesisDestinations[i], wasActive, nil
+			return dest, wasActive, nil
 		}
 	}
 	if len(meta.KinesisDestinations) >= maxKinesisDestinations {
@@ -104,10 +105,11 @@ func (s *Storage) DisableKinesisStreamingDestination(
 	for i, d := range meta.KinesisDestinations {
 		if d.StreamARN == streamARN {
 			meta.KinesisDestinations[i].Status = "DISABLED"
+			dest := meta.KinesisDestinations[i]
 			if err := s.writeTableMeta(tableName, meta); err != nil {
 				return KinesisDestination{}, err
 			}
-			return meta.KinesisDestinations[i], nil
+			return dest, nil
 		}
 	}
 	return KinesisDestination{}, ErrKinesisDestinationNotFound
