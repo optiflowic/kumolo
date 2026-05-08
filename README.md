@@ -46,16 +46,21 @@ Point your AWS SDK at `http://localhost:5566` — no other changes needed.
 
 ```go
 import (
+    "context"
+
     "github.com/aws/aws-sdk-go-v2/aws"
     "github.com/aws/aws-sdk-go-v2/config"
     "github.com/aws/aws-sdk-go-v2/credentials"
     "github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
-cfg, _ := config.LoadDefaultConfig(context.Background(),
+cfg, err := config.LoadDefaultConfig(context.Background(),
     config.WithRegion("us-east-1"),
     config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")),
 )
+if err != nil {
+    panic(err)
+}
 
 client := s3.NewFromConfig(cfg, func(o *s3.Options) {
     o.BaseEndpoint = aws.String("http://localhost:5566")
@@ -67,8 +72,8 @@ The same pattern applies to DynamoDB, STS, and other supported services.
 
 ## Supported Services
 
-| Service   | Operations |
-|-----------|-----------|
+| Service      | Operations |
+|--------------|------------|
 | **S3**    | Bucket CRUD, Object CRUD, Multipart Upload, Versioning, Tagging, CORS, Policy, Lifecycle, ACL, Encryption, and more |
 | **DynamoDB** | Table CRUD, Item operations (Get/Put/Delete/Update), Query, Scan, Batch operations, Transactions, TTL, Tags, Kinesis streaming destinations |
 | **STS**   | GetCallerIdentity, AssumeRole, GetSessionToken |
