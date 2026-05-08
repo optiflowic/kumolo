@@ -4620,7 +4620,7 @@ func TestHandleEnableKinesisStreamingDestination(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 		var resp map[string]any
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-		assert.Equal(t, "ACTIVE", resp["DestinationStatus"])
+		assert.Equal(t, "ENABLING", resp["DestinationStatus"])
 		cfg := resp["EnableKinesisStreamingConfiguration"].(map[string]any)
 		assert.Equal(t, "MICROSECOND", cfg["ApproximateCreationDateTimePrecision"])
 	})
@@ -4649,6 +4649,30 @@ func TestHandleEnableKinesisStreamingDestination(t *testing.T) {
 		w := dynamo(t, ro, "EnableKinesisStreamingDestination", `{"TableName":"t"}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("400 for invalid StreamArn format", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "EnableKinesisStreamingDestination", `{
+			"TableName": "t", "StreamArn": "not-an-arn"
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("describe after enable returns ACTIVE", func(t *testing.T) {
+		ro := newTestRouter(t)
+		dynamo(t, ro, "CreateTable", createTableBody)
+		dynamo(t, ro, "EnableKinesisStreamingDestination", fmt.Sprintf(`{
+			"TableName": "test-table", "StreamArn": %q
+		}`, streamARN))
+		w := dynamo(t, ro, "DescribeKinesisStreamingDestination", `{"TableName":"test-table"}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		dests := resp["KinesisDataStreamDestinations"].([]any)
+		require.Len(t, dests, 1)
+		assert.Equal(t, "ACTIVE", dests[0].(map[string]any)["DestinationStatus"])
 	})
 
 	t.Run("400 for invalid precision", func(t *testing.T) {
@@ -4713,7 +4737,7 @@ func TestHandleDisableKinesisStreamingDestination(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 		var resp map[string]any
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-		assert.Equal(t, "DISABLED", resp["DestinationStatus"])
+		assert.Equal(t, "DISABLING", resp["DestinationStatus"])
 	})
 
 	t.Run("400 for invalid JSON", func(t *testing.T) {
@@ -4740,6 +4764,33 @@ func TestHandleDisableKinesisStreamingDestination(t *testing.T) {
 		w := dynamo(t, ro, "DisableKinesisStreamingDestination", `{"TableName":"t"}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("400 for invalid StreamArn format", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "DisableKinesisStreamingDestination", `{
+			"TableName": "t", "StreamArn": "not-an-arn"
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("describe after disable returns DISABLED", func(t *testing.T) {
+		ro := newTestRouter(t)
+		dynamo(t, ro, "CreateTable", createTableBody)
+		dynamo(t, ro, "EnableKinesisStreamingDestination", fmt.Sprintf(`{
+			"TableName": "test-table", "StreamArn": %q
+		}`, streamARN))
+		dynamo(t, ro, "DisableKinesisStreamingDestination", fmt.Sprintf(`{
+			"TableName": "test-table", "StreamArn": %q
+		}`, streamARN))
+		w := dynamo(t, ro, "DescribeKinesisStreamingDestination", `{"TableName":"test-table"}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		dests := resp["KinesisDataStreamDestinations"].([]any)
+		require.Len(t, dests, 1)
+		assert.Equal(t, "DISABLED", dests[0].(map[string]any)["DestinationStatus"])
 	})
 
 	t.Run("400 for unknown table", func(t *testing.T) {

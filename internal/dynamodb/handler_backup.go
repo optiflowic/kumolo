@@ -5,7 +5,12 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"time"
+)
+
+var kinesisStreamARNRe = regexp.MustCompile(
+	`^arn:(?:aws|aws-cn|aws-us-gov):kinesis:[a-z0-9-]+:\d{12}:stream/\S+$`,
 )
 
 func (ro *Router) handleDescribeContinuousBackups(w http.ResponseWriter, body []byte) {
@@ -237,6 +242,15 @@ func (ro *Router) handleEnableKinesisStreamingDestination(w http.ResponseWriter,
 		)
 		return
 	}
+	if !kinesisStreamARNRe.MatchString(req.StreamArn) {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"Invalid StreamArn",
+		)
+		return
+	}
 	precision := "MILLISECOND"
 	if req.EnableKinesisStreamingConfiguration != nil &&
 		req.EnableKinesisStreamingConfiguration.ApproximateCreationDateTimePrecision != "" {
@@ -297,7 +311,7 @@ func (ro *Router) handleEnableKinesisStreamingDestination(w http.ResponseWriter,
 	writeJSON(w, http.StatusOK, map[string]any{
 		"TableName":         req.TableName,
 		"StreamArn":         dest.StreamARN,
-		"DestinationStatus": dest.Status,
+		"DestinationStatus": "ENABLING",
 		"EnableKinesisStreamingConfiguration": map[string]any{
 			"ApproximateCreationDateTimePrecision": dest.Precision,
 		},
@@ -333,6 +347,15 @@ func (ro *Router) handleDisableKinesisStreamingDestination(w http.ResponseWriter
 			http.StatusBadRequest,
 			"com.amazonaws.dynamodb.v20120810#ValidationException",
 			"StreamArn is required",
+		)
+		return
+	}
+	if !kinesisStreamARNRe.MatchString(req.StreamArn) {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"Invalid StreamArn",
 		)
 		return
 	}
@@ -387,7 +410,7 @@ func (ro *Router) handleDisableKinesisStreamingDestination(w http.ResponseWriter
 	writeJSON(w, http.StatusOK, map[string]any{
 		"TableName":         req.TableName,
 		"StreamArn":         dest.StreamARN,
-		"DestinationStatus": dest.Status,
+		"DestinationStatus": "DISABLING",
 	})
 }
 
