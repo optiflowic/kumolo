@@ -92,7 +92,11 @@ type Router struct{}
 func NewRouter() *Router { return &Router{} }
 
 func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	action := r.URL.Query().Get("Action")
+	if err := r.ParseForm(); err != nil {
+		writeError(w, http.StatusBadRequest, "InvalidRequest", "failed to parse request")
+		return
+	}
+	action := r.Form.Get("Action")
 	switch action {
 	case "GetCallerIdentity":
 		ro.handleGetCallerIdentity(w)

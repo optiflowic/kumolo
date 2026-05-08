@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -34,7 +35,9 @@ func (w *failWriter) Write(b []byte) (int, error) {
 
 func stsRequest(t *testing.T, action string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, "/?Action="+action+"&Version=2011-06-15", nil)
+	body := "Action=" + action + "&Version=2011-06-15"
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=utf-8")
 	w := httptest.NewRecorder()
 	NewRouter().ServeHTTP(w, req)
 	return w
@@ -79,6 +82,14 @@ func TestHandleGetSessionToken(t *testing.T) {
 	assert.Equal(t, fixedSecretKey, creds.SecretAccessKey)
 	assert.Equal(t, fixedSessionToken, creds.SessionToken)
 	assert.Equal(t, fixedExpiration, creds.Expiration)
+}
+
+func TestParseFormError(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("%invalid"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	NewRouter().ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 func TestWriteXMLErrors(t *testing.T) {

@@ -35,8 +35,7 @@ func NewMux(
 
 	mux := http.NewServeMux()
 	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query()
-		if q.Get("Action") != "" && q.Get("Version") == "2011-06-15" {
+		if strings.Contains(r.Header.Get("Content-Type"), "application/x-www-form-urlencoded") {
 			stsRouter.ServeHTTP(w, r)
 			return
 		}
