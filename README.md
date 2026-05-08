@@ -74,9 +74,9 @@ The same pattern applies to DynamoDB, STS, and other supported services.
 
 | Service      | Operations |
 |--------------|------------|
-| **S3**    | Bucket CRUD, Object CRUD, Multipart Upload, Versioning, Tagging, CORS, Policy, Lifecycle, ACL, Encryption, and more |
+| **S3**       | Bucket CRUD, Object CRUD, Multipart Upload, Versioning, Tagging, CORS, Policy, Lifecycle, ACL, Encryption, and more |
 | **DynamoDB** | Table CRUD, Item operations (Get/Put/Delete/Update), Query, Scan, Batch operations, Transactions, TTL, Tags, Kinesis streaming destinations |
-| **STS**   | GetCallerIdentity, AssumeRole, GetSessionToken |
+| **STS**      | GetCallerIdentity, AssumeRole, GetSessionToken |
 
 ## Configuration
 
