@@ -20,6 +20,19 @@ type TTLSpec struct {
 	Enabled       bool   `json:"enabled"`
 }
 
+// PITRStatus holds the Point-in-Time Recovery state for a table.
+type PITRStatus struct {
+	Enabled   bool       `json:"enabled"`
+	EnabledAt *time.Time `json:"enabledAt,omitempty"`
+}
+
+// KinesisDestination holds a configured Kinesis Data Streams destination for a table.
+type KinesisDestination struct {
+	StreamARN string `json:"streamArn"`
+	Status    string `json:"status"`    // ACTIVE | DISABLED
+	Precision string `json:"precision"` // MILLISECOND | MICROSECOND
+}
+
 // ProvisionedThroughput holds read/write capacity units.
 type ProvisionedThroughput struct {
 	ReadCapacityUnits  int64 `json:"ReadCapacityUnits,omitempty"`
@@ -55,6 +68,8 @@ type TableMetadata struct {
 	CreatedAt              time.Time              `json:"createdAt"`
 	TTL                    *TTLSpec               `json:"ttl,omitempty"`
 	Tags                   map[string]string      `json:"tags,omitempty"`
+	PITR                   *PITRStatus            `json:"pitr,omitempty"`
+	KinesisDestinations    []KinesisDestination   `json:"kinesisDestinations,omitempty"`
 }
 
 // Sort key condition operators used in SortKeyCondition.Operator.

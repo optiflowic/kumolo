@@ -2056,26 +2056,31 @@ func (e *errorReader) Read(_ []byte) (int, error) {
 
 // mockStore is a configurable in-memory store for router tests.
 type mockStore struct {
-	createTableFn        func(meta TableMetadata) error
-	deleteTableFn        func(name string) error
-	describeTableFn      func(name string) (TableMetadata, error)
-	listTablesFn         func() ([]string, error)
-	putItemFn            func(tableName string, item map[string]any) (map[string]any, error)
-	getItemFn            func(tableName string, key map[string]any) (map[string]any, error)
-	deleteItemFn         func(tableName string, key map[string]any) (map[string]any, error)
-	scanFn               func(tableName string, opts ScanOptions) ([]map[string]any, map[string]any, error)
-	updateItemFn         func(tableName string, key map[string]any, updates map[string]any) (map[string]any, map[string]any, error)
-	queryFn              func(tableName, hashKeyName string, hashKeyValue any) ([]map[string]any, error)
-	batchGetItemsFn      func(tableName string, keys []map[string]any) ([]map[string]any, error)
-	batchWriteItemsFn    func(tableName string, puts []map[string]any, deletes []map[string]any) error
-	updateTimeToLiveFn   func(tableName string, spec TTLSpec) (TTLSpec, error)
-	describeTimeToLiveFn func(tableName string) (string, *TTLSpec, error)
-	tagResourceFn        func(resourceARN string, tags map[string]string) error
-	untagResourceFn      func(resourceARN string, tagKeys []string) error
-	listTagsOfResourceFn func(resourceARN string) (map[string]string, error)
-	updateTableFn        func(tableName string, in UpdateTableInput) (TableMetadata, error)
-	transactGetItemsFn   func(gets []TransactGetInput) ([]map[string]any, error)
-	transactWriteItemsFn func(actions []TransactWriteAction) error
+	createTableFn                         func(meta TableMetadata) error
+	deleteTableFn                         func(name string) error
+	describeTableFn                       func(name string) (TableMetadata, error)
+	listTablesFn                          func() ([]string, error)
+	putItemFn                             func(tableName string, item map[string]any) (map[string]any, error)
+	getItemFn                             func(tableName string, key map[string]any) (map[string]any, error)
+	deleteItemFn                          func(tableName string, key map[string]any) (map[string]any, error)
+	scanFn                                func(tableName string, opts ScanOptions) ([]map[string]any, map[string]any, error)
+	updateItemFn                          func(tableName string, key map[string]any, updates map[string]any) (map[string]any, map[string]any, error)
+	queryFn                               func(tableName, hashKeyName string, hashKeyValue any) ([]map[string]any, error)
+	batchGetItemsFn                       func(tableName string, keys []map[string]any) ([]map[string]any, error)
+	batchWriteItemsFn                     func(tableName string, puts []map[string]any, deletes []map[string]any) error
+	updateTimeToLiveFn                    func(tableName string, spec TTLSpec) (TTLSpec, error)
+	describeTimeToLiveFn                  func(tableName string) (string, *TTLSpec, error)
+	tagResourceFn                         func(resourceARN string, tags map[string]string) error
+	untagResourceFn                       func(resourceARN string, tagKeys []string) error
+	listTagsOfResourceFn                  func(resourceARN string) (map[string]string, error)
+	updateTableFn                         func(tableName string, in UpdateTableInput) (TableMetadata, error)
+	transactGetItemsFn                    func(gets []TransactGetInput) ([]map[string]any, error)
+	transactWriteItemsFn                  func(actions []TransactWriteAction) error
+	describeContinuousBackupsFn           func(tableName string) (TableMetadata, error)
+	updateContinuousBackupsFn             func(tableName string, enabled bool) (TableMetadata, error)
+	describeKinesisStreamingDestinationFn func(tableName string) ([]KinesisDestination, error)
+	enableKinesisStreamingDestinationFn   func(tableName, streamARN, precision string) (KinesisDestination, error)
+	disableKinesisStreamingDestinationFn  func(tableName, streamARN string) (KinesisDestination, error)
 }
 
 func (m *mockStore) CreateTable(meta TableMetadata) error {
@@ -2185,6 +2190,32 @@ func (m *mockStore) TransactGetItems(gets []TransactGetInput) ([]map[string]any,
 
 func (m *mockStore) TransactWriteItems(actions []TransactWriteAction) error {
 	return m.transactWriteItemsFn(actions)
+}
+
+func (m *mockStore) DescribeContinuousBackups(tableName string) (TableMetadata, error) {
+	return m.describeContinuousBackupsFn(tableName)
+}
+
+func (m *mockStore) UpdateContinuousBackups(tableName string, enabled bool) (TableMetadata, error) {
+	return m.updateContinuousBackupsFn(tableName, enabled)
+}
+
+func (m *mockStore) DescribeKinesisStreamingDestination(
+	tableName string,
+) ([]KinesisDestination, error) {
+	return m.describeKinesisStreamingDestinationFn(tableName)
+}
+
+func (m *mockStore) EnableKinesisStreamingDestination(
+	tableName, streamARN, precision string,
+) (KinesisDestination, error) {
+	return m.enableKinesisStreamingDestinationFn(tableName, streamARN, precision)
+}
+
+func (m *mockStore) DisableKinesisStreamingDestination(
+	tableName, streamARN string,
+) (KinesisDestination, error) {
+	return m.disableKinesisStreamingDestinationFn(tableName, streamARN)
 }
 
 var errInternal = errors.New("internal error")
@@ -4380,6 +4411,344 @@ func TestHandleTransactWriteItems(t *testing.T) {
 		w := dynamo(t, ro, "TransactWriteItems", `{
 			"TransactItems": [{"Put": {"TableName": "t", "Item": {"pk": {"S": "x"}}}}]
 		}`)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+}
+
+func TestHandleDescribeContinuousBackups(t *testing.T) {
+	t.Run("returns DISABLED status by default", func(t *testing.T) {
+		ro := newTestRouter(t)
+		dynamo(t, ro, "CreateTable", createTableBody)
+		w := dynamo(t, ro, "DescribeContinuousBackups", `{"TableName":"test-table"}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		desc := resp["ContinuousBackupsDescription"].(map[string]any)
+		assert.Equal(t, "ENABLED", desc["ContinuousBackupsStatus"])
+		pitr := desc["PointInTimeRecoveryDescription"].(map[string]any)
+		assert.Equal(t, "DISABLED", pitr["PointInTimeRecoveryStatus"])
+	})
+
+	t.Run("400 for invalid JSON", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "DescribeContinuousBackups", `{bad}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("400 for missing TableName", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "DescribeContinuousBackups", `{}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("400 for unknown table", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "DescribeContinuousBackups", `{"TableName":"no-such-table"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#TableNotFoundException")
+	})
+
+	t.Run("500 for unexpected storage error", func(t *testing.T) {
+		ro := &Router{storage: &mockStore{
+			describeContinuousBackupsFn: func(string) (TableMetadata, error) {
+				return TableMetadata{}, errors.New("disk failure")
+			},
+		}}
+		w := dynamo(t, ro, "DescribeContinuousBackups", `{"TableName":"t"}`)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+}
+
+func TestHandleUpdateContinuousBackups(t *testing.T) {
+	t.Run("enables PITR", func(t *testing.T) {
+		ro := newTestRouter(t)
+		dynamo(t, ro, "CreateTable", createTableBody)
+		w := dynamo(t, ro, "UpdateContinuousBackups", `{
+			"TableName": "test-table",
+			"PointInTimeRecoverySpecification": {"PointInTimeRecoveryEnabled": true}
+		}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		desc := resp["ContinuousBackupsDescription"].(map[string]any)
+		pitr := desc["PointInTimeRecoveryDescription"].(map[string]any)
+		assert.Equal(t, "ENABLED", pitr["PointInTimeRecoveryStatus"])
+		assert.NotNil(t, pitr["EarliestRestorableDateTime"])
+		assert.NotNil(t, pitr["LatestRestorableDateTime"])
+	})
+
+	t.Run("disables PITR", func(t *testing.T) {
+		ro := newTestRouter(t)
+		dynamo(t, ro, "CreateTable", createTableBody)
+		dynamo(t, ro, "UpdateContinuousBackups", `{
+			"TableName": "test-table",
+			"PointInTimeRecoverySpecification": {"PointInTimeRecoveryEnabled": true}
+		}`)
+		w := dynamo(t, ro, "UpdateContinuousBackups", `{
+			"TableName": "test-table",
+			"PointInTimeRecoverySpecification": {"PointInTimeRecoveryEnabled": false}
+		}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		desc := resp["ContinuousBackupsDescription"].(map[string]any)
+		pitr := desc["PointInTimeRecoveryDescription"].(map[string]any)
+		assert.Equal(t, "DISABLED", pitr["PointInTimeRecoveryStatus"])
+	})
+
+	t.Run("400 for invalid JSON", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "UpdateContinuousBackups", `{bad}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("400 for missing TableName", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "UpdateContinuousBackups", `{}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("400 for unknown table", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "UpdateContinuousBackups", `{
+			"TableName": "no-such-table",
+			"PointInTimeRecoverySpecification": {"PointInTimeRecoveryEnabled": true}
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#TableNotFoundException")
+	})
+
+	t.Run("500 for unexpected storage error", func(t *testing.T) {
+		ro := &Router{storage: &mockStore{
+			updateContinuousBackupsFn: func(string, bool) (TableMetadata, error) {
+				return TableMetadata{}, errors.New("disk failure")
+			},
+		}}
+		w := dynamo(t, ro, "UpdateContinuousBackups", `{
+			"TableName": "t",
+			"PointInTimeRecoverySpecification": {"PointInTimeRecoveryEnabled": true}
+		}`)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+}
+
+func TestHandleDescribeKinesisStreamingDestination(t *testing.T) {
+	t.Run("returns empty destinations by default", func(t *testing.T) {
+		ro := newTestRouter(t)
+		dynamo(t, ro, "CreateTable", createTableBody)
+		w := dynamo(t, ro, "DescribeKinesisStreamingDestination", `{"TableName":"test-table"}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		dests := resp["KinesisDataStreamDestinations"].([]any)
+		assert.Empty(t, dests)
+	})
+
+	t.Run("400 for invalid JSON", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "DescribeKinesisStreamingDestination", `{bad}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("400 for missing TableName", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "DescribeKinesisStreamingDestination", `{}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("returns configured destinations", func(t *testing.T) {
+		const arn = "arn:aws:kinesis:us-east-1:000000000000:stream/my-stream"
+		ro := newTestRouter(t)
+		dynamo(t, ro, "CreateTable", createTableBody)
+		dynamo(t, ro, "EnableKinesisStreamingDestination", fmt.Sprintf(`{
+			"TableName": "test-table", "StreamArn": %q
+		}`, arn))
+		w := dynamo(t, ro, "DescribeKinesisStreamingDestination", `{"TableName":"test-table"}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		dests := resp["KinesisDataStreamDestinations"].([]any)
+		require.Len(t, dests, 1)
+		d := dests[0].(map[string]any)
+		assert.Equal(t, arn, d["StreamArn"])
+		assert.Equal(t, "ACTIVE", d["DestinationStatus"])
+	})
+
+	t.Run("400 for unknown table", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "DescribeKinesisStreamingDestination", `{"TableName":"no-such-table"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ResourceNotFoundException")
+	})
+
+	t.Run("500 for unexpected storage error", func(t *testing.T) {
+		ro := &Router{storage: &mockStore{
+			describeKinesisStreamingDestinationFn: func(string) ([]KinesisDestination, error) {
+				return nil, errors.New("disk failure")
+			},
+		}}
+		w := dynamo(t, ro, "DescribeKinesisStreamingDestination", `{"TableName":"t"}`)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+}
+
+func TestHandleEnableKinesisStreamingDestination(t *testing.T) {
+	const streamARN = "arn:aws:kinesis:us-east-1:000000000000:stream/my-stream"
+
+	t.Run("enables destination and returns ACTIVE", func(t *testing.T) {
+		ro := newTestRouter(t)
+		dynamo(t, ro, "CreateTable", createTableBody)
+		w := dynamo(t, ro, "EnableKinesisStreamingDestination", fmt.Sprintf(`{
+			"TableName": "test-table",
+			"StreamArn": %q,
+			"EnableKinesisStreamingConfiguration": {"ApproximateCreationDateTimePrecision": "MICROSECOND"}
+		}`, streamARN))
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, "ACTIVE", resp["DestinationStatus"])
+		assert.Equal(t, "MICROSECOND", resp["ApproximateCreationDateTimePrecision"])
+	})
+
+	t.Run("400 for invalid JSON", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "EnableKinesisStreamingDestination", `{bad}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("400 for missing TableName", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(
+			t,
+			ro,
+			"EnableKinesisStreamingDestination",
+			fmt.Sprintf(`{"StreamArn":%q}`, streamARN),
+		)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("400 for missing StreamArn", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "EnableKinesisStreamingDestination", `{"TableName":"t"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("400 for unknown table", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "EnableKinesisStreamingDestination", fmt.Sprintf(`{
+			"TableName": "no-such-table", "StreamArn": %q
+		}`, streamARN))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ResourceNotFoundException")
+	})
+
+	t.Run("400 when limit exceeded", func(t *testing.T) {
+		ro := &Router{storage: &mockStore{
+			enableKinesisStreamingDestinationFn: func(string, string, string) (KinesisDestination, error) {
+				return KinesisDestination{}, ErrKinesisLimitExceeded
+			},
+		}}
+		w := dynamo(t, ro, "EnableKinesisStreamingDestination", fmt.Sprintf(`{
+			"TableName": "t", "StreamArn": %q
+		}`, streamARN))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#LimitExceededException")
+	})
+
+	t.Run("500 for unexpected storage error", func(t *testing.T) {
+		ro := &Router{storage: &mockStore{
+			enableKinesisStreamingDestinationFn: func(string, string, string) (KinesisDestination, error) {
+				return KinesisDestination{}, errors.New("disk failure")
+			},
+		}}
+		w := dynamo(t, ro, "EnableKinesisStreamingDestination", fmt.Sprintf(`{
+			"TableName": "t", "StreamArn": %q
+		}`, streamARN))
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+}
+
+func TestHandleDisableKinesisStreamingDestination(t *testing.T) {
+	const streamARN = "arn:aws:kinesis:us-east-1:000000000000:stream/my-stream"
+
+	t.Run("disables destination and returns DISABLED", func(t *testing.T) {
+		ro := newTestRouter(t)
+		dynamo(t, ro, "CreateTable", createTableBody)
+		dynamo(t, ro, "EnableKinesisStreamingDestination", fmt.Sprintf(`{
+			"TableName": "test-table", "StreamArn": %q
+		}`, streamARN))
+		w := dynamo(t, ro, "DisableKinesisStreamingDestination", fmt.Sprintf(`{
+			"TableName": "test-table", "StreamArn": %q
+		}`, streamARN))
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, "DISABLED", resp["DestinationStatus"])
+	})
+
+	t.Run("400 for invalid JSON", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "DisableKinesisStreamingDestination", `{bad}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("400 for missing TableName", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(
+			t,
+			ro,
+			"DisableKinesisStreamingDestination",
+			fmt.Sprintf(`{"StreamArn":%q}`, streamARN),
+		)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("400 for missing StreamArn", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "DisableKinesisStreamingDestination", `{"TableName":"t"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("400 for unknown table", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "DisableKinesisStreamingDestination", fmt.Sprintf(`{
+			"TableName": "no-such-table", "StreamArn": %q
+		}`, streamARN))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ResourceNotFoundException")
+	})
+
+	t.Run("400 for destination not found", func(t *testing.T) {
+		ro := newTestRouter(t)
+		dynamo(t, ro, "CreateTable", createTableBody)
+		w := dynamo(t, ro, "DisableKinesisStreamingDestination", fmt.Sprintf(`{
+			"TableName": "test-table", "StreamArn": %q
+		}`, streamARN))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ResourceNotFoundException")
+	})
+
+	t.Run("500 for unexpected storage error", func(t *testing.T) {
+		ro := &Router{storage: &mockStore{
+			disableKinesisStreamingDestinationFn: func(string, string) (KinesisDestination, error) {
+				return KinesisDestination{}, errors.New("disk failure")
+			},
+		}}
+		w := dynamo(t, ro, "DisableKinesisStreamingDestination", fmt.Sprintf(`{
+			"TableName": "t", "StreamArn": %q
+		}`, streamARN))
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
 }
