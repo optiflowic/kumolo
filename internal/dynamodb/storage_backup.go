@@ -50,40 +50,41 @@ func (s *Storage) DescribeKinesisStreamingDestination(
 	return meta.KinesisDestinations, nil
 }
 
+// EnableKinesisStreamingDestination enables or updates a Kinesis destination.
+// The second return value is true when the destination was already ACTIVE (precision update),
+// which maps to UPDATING in the AWS response; false maps to ENABLING.
 func (s *Storage) EnableKinesisStreamingDestination(
 	tableName, streamARN, precision string,
-) (KinesisDestination, error) {
+) (KinesisDestination, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.tableExistsLocked(tableName) {
-		return KinesisDestination{}, ErrTableNotFound
+		return KinesisDestination{}, false, ErrTableNotFound
 	}
 	meta, err := s.readTableMeta(tableName)
 	if err != nil {
-		return KinesisDestination{}, err
+		return KinesisDestination{}, false, err
 	}
-	// If the stream ARN already exists, update precision and set ACTIVE.
 	for i, d := range meta.KinesisDestinations {
 		if d.StreamARN == streamARN {
-			if precision != "" {
-				meta.KinesisDestinations[i].Precision = precision
-			}
+			wasActive := d.Status == "ACTIVE"
+			meta.KinesisDestinations[i].Precision = precision
 			meta.KinesisDestinations[i].Status = "ACTIVE"
 			if err := s.writeTableMeta(tableName, meta); err != nil {
-				return KinesisDestination{}, err
+				return KinesisDestination{}, false, err
 			}
-			return meta.KinesisDestinations[i], nil
+			return meta.KinesisDestinations[i], wasActive, nil
 		}
 	}
 	if len(meta.KinesisDestinations) >= maxKinesisDestinations {
-		return KinesisDestination{}, ErrKinesisLimitExceeded
+		return KinesisDestination{}, false, ErrKinesisLimitExceeded
 	}
 	dest := KinesisDestination{StreamARN: streamARN, Status: "ACTIVE", Precision: precision}
 	meta.KinesisDestinations = append(meta.KinesisDestinations, dest)
 	if err := s.writeTableMeta(tableName, meta); err != nil {
-		return KinesisDestination{}, err
+		return KinesisDestination{}, false, err
 	}
-	return dest, nil
+	return dest, false, nil
 }
 
 func (s *Storage) DisableKinesisStreamingDestination(

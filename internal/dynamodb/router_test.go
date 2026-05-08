@@ -2079,7 +2079,7 @@ type mockStore struct {
 	describeContinuousBackupsFn           func(tableName string) (TableMetadata, error)
 	updateContinuousBackupsFn             func(tableName string, enabled bool) (TableMetadata, error)
 	describeKinesisStreamingDestinationFn func(tableName string) ([]KinesisDestination, error)
-	enableKinesisStreamingDestinationFn   func(tableName, streamARN, precision string) (KinesisDestination, error)
+	enableKinesisStreamingDestinationFn   func(tableName, streamARN, precision string) (KinesisDestination, bool, error)
 	disableKinesisStreamingDestinationFn  func(tableName, streamARN string) (KinesisDestination, error)
 }
 
@@ -2208,7 +2208,7 @@ func (m *mockStore) DescribeKinesisStreamingDestination(
 
 func (m *mockStore) EnableKinesisStreamingDestination(
 	tableName, streamARN, precision string,
-) (KinesisDestination, error) {
+) (KinesisDestination, bool, error) {
 	return m.enableKinesisStreamingDestinationFn(tableName, streamARN, precision)
 }
 
@@ -4609,7 +4609,7 @@ func TestHandleDescribeKinesisStreamingDestination(t *testing.T) {
 func TestHandleEnableKinesisStreamingDestination(t *testing.T) {
 	const streamARN = "arn:aws:kinesis:us-east-1:000000000000:stream/my-stream"
 
-	t.Run("enables destination and returns ACTIVE", func(t *testing.T) {
+	t.Run("new destination returns ENABLING", func(t *testing.T) {
 		ro := newTestRouter(t)
 		dynamo(t, ro, "CreateTable", createTableBody)
 		w := dynamo(t, ro, "EnableKinesisStreamingDestination", fmt.Sprintf(`{
@@ -4623,6 +4623,41 @@ func TestHandleEnableKinesisStreamingDestination(t *testing.T) {
 		assert.Equal(t, "ENABLING", resp["DestinationStatus"])
 		cfg := resp["EnableKinesisStreamingConfiguration"].(map[string]any)
 		assert.Equal(t, "MICROSECOND", cfg["ApproximateCreationDateTimePrecision"])
+	})
+
+	t.Run("re-enabling DISABLED destination returns ENABLING", func(t *testing.T) {
+		ro := newTestRouter(t)
+		dynamo(t, ro, "CreateTable", createTableBody)
+		dynamo(t, ro, "EnableKinesisStreamingDestination", fmt.Sprintf(`{
+			"TableName": "test-table", "StreamArn": %q
+		}`, streamARN))
+		dynamo(t, ro, "DisableKinesisStreamingDestination", fmt.Sprintf(`{
+			"TableName": "test-table", "StreamArn": %q
+		}`, streamARN))
+		w := dynamo(t, ro, "EnableKinesisStreamingDestination", fmt.Sprintf(`{
+			"TableName": "test-table", "StreamArn": %q
+		}`, streamARN))
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, "ENABLING", resp["DestinationStatus"])
+	})
+
+	t.Run("updating precision on ACTIVE destination returns UPDATING", func(t *testing.T) {
+		ro := newTestRouter(t)
+		dynamo(t, ro, "CreateTable", createTableBody)
+		dynamo(t, ro, "EnableKinesisStreamingDestination", fmt.Sprintf(`{
+			"TableName": "test-table", "StreamArn": %q
+		}`, streamARN))
+		w := dynamo(t, ro, "EnableKinesisStreamingDestination", fmt.Sprintf(`{
+			"TableName": "test-table",
+			"StreamArn": %q,
+			"EnableKinesisStreamingConfiguration": {"ApproximateCreationDateTimePrecision": "MICROSECOND"}
+		}`, streamARN))
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, "UPDATING", resp["DestinationStatus"])
 	})
 
 	t.Run("400 for invalid JSON", func(t *testing.T) {
@@ -4698,8 +4733,8 @@ func TestHandleEnableKinesisStreamingDestination(t *testing.T) {
 
 	t.Run("400 when limit exceeded", func(t *testing.T) {
 		ro := &Router{storage: &mockStore{
-			enableKinesisStreamingDestinationFn: func(string, string, string) (KinesisDestination, error) {
-				return KinesisDestination{}, ErrKinesisLimitExceeded
+			enableKinesisStreamingDestinationFn: func(string, string, string) (KinesisDestination, bool, error) {
+				return KinesisDestination{}, false, ErrKinesisLimitExceeded
 			},
 		}}
 		w := dynamo(t, ro, "EnableKinesisStreamingDestination", fmt.Sprintf(`{
@@ -4711,8 +4746,8 @@ func TestHandleEnableKinesisStreamingDestination(t *testing.T) {
 
 	t.Run("500 for unexpected storage error", func(t *testing.T) {
 		ro := &Router{storage: &mockStore{
-			enableKinesisStreamingDestinationFn: func(string, string, string) (KinesisDestination, error) {
-				return KinesisDestination{}, errors.New("disk failure")
+			enableKinesisStreamingDestinationFn: func(string, string, string) (KinesisDestination, bool, error) {
+				return KinesisDestination{}, false, errors.New("disk failure")
 			},
 		}}
 		w := dynamo(t, ro, "EnableKinesisStreamingDestination", fmt.Sprintf(`{

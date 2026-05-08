@@ -44,7 +44,7 @@ type store interface {
 	DescribeKinesisStreamingDestination(tableName string) ([]KinesisDestination, error)
 	EnableKinesisStreamingDestination(
 		tableName, streamARN, precision string,
-	) (KinesisDestination, error)
+	) (KinesisDestination, bool, error)
 	DisableKinesisStreamingDestination(tableName, streamARN string) (KinesisDestination, error)
 }
 

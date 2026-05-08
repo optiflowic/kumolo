@@ -266,7 +266,7 @@ func (ro *Router) handleEnableKinesisStreamingDestination(w http.ResponseWriter,
 		}
 		precision = p
 	}
-	dest, err := ro.storage.EnableKinesisStreamingDestination(
+	dest, wasActive, err := ro.storage.EnableKinesisStreamingDestination(
 		req.TableName,
 		req.StreamArn,
 		precision,
@@ -308,10 +308,14 @@ func (ro *Router) handleEnableKinesisStreamingDestination(w http.ResponseWriter,
 		"stream",
 		req.StreamArn,
 	)
+	destStatus := "ENABLING"
+	if wasActive {
+		destStatus = "UPDATING"
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"TableName":         req.TableName,
 		"StreamArn":         dest.StreamARN,
-		"DestinationStatus": "ENABLING",
+		"DestinationStatus": destStatus,
 		"EnableKinesisStreamingConfiguration": map[string]any{
 			"ApproximateCreationDateTimePrecision": dest.Precision,
 		},

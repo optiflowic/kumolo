@@ -114,7 +114,7 @@ func TestEnableKinesisStreamingDestination(t *testing.T) {
 	t.Run("enables destination with ACTIVE status", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		dest, err := s.EnableKinesisStreamingDestination("test-table", streamARN, "MILLISECOND")
+		dest, _, err := s.EnableKinesisStreamingDestination("test-table", streamARN, "MILLISECOND")
 		require.NoError(t, err)
 		assert.Equal(t, streamARN, dest.StreamARN)
 		assert.Equal(t, "ACTIVE", dest.Status)
@@ -124,41 +124,77 @@ func TestEnableKinesisStreamingDestination(t *testing.T) {
 	t.Run("stores MILLISECOND precision", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		dest, err := s.EnableKinesisStreamingDestination("test-table", streamARN, "MILLISECOND")
+		dest, _, err := s.EnableKinesisStreamingDestination("test-table", streamARN, "MILLISECOND")
 		require.NoError(t, err)
 		assert.Equal(t, "MILLISECOND", dest.Precision)
 	})
 
 	t.Run(
-		"re-enabling existing destination updates precision and keeps ACTIVE",
+		"re-enabling ACTIVE destination returns wasActive=true and updates precision",
 		func(t *testing.T) {
 			s := newTestStorage(t)
 			require.NoError(t, s.CreateTable(testMeta))
-			_, err := s.EnableKinesisStreamingDestination("test-table", streamARN, "MILLISECOND")
+			_, _, err := s.EnableKinesisStreamingDestination("test-table", streamARN, "MILLISECOND")
 			require.NoError(t, err)
-			dest, err := s.EnableKinesisStreamingDestination("test-table", streamARN, "MICROSECOND")
+			dest, wasActive, err := s.EnableKinesisStreamingDestination(
+				"test-table",
+				streamARN,
+				"MICROSECOND",
+			)
 			require.NoError(t, err)
+			assert.True(t, wasActive)
 			assert.Equal(t, "ACTIVE", dest.Status)
 			assert.Equal(t, "MICROSECOND", dest.Precision)
 		},
 	)
 
+	t.Run(
+		"re-enabling DISABLED destination returns wasActive=false",
+		func(t *testing.T) {
+			s := newTestStorage(t)
+			require.NoError(t, s.CreateTable(testMeta))
+			_, _, err := s.EnableKinesisStreamingDestination("test-table", streamARN, "MILLISECOND")
+			require.NoError(t, err)
+			_, err = s.DisableKinesisStreamingDestination("test-table", streamARN)
+			require.NoError(t, err)
+			_, wasActive, err := s.EnableKinesisStreamingDestination(
+				"test-table",
+				streamARN,
+				"MILLISECOND",
+			)
+			require.NoError(t, err)
+			assert.False(t, wasActive)
+		},
+	)
+
+	t.Run("new destination returns wasActive=false", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		_, wasActive, err := s.EnableKinesisStreamingDestination(
+			"test-table",
+			streamARN,
+			"MILLISECOND",
+		)
+		require.NoError(t, err)
+		assert.False(t, wasActive)
+	})
+
 	t.Run("returns ErrKinesisLimitExceeded beyond 2 destinations", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		_, err := s.EnableKinesisStreamingDestination(
+		_, _, err := s.EnableKinesisStreamingDestination(
 			"test-table",
 			"arn:aws:kinesis:us-east-1:000000000000:stream/s1",
 			"MILLISECOND",
 		)
 		require.NoError(t, err)
-		_, err = s.EnableKinesisStreamingDestination(
+		_, _, err = s.EnableKinesisStreamingDestination(
 			"test-table",
 			"arn:aws:kinesis:us-east-1:000000000000:stream/s2",
 			"MILLISECOND",
 		)
 		require.NoError(t, err)
-		_, err = s.EnableKinesisStreamingDestination(
+		_, _, err = s.EnableKinesisStreamingDestination(
 			"test-table",
 			"arn:aws:kinesis:us-east-1:000000000000:stream/s3",
 			"MILLISECOND",
@@ -169,7 +205,7 @@ func TestEnableKinesisStreamingDestination(t *testing.T) {
 	t.Run("persists destination across reads", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		_, err := s.EnableKinesisStreamingDestination("test-table", streamARN, "MILLISECOND")
+		_, _, err := s.EnableKinesisStreamingDestination("test-table", streamARN, "MILLISECOND")
 		require.NoError(t, err)
 		dests, err := s.DescribeKinesisStreamingDestination("test-table")
 		require.NoError(t, err)
@@ -180,7 +216,7 @@ func TestEnableKinesisStreamingDestination(t *testing.T) {
 
 	t.Run("returns ErrTableNotFound for missing table", func(t *testing.T) {
 		s := newTestStorage(t)
-		_, err := s.EnableKinesisStreamingDestination("no-such-table", streamARN, "MILLISECOND")
+		_, _, err := s.EnableKinesisStreamingDestination("no-such-table", streamARN, "MILLISECOND")
 		assert.ErrorIs(t, err, ErrTableNotFound)
 	})
 
@@ -188,7 +224,7 @@ func TestEnableKinesisStreamingDestination(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
 		s.readAll = func(io.Reader) ([]byte, error) { return nil, errors.New("read failure") }
-		_, err := s.EnableKinesisStreamingDestination("test-table", streamARN, "MILLISECOND")
+		_, _, err := s.EnableKinesisStreamingDestination("test-table", streamARN, "MILLISECOND")
 		assert.Error(t, err)
 	})
 
@@ -198,19 +234,19 @@ func TestEnableKinesisStreamingDestination(t *testing.T) {
 		s.openFile = func(string, int, os.FileMode) (io.WriteCloser, error) {
 			return nil, errors.New("write failure")
 		}
-		_, err := s.EnableKinesisStreamingDestination("test-table", streamARN, "MILLISECOND")
+		_, _, err := s.EnableKinesisStreamingDestination("test-table", streamARN, "MILLISECOND")
 		assert.Error(t, err)
 	})
 
 	t.Run("returns error when writeTableMeta fails on re-enable", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		_, err := s.EnableKinesisStreamingDestination("test-table", streamARN, "MILLISECOND")
+		_, _, err := s.EnableKinesisStreamingDestination("test-table", streamARN, "MILLISECOND")
 		require.NoError(t, err)
 		s.openFile = func(string, int, os.FileMode) (io.WriteCloser, error) {
 			return nil, errors.New("write failure")
 		}
-		_, err = s.EnableKinesisStreamingDestination("test-table", streamARN, "MICROSECOND")
+		_, _, err = s.EnableKinesisStreamingDestination("test-table", streamARN, "MICROSECOND")
 		assert.Error(t, err)
 	})
 }
@@ -221,7 +257,7 @@ func TestDisableKinesisStreamingDestination(t *testing.T) {
 	t.Run("sets status to DISABLED", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		_, err := s.EnableKinesisStreamingDestination("test-table", streamARN, "MILLISECOND")
+		_, _, err := s.EnableKinesisStreamingDestination("test-table", streamARN, "MILLISECOND")
 		require.NoError(t, err)
 		dest, err := s.DisableKinesisStreamingDestination("test-table", streamARN)
 		require.NoError(t, err)
@@ -231,7 +267,7 @@ func TestDisableKinesisStreamingDestination(t *testing.T) {
 	t.Run("persists DISABLED status", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		_, err := s.EnableKinesisStreamingDestination("test-table", streamARN, "MILLISECOND")
+		_, _, err := s.EnableKinesisStreamingDestination("test-table", streamARN, "MILLISECOND")
 		require.NoError(t, err)
 		_, err = s.DisableKinesisStreamingDestination("test-table", streamARN)
 		require.NoError(t, err)
@@ -265,7 +301,7 @@ func TestDisableKinesisStreamingDestination(t *testing.T) {
 	t.Run("returns error when writeTableMeta fails", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		_, err := s.EnableKinesisStreamingDestination("test-table", streamARN, "MILLISECOND")
+		_, _, err := s.EnableKinesisStreamingDestination("test-table", streamARN, "MILLISECOND")
 		require.NoError(t, err)
 		s.openFile = func(string, int, os.FileMode) (io.WriteCloser, error) {
 			return nil, errors.New("write failure")
