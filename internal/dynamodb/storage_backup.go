@@ -24,8 +24,10 @@ func (s *Storage) UpdateContinuousBackups(tableName string, enabled bool) (Table
 		return TableMetadata{}, err
 	}
 	if enabled {
-		now := time.Now().UTC()
-		meta.PITR = &PITRStatus{Enabled: true, EnabledAt: &now}
+		if meta.PITR == nil || !meta.PITR.Enabled {
+			now := time.Now().UTC()
+			meta.PITR = &PITRStatus{Enabled: true, EnabledAt: &now}
+		}
 	} else {
 		meta.PITR = &PITRStatus{Enabled: false}
 	}

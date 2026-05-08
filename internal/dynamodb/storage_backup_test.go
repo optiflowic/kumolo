@@ -59,6 +59,17 @@ func TestUpdateContinuousBackups(t *testing.T) {
 		assert.True(t, meta.PITR.Enabled)
 	})
 
+	t.Run("enabling already-enabled PITR does not reset EnabledAt", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		first, err := s.UpdateContinuousBackups("test-table", true)
+		require.NoError(t, err)
+		require.NotNil(t, first.PITR.EnabledAt)
+		second, err := s.UpdateContinuousBackups("test-table", true)
+		require.NoError(t, err)
+		assert.Equal(t, first.PITR.EnabledAt, second.PITR.EnabledAt)
+	})
+
 	t.Run("returns ErrTableNotFound for missing table", func(t *testing.T) {
 		s := newTestStorage(t)
 		_, err := s.UpdateContinuousBackups("no-such-table", true)
