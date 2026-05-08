@@ -9,6 +9,7 @@ import (
 	"github.com/optiflowic/kumolo/internal/dynamodb"
 	"github.com/optiflowic/kumolo/internal/logging"
 	"github.com/optiflowic/kumolo/internal/s3"
+	"github.com/optiflowic/kumolo/internal/sts"
 )
 
 func NewMux(
@@ -28,11 +29,17 @@ func NewMux(
 
 	s3Router := s3.NewRouter(s3Storage)
 	dynamoRouter := dynamodb.NewRouter(dynamoStorage)
+	stsRouter := sts.NewRouter()
 
 	s3.NewLifecycleEnforcer(s3Storage, lifecycleInterval).Start(ctx)
 
 	mux := http.NewServeMux()
 	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if q.Get("Action") != "" && q.Get("Version") == "2011-06-15" {
+			stsRouter.ServeHTTP(w, r)
+			return
+		}
 		if strings.HasPrefix(r.Header.Get("X-Amz-Target"), "DynamoDB_") {
 			dynamoRouter.ServeHTTP(w, r)
 			return
