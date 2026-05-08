@@ -139,8 +139,12 @@ func toContinuousBackupsDescription(pitr *PITRStatus) map[string]any {
 	if pitr != nil && pitr.Enabled {
 		pitrDesc["PointInTimeRecoveryStatus"] = "ENABLED"
 		if pitr.EnabledAt != nil {
-			pitrDesc["EarliestRestorableDateTime"] = float64(pitr.EnabledAt.Unix())
-			pitrDesc["LatestRestorableDateTime"] = float64(time.Now().UTC().Unix())
+			pitrDesc["EarliestRestorableDateTime"] = float64(
+				pitr.EnabledAt.Add(5 * time.Minute).Unix(),
+			)
+			pitrDesc["LatestRestorableDateTime"] = float64(
+				time.Now().UTC().Add(-5 * time.Minute).Unix(),
+			)
 		}
 	}
 	return map[string]any{
