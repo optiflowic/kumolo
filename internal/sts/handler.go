@@ -11,7 +11,7 @@ const (
 	requestID = "00000000-0000-0000-0000-000000000000"
 
 	fixedAccount      = "000000000000"
-	fixedUserID       = "AKIAIOSFODNN7EXAMPLE" // #nosec G101 -- well-known AWS docs example key, not a real credential
+	fixedUserID       = "000000000000"
 	fixedARN          = "arn:aws:iam::000000000000:root"
 	fixedAccessKeyID  = "AKIAIOSFODNN7EXAMPLE"                     // #nosec G101 -- well-known AWS docs example key, not a real credential
 	fixedSecretKey    = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" // #nosec G101 -- well-known AWS docs example key, not a real credential
@@ -158,7 +158,7 @@ func (ro *Router) handleGetSessionToken(w http.ResponseWriter) {
 }
 
 func writeXML(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "text/xml")
+	w.Header().Set("Content-Type", "text/xml;charset=UTF-8")
 	w.WriteHeader(status)
 	if _, err := w.Write([]byte(xml.Header)); err != nil {
 		slog.Warn("failed to write STS XML header", "err", err)

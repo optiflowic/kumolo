@@ -65,6 +65,7 @@ func TestUnknownAction(t *testing.T) {
 
 	var resp errorResponse
 	require.NoError(t, xml.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, "Sender", resp.Error.Type)
 	assert.Equal(t, "InvalidAction", resp.Error.Code)
 	assert.Contains(t, resp.Error.Message, "UnknownAction")
 }
