@@ -60,7 +60,7 @@ func (ro *Router) handleDescribeContinuousBackups(w http.ResponseWriter, body []
 func (ro *Router) handleUpdateContinuousBackups(w http.ResponseWriter, body []byte) {
 	var req struct {
 		TableName                        string `json:"TableName"`
-		PointInTimeRecoverySpecification struct {
+		PointInTimeRecoverySpecification *struct {
 			PointInTimeRecoveryEnabled bool `json:"PointInTimeRecoveryEnabled"`
 		} `json:"PointInTimeRecoverySpecification"`
 	}
@@ -79,6 +79,15 @@ func (ro *Router) handleUpdateContinuousBackups(w http.ResponseWriter, body []by
 			http.StatusBadRequest,
 			"com.amazonaws.dynamodb.v20120810#ValidationException",
 			"TableName is required",
+		)
+		return
+	}
+	if req.PointInTimeRecoverySpecification == nil {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"PointInTimeRecoverySpecification is required",
 		)
 		return
 	}
@@ -231,7 +240,17 @@ func (ro *Router) handleEnableKinesisStreamingDestination(w http.ResponseWriter,
 	precision := "MILLISECOND"
 	if req.EnableKinesisStreamingConfiguration != nil &&
 		req.EnableKinesisStreamingConfiguration.ApproximateCreationDateTimePrecision != "" {
-		precision = req.EnableKinesisStreamingConfiguration.ApproximateCreationDateTimePrecision
+		p := req.EnableKinesisStreamingConfiguration.ApproximateCreationDateTimePrecision
+		if p != "MILLISECOND" && p != "MICROSECOND" {
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				"ApproximateCreationDateTimePrecision must be MILLISECOND or MICROSECOND",
+			)
+			return
+		}
+		precision = p
 	}
 	dest, err := ro.storage.EnableKinesisStreamingDestination(
 		req.TableName,
@@ -276,10 +295,12 @@ func (ro *Router) handleEnableKinesisStreamingDestination(w http.ResponseWriter,
 		req.StreamArn,
 	)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"TableName":                            req.TableName,
-		"StreamArn":                            dest.StreamARN,
-		"DestinationStatus":                    dest.Status,
-		"ApproximateCreationDateTimePrecision": dest.Precision,
+		"TableName":         req.TableName,
+		"StreamArn":         dest.StreamARN,
+		"DestinationStatus": dest.Status,
+		"EnableKinesisStreamingConfiguration": map[string]any{
+			"ApproximateCreationDateTimePrecision": dest.Precision,
+		},
 	})
 }
 

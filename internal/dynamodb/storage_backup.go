@@ -78,9 +78,6 @@ func (s *Storage) EnableKinesisStreamingDestination(
 	if len(meta.KinesisDestinations) >= maxKinesisDestinations {
 		return KinesisDestination{}, ErrKinesisLimitExceeded
 	}
-	if precision == "" {
-		precision = "MILLISECOND"
-	}
 	dest := KinesisDestination{StreamARN: streamARN, Status: "ACTIVE", Precision: precision}
 	meta.KinesisDestinations = append(meta.KinesisDestinations, dest)
 	if err := s.writeTableMeta(tableName, meta); err != nil {

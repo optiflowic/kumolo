@@ -4512,6 +4512,14 @@ func TestHandleUpdateContinuousBackups(t *testing.T) {
 		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
+	t.Run("400 for missing PointInTimeRecoverySpecification", func(t *testing.T) {
+		ro := newTestRouter(t)
+		dynamo(t, ro, "CreateTable", createTableBody)
+		w := dynamo(t, ro, "UpdateContinuousBackups", `{"TableName":"test-table"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
 	t.Run("400 for unknown table", func(t *testing.T) {
 		ro := newTestRouter(t)
 		w := dynamo(t, ro, "UpdateContinuousBackups", `{
@@ -4613,7 +4621,8 @@ func TestHandleEnableKinesisStreamingDestination(t *testing.T) {
 		var resp map[string]any
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		assert.Equal(t, "ACTIVE", resp["DestinationStatus"])
-		assert.Equal(t, "MICROSECOND", resp["ApproximateCreationDateTimePrecision"])
+		cfg := resp["EnableKinesisStreamingConfiguration"].(map[string]any)
+		assert.Equal(t, "MICROSECOND", cfg["ApproximateCreationDateTimePrecision"])
 	})
 
 	t.Run("400 for invalid JSON", func(t *testing.T) {
@@ -4638,6 +4647,18 @@ func TestHandleEnableKinesisStreamingDestination(t *testing.T) {
 	t.Run("400 for missing StreamArn", func(t *testing.T) {
 		ro := newTestRouter(t)
 		w := dynamo(t, ro, "EnableKinesisStreamingDestination", `{"TableName":"t"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("400 for invalid precision", func(t *testing.T) {
+		ro := newTestRouter(t)
+		dynamo(t, ro, "CreateTable", createTableBody)
+		w := dynamo(t, ro, "EnableKinesisStreamingDestination", fmt.Sprintf(`{
+			"TableName": "test-table",
+			"StreamArn": %q,
+			"EnableKinesisStreamingConfiguration": {"ApproximateCreationDateTimePrecision": "NANOSECOND"}
+		}`, streamARN))
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})

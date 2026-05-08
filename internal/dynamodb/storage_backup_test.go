@@ -121,10 +121,10 @@ func TestEnableKinesisStreamingDestination(t *testing.T) {
 		assert.Equal(t, "MILLISECOND", dest.Precision)
 	})
 
-	t.Run("defaults precision to MILLISECOND when empty", func(t *testing.T) {
+	t.Run("stores MILLISECOND precision", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
-		dest, err := s.EnableKinesisStreamingDestination("test-table", streamARN, "")
+		dest, err := s.EnableKinesisStreamingDestination("test-table", streamARN, "MILLISECOND")
 		require.NoError(t, err)
 		assert.Equal(t, "MILLISECOND", dest.Precision)
 	})
