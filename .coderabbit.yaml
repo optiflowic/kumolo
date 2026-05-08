@@ -9,8 +9,39 @@ reviews:
   collapse_walkthrough: false
 
   path_instructions:
+    - path: "**/*.go"
+      instructions: |
+        ## Clean Architecture
+        - Each package must have a single, well-defined responsibility. Flag packages that mix concerns (e.g., HTTP handling and storage logic in the same file).
+        - Dependencies must flow inward: handlers depend on storage interfaces, never the reverse. Flag direct instantiation of concrete types across package boundaries.
+        - Prefer interface-based dependencies over concrete types to allow substitution and testing.
+        - Keep `internal/` packages isolated from each other — cross-service imports are a red flag.
+
+        ## Readable Code (The Art of Readable Code)
+        - Names should be precise and informative. Flag vague names like `data`, `info`, `temp`, `handle`, `process`.
+        - Functions should do one thing. Flag functions longer than ~40 lines or with more than one level of abstraction.
+        - Avoid deep nesting (more than 3 levels). Suggest early returns or extracted helpers instead.
+        - Boolean expressions in conditions should read naturally. Suggest named variables for complex conditions.
+        - Magic numbers and strings must be named constants.
+
+        ## Go Best Practices
+        - Errors must be wrapped with context using `fmt.Errorf("...: %w", err)`. Flag silent error discards.
+        - Return early on errors; avoid deeply nested happy-path code.
+        - Prefer small, composable functions over large monolithic ones.
+        - Unexported types and functions should be the default; export only what callers need.
+        - Avoid `init()` functions. Flag global mutable state.
+        - Context (`context.Context`) must be the first parameter when passed; never stored in structs.
+
+        ## SOLID
+        - Single Responsibility: one reason to change per type/function.
+        - Open/Closed: extend behavior via interfaces, not by modifying existing types.
+        - Liskov Substitution: interface implementations must honor the contract without surprises.
+        - Interface Segregation: keep interfaces small and focused; flag interfaces with more than ~5 methods.
+        - Dependency Inversion: depend on abstractions, not concrete implementations.
+
     - path: "internal/**/*.go"
       instructions: |
+        ## Project Conventions
         - Enforce 100% test coverage per package. Flag any new code paths not covered by tests.
         - Use testify (require/assert) for assertions. Flag usage of standard library testing assertions.
         - Prefer table-driven tests for similar cases.
@@ -23,6 +54,7 @@ reviews:
         - Verify testify (require/assert) is used, not t.Fatal/t.Error.
         - Check table-driven test structure for repeated similar cases.
         - Confirm all new exported functions and branches are covered.
+        - Test names should describe the scenario, not just the function name.
 
   finishing_touches:
     docstrings:
