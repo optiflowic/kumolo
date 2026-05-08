@@ -24,6 +24,14 @@ func TestDescribeContinuousBackups(t *testing.T) {
 		_, err := s.DescribeContinuousBackups("no-such-table")
 		assert.ErrorIs(t, err, ErrTableNotFound)
 	})
+
+	t.Run("returns error when readTableMeta fails", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		s.readAll = func(io.Reader) ([]byte, error) { return nil, errors.New("read failure") }
+		_, err := s.DescribeContinuousBackups("test-table")
+		assert.Error(t, err)
+	})
 }
 
 func TestUpdateContinuousBackups(t *testing.T) {
