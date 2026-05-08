@@ -56,4 +56,24 @@ func TestNewMux(t *testing.T) {
 		mux.ServeHTTP(w, req)
 		assert.Equal(t, "application/x-amz-json-1.0", w.Header().Get("Content-Type"))
 	})
+
+	t.Run("routes STS requests via form-encoded body", func(t *testing.T) {
+		req := httptest.NewRequest(
+			http.MethodPost,
+			"/",
+			strings.NewReader("Action=GetCallerIdentity&Version=2011-06-15"),
+		)
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=utf-8")
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		assert.Contains(t, w.Header().Get("Content-Type"), "text/xml")
+	})
+
+	t.Run("does not route non-POST form-encoded to STS", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=utf-8")
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		assert.Equal(t, "application/xml", w.Header().Get("Content-Type"))
+	})
 }
