@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" alt="kumolo" width="180" />
+</p>
+
 # kumolo
 
 A high-fidelity AWS emulator for local development and testing.
