@@ -3,8 +3,16 @@ name: 🚀 CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
 
 jobs:
   lint:
@@ -22,6 +30,16 @@ jobs:
 
       - name: 🚀 Enable Nix cache
         uses: DeterminateSystems/magic-nix-cache-action@v9
+
+      - name: 🗂️ Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
 
       - name: 🔍 Run golangci-lint
         run: nix develop --command make lint
@@ -41,6 +59,16 @@ jobs:
 
       - name: 🚀 Enable Nix cache
         uses: DeterminateSystems/magic-nix-cache-action@v9
+
+      - name: 🗂️ Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
 
       - name: 🔐 Verify module checksums
         run: nix develop --command make verify
@@ -64,6 +92,16 @@ jobs:
 
       - name: 🚀 Enable Nix cache
         uses: DeterminateSystems/magic-nix-cache-action@v9
+
+      - name: 🗂️ Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
 
       - name: 🔍 Check go mod tidy
         run: |
