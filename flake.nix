@@ -23,6 +23,8 @@
             go_1_26
             gnumake
             govulncheck
+            goreleaser
+            awscli2
           ];
 
           shellHook = ''
