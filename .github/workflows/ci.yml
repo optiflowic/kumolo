@@ -3,8 +3,16 @@ name: 🚀 CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
 
 jobs:
   lint:
@@ -12,45 +20,75 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      actions: write
 
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v5
 
-      - name: 🔧 Set up Go
-        uses: actions/setup-go@v6
+      - name: ❄️ Install Nix
+        uses: DeterminateSystems/nix-installer-action@v22
+
+      - name: 📦 Cache Nix store
+        uses: nix-community/cache-nix-action@v7
         with:
-          go-version-file: go.mod
-          cache: true
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-
+          purge-last-accessed: 604800
+
+      - name: 🗂️ Cache Go modules
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
 
       - name: 🔍 Run golangci-lint
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: v2.11.4
+        run: nix develop --command make lint
 
   security:
     name: Security
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      actions: write
 
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v5
 
-      - name: 🔧 Set up Go
-        uses: actions/setup-go@v6
+      - name: ❄️ Install Nix
+        uses: DeterminateSystems/nix-installer-action@v22
+
+      - name: 📦 Cache Nix store
+        uses: nix-community/cache-nix-action@v7
         with:
-          go-version-file: go.mod
-          cache: true
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-
+          purge-last-accessed: 604800
+
+      - name: 🗂️ Cache Go modules
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
 
       - name: 🔐 Verify module checksums
-        run: make verify
+        run: nix develop --command make verify
 
       - name: 🛡️ Run govulncheck
-        uses: golang/govulncheck-action@v1
-        with:
-          go-version-file: go.mod
+        run: nix develop --command govulncheck ./...
 
   build-test:
     name: Build & Test
@@ -58,32 +96,49 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      actions: write
 
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v5
 
-      - name: 🔧 Set up Go
-        uses: actions/setup-go@v6
+      - name: ❄️ Install Nix
+        uses: DeterminateSystems/nix-installer-action@v22
+
+      - name: 📦 Cache Nix store
+        uses: nix-community/cache-nix-action@v7
         with:
-          go-version-file: go.mod
-          cache: true
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-
+          purge-last-accessed: 604800
+
+      - name: 🗂️ Cache Go modules
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
 
       - name: 🔍 Check go mod tidy
         run: |
-          make tidy
+          nix develop --command make tidy
           git diff --exit-code go.mod go.sum
 
       - name: 🖊️ Check formatting
-        run: make fmt-check
+        run: nix develop --command make fmt-check
 
       - name: 🔎 Vet
-        run: make vet
+        run: nix develop --command make vet
 
       - name: 🧪 Test with coverage
         run: |
-          make cover
-          COVERAGE=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}')
+          nix develop --command bash -c 'make cover && go tool cover -func=coverage.out > coverage-func.out'
+          COVERAGE=$(tail -1 coverage-func.out | awk '{print $3}')
           echo "COVERAGE=$COVERAGE" >> $GITHUB_ENV
 
       - name: 💬 Post coverage comment
@@ -91,9 +146,9 @@ jobs:
         uses: actions/github-script@v9
         with:
           script: |
-            const { execSync } = require('child_process');
+            const fs = require('fs');
 
-            const funcOutput = execSync('go tool cover -func=coverage.out').toString().trim();
+            const funcOutput = fs.readFileSync('coverage-func.out', 'utf8').trim();
             const lines = funcOutput.split('\n');
 
             // Extract total from last line
@@ -156,10 +211,10 @@ jobs:
             }
 
       - name: 🏗️ Build
-        run: make build
+        run: nix develop --command make build
 
       - name: 🧼 Clean build artifacts
-        run: make clean
+        run: nix develop --command make clean
 
   docker:
     name: Docker Build

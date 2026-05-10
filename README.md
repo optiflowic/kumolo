@@ -90,6 +90,10 @@ The same pattern applies to DynamoDB, STS, and other supported services.
 | `KUMOLO_DATA_DIR`     | `./data`  | Persistent storage directory      |
 | `KUMOLO_LOG_LEVEL`    | `info`    | Log level (`debug`, `info`, `warn`, `error`) |
 
+## Contributing
+
+See [CONTRIBUTING.md](.github/CONTRIBUTING.md).
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

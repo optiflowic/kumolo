@@ -95,3 +95,6 @@ tags
 
 # Built Visual Studio Code Extensions
 *.vsix
+
+# direnv
+.direnv/
