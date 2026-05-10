@@ -234,5 +234,9 @@ jobs:
         with:
           context: .
           push: false
+          build-args: |
+            VERSION=dev
+            COMMIT=${{ github.sha }}
+            DATE=${{ github.event.head_commit.timestamp }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
