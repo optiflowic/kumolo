@@ -90,6 +90,37 @@ The same pattern applies to DynamoDB, STS, and other supported services.
 | `KUMOLO_DATA_DIR`     | `./data`  | Persistent storage directory      |
 | `KUMOLO_LOG_LEVEL`    | `info`    | Log level (`debug`, `info`, `warn`, `error`) |
 
+## Contributing
+
+Contributions are welcome! Please open an issue before submitting a pull request for non-trivial changes.
+
+### Development Environment
+
+The dev environment is managed with [Nix](https://nixos.org/). With Nix installed, enter the shell:
+
+```bash
+nix develop
+```
+
+Or, if you use [direnv](https://direnv.net/), run `direnv allow` once and the shell activates automatically.
+
+### Common Commands
+
+| Command | Description |
+|---|---|
+| `make build` | Build the binary |
+| `make test` | Run tests |
+| `make cover` | Run tests with coverage report |
+| `make lint` | Run golangci-lint |
+| `make fmt` | Format code |
+| `make all` | fmt-check, vet, lint, test, build |
+
+### Conventions
+
+- Commits follow [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `chore:`, `docs:`).
+- Each PR should contain one logical change.
+- New operations must include table-driven tests with 100% package coverage.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
