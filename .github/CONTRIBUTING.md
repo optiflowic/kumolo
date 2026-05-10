@@ -33,19 +33,37 @@ When suggesting a feature:
 
 - Fork the repository and create a feature branch from `main`.
 - Follow [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:`, etc.).
-- Run `go test ./...` before submitting.
+- Run `make all` before submitting.
 - Verify that the AWS SDK v2 can connect to your changes without modification.
 - Link to the related issue using `Closes #123`.
 
 ## 🐳 Local Development
 
-```bash
-# Run kumolo locally
-go run ./cmd/kumolo
+The dev environment is managed with [Nix](https://nixos.org/). With Nix installed, enter the shell:
 
-# Run with Docker
+```bash
+nix develop
+```
+
+Or, if you use [direnv](https://direnv.net/), run `direnv allow` once and the shell activates automatically.
+
+### Common Commands
+
+| Command | Description |
+|---|---|
+| `make build` | Build the binary |
+| `make run` | Run locally |
+| `make test` | Run tests |
+| `make cover` | Run tests with coverage report |
+| `make lint` | Run golangci-lint |
+| `make fmt` | Format code |
+| `make all` | fmt-check, vet, lint, test, build |
+
+### Docker
+
+```bash
 docker build -t kumolo .
-docker run -p 4566:4566 kumolo
+docker run -p 5566:5566 kumolo
 ```
 
 ## 📄 License
