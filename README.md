@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.png" alt="kumolo" width="180" />
+  <img src="assets/logo.png" alt="kumolo" width="280" />
 </p>
 
 # kumolo
