@@ -17,16 +17,14 @@ jobs:
       - name: 📥 Checkout repository
         uses: actions/checkout@v5
 
-      - name: 🔧 Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
+      - name: ❄️ Install Nix
+        uses: DeterminateSystems/nix-installer-action@v16
+
+      - name: 🚀 Enable Nix cache
+        uses: DeterminateSystems/magic-nix-cache-action@v9
 
       - name: 🔍 Run golangci-lint
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: v2.11.4
+        run: nix develop --command make lint
 
   security:
     name: Security
@@ -38,19 +36,17 @@ jobs:
       - name: 📥 Checkout repository
         uses: actions/checkout@v5
 
-      - name: 🔧 Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
+      - name: ❄️ Install Nix
+        uses: DeterminateSystems/nix-installer-action@v16
+
+      - name: 🚀 Enable Nix cache
+        uses: DeterminateSystems/magic-nix-cache-action@v9
 
       - name: 🔐 Verify module checksums
-        run: make verify
+        run: nix develop --command make verify
 
       - name: 🛡️ Run govulncheck
-        uses: golang/govulncheck-action@v1
-        with:
-          go-version-file: go.mod
+        run: nix develop --command govulncheck ./...
 
   build-test:
     name: Build & Test
@@ -63,27 +59,27 @@ jobs:
       - name: 📥 Checkout repository
         uses: actions/checkout@v5
 
-      - name: 🔧 Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
+      - name: ❄️ Install Nix
+        uses: DeterminateSystems/nix-installer-action@v16
+
+      - name: 🚀 Enable Nix cache
+        uses: DeterminateSystems/magic-nix-cache-action@v9
 
       - name: 🔍 Check go mod tidy
         run: |
-          make tidy
+          nix develop --command make tidy
           git diff --exit-code go.mod go.sum
 
       - name: 🖊️ Check formatting
-        run: make fmt-check
+        run: nix develop --command make fmt-check
 
       - name: 🔎 Vet
-        run: make vet
+        run: nix develop --command make vet
 
       - name: 🧪 Test with coverage
         run: |
-          make cover
-          COVERAGE=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}')
+          nix develop --command bash -c 'make cover && go tool cover -func=coverage.out > coverage-func.out'
+          COVERAGE=$(tail -1 coverage-func.out | awk '{print $3}')
           echo "COVERAGE=$COVERAGE" >> $GITHUB_ENV
 
       - name: 💬 Post coverage comment
@@ -91,9 +87,9 @@ jobs:
         uses: actions/github-script@v9
         with:
           script: |
-            const { execSync } = require('child_process');
+            const fs = require('fs');
 
-            const funcOutput = execSync('go tool cover -func=coverage.out').toString().trim();
+            const funcOutput = fs.readFileSync('coverage-func.out', 'utf8').trim();
             const lines = funcOutput.split('\n');
 
             // Extract total from last line
@@ -156,10 +152,10 @@ jobs:
             }
 
       - name: 🏗️ Build
-        run: make build
+        run: nix develop --command make build
 
       - name: 🧼 Clean build artifacts
-        run: make clean
+        run: nix develop --command make clean
 
   docker:
     name: Docker Build
