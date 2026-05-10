@@ -10,9 +10,9 @@ We welcome bug reports, feature requests, documentation improvements, and other 
 
 ## 🪧 Before You Start
 
-- Check if there's an existing [issue](../../../issues) for your idea.
+- Check if there's an existing [issue](https://github.com/optiflowic/kumolo/issues) for your idea.
 - Make sure you're running the latest version of kumolo.
-- If you're not sure how to proceed, feel free to open a `question` issue or start a [Discussion](../../../discussions).
+- If you're not sure how to proceed, feel free to open a `question` issue or start a [Discussion](https://github.com/optiflowic/kumolo/discussions).
 
 ## 🐞 Reporting Issues
 
