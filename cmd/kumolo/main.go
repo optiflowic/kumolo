@@ -17,6 +17,12 @@ import (
 	"github.com/optiflowic/kumolo/internal/server"
 )
 
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 func main() {
 	if err := run(); err != nil {
 		slog.Error("fatal", "err", err)
@@ -73,6 +79,9 @@ func run() error {
 	go func() {
 		slog.Info(
 			"kumolo listening",
+			"version", version,
+			"commit", commit,
+			"built", date,
 			"port",
 			cfg.Port,
 			"data-dir",
