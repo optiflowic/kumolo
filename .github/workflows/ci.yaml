@@ -213,6 +213,9 @@ jobs:
       - name: 🏗️ Build
         run: nix develop --command make build
 
+      - name: 🔗 Integration tests
+        run: nix develop --command make integration
+
       - name: 🧼 Clean build artifacts
         run: nix develop --command make clean
 

@@ -41,6 +41,7 @@
           ];
 
           shellHook = ''
+            unset GOROOT
             echo "kumolo dev env: $(go version)"
           '';
         };

@@ -1,4 +1,4 @@
-.PHONY: all install build run fmt fmt-check vet lint test cover verify tidy clean
+.PHONY: all install build run fmt fmt-check vet lint test cover integration verify tidy clean
 
 BUILD_DIR = build
 BINARY_NAME = $(BUILD_DIR)/kumolo
@@ -38,6 +38,9 @@ test:
 cover:
 	go test -race -coverprofile=coverage.out ./...
 	go tool cover -func=coverage.out
+
+integration:
+	go test -race -count=1 -timeout 120s ./tests/integration/...
 
 verify:
 	go mod verify
