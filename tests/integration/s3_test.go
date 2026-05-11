@@ -8,6 +8,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
+	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -19,6 +20,7 @@ func TestS3Integration(t *testing.T) {
 	const (
 		bucket  = "test-bucket"
 		key     = "hello.txt"
+		copyKey = "hello-copy.txt"
 		content = "hello, world"
 	)
 
@@ -38,6 +40,15 @@ func TestS3Integration(t *testing.T) {
 		require.NoError(t, err)
 	})
 
+	t.Run("HeadObject", func(t *testing.T) {
+		out, err := clients.s3.HeadObject(ctx, &awss3.HeadObjectInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String(key),
+		})
+		require.NoError(t, err)
+		assert.EqualValues(t, len(content), aws.ToInt64(out.ContentLength))
+	})
+
 	t.Run("GetObject", func(t *testing.T) {
 		out, err := clients.s3.GetObject(ctx, &awss3.GetObjectInput{
 			Bucket: aws.String(bucket),
@@ -51,26 +62,57 @@ func TestS3Integration(t *testing.T) {
 		assert.Equal(t, content, string(body))
 	})
 
+	t.Run("CopyObject", func(t *testing.T) {
+		_, err := clients.s3.CopyObject(ctx, &awss3.CopyObjectInput{
+			Bucket:     aws.String(bucket),
+			Key:        aws.String(copyKey),
+			CopySource: aws.String(bucket + "/" + key),
+		})
+		require.NoError(t, err)
+
+		out, err := clients.s3.GetObject(ctx, &awss3.GetObjectInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String(copyKey),
+		})
+		require.NoError(t, err)
+		defer out.Body.Close()
+		body, err := io.ReadAll(out.Body)
+		require.NoError(t, err)
+		assert.Equal(t, content, string(body))
+	})
+
 	t.Run("ListObjectsV2", func(t *testing.T) {
 		out, err := clients.s3.ListObjectsV2(ctx, &awss3.ListObjectsV2Input{
 			Bucket: aws.String(bucket),
 		})
 		require.NoError(t, err)
-		require.Len(t, out.Contents, 1)
-		assert.Equal(t, key, aws.ToString(out.Contents[0].Key))
+		require.Len(t, out.Contents, 2)
+		keys := []string{
+			aws.ToString(out.Contents[0].Key),
+			aws.ToString(out.Contents[1].Key),
+		}
+		assert.Contains(t, keys, key)
+		assert.Contains(t, keys, copyKey)
 	})
 
-	t.Run("DeleteObject", func(t *testing.T) {
-		_, err := clients.s3.DeleteObject(ctx, &awss3.DeleteObjectInput{
+	t.Run("DeleteObjects", func(t *testing.T) {
+		out, err := clients.s3.DeleteObjects(ctx, &awss3.DeleteObjectsInput{
 			Bucket: aws.String(bucket),
-			Key:    aws.String(key),
+			Delete: &s3types.Delete{
+				Objects: []s3types.ObjectIdentifier{
+					{Key: aws.String(key)},
+					{Key: aws.String(copyKey)},
+				},
+			},
 		})
 		require.NoError(t, err)
+		assert.Len(t, out.Deleted, 2)
+		assert.Empty(t, out.Errors)
 
-		out, err := clients.s3.ListObjectsV2(ctx, &awss3.ListObjectsV2Input{
+		list, err := clients.s3.ListObjectsV2(ctx, &awss3.ListObjectsV2Input{
 			Bucket: aws.String(bucket),
 		})
 		require.NoError(t, err)
-		assert.Empty(t, out.Contents)
+		assert.Empty(t, list.Contents)
 	})
 }

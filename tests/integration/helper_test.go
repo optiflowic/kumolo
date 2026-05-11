@@ -10,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	awsdynamodb "github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
+	awssts "github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/optiflowic/kumolo/internal/server"
 	"github.com/stretchr/testify/require"
 )
@@ -17,6 +18,7 @@ import (
 type testClients struct {
 	s3  *awss3.Client
 	ddb *awsdynamodb.Client
+	sts *awssts.Client
 }
 
 func newTestClients(t *testing.T) testClients {
@@ -47,5 +49,6 @@ func newTestClients(t *testing.T) testClients {
 			o.UsePathStyle = true
 		}),
 		ddb: awsdynamodb.NewFromConfig(cfg),
+		sts: awssts.NewFromConfig(cfg),
 	}
 }
