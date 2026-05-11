@@ -13,6 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestS3Integration runs sub-tests sequentially against shared state.
+// Each sub-test depends on the state left by the previous one; order matters.
 func TestS3Integration(t *testing.T) {
 	clients := newTestClients(t)
 	ctx := context.Background()

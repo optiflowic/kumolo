@@ -35,7 +35,7 @@ func newTestClients(t *testing.T) testClients {
 	t.Cleanup(srv.Close)
 
 	cfg, err := config.LoadDefaultConfig(
-		context.Background(),
+		ctx,
 		config.WithRegion("us-east-1"),
 		config.WithCredentialsProvider(
 			credentials.NewStaticCredentialsProvider("test", "test", ""),

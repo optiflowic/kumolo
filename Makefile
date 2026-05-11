@@ -40,7 +40,7 @@ cover:
 	go tool cover -func=coverage.out
 
 integration:
-	go test -race -count=1 ./tests/integration/...
+	go test -race -count=1 -timeout 120s ./tests/integration/...
 
 verify:
 	go mod verify

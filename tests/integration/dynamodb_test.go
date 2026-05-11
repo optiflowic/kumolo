@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestDynamoDBIntegration runs sub-tests sequentially against shared state.
+// Each sub-test depends on the state left by the previous one; order matters.
 func TestDynamoDBIntegration(t *testing.T) {
 	clients := newTestClients(t)
 	ctx := context.Background()
