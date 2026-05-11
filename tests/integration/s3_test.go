@@ -55,7 +55,7 @@ func TestS3Integration(t *testing.T) {
 			Key:    aws.String(key),
 		})
 		require.NoError(t, err)
-		defer out.Body.Close()
+		t.Cleanup(func() { _ = out.Body.Close() })
 
 		body, err := io.ReadAll(out.Body)
 		require.NoError(t, err)
@@ -75,7 +75,7 @@ func TestS3Integration(t *testing.T) {
 			Key:    aws.String(copyKey),
 		})
 		require.NoError(t, err)
-		defer out.Body.Close()
+		t.Cleanup(func() { _ = out.Body.Close() })
 		body, err := io.ReadAll(out.Body)
 		require.NoError(t, err)
 		assert.Equal(t, content, string(body))
