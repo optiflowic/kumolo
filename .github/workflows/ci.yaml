@@ -210,6 +210,9 @@ jobs:
               });
             }
 
+      - name: 🔗 Integration tests
+        run: nix develop --command make integration
+
       - name: 🏗️ Build
         run: nix develop --command make build
 
