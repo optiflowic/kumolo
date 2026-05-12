@@ -255,4 +255,219 @@ func TestS3MultipartUpload(t *testing.T) {
 		require.Error(t, err)
 		assert.Equal(t, "NoSuchUpload", apiErrorCode(err), "ListParts after abort: %v", err)
 	})
+
+	t.Run("ListPartsVerification", func(t *testing.T) {
+		const key = "list-parts-object"
+		partBodies := []string{"first-part-content", "second-part-content"}
+
+		createOut, err := clients.s3.CreateMultipartUpload(ctx, &awss3.CreateMultipartUploadInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String(key),
+		})
+		require.NoError(t, err)
+		uploadID := aws.ToString(createOut.UploadId)
+		t.Cleanup(func() {
+			_, _ = clients.s3.AbortMultipartUpload(ctx, &awss3.AbortMultipartUploadInput{
+				Bucket:   aws.String(bucket),
+				Key:      aws.String(key),
+				UploadId: aws.String(uploadID),
+			})
+		})
+
+		var uploadedETags []string
+		for i, body := range partBodies {
+			upOut, err := clients.s3.UploadPart(ctx, &awss3.UploadPartInput{
+				Bucket:     aws.String(bucket),
+				Key:        aws.String(key),
+				UploadId:   aws.String(uploadID),
+				PartNumber: aws.Int32(int32(i + 1)),
+				Body:       strings.NewReader(body),
+			})
+			require.NoError(t, err)
+			uploadedETags = append(uploadedETags, aws.ToString(upOut.ETag))
+		}
+
+		listOut, err := clients.s3.ListParts(ctx, &awss3.ListPartsInput{
+			Bucket:   aws.String(bucket),
+			Key:      aws.String(key),
+			UploadId: aws.String(uploadID),
+		})
+		require.NoError(t, err)
+		require.Len(t, listOut.Parts, 2)
+		assert.Equal(t, int32(1), aws.ToInt32(listOut.Parts[0].PartNumber))
+		assert.Equal(t, uploadedETags[0], aws.ToString(listOut.Parts[0].ETag))
+		assert.EqualValues(t, len(partBodies[0]), aws.ToInt64(listOut.Parts[0].Size))
+		assert.Equal(t, int32(2), aws.ToInt32(listOut.Parts[1].PartNumber))
+		assert.Equal(t, uploadedETags[1], aws.ToString(listOut.Parts[1].ETag))
+		assert.EqualValues(t, len(partBodies[1]), aws.ToInt64(listOut.Parts[1].Size))
+	})
+
+	t.Run("CompleteWithWrongETag", func(t *testing.T) {
+		const key = "wrong-etag-object"
+
+		createOut, err := clients.s3.CreateMultipartUpload(ctx, &awss3.CreateMultipartUploadInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String(key),
+		})
+		require.NoError(t, err)
+		uploadID := aws.ToString(createOut.UploadId)
+		t.Cleanup(func() {
+			_, _ = clients.s3.AbortMultipartUpload(ctx, &awss3.AbortMultipartUploadInput{
+				Bucket:   aws.String(bucket),
+				Key:      aws.String(key),
+				UploadId: aws.String(uploadID),
+			})
+		})
+
+		_, err = clients.s3.UploadPart(ctx, &awss3.UploadPartInput{
+			Bucket:     aws.String(bucket),
+			Key:        aws.String(key),
+			UploadId:   aws.String(uploadID),
+			PartNumber: aws.Int32(1),
+			Body:       strings.NewReader("some content"),
+		})
+		require.NoError(t, err)
+
+		_, err = clients.s3.CompleteMultipartUpload(ctx, &awss3.CompleteMultipartUploadInput{
+			Bucket:   aws.String(bucket),
+			Key:      aws.String(key),
+			UploadId: aws.String(uploadID),
+			MultipartUpload: &s3types.CompletedMultipartUpload{
+				Parts: []s3types.CompletedPart{
+					{PartNumber: aws.Int32(1), ETag: aws.String(`"00000000000000000000000000000000"`)},
+				},
+			},
+		})
+		require.Error(t, err)
+		assert.Equal(t, "InvalidPart", apiErrorCode(err))
+	})
+
+	t.Run("CompleteWithOutOfOrderParts", func(t *testing.T) {
+		const key = "out-of-order-object"
+
+		createOut, err := clients.s3.CreateMultipartUpload(ctx, &awss3.CreateMultipartUploadInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String(key),
+		})
+		require.NoError(t, err)
+		uploadID := aws.ToString(createOut.UploadId)
+		t.Cleanup(func() {
+			_, _ = clients.s3.AbortMultipartUpload(ctx, &awss3.AbortMultipartUploadInput{
+				Bucket:   aws.String(bucket),
+				Key:      aws.String(key),
+				UploadId: aws.String(uploadID),
+			})
+		})
+
+		var etags [2]string
+		for i := range etags {
+			upOut, err := clients.s3.UploadPart(ctx, &awss3.UploadPartInput{
+				Bucket:     aws.String(bucket),
+				Key:        aws.String(key),
+				UploadId:   aws.String(uploadID),
+				PartNumber: aws.Int32(int32(i + 1)),
+				Body:       strings.NewReader("data"),
+			})
+			require.NoError(t, err)
+			etags[i] = aws.ToString(upOut.ETag)
+		}
+
+		_, err = clients.s3.CompleteMultipartUpload(ctx, &awss3.CompleteMultipartUploadInput{
+			Bucket:   aws.String(bucket),
+			Key:      aws.String(key),
+			UploadId: aws.String(uploadID),
+			MultipartUpload: &s3types.CompletedMultipartUpload{
+				Parts: []s3types.CompletedPart{
+					{PartNumber: aws.Int32(2), ETag: aws.String(etags[1])},
+					{PartNumber: aws.Int32(1), ETag: aws.String(etags[0])},
+				},
+			},
+		})
+		require.Error(t, err)
+		assert.Equal(t, "InvalidPartOrder", apiErrorCode(err))
+	})
+
+	t.Run("ETagFormat", func(t *testing.T) {
+		const (
+			key      = "etag-format-object"
+			numParts = 2
+		)
+
+		createOut, err := clients.s3.CreateMultipartUpload(ctx, &awss3.CreateMultipartUploadInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String(key),
+		})
+		require.NoError(t, err)
+		uploadID := aws.ToString(createOut.UploadId)
+
+		var completedParts []s3types.CompletedPart
+		for i := 0; i < numParts; i++ {
+			upOut, err := clients.s3.UploadPart(ctx, &awss3.UploadPartInput{
+				Bucket:     aws.String(bucket),
+				Key:        aws.String(key),
+				UploadId:   aws.String(uploadID),
+				PartNumber: aws.Int32(int32(i + 1)),
+				Body:       strings.NewReader("part data"),
+			})
+			require.NoError(t, err)
+			completedParts = append(completedParts, s3types.CompletedPart{
+				PartNumber: aws.Int32(int32(i + 1)),
+				ETag:       upOut.ETag,
+			})
+		}
+
+		completeOut, err := clients.s3.CompleteMultipartUpload(ctx, &awss3.CompleteMultipartUploadInput{
+			Bucket:   aws.String(bucket),
+			Key:      aws.String(key),
+			UploadId: aws.String(uploadID),
+			MultipartUpload: &s3types.CompletedMultipartUpload{
+				Parts: completedParts,
+			},
+		})
+		require.NoError(t, err)
+		assert.Regexp(t, `^"[0-9a-f]+-2"$`, aws.ToString(completeOut.ETag))
+	})
+
+	t.Run("ContentTypePreserved", func(t *testing.T) {
+		const (
+			key         = "content-type-object"
+			contentType = "text/plain; charset=utf-8"
+		)
+
+		createOut, err := clients.s3.CreateMultipartUpload(ctx, &awss3.CreateMultipartUploadInput{
+			Bucket:      aws.String(bucket),
+			Key:         aws.String(key),
+			ContentType: aws.String(contentType),
+		})
+		require.NoError(t, err)
+		uploadID := aws.ToString(createOut.UploadId)
+
+		upOut, err := clients.s3.UploadPart(ctx, &awss3.UploadPartInput{
+			Bucket:     aws.String(bucket),
+			Key:        aws.String(key),
+			UploadId:   aws.String(uploadID),
+			PartNumber: aws.Int32(1),
+			Body:       strings.NewReader("hello"),
+		})
+		require.NoError(t, err)
+
+		_, err = clients.s3.CompleteMultipartUpload(ctx, &awss3.CompleteMultipartUploadInput{
+			Bucket:   aws.String(bucket),
+			Key:      aws.String(key),
+			UploadId: aws.String(uploadID),
+			MultipartUpload: &s3types.CompletedMultipartUpload{
+				Parts: []s3types.CompletedPart{
+					{PartNumber: aws.Int32(1), ETag: upOut.ETag},
+				},
+			},
+		})
+		require.NoError(t, err)
+
+		headOut, err := clients.s3.HeadObject(ctx, &awss3.HeadObjectInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String(key),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, contentType, aws.ToString(headOut.ContentType))
+	})
 }
