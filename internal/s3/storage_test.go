@@ -293,7 +293,17 @@ func TestDeleteBucket(t *testing.T) {
 		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
 
-		meta, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "", nil, nil)
+		meta, err := s.PutObject(
+			"my-bucket",
+			"obj.txt",
+			strings.NewReader("v1"),
+			"text/plain",
+			nil,
+			"",
+			"",
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
 		_, err = s.DeleteObjectVersion("my-bucket", "obj.txt", meta.VersionID, false)
 		require.NoError(t, err)
@@ -306,29 +316,52 @@ func TestDeleteBucket(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateBucket("my-bucket", "", false))
 		require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
-		_, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("hello"), "text/plain", nil, "", "", nil, nil)
+		_, err := s.PutObject(
+			"my-bucket",
+			"obj.txt",
+			strings.NewReader("hello"),
+			"text/plain",
+			nil,
+			"",
+			"",
+			nil,
+			nil,
+		)
 		require.NoError(t, err)
 
 		assert.ErrorIs(t, s.DeleteBucket("my-bucket"), ErrBucketNotEmpty)
 	})
 
-	t.Run("succeeds after versioning enabled then all objects deleted via delete markers cleared", func(t *testing.T) {
-		s := newTestStorage(t)
-		require.NoError(t, s.CreateBucket("my-bucket", "", false))
-		require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
+	t.Run(
+		"succeeds after versioning enabled then all objects deleted via delete markers cleared",
+		func(t *testing.T) {
+			s := newTestStorage(t)
+			require.NoError(t, s.CreateBucket("my-bucket", "", false))
+			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
 
-		// Put and delete-marker an object, then delete the marker itself.
-		meta, err := s.PutObject("my-bucket", "obj.txt", strings.NewReader("v1"), "text/plain", nil, "", "", nil, nil)
-		require.NoError(t, err)
-		markerVersionID, _, err := s.DeleteObjectVersioned("my-bucket", "obj.txt", false)
-		require.NoError(t, err)
-		_, err = s.DeleteObjectVersion("my-bucket", "obj.txt", markerVersionID, false)
-		require.NoError(t, err)
-		_, err = s.DeleteObjectVersion("my-bucket", "obj.txt", meta.VersionID, false)
-		require.NoError(t, err)
+			// Put and delete-marker an object, then delete the marker itself.
+			meta, err := s.PutObject(
+				"my-bucket",
+				"obj.txt",
+				strings.NewReader("v1"),
+				"text/plain",
+				nil,
+				"",
+				"",
+				nil,
+				nil,
+			)
+			require.NoError(t, err)
+			markerVersionID, _, err := s.DeleteObjectVersioned("my-bucket", "obj.txt", false)
+			require.NoError(t, err)
+			_, err = s.DeleteObjectVersion("my-bucket", "obj.txt", markerVersionID, false)
+			require.NoError(t, err)
+			_, err = s.DeleteObjectVersion("my-bucket", "obj.txt", meta.VersionID, false)
+			require.NoError(t, err)
 
-		assert.NoError(t, s.DeleteBucket("my-bucket"))
-	})
+			assert.NoError(t, s.DeleteBucket("my-bucket"))
+		},
+	)
 }
 
 func TestListBuckets(t *testing.T) {

@@ -1,4 +1,4 @@
-.PHONY: all install build run fmt fmt-check vet lint test cover integration verify tidy clean
+.PHONY: all install build run fmt fmt-check vet lint test cover integration e2e verify tidy clean
 
 BUILD_DIR = build
 BINARY_NAME = $(BUILD_DIR)/kumolo
@@ -41,6 +41,10 @@ cover:
 
 integration:
 	go test -race -count=1 -timeout 120s ./tests/integration/...
+
+e2e:
+	./e2e/aws-cli/s3.sh
+	./e2e/aws-cli/dynamodb.sh
 
 verify:
 	go mod verify
