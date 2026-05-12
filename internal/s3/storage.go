@@ -126,9 +126,22 @@ func (s *Storage) DeleteBucket(bucket string) error {
 		}
 		return err
 	}
-	if len(entries) > 0 {
+	for _, e := range entries {
+		if e.Name() == ".ver" {
+			// .ver is an internal system directory; evaluated separately below.
+			continue
+		}
 		return ErrBucketNotEmpty
 	}
+	// If .ver exists, make sure it holds no actual versioned objects.
+	verDir := filepath.Join(bucket, ".ver")
+	if !s.verDirIsEmpty(verDir) {
+		return ErrBucketNotEmpty
+	}
+	// Remove the (empty) .ver tree so that the bucket directory itself becomes
+	// empty and the final Remove call below succeeds.
+	s.removeAllDir(verDir)
+
 	if err := s.root.Remove(bucket + ".bucket.json"); err != nil &&
 		!errors.Is(err, os.ErrNotExist) {
 		slog.Warn("failed to remove bucket metadata", "bucket", bucket, "err", err)
@@ -692,6 +705,12 @@ func (s *Storage) DeleteObjectVersion(
 			"err",
 			err,
 		)
+	}
+	// Prune the empty key directory (bucket/.ver/<key>/) so that DeleteBucket
+	// does not mistake an empty dir for a remaining versioned object.
+	keyDir := filepath.Dir(vp)
+	if entries, _ := s.readDir(keyDir); len(entries) == 0 {
+		_ = s.root.Remove(keyDir)
 	}
 	return isMarker, nil
 }
@@ -2199,4 +2218,42 @@ func (s *Storage) removeUploadDir(uploadDir string) error {
 		}
 	}
 	return s.root.Remove(uploadDir)
+}
+
+// removeAllDir recursively removes dir and all of its contents.
+// Silently ignores os.ErrNotExist at each step.
+func (s *Storage) removeAllDir(dir string) {
+	entries, err := s.readDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		child := filepath.Join(dir, e.Name())
+		if e.IsDir() {
+			s.removeAllDir(child)
+		} else {
+			_ = s.root.Remove(child)
+		}
+	}
+	_ = s.root.Remove(dir)
+}
+
+// verDirIsEmpty reports whether the .ver directory tree contains no versioned
+// objects.  Returns true when verDir does not exist or contains only empty
+// subdirectories (which can happen after all versions of every object have
+// been individually deleted).
+func (s *Storage) verDirIsEmpty(verDir string) bool {
+	entries, err := s.readDir(verDir)
+	if err != nil {
+		return true // .ver does not exist
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			return false // unexpected file — treat as non-empty
+		}
+		if !s.verDirIsEmpty(filepath.Join(verDir, e.Name())) {
+			return false
+		}
+	}
+	return true
 }
