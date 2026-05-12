@@ -334,7 +334,10 @@ func TestS3MultipartUpload(t *testing.T) {
 			UploadId: aws.String(uploadID),
 			MultipartUpload: &s3types.CompletedMultipartUpload{
 				Parts: []s3types.CompletedPart{
-					{PartNumber: aws.Int32(1), ETag: aws.String(`"00000000000000000000000000000000"`)},
+					{
+						PartNumber: aws.Int32(1),
+						ETag:       aws.String(`"00000000000000000000000000000000"`),
+					},
 				},
 			},
 		})
@@ -416,14 +419,17 @@ func TestS3MultipartUpload(t *testing.T) {
 			})
 		}
 
-		completeOut, err := clients.s3.CompleteMultipartUpload(ctx, &awss3.CompleteMultipartUploadInput{
-			Bucket:   aws.String(bucket),
-			Key:      aws.String(key),
-			UploadId: aws.String(uploadID),
-			MultipartUpload: &s3types.CompletedMultipartUpload{
-				Parts: completedParts,
+		completeOut, err := clients.s3.CompleteMultipartUpload(
+			ctx,
+			&awss3.CompleteMultipartUploadInput{
+				Bucket:   aws.String(bucket),
+				Key:      aws.String(key),
+				UploadId: aws.String(uploadID),
+				MultipartUpload: &s3types.CompletedMultipartUpload{
+					Parts: completedParts,
+				},
 			},
-		})
+		)
 		require.NoError(t, err)
 		assert.Regexp(t, `^"[0-9a-f]+-2"$`, aws.ToString(completeOut.ETag))
 	})
@@ -469,5 +475,62 @@ func TestS3MultipartUpload(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.Equal(t, contentType, aws.ToString(headOut.ContentType))
+	})
+
+	t.Run("UploadPartCopy", func(t *testing.T) {
+		const (
+			srcKey  = "upload-part-copy-source"
+			destKey = "upload-part-copy-dest"
+			content = "source object content"
+		)
+
+		// Create the source object.
+		_, err := clients.s3.PutObject(ctx, &awss3.PutObjectInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String(srcKey),
+			Body:   strings.NewReader(content),
+		})
+		require.NoError(t, err)
+
+		createOut, err := clients.s3.CreateMultipartUpload(ctx, &awss3.CreateMultipartUploadInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String(destKey),
+		})
+		require.NoError(t, err)
+		uploadID := aws.ToString(createOut.UploadId)
+
+		copyOut, err := clients.s3.UploadPartCopy(ctx, &awss3.UploadPartCopyInput{
+			Bucket:     aws.String(bucket),
+			Key:        aws.String(destKey),
+			UploadId:   aws.String(uploadID),
+			PartNumber: aws.Int32(1),
+			CopySource: aws.String(bucket + "/" + srcKey),
+		})
+		require.NoError(t, err)
+		require.NotNil(t, copyOut.CopyPartResult)
+		require.NotEmpty(t, aws.ToString(copyOut.CopyPartResult.ETag))
+
+		_, err = clients.s3.CompleteMultipartUpload(ctx, &awss3.CompleteMultipartUploadInput{
+			Bucket:   aws.String(bucket),
+			Key:      aws.String(destKey),
+			UploadId: aws.String(uploadID),
+			MultipartUpload: &s3types.CompletedMultipartUpload{
+				Parts: []s3types.CompletedPart{
+					{PartNumber: aws.Int32(1), ETag: copyOut.CopyPartResult.ETag},
+				},
+			},
+		})
+		require.NoError(t, err)
+
+		getOut, err := clients.s3.GetObject(ctx, &awss3.GetObjectInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String(destKey),
+		})
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = getOut.Body.Close() })
+
+		got, err := io.ReadAll(getOut.Body)
+		require.NoError(t, err)
+		assert.Equal(t, content, string(got))
 	})
 }
