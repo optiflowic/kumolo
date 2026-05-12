@@ -3,12 +3,15 @@ package integration_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/smithy-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -116,5 +119,124 @@ func TestS3Integration(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.Empty(t, list.Contents)
+	})
+}
+
+// apiErrorCode extracts the AWS error code from an SDK error.
+func apiErrorCode(err error) string {
+	var apiErr smithy.APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.ErrorCode()
+	}
+	return ""
+}
+
+// TestS3MultipartUpload verifies the multipart upload round-trip and abort path.
+func TestS3MultipartUpload(t *testing.T) {
+	clients := newTestClients(t)
+	ctx := context.Background()
+
+	const bucket = "mpu-test-bucket"
+
+	_, err := clients.s3.CreateBucket(ctx, &awss3.CreateBucketInput{
+		Bucket: aws.String(bucket),
+	})
+	require.NoError(t, err)
+
+	t.Run("CompleteRoundtrip", func(t *testing.T) {
+		const key = "multipart-object"
+		parts := []string{"part-one-data", "part-two-data", "part-three-data"}
+		want := strings.Join(parts, "")
+
+		createOut, err := clients.s3.CreateMultipartUpload(ctx, &awss3.CreateMultipartUploadInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String(key),
+		})
+		require.NoError(t, err)
+		uploadID := aws.ToString(createOut.UploadId)
+		require.NotEmpty(t, uploadID)
+
+		var completedParts []s3types.CompletedPart
+		for i, body := range parts {
+			partNum := int32(i + 1)
+			upOut, err := clients.s3.UploadPart(ctx, &awss3.UploadPartInput{
+				Bucket:     aws.String(bucket),
+				Key:        aws.String(key),
+				UploadId:   aws.String(uploadID),
+				PartNumber: aws.Int32(partNum),
+				Body:       strings.NewReader(body),
+			})
+			require.NoError(t, err)
+			completedParts = append(completedParts, s3types.CompletedPart{
+				PartNumber: aws.Int32(partNum),
+				ETag:       upOut.ETag,
+			})
+		}
+
+		_, err = clients.s3.CompleteMultipartUpload(ctx, &awss3.CompleteMultipartUploadInput{
+			Bucket:   aws.String(bucket),
+			Key:      aws.String(key),
+			UploadId: aws.String(uploadID),
+			MultipartUpload: &s3types.CompletedMultipartUpload{
+				Parts: completedParts,
+			},
+		})
+		require.NoError(t, err)
+
+		getOut, err := clients.s3.GetObject(ctx, &awss3.GetObjectInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String(key),
+		})
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = getOut.Body.Close() })
+
+		got, err := io.ReadAll(getOut.Body)
+		require.NoError(t, err)
+		assert.Equal(t, want, string(got))
+	})
+
+	t.Run("AbortCancelsUpload", func(t *testing.T) {
+		const key = "aborted-object"
+
+		createOut, err := clients.s3.CreateMultipartUpload(ctx, &awss3.CreateMultipartUploadInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String(key),
+		})
+		require.NoError(t, err)
+		uploadID := aws.ToString(createOut.UploadId)
+
+		_, err = clients.s3.UploadPart(ctx, &awss3.UploadPartInput{
+			Bucket:     aws.String(bucket),
+			Key:        aws.String(key),
+			UploadId:   aws.String(uploadID),
+			PartNumber: aws.Int32(1),
+			Body:       strings.NewReader("some data"),
+		})
+		require.NoError(t, err)
+
+		_, err = clients.s3.AbortMultipartUpload(ctx, &awss3.AbortMultipartUploadInput{
+			Bucket:   aws.String(bucket),
+			Key:      aws.String(key),
+			UploadId: aws.String(uploadID),
+		})
+		require.NoError(t, err)
+
+		// ListParts must return NoSuchUpload after abort.
+		_, err = clients.s3.ListParts(ctx, &awss3.ListPartsInput{
+			Bucket:   aws.String(bucket),
+			Key:      aws.String(key),
+			UploadId: aws.String(uploadID),
+		})
+		require.Error(t, err)
+		assert.Equal(t, "NoSuchUpload", apiErrorCode(err), "ListParts after abort: %v", err)
+
+		// The object must not exist after abort.
+		_, err = clients.s3.GetObject(ctx, &awss3.GetObjectInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String(key),
+		})
+		require.Error(t, err)
+		var noSuchKey *s3types.NoSuchKey
+		assert.True(t, errors.As(err, &noSuchKey), "expected NoSuchKey, got %T: %v", err, err)
 	})
 }
