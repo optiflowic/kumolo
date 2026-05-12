@@ -2,6 +2,7 @@ package integration_test
 
 import (
 	"context"
+	"errors"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	awsdynamodb "github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	awssts "github.com/aws/aws-sdk-go-v2/service/sts"
+	"github.com/aws/smithy-go"
 	"github.com/optiflowic/kumolo/internal/server"
 	"github.com/stretchr/testify/require"
 )
@@ -19,6 +21,15 @@ type testClients struct {
 	s3  *awss3.Client
 	ddb *awsdynamodb.Client
 	sts *awssts.Client
+}
+
+// apiErrorCode extracts the AWS error code from an SDK error.
+func apiErrorCode(err error) string {
+	var apiErr smithy.APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.ErrorCode()
+	}
+	return ""
 }
 
 func newTestClients(t *testing.T) testClients {

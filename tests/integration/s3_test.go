@@ -3,7 +3,6 @@ package integration_test
 import (
 	"bytes"
 	"context"
-	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -11,7 +10,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
-	"github.com/aws/smithy-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -122,16 +120,8 @@ func TestS3Integration(t *testing.T) {
 	})
 }
 
-// apiErrorCode extracts the AWS error code from an SDK error.
-func apiErrorCode(err error) string {
-	var apiErr smithy.APIError
-	if errors.As(err, &apiErr) {
-		return apiErr.ErrorCode()
-	}
-	return ""
-}
-
-// TestS3MultipartUpload verifies the multipart upload round-trip and abort path.
+// TestS3MultipartUpload verifies the multipart upload round-trip and abort paths.
+// CreateBucket is shared setup; sub-tests run sequentially against the same bucket.
 func TestS3MultipartUpload(t *testing.T) {
 	clients := newTestClients(t)
 	ctx := context.Background()
@@ -193,6 +183,7 @@ func TestS3MultipartUpload(t *testing.T) {
 		got, err := io.ReadAll(getOut.Body)
 		require.NoError(t, err)
 		assert.Equal(t, want, string(got))
+		assert.EqualValues(t, len(want), aws.ToInt64(getOut.ContentLength))
 	})
 
 	t.Run("AbortCancelsUpload", func(t *testing.T) {
@@ -236,7 +227,32 @@ func TestS3MultipartUpload(t *testing.T) {
 			Key:    aws.String(key),
 		})
 		require.Error(t, err)
-		var noSuchKey *s3types.NoSuchKey
-		assert.True(t, errors.As(err, &noSuchKey), "expected NoSuchKey, got %T: %v", err, err)
+		assert.Equal(t, "NoSuchKey", apiErrorCode(err), "GetObject after abort: %v", err)
+	})
+
+	t.Run("AbortWithNoParts", func(t *testing.T) {
+		const key = "aborted-no-parts"
+
+		createOut, err := clients.s3.CreateMultipartUpload(ctx, &awss3.CreateMultipartUploadInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String(key),
+		})
+		require.NoError(t, err)
+		uploadID := aws.ToString(createOut.UploadId)
+
+		_, err = clients.s3.AbortMultipartUpload(ctx, &awss3.AbortMultipartUploadInput{
+			Bucket:   aws.String(bucket),
+			Key:      aws.String(key),
+			UploadId: aws.String(uploadID),
+		})
+		require.NoError(t, err)
+
+		_, err = clients.s3.ListParts(ctx, &awss3.ListPartsInput{
+			Bucket:   aws.String(bucket),
+			Key:      aws.String(key),
+			UploadId: aws.String(uploadID),
+		})
+		require.Error(t, err)
+		assert.Equal(t, "NoSuchUpload", apiErrorCode(err), "ListParts after abort: %v", err)
 	})
 }
