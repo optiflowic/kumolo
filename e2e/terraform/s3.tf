@@ -11,7 +11,8 @@ resource "aws_s3_bucket_versioning" "main" {
 }
 
 resource "aws_s3_bucket_lifecycle_configuration" "main" {
-  bucket = aws_s3_bucket.main.id
+  bucket     = aws_s3_bucket.main.id
+  depends_on = [aws_s3_bucket_versioning.main]
 
   rule {
     id     = "expire-old-versions"
