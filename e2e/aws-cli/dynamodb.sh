@@ -195,7 +195,7 @@ run "UpdateTable (add GSI)" \
       '[{"Create":{"IndexName":"name-index","KeySchema":[{"AttributeName":"name","KeyType":"HASH"}],"Projection":{"ProjectionType":"ALL"}}}]'
 
 # Cleanup
-$AWS delete-table --table-name "$TABLE" > /dev/null 2>&1
+$AWS delete-table --table-name "$TABLE" > /dev/null 2>&1 || true
 
 # ---------------------------------------------------------------------------
 echo ""
