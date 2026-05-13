@@ -164,11 +164,14 @@ run "GetObjectAttributes" \
 # Conditional GET (If-None-Match)
 ETAG=$($AWS s3api head-object --bucket "$BUCKET" --key "hello.txt" \
   --query ETag --output text 2>/dev/null | tr -d '"')
-run "GetObject (If-None-Match 304)" \
-  bash -c "$AWS s3api get-object \
-    --bucket $BUCKET --key hello.txt \
-    --if-none-match '\"$ETAG\"' /dev/null 2>&1 | grep -q '304\|NotModified'" \
-  || true  # 304 causes non-zero exit; check via message instead
+IFNM_OUT=$($AWS s3api get-object \
+  --bucket "$BUCKET" --key "hello.txt" \
+  --if-none-match "\"$ETAG\"" /dev/null 2>&1 || true)
+if echo "$IFNM_OUT" | grep -q '304\|NotModified'; then
+  ok "GetObject (If-None-Match 304)"
+else
+  fail "GetObject (If-None-Match 304) — unexpected response: $(echo "$IFNM_OUT" | head -1)"
+fi
 
 # DeleteObjects (batch)
 run "DeleteObjects" \
