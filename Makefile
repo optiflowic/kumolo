@@ -1,4 +1,4 @@
-.PHONY: all install build run fmt fmt-check vet lint test cover integration e2e verify tidy clean
+.PHONY: all install build run fmt fmt-check vet lint test cover integration e2e e2e-terraform verify tidy clean
 
 BUILD_DIR = build
 BINARY_NAME = $(BUILD_DIR)/kumolo
@@ -45,6 +45,9 @@ integration:
 e2e:
 	./e2e/aws-cli/s3.sh
 	./e2e/aws-cli/dynamodb.sh
+
+e2e-terraform:
+	cd e2e/terraform && terraform init -input=false && terraform apply -auto-approve && terraform destroy -auto-approve
 
 verify:
 	go mod verify

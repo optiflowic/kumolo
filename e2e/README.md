@@ -30,6 +30,12 @@ Run all CLI verifications at once:
 make e2e
 ```
 
+Run Terraform verification:
+
+```sh
+make e2e-terraform
+```
+
 ## Other IaC Tools
 
 Any tool that supports AWS endpoint overrides works with kumolo. Key settings:

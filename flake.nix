@@ -38,6 +38,7 @@
             govulncheck
             goreleaser
             awscli2
+            terraform
           ];
 
           shellHook = ''
