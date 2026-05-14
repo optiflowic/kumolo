@@ -582,7 +582,27 @@ func (s *Storage) deleteObjectFilesLocked(objPath string) error {
 			err,
 		)
 	}
+	s.pruneEmptyAncestorsLocked(objPath)
 	return nil
+}
+
+// pruneEmptyAncestorsLocked removes empty ancestor directories of objPath up
+// to (but not including) the bucket root, so that DeleteBucket can succeed
+// after all objects in a prefix have been removed.
+// Caller must hold the write lock.
+func (s *Storage) pruneEmptyAncestorsLocked(objPath string) {
+	bucketRoot := strings.SplitN(objPath, string(filepath.Separator), 2)[0]
+	dir := filepath.Dir(objPath)
+	for dir != bucketRoot && dir != "." && dir != "" {
+		entries, err := s.readDir(dir)
+		if err != nil || len(entries) != 0 {
+			return
+		}
+		if err := s.root.Remove(dir); err != nil {
+			return
+		}
+		dir = filepath.Dir(dir)
+	}
 }
 
 // DeleteObjectVersioned performs a versioning-aware delete.

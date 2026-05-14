@@ -362,6 +362,39 @@ func TestDeleteBucket(t *testing.T) {
 			assert.NoError(t, s.DeleteBucket("my-bucket"))
 		},
 	)
+
+	t.Run("succeeds after deleting nested-key objects with versioning", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
+		require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
+
+		putObj := func(key string) ObjectMetadata {
+			meta, err := s.PutObject(
+				"my-bucket", key, strings.NewReader("data"),
+				"text/plain", nil, "", "", nil, nil,
+			)
+			require.NoError(t, err)
+			return meta
+		}
+
+		meta1 := putObj("config/app.json")
+		meta2 := putObj("docs/README.txt")
+
+		// Delete via marker then remove marker + version for each object.
+		for _, tc := range []struct {
+			key  string
+			meta ObjectMetadata
+		}{{key: "config/app.json", meta: meta1}, {key: "docs/README.txt", meta: meta2}} {
+			markerID, _, err := s.DeleteObjectVersioned("my-bucket", tc.key, false)
+			require.NoError(t, err)
+			_, err = s.DeleteObjectVersion("my-bucket", tc.key, markerID, false)
+			require.NoError(t, err)
+			_, err = s.DeleteObjectVersion("my-bucket", tc.key, tc.meta.VersionID, false)
+			require.NoError(t, err)
+		}
+
+		assert.NoError(t, s.DeleteBucket("my-bucket"))
+	})
 }
 
 func TestListBuckets(t *testing.T) {
@@ -1641,6 +1674,28 @@ func TestDeleteObject(t *testing.T) {
 		)
 		require.NoError(t, s.DeleteObject("my-bucket", "obj.txt", false))
 
+		assert.NoError(t, s.DeleteBucket("my-bucket"))
+	})
+
+	t.Run("prunes empty parent directories after deleting nested-key object", func(t *testing.T) {
+		s, rootPath := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
+		_, err := s.PutObject(
+			"my-bucket",
+			"a/b/obj.txt",
+			strings.NewReader("data"),
+			"text/plain",
+			nil,
+			"",
+			"",
+			nil,
+			nil,
+		)
+		require.NoError(t, err)
+
+		require.NoError(t, s.DeleteObject("my-bucket", "a/b/obj.txt", false))
+
+		assert.NoDirExists(t, filepath.Join(rootPath, "my-bucket", "a"))
 		assert.NoError(t, s.DeleteBucket("my-bucket"))
 	})
 }
