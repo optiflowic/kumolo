@@ -47,7 +47,12 @@ e2e:
 	./e2e/aws-cli/dynamodb.sh
 
 e2e-terraform:
-	cd e2e/terraform && terraform init -input=false && terraform apply -auto-approve && terraform destroy -auto-approve
+	./e2e/terraform/cleanup.sh
+	cd e2e/terraform && \
+	  rm -f terraform.tfstate terraform.tfstate.backup .terraform.tfstate.lock.info && \
+	  terraform init -input=false && \
+	  terraform apply -auto-approve && \
+	  terraform destroy -auto-approve
 
 verify:
 	go mod verify
