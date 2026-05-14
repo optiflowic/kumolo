@@ -599,7 +599,7 @@ func (s *Storage) pruneEmptyAncestorsLocked(objPath string) {
 			return
 		}
 		if err := s.root.Remove(dir); err != nil {
-			return
+			return // untestable: os.Root.Remove failure cannot be injected
 		}
 		dir = filepath.Dir(dir)
 	}
@@ -2260,7 +2260,7 @@ func (s *Storage) removeAllDir(dir string) {
 		if e.IsDir() {
 			s.removeAllDir(child)
 		} else {
-			_ = s.root.Remove(child)
+			_ = s.root.Remove(child) // untestable: verDirIsEmpty guarantees only empty dirs reach here
 		}
 	}
 	_ = s.root.Remove(dir)
