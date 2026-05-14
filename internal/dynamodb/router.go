@@ -62,9 +62,6 @@ type warmThroughput struct {
 	Status              string `json:"Status"`
 }
 
-// newWarmThroughput builds a WarmThroughput value. For PROVISIONED tables the
-// read/write units mirror the provisioned capacity; PAY_PER_REQUEST tables
-// have no fixed capacity so both fields are 0.
 func newWarmThroughput(pt *ProvisionedThroughput) *warmThroughput {
 	wt := &warmThroughput{Status: "ACTIVE"}
 	if pt != nil {
