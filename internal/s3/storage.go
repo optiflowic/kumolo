@@ -586,14 +586,10 @@ func (s *Storage) deleteObjectFilesLocked(objPath string) error {
 	return nil
 }
 
-// pruneEmptyAncestorsLocked removes empty ancestor directories of objPath up
-// to (but not including) the bucket root, so that DeleteBucket can succeed
-// after all objects in a prefix have been removed.
-// Caller must hold the write lock.
-func (s *Storage) pruneEmptyAncestorsLocked(objPath string) {
-	bucketRoot := strings.SplitN(objPath, string(filepath.Separator), 2)[0]
-	dir := filepath.Dir(objPath)
-	for dir != bucketRoot && dir != "." && dir != "" {
+// pruneEmptyDirsUpTo removes empty ancestor directories starting from dir up
+// to (but not including) stopDir. Caller must hold the write lock.
+func (s *Storage) pruneEmptyDirsUpTo(dir, stopDir string) {
+	for dir != stopDir && dir != "." && dir != "" {
 		entries, err := s.readDir(dir)
 		if err != nil || len(entries) != 0 {
 			return
@@ -603,6 +599,15 @@ func (s *Storage) pruneEmptyAncestorsLocked(objPath string) {
 		}
 		dir = filepath.Dir(dir)
 	}
+}
+
+// pruneEmptyAncestorsLocked removes empty ancestor directories of objPath up
+// to (but not including) the bucket root, so that DeleteBucket can succeed
+// after all objects in a prefix have been removed.
+// Caller must hold the write lock.
+func (s *Storage) pruneEmptyAncestorsLocked(objPath string) {
+	bucketRoot := strings.SplitN(objPath, string(filepath.Separator), 2)[0]
+	s.pruneEmptyDirsUpTo(filepath.Dir(objPath), bucketRoot)
 }
 
 // DeleteObjectVersioned performs a versioning-aware delete.
@@ -728,18 +733,7 @@ func (s *Storage) DeleteObjectVersion(
 	}
 	// Prune empty ancestor directories within the .ver tree so that
 	// verDirIsEmpty does not treat leftover dirs as versioned objects.
-	verRoot := filepath.Join(bucket, ".ver")
-	dir := filepath.Dir(vp)
-	for dir != verRoot && dir != "." && dir != "" {
-		entries, err := s.readDir(dir)
-		if err != nil || len(entries) != 0 {
-			break
-		}
-		if err := s.root.Remove(dir); err != nil {
-			break
-		}
-		dir = filepath.Dir(dir)
-	}
+	s.pruneEmptyDirsUpTo(filepath.Dir(vp), filepath.Join(bucket, ".ver"))
 	return isMarker, nil
 }
 
