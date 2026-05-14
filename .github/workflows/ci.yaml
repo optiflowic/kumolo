@@ -49,7 +49,7 @@ jobs:
             ${{ runner.os }}-go-
 
       - name: 🔍 Run golangci-lint
-        run: nix develop --command make lint
+        run: nix develop .#ci --command make lint
 
   security:
     name: Security
@@ -85,10 +85,10 @@ jobs:
             ${{ runner.os }}-go-
 
       - name: 🔐 Verify module checksums
-        run: nix develop --command make verify
+        run: nix develop .#ci --command make verify
 
       - name: 🛡️ Run govulncheck
-        run: nix develop --command govulncheck ./...
+        run: nix develop .#ci --command govulncheck ./...
 
   build-test:
     name: Build & Test
@@ -126,18 +126,18 @@ jobs:
 
       - name: 🔍 Check go mod tidy
         run: |
-          nix develop --command make tidy
+          nix develop .#ci --command make tidy
           git diff --exit-code go.mod go.sum
 
       - name: 🖊️ Check formatting
-        run: nix develop --command make fmt-check
+        run: nix develop .#ci --command make fmt-check
 
       - name: 🔎 Vet
-        run: nix develop --command make vet
+        run: nix develop .#ci --command make vet
 
       - name: 🧪 Test with coverage
         run: |
-          nix develop --command bash -c 'make cover && go tool cover -func=coverage.out > coverage-func.out'
+          nix develop .#ci --command bash -c 'make cover && go tool cover -func=coverage.out > coverage-func.out'
           COVERAGE=$(tail -1 coverage-func.out | awk '{print $3}')
           echo "COVERAGE=$COVERAGE" >> $GITHUB_ENV
 
@@ -211,13 +211,13 @@ jobs:
             }
 
       - name: 🏗️ Build
-        run: nix develop --command make build
+        run: nix develop .#ci --command make build
 
       - name: 🔗 Integration tests
-        run: nix develop --command make integration
+        run: nix develop .#ci --command make integration
 
       - name: 🧼 Clean build artifacts
-        run: nix develop --command make clean
+        run: nix develop .#ci --command make clean
 
   docker:
     name: Docker Build
