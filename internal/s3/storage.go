@@ -726,11 +726,19 @@ func (s *Storage) DeleteObjectVersion(
 			err,
 		)
 	}
-	// Prune the empty key directory (bucket/.ver/<key>/) so that DeleteBucket
-	// does not mistake an empty dir for a remaining versioned object.
-	keyDir := filepath.Dir(vp)
-	if entries, _ := s.readDir(keyDir); len(entries) == 0 {
-		_ = s.root.Remove(keyDir)
+	// Prune empty ancestor directories within the .ver tree so that
+	// verDirIsEmpty does not treat leftover dirs as versioned objects.
+	verRoot := filepath.Join(bucket, ".ver")
+	dir := filepath.Dir(vp)
+	for dir != verRoot && dir != "." && dir != "" {
+		entries, err := s.readDir(dir)
+		if err != nil || len(entries) != 0 {
+			break
+		}
+		if err := s.root.Remove(dir); err != nil {
+			break
+		}
+		dir = filepath.Dir(dir)
 	}
 	return isMarker, nil
 }

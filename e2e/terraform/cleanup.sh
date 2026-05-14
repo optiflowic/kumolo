@@ -9,13 +9,15 @@ AWS="aws --endpoint-url $ENDPOINT"
 
 # Delete all versions and delete markers, then remove the bucket.
 if $AWS s3api head-bucket --bucket kumolo-tf-verify > /dev/null 2>&1; then
-  $AWS s3api list-object-versions --bucket kumolo-tf-verify \
-      --output text --query '[Versions,DeleteMarkers][][Key,VersionId]' 2>/dev/null | \
-    while IFS=$'\t' read -r key vid; do
-      [[ -z "$key" || "$key" == "None" ]] && continue
-      $AWS s3api delete-object \
-        --bucket kumolo-tf-verify --key "$key" --version-id "$vid" > /dev/null 2>&1 || true
-    done
+  for query in 'Versions[].[Key,VersionId]' 'DeleteMarkers[].[Key,VersionId]'; do
+    $AWS s3api list-object-versions --bucket kumolo-tf-verify \
+        --output text --query "$query" 2>/dev/null | \
+      while IFS=$'\t' read -r key vid; do
+        [[ -z "$key" || "$key" == "None" ]] && continue
+        $AWS s3api delete-object \
+          --bucket kumolo-tf-verify --key "$key" --version-id "$vid" > /dev/null 2>&1 || true
+      done
+  done
   $AWS s3api delete-bucket --bucket kumolo-tf-verify > /dev/null 2>&1 || true
 fi
 
