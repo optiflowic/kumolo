@@ -22,8 +22,8 @@ provider "aws" {
   s3_use_path_style = true
 
   endpoints {
-    s3       = "http://localhost:5566"
-    dynamodb = "http://localhost:5566"
-    sts      = "http://localhost:5566"
+    s3       = var.kumolo_endpoint
+    dynamodb = var.kumolo_endpoint
+    sts      = var.kumolo_endpoint
   }
 }
