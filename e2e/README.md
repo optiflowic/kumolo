@@ -17,6 +17,17 @@ make build && ./build/kumolo
 
 kumolo listens on `http://localhost:5566` by default.
 
+## When to run
+
+These are manual verification tools, not part of CI. Run them locally before
+opening a PR when:
+
+- You added or changed S3 / DynamoDB operations
+- You added support for a new IaC tool or AWS SDK version
+
+CI covers unit and integration tests (`make test` / `make integration`), which
+catch most regressions. E2E tests add a real-tool smoke test on top of that.
+
 ## Tools
 
 | Directory | Description |
