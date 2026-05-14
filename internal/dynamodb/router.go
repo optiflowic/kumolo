@@ -54,6 +54,23 @@ type billingModeSummary struct {
 	LastUpdateToPayPerRequestDateTime float64 `json:"LastUpdateToPayPerRequestDateTime,omitempty"`
 }
 
+// warmThroughput mirrors the AWS WarmThroughput shape returned in TableDescription.
+// Required by AWS provider v6+ which polls this field after CreateTable.
+type warmThroughput struct {
+	ReadUnitsPerSecond  int64  `json:"ReadUnitsPerSecond"`
+	WriteUnitsPerSecond int64  `json:"WriteUnitsPerSecond"`
+	Status              string `json:"Status"`
+}
+
+func newWarmThroughput(pt *ProvisionedThroughput) *warmThroughput {
+	wt := &warmThroughput{Status: "ACTIVE"}
+	if pt != nil {
+		wt.ReadUnitsPerSecond = pt.ReadCapacityUnits
+		wt.WriteUnitsPerSecond = pt.WriteCapacityUnits
+	}
+	return wt
+}
+
 // tableDescription is the DynamoDB API representation of a table.
 type tableDescription struct {
 	TableName              string                 `json:"TableName"`
@@ -66,6 +83,7 @@ type tableDescription struct {
 	ProvisionedThroughput  *ProvisionedThroughput `json:"ProvisionedThroughput,omitempty"`
 	GlobalSecondaryIndexes []gsiDescription       `json:"GlobalSecondaryIndexes,omitempty"`
 	LocalSecondaryIndexes  []lsiDescription       `json:"LocalSecondaryIndexes,omitempty"`
+	WarmThroughput         *warmThroughput        `json:"WarmThroughput,omitempty"`
 	ItemCount              int64                  `json:"ItemCount"`
 	TableSizeBytes         int64                  `json:"TableSizeBytes"`
 }
@@ -102,6 +120,7 @@ func toTableDescription(m TableMetadata) tableDescription {
 		KeySchema:             m.KeySchema,
 		AttributeDefinitions:  m.AttributeDefinitions,
 		ProvisionedThroughput: m.ProvisionedThroughput,
+		WarmThroughput:        newWarmThroughput(m.ProvisionedThroughput),
 	}
 	if m.BillingMode != "" {
 		bms := &billingModeSummary{BillingMode: m.BillingMode}

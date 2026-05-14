@@ -126,9 +126,22 @@ func (s *Storage) DeleteBucket(bucket string) error {
 		}
 		return err
 	}
-	if len(entries) > 0 {
+	for _, e := range entries {
+		if e.Name() == ".ver" {
+			// .ver is an internal system directory; evaluated separately below.
+			continue
+		}
 		return ErrBucketNotEmpty
 	}
+	// If .ver exists, make sure it holds no actual versioned objects.
+	verDir := filepath.Join(bucket, ".ver")
+	if !s.verDirIsEmpty(verDir) {
+		return ErrBucketNotEmpty
+	}
+	// Remove the (empty) .ver tree so that the bucket directory itself becomes
+	// empty and the final Remove call below succeeds.
+	s.removeAllDir(verDir)
+
 	if err := s.root.Remove(bucket + ".bucket.json"); err != nil &&
 		!errors.Is(err, os.ErrNotExist) {
 		slog.Warn("failed to remove bucket metadata", "bucket", bucket, "err", err)
@@ -569,7 +582,32 @@ func (s *Storage) deleteObjectFilesLocked(objPath string) error {
 			err,
 		)
 	}
+	s.pruneEmptyAncestorsLocked(objPath)
 	return nil
+}
+
+// pruneEmptyDirsUpTo removes empty ancestor directories starting from dir up
+// to (but not including) stopDir. Caller must hold the write lock.
+func (s *Storage) pruneEmptyDirsUpTo(dir, stopDir string) {
+	for dir != stopDir && dir != "." && dir != "" {
+		entries, err := s.readDir(dir)
+		if err != nil || len(entries) != 0 {
+			return
+		}
+		if err := s.root.Remove(dir); err != nil {
+			return // untestable: os.Root.Remove failure cannot be injected
+		}
+		dir = filepath.Dir(dir)
+	}
+}
+
+// pruneEmptyAncestorsLocked removes empty ancestor directories of objPath up
+// to (but not including) the bucket root, so that DeleteBucket can succeed
+// after all objects in a prefix have been removed.
+// Caller must hold the write lock.
+func (s *Storage) pruneEmptyAncestorsLocked(objPath string) {
+	bucketRoot := strings.SplitN(objPath, string(filepath.Separator), 2)[0]
+	s.pruneEmptyDirsUpTo(filepath.Dir(objPath), bucketRoot)
 }
 
 // DeleteObjectVersioned performs a versioning-aware delete.
@@ -693,6 +731,9 @@ func (s *Storage) DeleteObjectVersion(
 			err,
 		)
 	}
+	// Prune empty ancestor directories within the .ver tree so that
+	// verDirIsEmpty does not treat leftover dirs as versioned objects.
+	s.pruneEmptyDirsUpTo(filepath.Dir(vp), filepath.Join(bucket, ".ver"))
 	return isMarker, nil
 }
 
@@ -2199,4 +2240,42 @@ func (s *Storage) removeUploadDir(uploadDir string) error {
 		}
 	}
 	return s.root.Remove(uploadDir)
+}
+
+// removeAllDir recursively removes dir and all of its contents.
+// Silently ignores os.ErrNotExist at each step.
+func (s *Storage) removeAllDir(dir string) {
+	entries, err := s.readDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		child := filepath.Join(dir, e.Name())
+		if e.IsDir() {
+			s.removeAllDir(child)
+		} else {
+			_ = s.root.Remove(child) // untestable: verDirIsEmpty guarantees only empty dirs reach here
+		}
+	}
+	_ = s.root.Remove(dir)
+}
+
+// verDirIsEmpty reports whether the .ver directory tree contains no versioned
+// objects.  Returns true when verDir does not exist or contains only empty
+// subdirectories (which can happen after all versions of every object have
+// been individually deleted).
+func (s *Storage) verDirIsEmpty(verDir string) bool {
+	entries, err := s.readDir(verDir)
+	if err != nil {
+		return true // .ver does not exist
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			return false // unexpected file — treat as non-empty
+		}
+		if !s.verDirIsEmpty(filepath.Join(verDir, e.Name())) {
+			return false
+		}
+	}
+	return true
 }

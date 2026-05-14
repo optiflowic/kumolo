@@ -345,6 +345,45 @@ func TestHandleDescribeTable(t *testing.T) {
 		assert.Equal(t, "test-table", tbl["TableName"])
 	})
 
+	t.Run(
+		"WarmThroughput present with ACTIVE status for PAY_PER_REQUEST table",
+		func(t *testing.T) {
+			ro := newTestRouter(t)
+			require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+			w := dynamo(t, ro, "DescribeTable", `{"TableName": "test-table"}`)
+			require.Equal(t, http.StatusOK, w.Code)
+			var resp map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+			tbl := resp["Table"].(map[string]any)
+			wt, ok := tbl["WarmThroughput"].(map[string]any)
+			require.True(t, ok, "WarmThroughput must be present")
+			assert.Equal(t, "ACTIVE", wt["Status"])
+			assert.Equal(t, float64(0), wt["ReadUnitsPerSecond"])
+			assert.Equal(t, float64(0), wt["WriteUnitsPerSecond"])
+		},
+	)
+
+	t.Run("WarmThroughput reflects provisioned capacity for PROVISIONED table", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", `{
+			"TableName": "prov-table",
+			"KeySchema": [{"AttributeName": "pk", "KeyType": "HASH"}],
+			"AttributeDefinitions": [{"AttributeName": "pk", "AttributeType": "S"}],
+			"BillingMode": "PROVISIONED",
+			"ProvisionedThroughput": {"ReadCapacityUnits": 5, "WriteCapacityUnits": 10}
+		}`).Code)
+		w := dynamo(t, ro, "DescribeTable", `{"TableName": "prov-table"}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		tbl := resp["Table"].(map[string]any)
+		wt, ok := tbl["WarmThroughput"].(map[string]any)
+		require.True(t, ok, "WarmThroughput must be present")
+		assert.Equal(t, "ACTIVE", wt["Status"])
+		assert.Equal(t, float64(5), wt["ReadUnitsPerSecond"])
+		assert.Equal(t, float64(10), wt["WriteUnitsPerSecond"])
+	})
+
 	t.Run("400 for missing table", func(t *testing.T) {
 		ro := newTestRouter(t)
 		w := dynamo(t, ro, "DescribeTable", `{"TableName": "no-such-table"}`)

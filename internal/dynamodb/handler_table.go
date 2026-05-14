@@ -9,10 +9,11 @@ import (
 
 func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 	var req struct {
-		TableName              string                `json:"TableName"`
-		KeySchema              []KeySchemaElement    `json:"KeySchema"`
-		AttributeDefinitions   []AttributeDefinition `json:"AttributeDefinitions"`
-		BillingMode            string                `json:"BillingMode"`
+		TableName              string                 `json:"TableName"`
+		KeySchema              []KeySchemaElement     `json:"KeySchema"`
+		AttributeDefinitions   []AttributeDefinition  `json:"AttributeDefinitions"`
+		BillingMode            string                 `json:"BillingMode"`
+		ProvisionedThroughput  *ProvisionedThroughput `json:"ProvisionedThroughput,omitempty"`
 		GlobalSecondaryIndexes []struct {
 			IndexName             string                 `json:"IndexName"`
 			KeySchema             []KeySchemaElement     `json:"KeySchema"`
@@ -44,10 +45,11 @@ func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 		return
 	}
 	meta := TableMetadata{
-		Name:                 req.TableName,
-		KeySchema:            req.KeySchema,
-		AttributeDefinitions: req.AttributeDefinitions,
-		BillingMode:          req.BillingMode,
+		Name:                  req.TableName,
+		KeySchema:             req.KeySchema,
+		AttributeDefinitions:  req.AttributeDefinitions,
+		BillingMode:           req.BillingMode,
+		ProvisionedThroughput: req.ProvisionedThroughput,
 	}
 	for _, g := range req.GlobalSecondaryIndexes {
 		meta.GlobalSecondaryIndexes = append(meta.GlobalSecondaryIndexes, GlobalSecondaryIndex{

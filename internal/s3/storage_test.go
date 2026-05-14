@@ -287,6 +287,151 @@ func TestDeleteBucket(t *testing.T) {
 		assert.Error(t, err)
 		assert.NotErrorIs(t, err, ErrBucketNotFound)
 	})
+
+	t.Run("succeeds after all object versions are deleted", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
+		require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
+
+		meta, err := s.PutObject(
+			"my-bucket",
+			"obj.txt",
+			strings.NewReader("v1"),
+			"text/plain",
+			nil,
+			"",
+			"",
+			nil,
+			nil,
+		)
+		require.NoError(t, err)
+		_, err = s.DeleteObjectVersion("my-bucket", "obj.txt", meta.VersionID, false)
+		require.NoError(t, err)
+
+		assert.NoError(t, s.DeleteBucket("my-bucket"))
+		assert.False(t, s.BucketExists("my-bucket"))
+	})
+
+	t.Run("returns ErrBucketNotEmpty when versioned objects remain", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
+		require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
+		_, err := s.PutObject(
+			"my-bucket",
+			"obj.txt",
+			strings.NewReader("hello"),
+			"text/plain",
+			nil,
+			"",
+			"",
+			nil,
+			nil,
+		)
+		require.NoError(t, err)
+
+		assert.ErrorIs(t, s.DeleteBucket("my-bucket"), ErrBucketNotEmpty)
+	})
+
+	t.Run(
+		"succeeds after versioning enabled then all objects deleted via delete markers cleared",
+		func(t *testing.T) {
+			s := newTestStorage(t)
+			require.NoError(t, s.CreateBucket("my-bucket", "", false))
+			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
+
+			// Put and delete-marker an object, then delete the marker itself.
+			meta, err := s.PutObject(
+				"my-bucket",
+				"obj.txt",
+				strings.NewReader("v1"),
+				"text/plain",
+				nil,
+				"",
+				"",
+				nil,
+				nil,
+			)
+			require.NoError(t, err)
+			markerVersionID, _, err := s.DeleteObjectVersioned("my-bucket", "obj.txt", false)
+			require.NoError(t, err)
+			_, err = s.DeleteObjectVersion("my-bucket", "obj.txt", markerVersionID, false)
+			require.NoError(t, err)
+			_, err = s.DeleteObjectVersion("my-bucket", "obj.txt", meta.VersionID, false)
+			require.NoError(t, err)
+
+			assert.NoError(t, s.DeleteBucket("my-bucket"))
+		},
+	)
+
+	t.Run(
+		"returns ErrBucketNotEmpty when original version remains in .ver after marker deleted",
+		func(t *testing.T) {
+			s := newTestStorage(t)
+			require.NoError(t, s.CreateBucket("my-bucket", "", false))
+			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
+			_, err := s.PutObject(
+				"my-bucket", "config/app.json",
+				strings.NewReader("v1"), "text/plain", nil, "", "", nil, nil,
+			)
+			require.NoError(t, err)
+
+			// Create delete marker — archives original to .ver/config/app.json/<v_orig>.
+			markerID, _, err := s.DeleteObjectVersioned("my-bucket", "config/app.json", false)
+			require.NoError(t, err)
+
+			// Delete only the marker; original version in .ver/ remains.
+			_, err = s.DeleteObjectVersion("my-bucket", "config/app.json", markerID, false)
+			require.NoError(t, err)
+
+			// verDirIsEmpty recursively finds the versioned object → ErrBucketNotEmpty.
+			assert.ErrorIs(t, s.DeleteBucket("my-bucket"), ErrBucketNotEmpty)
+		},
+	)
+
+	t.Run("succeeds when .ver contains only empty subdirectories", func(t *testing.T) {
+		s, rootPath := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
+
+		// Simulate leftover empty subdirs in .ver (e.g. from a failed write).
+		emptyVerDir := filepath.Join(rootPath, "my-bucket", ".ver", "leftover", "subdir")
+		require.NoError(t, os.MkdirAll(emptyVerDir, 0o750))
+
+		// verDirIsEmpty returns true → removeAllDir recursively cleans up.
+		assert.NoError(t, s.DeleteBucket("my-bucket"))
+	})
+
+	t.Run("succeeds after deleting nested-key objects with versioning", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
+		require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
+
+		putObj := func(key string) ObjectMetadata {
+			meta, err := s.PutObject(
+				"my-bucket", key, strings.NewReader("data"),
+				"text/plain", nil, "", "", nil, nil,
+			)
+			require.NoError(t, err)
+			return meta
+		}
+
+		meta1 := putObj("config/app.json")
+		meta2 := putObj("docs/README.txt")
+
+		// Delete via marker then remove marker + version for each object.
+		for _, tc := range []struct {
+			key  string
+			meta ObjectMetadata
+		}{{key: "config/app.json", meta: meta1}, {key: "docs/README.txt", meta: meta2}} {
+			markerID, _, err := s.DeleteObjectVersioned("my-bucket", tc.key, false)
+			require.NoError(t, err)
+			_, err = s.DeleteObjectVersion("my-bucket", tc.key, markerID, false)
+			require.NoError(t, err)
+			_, err = s.DeleteObjectVersion("my-bucket", tc.key, tc.meta.VersionID, false)
+			require.NoError(t, err)
+		}
+
+		assert.NoError(t, s.DeleteBucket("my-bucket"))
+	})
 }
 
 func TestListBuckets(t *testing.T) {
@@ -1567,6 +1712,51 @@ func TestDeleteObject(t *testing.T) {
 		require.NoError(t, s.DeleteObject("my-bucket", "obj.txt", false))
 
 		assert.NoError(t, s.DeleteBucket("my-bucket"))
+	})
+
+	t.Run("prunes empty parent directories after deleting nested-key object", func(t *testing.T) {
+		s, rootPath := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
+		_, err := s.PutObject(
+			"my-bucket",
+			"a/b/obj.txt",
+			strings.NewReader("data"),
+			"text/plain",
+			nil,
+			"",
+			"",
+			nil,
+			nil,
+		)
+		require.NoError(t, err)
+
+		require.NoError(t, s.DeleteObject("my-bucket", "a/b/obj.txt", false))
+
+		assert.NoDirExists(t, filepath.Join(rootPath, "my-bucket", "a"))
+		assert.NoError(t, s.DeleteBucket("my-bucket"))
+	})
+
+	t.Run("does not prune parent directory when sibling object exists", func(t *testing.T) {
+		s, rootPath := newTestStorageWithRoot(t)
+		require.NoError(t, s.CreateBucket("my-bucket", "", false))
+		for _, key := range []string{"a/obj1.txt", "a/obj2.txt"} {
+			_, err := s.PutObject(
+				"my-bucket",
+				key,
+				strings.NewReader("data"),
+				"text/plain",
+				nil,
+				"",
+				"",
+				nil,
+				nil,
+			)
+			require.NoError(t, err)
+		}
+
+		require.NoError(t, s.DeleteObject("my-bucket", "a/obj1.txt", false))
+
+		assert.DirExists(t, filepath.Join(rootPath, "my-bucket", "a"))
 	})
 }
 
