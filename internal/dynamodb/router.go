@@ -62,6 +62,18 @@ type warmThroughput struct {
 	Status              string `json:"Status"`
 }
 
+// newWarmThroughput builds a WarmThroughput value. For PROVISIONED tables the
+// read/write units mirror the provisioned capacity; PAY_PER_REQUEST tables
+// have no fixed capacity so both fields are 0.
+func newWarmThroughput(pt *ProvisionedThroughput) *warmThroughput {
+	wt := &warmThroughput{Status: "ACTIVE"}
+	if pt != nil {
+		wt.ReadUnitsPerSecond = pt.ReadCapacityUnits
+		wt.WriteUnitsPerSecond = pt.WriteCapacityUnits
+	}
+	return wt
+}
+
 // tableDescription is the DynamoDB API representation of a table.
 type tableDescription struct {
 	TableName              string                 `json:"TableName"`
@@ -111,7 +123,7 @@ func toTableDescription(m TableMetadata) tableDescription {
 		KeySchema:             m.KeySchema,
 		AttributeDefinitions:  m.AttributeDefinitions,
 		ProvisionedThroughput: m.ProvisionedThroughput,
-		WarmThroughput:        &warmThroughput{Status: "ACTIVE"},
+		WarmThroughput:        newWarmThroughput(m.ProvisionedThroughput),
 	}
 	if m.BillingMode != "" {
 		bms := &billingModeSummary{BillingMode: m.BillingMode}
