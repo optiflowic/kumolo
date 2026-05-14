@@ -50,7 +50,7 @@ e2e-terraform:
 	./e2e/terraform/cleanup.sh
 	cd e2e/terraform && \
 	  rm -f terraform.tfstate terraform.tfstate.backup .terraform.tfstate.lock.info && \
-	  terraform init -input=false && \
+	  { [ -d .terraform ] || terraform init -input=false; } && \
 	  terraform apply -auto-approve && \
 	  terraform destroy -auto-approve
 
