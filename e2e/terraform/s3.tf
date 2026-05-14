@@ -1,5 +1,6 @@
 resource "aws_s3_bucket" "main" {
-  bucket = "kumolo-tf-verify"
+  bucket        = "kumolo-tf-verify"
+  force_destroy = true
 }
 
 resource "aws_s3_bucket_versioning" "main" {
@@ -10,21 +11,6 @@ resource "aws_s3_bucket_versioning" "main" {
   }
 }
 
-resource "aws_s3_bucket_lifecycle_configuration" "main" {
-  bucket     = aws_s3_bucket.main.id
-  depends_on = [aws_s3_bucket_versioning.main]
-
-  rule {
-    id     = "expire-old-versions"
-    status = "Enabled"
-
-    filter {}
-
-    noncurrent_version_expiration {
-      noncurrent_days = 30
-    }
-  }
-}
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "main" {
   bucket = aws_s3_bucket.main.id
