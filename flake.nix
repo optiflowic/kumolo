@@ -28,6 +28,7 @@
         pkgs = import nixpkgs {
           inherit system;
           overlays = [ goOverlay ];
+          config.allowUnfreePredicate = pkg: builtins.elem (pkgs.lib.getName pkg) [ "terraform" ];
         };
       in
       {
