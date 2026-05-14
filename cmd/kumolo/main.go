@@ -23,6 +23,25 @@ var (
 	date    = "unknown"
 )
 
+const banner = `
+  ☁   ☁     ☁      ☁   ☁     ☁   ☁
+
+██╗  ██╗██╗   ██╗███╗   ███╗ ██████╗ ██╗      ██████╗
+██║ ██╔╝██║   ██║████╗ ████║██╔═══██╗██║     ██╔═══██╗
+█████╔╝ ██║   ██║██╔████╔██║██║   ██║██║     ██║   ██║
+██╔═██╗ ██║   ██║██║╚██╔╝██║██║   ██║██║     ██║   ██║
+██║  ██╗╚██████╔╝██║ ╚═╝ ██║╚██████╔╝███████╗╚██████╔╝
+╚═╝  ╚═╝ ╚═════╝ ╚═╝     ╚═╝ ╚═════╝ ╚══════╝ ╚═════╝
+
+  ☁      ☁    ☁       ☁     ☁      ☁    ☁
+
+  high-fidelity AWS emulator for local dev   %s
+  https://github.com/optiflowic/kumolo
+
+  ☁   ☁     ☁      ☁   ☁     ☁   ☁
+
+`
+
 func main() {
 	if err := run(); err != nil {
 		slog.Error("fatal", "err", err)
@@ -31,6 +50,8 @@ func main() {
 }
 
 func run() error {
+	fmt.Fprintf(os.Stderr, banner, version)
+
 	env := config.LoadEnv()
 	buildConfig := config.RegisterFlags(flag.CommandLine, env)
 	flag.Parse()
