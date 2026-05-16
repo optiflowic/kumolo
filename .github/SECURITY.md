@@ -9,7 +9,7 @@
 
 If you discover a security vulnerability in this project, we kindly ask you to report it privately.
 
-Please use [GitHub Security Advisories](../../../security/advisories/new) to report vulnerabilities privately.
+Please use [GitHub Security Advisories](https://github.com/optiflowic/kumolo/security/advisories/new) to report vulnerabilities privately.
 Avoid creating a public issue or pull request.
 
 We will make every effort to respond as quickly as possible and take appropriate action.
