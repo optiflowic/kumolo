@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -322,6 +324,78 @@ func TestPutItem(t *testing.T) {
 	})
 }
 
+func TestIsTTLExpired(t *testing.T) {
+	past := strconv.FormatInt(time.Now().Unix()-10, 10)
+	future := strconv.FormatInt(time.Now().Unix()+3600, 10)
+
+	tests := []struct {
+		name string
+		ttl  *TTLSpec
+		item map[string]any
+		want bool
+	}{
+		{
+			name: "nil TTL spec",
+			ttl:  nil,
+			item: map[string]any{"exp": map[string]any{"N": past}},
+			want: false,
+		},
+		{
+			name: "disabled TTL",
+			ttl:  &TTLSpec{AttributeName: "exp", Enabled: false},
+			item: map[string]any{"exp": map[string]any{"N": past}},
+			want: false,
+		},
+		{
+			name: "empty AttributeName",
+			ttl:  &TTLSpec{AttributeName: "", Enabled: true},
+			item: map[string]any{"exp": map[string]any{"N": past}},
+			want: false,
+		},
+		{
+			name: "attribute missing from item",
+			ttl:  &TTLSpec{AttributeName: "exp", Enabled: true},
+			item: map[string]any{},
+			want: false,
+		},
+		{
+			name: "attribute value is not a map",
+			ttl:  &TTLSpec{AttributeName: "exp", Enabled: true},
+			item: map[string]any{"exp": "not-a-map"},
+			want: false,
+		},
+		{
+			name: "attribute map has no N field",
+			ttl:  &TTLSpec{AttributeName: "exp", Enabled: true},
+			item: map[string]any{"exp": map[string]any{"S": "not-a-number"}},
+			want: false,
+		},
+		{
+			name: "N value is not a valid integer",
+			ttl:  &TTLSpec{AttributeName: "exp", Enabled: true},
+			item: map[string]any{"exp": map[string]any{"N": "not-an-int"}},
+			want: false,
+		},
+		{
+			name: "expired item",
+			ttl:  &TTLSpec{AttributeName: "exp", Enabled: true},
+			item: map[string]any{"exp": map[string]any{"N": past}},
+			want: true,
+		},
+		{
+			name: "non-expired item",
+			ttl:  &TTLSpec{AttributeName: "exp", Enabled: true},
+			item: map[string]any{"exp": map[string]any{"N": future}},
+			want: false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, isTTLExpired(tc.item, tc.ttl))
+		})
+	}
+}
+
 func TestGetItem(t *testing.T) {
 	item := map[string]any{"pk": map[string]any{"S": "key1"}, "val": map[string]any{"S": "hello"}}
 
@@ -379,6 +453,21 @@ func TestGetItem(t *testing.T) {
 		}
 		_, err := s.GetItem("test-table", map[string]any{"pk": map[string]any{"S": "key1"}})
 		assert.Error(t, err)
+	})
+
+	t.Run("returns nil for TTL-expired item", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		_, err := s.UpdateTimeToLive("test-table", TTLSpec{AttributeName: "exp", Enabled: true})
+		require.NoError(t, err)
+		pastTS := strconv.FormatInt(time.Now().Unix()-10, 10)
+		mustPutItem(t, s, "test-table", map[string]any{
+			"pk":  map[string]any{"S": "key1"},
+			"exp": map[string]any{"N": pastTS},
+		})
+		got, err := s.GetItem("test-table", map[string]any{"pk": map[string]any{"S": "key1"}})
+		require.NoError(t, err)
+		assert.Nil(t, got)
 	})
 }
 
@@ -536,7 +625,13 @@ func TestScan(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
 		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "a"}})
-		s.readAll = func(io.Reader) ([]byte, error) {
+		callCount := 0
+		origReadAll := s.readAll
+		s.readAll = func(r io.Reader) ([]byte, error) {
+			callCount++
+			if callCount == 1 {
+				return origReadAll(r) // first call: table metadata
+			}
 			return []byte("not-json"), nil
 		}
 		items, _, err := s.Scan("test-table", ScanOptions{})
@@ -725,6 +820,27 @@ func TestScan(t *testing.T) {
 		full, _, err := s.Scan("test-table", ScanOptions{Segment: &seg, TotalSegments: &total})
 		require.NoError(t, err)
 		assert.Equal(t, full, append(page1, page2...))
+	})
+
+	t.Run("excludes TTL-expired items", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		_, err := s.UpdateTimeToLive("test-table", TTLSpec{AttributeName: "exp", Enabled: true})
+		require.NoError(t, err)
+		pastTS := strconv.FormatInt(time.Now().Unix()-10, 10)
+		futureTS := strconv.FormatInt(time.Now().Unix()+3600, 10)
+		mustPutItem(t, s, "test-table", map[string]any{
+			"pk":  map[string]any{"S": "expired"},
+			"exp": map[string]any{"N": pastTS},
+		})
+		mustPutItem(t, s, "test-table", map[string]any{
+			"pk":  map[string]any{"S": "live"},
+			"exp": map[string]any{"N": futureTS},
+		})
+		items, _, err := s.Scan("test-table", ScanOptions{})
+		require.NoError(t, err)
+		require.Len(t, items, 1)
+		assert.Equal(t, map[string]any{"S": "live"}, items[0]["pk"])
 	})
 }
 
@@ -1144,6 +1260,27 @@ func TestQuery(t *testing.T) {
 			QueryOptions{ScanIndexForward: true},
 		)
 		assert.Error(t, err)
+	})
+
+	t.Run("excludes TTL-expired items", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		_, err := s.UpdateTimeToLive("test-table", TTLSpec{AttributeName: "exp", Enabled: true})
+		require.NoError(t, err)
+		pastTS := strconv.FormatInt(time.Now().Unix()-10, 10)
+		mustPutItem(t, s, "test-table", map[string]any{
+			"pk":  map[string]any{"S": "a"},
+			"exp": map[string]any{"N": pastTS},
+		})
+		items, _, err := s.Query(
+			"test-table",
+			"pk",
+			map[string]any{"S": "a"},
+			nil,
+			QueryOptions{ScanIndexForward: true},
+		)
+		require.NoError(t, err)
+		assert.Empty(t, items)
 	})
 }
 
@@ -2272,6 +2409,31 @@ func TestBatchGetItems(t *testing.T) {
 		keys := []map[string]any{{"pk": map[string]any{"S": "k1"}}}
 		_, err := s.BatchGetItems("test-table", keys)
 		assert.Error(t, err)
+	})
+
+	t.Run("omits TTL-expired items", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		_, err := s.UpdateTimeToLive("test-table", TTLSpec{AttributeName: "exp", Enabled: true})
+		require.NoError(t, err)
+		pastTS := strconv.FormatInt(time.Now().Unix()-10, 10)
+		futureTS := strconv.FormatInt(time.Now().Unix()+3600, 10)
+		mustPutItem(t, s, "test-table", map[string]any{
+			"pk":  map[string]any{"S": "expired"},
+			"exp": map[string]any{"N": pastTS},
+		})
+		mustPutItem(t, s, "test-table", map[string]any{
+			"pk":  map[string]any{"S": "live"},
+			"exp": map[string]any{"N": futureTS},
+		})
+		keys := []map[string]any{
+			{"pk": map[string]any{"S": "expired"}},
+			{"pk": map[string]any{"S": "live"}},
+		}
+		items, err := s.BatchGetItems("test-table", keys)
+		require.NoError(t, err)
+		require.Len(t, items, 1)
+		assert.Equal(t, map[string]any{"S": "live"}, items[0]["pk"])
 	})
 }
 

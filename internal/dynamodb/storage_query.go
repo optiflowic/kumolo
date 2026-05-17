@@ -96,14 +96,9 @@ func (s *Storage) Scan(
 		return nil, nil, ErrTableNotFound
 	}
 
-	needsMeta := len(opts.ExclusiveStartKey) > 0 || opts.Limit != nil || opts.Segment != nil
-	var meta TableMetadata
-	if needsMeta {
-		var err error
-		meta, err = s.readTableMeta(tableName)
-		if err != nil {
-			return nil, nil, err
-		}
+	meta, err := s.readTableMeta(tableName)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	all, err := s.readAllItemsLocked(tableName)
@@ -111,18 +106,24 @@ func (s *Storage) Scan(
 		return nil, nil, err
 	}
 
-	// When pagination is in use (ESK or Limit), sort items by their hash key so
-	// that order is deterministic regardless of the underlying filesystem's
-	// ReadDir order (e.g. creation order on Linux ext4 vs. alphabetical on macOS
-	// APFS). Deterministic order is required for the k > eskKey comparison that
-	// resumes scanning after a deleted item.
-	if needsMeta {
-		sort.Slice(all, func(i, j int) bool {
-			ki, _ := itemKey(all[i], meta.KeySchema)
-			kj, _ := itemKey(all[j], meta.KeySchema)
-			return ki < kj
-		})
+	if meta.TTL != nil && meta.TTL.Enabled {
+		filtered := all[:0]
+		for _, item := range all {
+			if !isTTLExpired(item, meta.TTL) {
+				filtered = append(filtered, item)
+			}
+		}
+		all = filtered
 	}
+
+	// Sort items by primary key for deterministic order regardless of filesystem
+	// ReadDir order. Required for the k > eskKey comparison that resumes
+	// scanning after a deleted item.
+	sort.Slice(all, func(i, j int) bool {
+		ki, _ := itemKey(all[i], meta.KeySchema)
+		kj, _ := itemKey(all[j], meta.KeySchema)
+		return ki < kj
+	})
 
 	// Segment partitioning must precede ESK so that ESK resumes within the
 	// correct segment, not across the global item list.
@@ -240,6 +241,9 @@ func (s *Storage) Query(
 	wantJSON, _ := json.Marshal(hashKeyValue) // only fails for channels/funcs
 	var matched []map[string]any
 	for _, item := range all {
+		if isTTLExpired(item, meta.TTL) {
+			continue
+		}
 		val, ok := item[hashKeyName]
 		if !ok {
 			continue
