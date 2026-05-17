@@ -27,11 +27,11 @@ func isTTLExpired(item map[string]any, ttl *TTLSpec) bool {
 	if !ok {
 		return false
 	}
-	expiry, err := strconv.ParseInt(nStr, 10, 64)
+	expiry, err := strconv.ParseFloat(nStr, 64)
 	if err != nil {
 		return false
 	}
-	return time.Now().Unix() >= expiry
+	return float64(time.Now().Unix()) >= expiry
 }
 
 func (s *Storage) PutItem(

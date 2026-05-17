@@ -327,6 +327,8 @@ func TestPutItem(t *testing.T) {
 func TestIsTTLExpired(t *testing.T) {
 	past := strconv.FormatInt(time.Now().Unix()-10, 10)
 	future := strconv.FormatInt(time.Now().Unix()+3600, 10)
+	pastFloat := fmt.Sprintf("%.3f", float64(time.Now().Unix()-10)+0.5)
+	futureFloat := fmt.Sprintf("%.3f", float64(time.Now().Unix()+3600)+0.5)
 
 	tests := []struct {
 		name string
@@ -371,9 +373,9 @@ func TestIsTTLExpired(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "N value is not a valid integer",
+			name: "N value is not a valid number",
 			ttl:  &TTLSpec{AttributeName: "exp", Enabled: true},
-			item: map[string]any{"exp": map[string]any{"N": "not-an-int"}},
+			item: map[string]any{"exp": map[string]any{"N": "not-a-number"}},
 			want: false,
 		},
 		{
@@ -386,6 +388,18 @@ func TestIsTTLExpired(t *testing.T) {
 			name: "non-expired item",
 			ttl:  &TTLSpec{AttributeName: "exp", Enabled: true},
 			item: map[string]any{"exp": map[string]any{"N": future}},
+			want: false,
+		},
+		{
+			name: "expired item with float N value",
+			ttl:  &TTLSpec{AttributeName: "exp", Enabled: true},
+			item: map[string]any{"exp": map[string]any{"N": pastFloat}},
+			want: true,
+		},
+		{
+			name: "non-expired item with float N value",
+			ttl:  &TTLSpec{AttributeName: "exp", Enabled: true},
+			item: map[string]any{"exp": map[string]any{"N": futureFloat}},
 			want: false,
 		},
 	}
@@ -625,12 +639,14 @@ func TestScan(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
 		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "a"}})
-		callCount := 0
+		// Scan calls readTableMeta first (call 1), then reads each item file.
+		// Allow the metadata read to succeed; corrupt only item file reads.
+		metaRead := false
 		origReadAll := s.readAll
 		s.readAll = func(r io.Reader) ([]byte, error) {
-			callCount++
-			if callCount == 1 {
-				return origReadAll(r) // first call: table metadata
+			if !metaRead {
+				metaRead = true
+				return origReadAll(r)
 			}
 			return []byte("not-json"), nil
 		}
