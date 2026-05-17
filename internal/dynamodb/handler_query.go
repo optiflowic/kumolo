@@ -51,56 +51,15 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
-	switch req.Select {
-	case "":
-		// OK — default (ALL_ATTRIBUTES)
-	case "ALL_ATTRIBUTES":
-		if req.ProjectionExpression != "" {
-			writeError(
-				w,
-				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ValidationException",
-				"Select type ALL_ATTRIBUTES is not allowed with a ProjectionExpression",
-			)
-			return
-		}
-	case "COUNT":
-		if req.ProjectionExpression != "" {
-			writeError(
-				w,
-				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ValidationException",
-				"Select type COUNT is not allowed with a ProjectionExpression",
-			)
-			return
-		}
-	case "SPECIFIC_ATTRIBUTES":
-		if req.ProjectionExpression == "" {
-			writeError(
-				w,
-				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ValidationException",
-				"Select SPECIFIC_ATTRIBUTES requires a ProjectionExpression",
-			)
-			return
-		}
-	case "ALL_PROJECTED_ATTRIBUTES":
+	if !validateSelectCommon(w, req.Select, req.ProjectionExpression) {
+		return
+	}
+	if req.Select == "ALL_PROJECTED_ATTRIBUTES" {
 		writeError(
 			w,
 			http.StatusBadRequest,
 			"com.amazonaws.dynamodb.v20120810#ValidationException",
 			"Select ALL_PROJECTED_ATTRIBUTES is not allowed when scanning a table without an index",
-		)
-		return
-	default:
-		writeError(
-			w,
-			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
-			fmt.Sprintf(
-				"Value '%s' at 'select' failed to satisfy constraint: Member must satisfy enum value set: [ALL_ATTRIBUTES, ALL_PROJECTED_ATTRIBUTES, SPECIFIC_ATTRIBUTES, COUNT]",
-				req.Select,
-			),
 		)
 		return
 	}
@@ -313,40 +272,10 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	switch req.Select {
-	case "":
-		// OK — default (ALL_ATTRIBUTES)
-	case "ALL_ATTRIBUTES":
-		if req.ProjectionExpression != "" {
-			writeError(
-				w,
-				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ValidationException",
-				"Select type ALL_ATTRIBUTES is not allowed with a ProjectionExpression",
-			)
-			return
-		}
-	case "COUNT":
-		if req.ProjectionExpression != "" {
-			writeError(
-				w,
-				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ValidationException",
-				"Select type COUNT is not allowed with a ProjectionExpression",
-			)
-			return
-		}
-	case "SPECIFIC_ATTRIBUTES":
-		if req.ProjectionExpression == "" {
-			writeError(
-				w,
-				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ValidationException",
-				"Select SPECIFIC_ATTRIBUTES requires a ProjectionExpression",
-			)
-			return
-		}
-	case "ALL_PROJECTED_ATTRIBUTES":
+	if !validateSelectCommon(w, req.Select, req.ProjectionExpression) {
+		return
+	}
+	if req.Select == "ALL_PROJECTED_ATTRIBUTES" {
 		if req.IndexName == "" {
 			writeError(
 				w,
@@ -365,17 +294,6 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 			)
 			return
 		}
-	default:
-		writeError(
-			w,
-			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
-			fmt.Sprintf(
-				"Value '%s' at 'select' failed to satisfy constraint: Member must satisfy enum value set: [ALL_ATTRIBUTES, ALL_PROJECTED_ATTRIBUTES, SPECIFIC_ATTRIBUTES, COUNT]",
-				req.Select,
-			),
-		)
-		return
 	}
 	if req.Limit != nil && *req.Limit < 1 {
 		writeError(

@@ -959,11 +959,11 @@ func TestHandleScan(t *testing.T) {
 					fmt.Sprintf(`{"TableName":"test-table","Item":{"pk":{"S":%q}}}`, pk)).Code)
 			}
 			w := dynamo(t, ro, "Scan", `{
-			"TableName": "test-table",
-			"Select": "COUNT",
-			"FilterExpression": "pk = :v",
-			"ExpressionAttributeValues": {":v": {"S": "a"}}
-		}`)
+				"TableName": "test-table",
+				"Select": "COUNT",
+				"FilterExpression": "pk = :v",
+				"ExpressionAttributeValues": {":v": {"S": "a"}}
+			}`)
 			require.Equal(t, http.StatusOK, w.Code)
 			var resp map[string]any
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
