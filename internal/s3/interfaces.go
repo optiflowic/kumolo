@@ -25,6 +25,7 @@ type objectStore interface {
 		sseAlgorithm, sseKMSKeyID string,
 		retention *ObjectRetention,
 		legalHold *ObjectLegalHold,
+		storageClass string,
 	) (ObjectMetadata, error)
 	PutObjectIfNotExists(
 		bucket, key string,
@@ -34,6 +35,7 @@ type objectStore interface {
 		sseAlgorithm, sseKMSKeyID string,
 		retention *ObjectRetention,
 		legalHold *ObjectLegalHold,
+		storageClass string,
 	) (ObjectMetadata, error)
 	GetObject(bucket, key string) (*os.File, ObjectMetadata, error)
 	GetObjectVersion(bucket, key, versionID string) (*os.File, ObjectMetadata, error)
@@ -44,6 +46,7 @@ type objectStore interface {
 		sseAlgorithm, sseKMSKeyID string,
 		retention *ObjectRetention,
 		legalHold *ObjectLegalHold,
+		storageClass string,
 	) (ObjectMetadata, error)
 	DeleteObject(bucket, key string, bypassGovernance bool) error
 	DeleteObjectVersioned(
@@ -67,6 +70,7 @@ type multipartStore interface {
 		bucket, key, contentType, sseAlgorithm, sseKMSKeyID string,
 		retention *ObjectRetention,
 		legalHold *ObjectLegalHold,
+		storageClass string,
 	) (uploadID string, err error)
 	UploadPart(uploadID string, partNumber int, r io.Reader) (etag string, err error)
 	DeletePart(uploadID string, partNumber int) error

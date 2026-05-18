@@ -199,6 +199,7 @@ func (s *Storage) PutObject(
 	sseAlgorithm, sseKMSKeyID string,
 	retention *ObjectRetention,
 	legalHold *ObjectLegalHold,
+	storageClass string,
 ) (ObjectMetadata, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -241,6 +242,7 @@ func (s *Storage) PutObject(
 		sseKMSKeyID,
 		retention,
 		legalHold,
+		storageClass,
 	)
 }
 
@@ -253,6 +255,7 @@ func (s *Storage) PutObjectIfNotExists(
 	sseAlgorithm, sseKMSKeyID string,
 	retention *ObjectRetention,
 	legalHold *ObjectLegalHold,
+	storageClass string,
 ) (ObjectMetadata, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -303,6 +306,7 @@ func (s *Storage) PutObjectIfNotExists(
 		sseKMSKeyID,
 		retention,
 		legalHold,
+		storageClass,
 	)
 }
 
@@ -319,6 +323,7 @@ func (s *Storage) writeObject(
 	sseAlgorithm, sseKMSKeyID string,
 	retention *ObjectRetention,
 	legalHold *ObjectLegalHold,
+	storageClass string,
 ) (retMeta ObjectMetadata, retErr error) {
 	f, err := s.openFile(objPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
@@ -353,6 +358,7 @@ func (s *Storage) writeObject(
 		VersionID:    versionID,
 		SSEAlgorithm: sseAlgorithm,
 		SSEKMSKeyID:  sseKMSKeyID,
+		StorageClass: storageClass,
 		Retention:    retention,
 		LegalHold:    legalHold,
 	}
@@ -405,6 +411,7 @@ func (s *Storage) CopyObject(
 	sseAlgorithm, sseKMSKeyID string,
 	retention *ObjectRetention,
 	legalHold *ObjectLegalHold,
+	storageClass string,
 ) (ObjectMetadata, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -462,6 +469,9 @@ func (s *Storage) CopyObject(
 	if contentType == "" {
 		contentType = srcMeta.ContentType
 	}
+	if storageClass == "" {
+		storageClass = srcMeta.StorageClass
+	}
 	dstPath := filepath.Join(dstBucket, dstKey)
 
 	dstVersionID := ""
@@ -488,6 +498,7 @@ func (s *Storage) CopyObject(
 		meta.UserMetadata = userMetadata
 		meta.SSEAlgorithm = sseAlgorithm
 		meta.SSEKMSKeyID = sseKMSKeyID
+		meta.StorageClass = storageClass
 		meta.Retention = retention
 		meta.LegalHold = legalHold
 		if err := s.writeMeta(dstPath, meta); err != nil {
@@ -519,6 +530,7 @@ func (s *Storage) CopyObject(
 		sseKMSKeyID,
 		retention,
 		legalHold,
+		storageClass,
 	)
 }
 
@@ -1501,6 +1513,7 @@ type uploadMeta struct {
 	Initiated    time.Time        `json:"initiated"`
 	SSEAlgorithm string           `json:"sseAlgorithm,omitempty"`
 	SSEKMSKeyID  string           `json:"sseKmsKeyId,omitempty"`
+	StorageClass string           `json:"storageClass,omitempty"`
 	Retention    *ObjectRetention `json:"retention,omitempty"`
 	LegalHold    *ObjectLegalHold `json:"legalHold,omitempty"`
 }
@@ -1517,6 +1530,7 @@ func (s *Storage) CreateMultipartUpload(
 	bucket, key, contentType, sseAlgorithm, sseKMSKeyID string,
 	retention *ObjectRetention,
 	legalHold *ObjectLegalHold,
+	storageClass string,
 ) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1542,6 +1556,7 @@ func (s *Storage) CreateMultipartUpload(
 		Initiated:    time.Now().UTC(),
 		SSEAlgorithm: sseAlgorithm,
 		SSEKMSKeyID:  sseKMSKeyID,
+		StorageClass: storageClass,
 		Retention:    retention,
 		LegalHold:    legalHold,
 	}
@@ -1836,6 +1851,7 @@ func (s *Storage) CompleteMultipartUpload(
 		umeta.SSEKMSKeyID,
 		umeta.Retention,
 		umeta.LegalHold,
+		umeta.StorageClass,
 	)
 	if err != nil {
 		return ObjectMetadata{}, err
