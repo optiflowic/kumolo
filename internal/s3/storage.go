@@ -463,6 +463,9 @@ func (s *Storage) CopyObject(
 	if !s.bucketExistsLocked(dstBucket) {
 		return ObjectMetadata{}, ErrBucketNotFound
 	}
+	if retention == nil {
+		retention = s.bucketDefaultRetentionLocked(dstBucket)
+	}
 	if userMetadata == nil {
 		userMetadata = srcMeta.UserMetadata
 	}
