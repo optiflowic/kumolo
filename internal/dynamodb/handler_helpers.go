@@ -8,10 +8,7 @@ import (
 	"strings"
 )
 
-// validateSelectCommon validates the Select + ProjectionExpression combination
-// for Scan and Query. It handles ALL_ATTRIBUTES, COUNT, SPECIFIC_ATTRIBUTES,
-// and unknown values. The caller must handle ALL_PROJECTED_ATTRIBUTES separately.
-// Returns false if a validation error was written to w.
+// validateSelectCommon validates Select+ProjectionExpression for Scan/Query; caller handles ALL_PROJECTED_ATTRIBUTES.
 func validateSelectCommon(w http.ResponseWriter, selectVal, projExpr string) bool {
 	switch selectVal {
 	case "", "ALL_PROJECTED_ATTRIBUTES":

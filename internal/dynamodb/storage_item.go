@@ -9,8 +9,7 @@ import (
 	"time"
 )
 
-// isTTLExpired reports whether item has a TTL attribute whose Unix-second value
-// is in the past.  Non-number attributes and missing attributes are ignored.
+// isTTLExpired reports whether item's TTL attribute has a past Unix-second timestamp; non-numeric/missing attrs return false.
 func isTTLExpired(item map[string]any, ttl *TTLSpec) bool {
 	if ttl == nil || !ttl.Enabled || ttl.AttributeName == "" {
 		return false
