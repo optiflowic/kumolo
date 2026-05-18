@@ -8029,7 +8029,10 @@ func TestGetObjectAttributes(t *testing.T) {
 
 	t.Run("returns actual StorageClass for non-STANDARD object", func(t *testing.T) {
 		ro := newTestRouter(t)
-		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/attr-bucket", nil))
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/attr-bucket", nil),
+		)
 		putReq := httptest.NewRequest(
 			http.MethodPut,
 			"/attr-bucket/glacier.txt",
