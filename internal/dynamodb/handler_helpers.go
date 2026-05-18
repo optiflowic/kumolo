@@ -3,9 +3,48 @@ package dynamodb
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 )
+
+// validateSelectCommon validates Select+ProjectionExpression for Scan/Query; caller handles ALL_PROJECTED_ATTRIBUTES.
+func validateSelectCommon(w http.ResponseWriter, selectVal, projExpr string) bool {
+	switch selectVal {
+	case "", "ALL_PROJECTED_ATTRIBUTES":
+		// "" = default (valid); ALL_PROJECTED_ATTRIBUTES = caller-specific logic
+	case "ALL_ATTRIBUTES":
+		if projExpr != "" {
+			writeError(w, http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				"Select type ALL_ATTRIBUTES is not allowed with a ProjectionExpression")
+			return false
+		}
+	case "COUNT":
+		if projExpr != "" {
+			writeError(w, http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				"Select type COUNT is not allowed with a ProjectionExpression")
+			return false
+		}
+	case "SPECIFIC_ATTRIBUTES":
+		if projExpr == "" {
+			writeError(w, http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				"Select type SPECIFIC_ATTRIBUTES is not compatible with the operation specified.")
+			return false
+		}
+	default:
+		writeError(w, http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			fmt.Sprintf(
+				"Value '%s' at 'select' failed to satisfy constraint: Member must satisfy enum value set: [ALL_ATTRIBUTES, ALL_PROJECTED_ATTRIBUTES, SPECIFIC_ATTRIBUTES, COUNT]",
+				selectVal,
+			))
+		return false
+	}
+	return true
+}
 
 // resolveAttrName resolves an expression attribute name reference.
 func resolveAttrName(ref string, attrNames map[string]string) (string, error) {

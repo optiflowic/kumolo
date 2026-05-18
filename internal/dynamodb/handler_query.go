@@ -11,6 +11,7 @@ import (
 func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 	var req struct {
 		TableName                 string            `json:"TableName"`
+		Select                    string            `json:"Select"`
 		FilterExpression          string            `json:"FilterExpression"`
 		ProjectionExpression      string            `json:"ProjectionExpression"`
 		ExpressionAttributeNames  map[string]string `json:"ExpressionAttributeNames"`
@@ -47,6 +48,18 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 				"Value %d at 'limit' failed to satisfy constraint: Member must have value greater than or equal to 1",
 				*req.Limit,
 			),
+		)
+		return
+	}
+	if !validateSelectCommon(w, req.Select, req.ProjectionExpression) {
+		return
+	}
+	if req.Select == "ALL_PROJECTED_ATTRIBUTES" {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"Select ALL_PROJECTED_ATTRIBUTES is not allowed when scanning a table without an index",
 		)
 		return
 	}
@@ -179,6 +192,17 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 		}
 	}
 	slog.Debug("scanned DynamoDB table", "table", req.TableName, "count", len(items))
+	if req.Select == "COUNT" {
+		resp := map[string]any{
+			"Count":        len(items),
+			"ScannedCount": scannedCount,
+		}
+		if lastEvaluatedKey != nil {
+			resp["LastEvaluatedKey"] = lastEvaluatedKey
+		}
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
 	resp := map[string]any{
 		"Items":        items,
 		"Count":        len(items),
@@ -194,6 +218,7 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 	var req struct {
 		TableName                 string            `json:"TableName"`
 		IndexName                 string            `json:"IndexName"`
+		Select                    string            `json:"Select"`
 		KeyConditionExpression    string            `json:"KeyConditionExpression"`
 		FilterExpression          string            `json:"FilterExpression"`
 		ProjectionExpression      string            `json:"ProjectionExpression"`
@@ -247,6 +272,29 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 		return
 	}
 
+	if !validateSelectCommon(w, req.Select, req.ProjectionExpression) {
+		return
+	}
+	if req.Select == "ALL_PROJECTED_ATTRIBUTES" {
+		if req.IndexName == "" {
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				"Select ALL_PROJECTED_ATTRIBUTES is not allowed when querying a table without an index",
+			)
+			return
+		}
+		if req.ProjectionExpression != "" {
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				"Select type ALL_PROJECTED_ATTRIBUTES is not allowed with a ProjectionExpression",
+			)
+			return
+		}
+	}
 	if req.Limit != nil && *req.Limit < 1 {
 		writeError(
 			w,
@@ -350,6 +398,17 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 		}
 	}
 	slog.Debug("queried DynamoDB table", "table", req.TableName, "count", len(items))
+	if req.Select == "COUNT" {
+		resp := map[string]any{
+			"Count":        len(items),
+			"ScannedCount": scannedCount,
+		}
+		if lastEvaluatedKey != nil {
+			resp["LastEvaluatedKey"] = lastEvaluatedKey
+		}
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
 	resp := map[string]any{
 		"Items":        items,
 		"Count":        len(items),

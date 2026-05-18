@@ -5,7 +5,33 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"time"
 )
+
+// isTTLExpired reports whether item's TTL attribute has a past Unix-second timestamp; non-numeric/missing attrs return false.
+func isTTLExpired(item map[string]any, ttl *TTLSpec) bool {
+	if ttl == nil || !ttl.Enabled || ttl.AttributeName == "" {
+		return false
+	}
+	attrVal, ok := item[ttl.AttributeName]
+	if !ok {
+		return false
+	}
+	nMap, ok := attrVal.(map[string]any)
+	if !ok {
+		return false
+	}
+	nStr, ok := nMap["N"].(string)
+	if !ok {
+		return false
+	}
+	expiry, err := strconv.ParseFloat(nStr, 64)
+	if err != nil {
+		return false
+	}
+	return float64(time.Now().Unix()) >= expiry
+}
 
 func (s *Storage) PutItem(
 	tableName string,
@@ -66,6 +92,9 @@ func (s *Storage) GetItem(tableName string, key map[string]any) (map[string]any,
 			return nil, nil
 		}
 		return nil, err
+	}
+	if isTTLExpired(item, meta.TTL) {
+		return nil, nil
 	}
 	return item, nil
 }
@@ -224,6 +253,9 @@ func (s *Storage) BatchGetItems(tableName string, keys []map[string]any) ([]map[
 				continue
 			}
 			return nil, err
+		}
+		if isTTLExpired(item, meta.TTL) {
+			continue
 		}
 		items = append(items, item)
 	}

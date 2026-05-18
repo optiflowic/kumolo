@@ -932,6 +932,111 @@ func TestHandleScan(t *testing.T) {
 		}
 		assert.Len(t, allItems, 6)
 	})
+
+	t.Run("Select COUNT returns Count and ScannedCount without Items", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		for _, pk := range []string{"a", "b", "c"} {
+			require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
+				fmt.Sprintf(`{"TableName":"test-table","Item":{"pk":{"S":%q}}}`, pk)).Code)
+		}
+		w := dynamo(t, ro, "Scan", `{"TableName":"test-table","Select":"COUNT"}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, float64(3), resp["Count"])
+		assert.Equal(t, float64(3), resp["ScannedCount"])
+		assert.Nil(t, resp["Items"])
+	})
+
+	t.Run(
+		"Select COUNT with FilterExpression returns different Count and ScannedCount",
+		func(t *testing.T) {
+			ro := newTestRouter(t)
+			require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+			for _, pk := range []string{"a", "b", "c"} {
+				require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
+					fmt.Sprintf(`{"TableName":"test-table","Item":{"pk":{"S":%q}}}`, pk)).Code)
+			}
+			w := dynamo(t, ro, "Scan", `{
+				"TableName": "test-table",
+				"Select": "COUNT",
+				"FilterExpression": "pk = :v",
+				"ExpressionAttributeValues": {":v": {"S": "a"}}
+			}`)
+			require.Equal(t, http.StatusOK, w.Code)
+			var resp map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+			assert.Equal(t, float64(1), resp["Count"])
+			assert.Equal(t, float64(3), resp["ScannedCount"])
+			assert.Nil(t, resp["Items"])
+		},
+	)
+
+	t.Run("400 for Select SPECIFIC_ATTRIBUTES without ProjectionExpression", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "Scan", `{"TableName":"test-table","Select":"SPECIFIC_ATTRIBUTES"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("400 for Select ALL_PROJECTED_ATTRIBUTES on table without index", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "Scan", `{"TableName":"test-table","Select":"ALL_PROJECTED_ATTRIBUTES"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("400 for invalid Select value", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "Scan", `{"TableName":"test-table","Select":"INVALID"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("400 for Select ALL_ATTRIBUTES with ProjectionExpression", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "Scan", `{
+			"TableName": "test-table",
+			"Select": "ALL_ATTRIBUTES",
+			"ProjectionExpression": "pk"
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("400 for Select COUNT with ProjectionExpression", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "Scan", `{
+			"TableName": "test-table",
+			"Select": "COUNT",
+			"ProjectionExpression": "pk"
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("Select COUNT with Limit returns LastEvaluatedKey", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		for _, pk := range []string{"a", "b", "c"} {
+			require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
+				fmt.Sprintf(`{"TableName":"test-table","Item":{"pk":{"S":%q}}}`, pk)).Code)
+		}
+		w := dynamo(t, ro, "Scan", `{"TableName":"test-table","Select":"COUNT","Limit":2}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, float64(2), resp["Count"])
+		assert.Equal(t, float64(2), resp["ScannedCount"])
+		assert.NotNil(t, resp["LastEvaluatedKey"])
+		assert.Nil(t, resp["Items"])
+	})
 }
 
 func TestUnknownOperation(t *testing.T) {
@@ -1942,6 +2047,141 @@ func TestHandleQuery(t *testing.T) {
         }`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("Select COUNT returns Count and ScannedCount without Items", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"a"}}}`).Code)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"b"}}}`).Code)
+		w := dynamo(t, ro, "Query", `{
+            "TableName": "test-table",
+            "Select": "COUNT",
+            "KeyConditionExpression": "pk = :pk",
+            "ExpressionAttributeValues": {":pk": {"S": "a"}}
+        }`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, float64(1), resp["Count"])
+		assert.Equal(t, float64(1), resp["ScannedCount"])
+		assert.Nil(t, resp["Items"])
+	})
+
+	t.Run("400 for Select SPECIFIC_ATTRIBUTES without ProjectionExpression", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "Query", `{
+            "TableName": "test-table",
+            "Select": "SPECIFIC_ATTRIBUTES",
+            "KeyConditionExpression": "pk = :pk",
+            "ExpressionAttributeValues": {":pk": {"S": "a"}}
+        }`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("400 for Select ALL_PROJECTED_ATTRIBUTES without IndexName", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "Query", `{
+            "TableName": "test-table",
+            "Select": "ALL_PROJECTED_ATTRIBUTES",
+            "KeyConditionExpression": "pk = :pk",
+            "ExpressionAttributeValues": {":pk": {"S": "a"}}
+        }`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("400 for invalid Select value", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "Query", `{
+            "TableName": "test-table",
+            "Select": "INVALID",
+            "KeyConditionExpression": "pk = :pk",
+            "ExpressionAttributeValues": {":pk": {"S": "a"}}
+        }`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("400 for Select ALL_ATTRIBUTES with ProjectionExpression", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "Query", `{
+            "TableName": "test-table",
+            "Select": "ALL_ATTRIBUTES",
+            "ProjectionExpression": "pk",
+            "KeyConditionExpression": "pk = :pk",
+            "ExpressionAttributeValues": {":pk": {"S": "a"}}
+        }`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("400 for Select COUNT with ProjectionExpression", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "Query", `{
+            "TableName": "test-table",
+            "Select": "COUNT",
+            "ProjectionExpression": "pk",
+            "KeyConditionExpression": "pk = :pk",
+            "ExpressionAttributeValues": {":pk": {"S": "a"}}
+        }`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("Select ALL_PROJECTED_ATTRIBUTES with valid IndexName returns 200", func(t *testing.T) {
+		ro := setupGSITable(t)
+		w := dynamo(t, ro, "Query", `{
+            "TableName": "gsi-table",
+            "IndexName": "gsi-index",
+            "Select": "ALL_PROJECTED_ATTRIBUTES",
+            "KeyConditionExpression": "gsi_pk = :pk",
+            "ExpressionAttributeValues": {":pk": {"S": "g1"}}
+        }`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, float64(2), resp["Count"])
+	})
+
+	t.Run("400 for Select ALL_PROJECTED_ATTRIBUTES with ProjectionExpression", func(t *testing.T) {
+		ro := setupGSITable(t)
+		w := dynamo(t, ro, "Query", `{
+            "TableName": "gsi-table",
+            "IndexName": "gsi-index",
+            "Select": "ALL_PROJECTED_ATTRIBUTES",
+            "ProjectionExpression": "pk",
+            "KeyConditionExpression": "gsi_pk = :pk",
+            "ExpressionAttributeValues": {":pk": {"S": "g1"}}
+        }`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("Select COUNT with Limit returns LastEvaluatedKey", func(t *testing.T) {
+		ro := setupSkTable(t)
+		w := dynamo(t, ro, "Query", `{
+            "TableName": "sk-table",
+            "Select": "COUNT",
+            "KeyConditionExpression": "pk = :pk",
+            "ExpressionAttributeValues": {":pk": {"S": "p"}},
+            "Limit": 2
+        }`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, float64(2), resp["Count"])
+		assert.Equal(t, float64(2), resp["ScannedCount"])
+		assert.NotNil(t, resp["LastEvaluatedKey"])
+		assert.Nil(t, resp["Items"])
 	})
 }
 
