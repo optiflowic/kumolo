@@ -505,6 +505,19 @@ func (ro *Router) handleCompleteMultipartUpload(
 				"InvalidPartOrder",
 				"The list of parts was not in ascending order.",
 			)
+		case errors.Is(err, ErrEntityTooSmall):
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"part too small",
+				"uploadId",
+				uploadID,
+			)
+			writeError(
+				w,
+				r,
+				http.StatusBadRequest,
+				"EntityTooSmall",
+				"Your proposed upload is smaller than the minimum allowed size.",
+			)
 		case errors.Is(err, ErrBucketNotFound):
 			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
 				"bucket not found",

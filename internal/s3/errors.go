@@ -22,6 +22,7 @@ var (
 	ErrObjectLocked        = errors.New("object is protected by Object Lock")
 	ErrObjectAlreadyExists = errors.New("object already exists")
 	ErrInvalidBucketState  = errors.New("invalid bucket state")
+	ErrEntityTooSmall      = errors.New("part too small")
 )
 
 // DeleteMarkerError is returned when a get/head operation resolves to a delete marker.

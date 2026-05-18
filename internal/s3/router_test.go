@@ -2722,7 +2722,9 @@ func TestRouterMultipartUpload(t *testing.T) {
 		ro, path := setup(t)
 		uploadID := initiateUpload(t, ro, path)
 
-		etag1 := uploadPart(t, ro, path, uploadID, 1, "hello ")
+		// Part 1 must be >= 5 MiB; part 2 (final) may be any size.
+		part1Data := strings.Repeat("x", minPartSize) + "hello "
+		etag1 := uploadPart(t, ro, path, uploadID, 1, part1Data)
 		etag2 := uploadPart(t, ro, path, uploadID, 2, "world")
 
 		w := completeUpload(t, ro, path, uploadID, []xmlCompletePart{
@@ -2736,7 +2738,7 @@ func TestRouterMultipartUpload(t *testing.T) {
 		getW := httptest.NewRecorder()
 		ro.ServeHTTP(getW, getReq)
 		assert.Equal(t, http.StatusOK, getW.Code)
-		assert.Equal(t, "hello world", getW.Body.String())
+		assert.Equal(t, part1Data+"world", getW.Body.String())
 	})
 
 	t.Run("CreateMultipartUpload returns 404 for missing bucket", func(t *testing.T) {

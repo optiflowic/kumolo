@@ -1770,6 +1770,9 @@ func (s *Storage) CompleteMultipartUpload(
 		if pm.ETag != p.ETag {
 			return ObjectMetadata{}, ErrInvalidPart
 		}
+		if i < len(parts)-1 && pm.Size < minPartSize {
+			return ObjectMetadata{}, ErrEntityTooSmall
+		}
 	}
 	// Open all part files and assemble via io.MultiReader.
 	files := make([]*os.File, 0, len(parts))
