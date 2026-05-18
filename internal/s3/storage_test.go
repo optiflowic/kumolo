@@ -1521,6 +1521,7 @@ func TestCopyObject(t *testing.T) {
 					"",
 					nil,
 					nil,
+					"",
 				)
 				require.NoError(t, err)
 
@@ -1536,6 +1537,7 @@ func TestCopyObject(t *testing.T) {
 					"",
 					nil,
 					nil,
+					"",
 				)
 				require.NoError(t, err)
 
@@ -1561,6 +1563,7 @@ func TestCopyObject(t *testing.T) {
 					"",
 					nil,
 					nil,
+					"",
 				)
 				require.NoError(t, err)
 
@@ -1580,6 +1583,7 @@ func TestCopyObject(t *testing.T) {
 					"",
 					explicit,
 					nil,
+					"",
 				)
 				require.NoError(t, err)
 
@@ -1605,6 +1609,7 @@ func TestCopyObject(t *testing.T) {
 						"",
 						nil,
 						nil,
+						"",
 					)
 					require.NoError(t, err)
 
