@@ -2330,11 +2330,12 @@ func parseBucketDefaultRetention(xmlBody string, now time.Time) *ObjectRetention
 }
 
 // bucketDefaultRetentionLocked returns the bucket-level default ObjectRetention,
-// or nil if none is configured. Caller must hold at least a read lock.
+// or nil if none is configured or the meta file cannot be read. Caller must
+// hold at least a read lock.
 func (s *Storage) bucketDefaultRetentionLocked(bucket string) *ObjectRetention {
 	meta, err := s.readBucketMeta(bucket)
 	if err != nil {
-		return nil
+		return nil // silently return nil on read error; bucket was just confirmed to exist
 	}
 	return parseBucketDefaultRetention(meta.ObjectLock, s.now())
 }

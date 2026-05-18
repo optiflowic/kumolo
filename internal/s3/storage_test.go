@@ -3966,6 +3966,13 @@ func TestBucketConfigStorage(t *testing.T) {
 				wantMode:  "GOVERNANCE",
 				wantUntil: now.AddDate(2, 0, 0),
 			},
+			{
+				name:      "Days and Years both set — Days wins",
+				xml:       `<ObjectLockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>COMPLIANCE</Mode><Days>7</Days><Years>1</Years></DefaultRetention></Rule></ObjectLockConfiguration>`,
+				wantNil:   false,
+				wantMode:  "COMPLIANCE",
+				wantUntil: now.AddDate(0, 0, 7),
+			},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
