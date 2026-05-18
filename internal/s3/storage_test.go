@@ -2002,7 +2002,9 @@ func TestMultipartUpload(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotEmpty(t, uploadID)
 
-		etag1, err := s.UploadPart(uploadID, 1, strings.NewReader("hello "))
+		// Part 1 must be >= 5 MiB (AWS minimum for non-final parts).
+		part1Data := strings.Repeat("x", minPartSize) + "hello "
+		etag1, err := s.UploadPart(uploadID, 1, strings.NewReader(part1Data))
 		require.NoError(t, err)
 		assert.NotEmpty(t, etag1)
 
@@ -2022,7 +2024,7 @@ func TestMultipartUpload(t *testing.T) {
 		defer func() { _ = f.Close() }()
 		data, err := io.ReadAll(f)
 		require.NoError(t, err)
-		assert.Equal(t, "hello world", string(data))
+		assert.Equal(t, part1Data+"world", string(data))
 	})
 
 	t.Run("abort cleans up temp files", func(t *testing.T) {
@@ -2118,7 +2120,9 @@ func TestMultipartUpload(t *testing.T) {
 		require.NoError(t, err)
 		etag1, err := s.UploadPart(uploadID, 1, strings.NewReader("a"))
 		require.NoError(t, err)
-		etag2, err := s.UploadPart(uploadID, 2, strings.NewReader("b"))
+		// Part 2 must be >= 5 MiB so the size check on the non-final submitted part
+		// does not fire before the order check validates {2, 1} as descending.
+		etag2, err := s.UploadPart(uploadID, 2, strings.NewReader(strings.Repeat("b", minPartSize)))
 		require.NoError(t, err)
 		_, err = s.CompleteMultipartUpload(uploadID, []CompletePart{
 			{PartNumber: 2, ETag: etag2},
@@ -2164,6 +2168,76 @@ func TestMultipartUpload(t *testing.T) {
 		})
 		assert.ErrorIs(t, err, ErrInvalidPart)
 	})
+
+	t.Run("complete returns ErrEntityTooSmall for non-final part below 5MiB", func(t *testing.T) {
+		s, _ := setup(t)
+		uploadID, err := s.CreateMultipartUpload(
+			"my-bucket",
+			"big.txt",
+			"text/plain",
+			"",
+			"",
+			nil,
+			nil,
+		)
+		require.NoError(t, err)
+		etag1, err := s.UploadPart(uploadID, 1, strings.NewReader("small")) // < 5 MiB
+		require.NoError(t, err)
+		etag2, err := s.UploadPart(uploadID, 2, strings.NewReader("last"))
+		require.NoError(t, err)
+		_, err = s.CompleteMultipartUpload(uploadID, []CompletePart{
+			{PartNumber: 1, ETag: etag1},
+			{PartNumber: 2, ETag: etag2},
+		})
+		assert.ErrorIs(t, err, ErrEntityTooSmall)
+	})
+
+	t.Run("complete allows single part below 5MiB", func(t *testing.T) {
+		s, _ := setup(t)
+		uploadID, err := s.CreateMultipartUpload(
+			"my-bucket",
+			"small.txt",
+			"text/plain",
+			"",
+			"",
+			nil,
+			nil,
+		)
+		require.NoError(t, err)
+		etag, err := s.UploadPart(uploadID, 1, strings.NewReader("tiny"))
+		require.NoError(t, err)
+		_, err = s.CompleteMultipartUpload(uploadID, []CompletePart{
+			{PartNumber: 1, ETag: etag},
+		})
+		assert.NoError(t, err)
+	})
+
+	t.Run(
+		"complete allows final part below 5MiB when preceding parts are large enough",
+		func(t *testing.T) {
+			s, _ := setup(t)
+			uploadID, err := s.CreateMultipartUpload(
+				"my-bucket",
+				"mixed.txt",
+				"text/plain",
+				"",
+				"",
+				nil,
+				nil,
+			)
+			require.NoError(t, err)
+			bigPart := strings.NewReader(strings.Repeat("x", minPartSize))
+			etag1, err := s.UploadPart(uploadID, 1, bigPart)
+			require.NoError(t, err)
+			etag2, err := s.UploadPart(uploadID, 2, strings.NewReader("last-small"))
+			require.NoError(t, err)
+			_, err = s.CompleteMultipartUpload(uploadID, []CompletePart{
+				{PartNumber: 1, ETag: etag1},
+				{PartNumber: 2, ETag: etag2},
+			})
+			assert.NoError(t, err)
+		},
+	)
 
 	t.Run("abort returns ErrUploadNotFound for unknown uploadId", func(t *testing.T) {
 		s, _ := setup(t)
@@ -2860,7 +2934,11 @@ func TestMultipartUpload(t *testing.T) {
 				nil,
 			)
 			require.NoError(t, err)
-			etag1, err := s.UploadPart(uploadID, 1, strings.NewReader("hello "))
+			etag1, err := s.UploadPart(
+				uploadID,
+				1,
+				strings.NewReader(strings.Repeat("x", minPartSize)),
+			)
 			require.NoError(t, err)
 			etag2, err := s.UploadPart(uploadID, 2, strings.NewReader("world"))
 			require.NoError(t, err)

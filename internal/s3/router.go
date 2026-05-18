@@ -54,6 +54,7 @@ const (
 
 	presignedURLMaxExpiry = 7 * 24 * 60 * 60 // 604800 seconds; AWS S3 maximum
 	maxPartNumber         = 10000            // AWS S3 maximum part number
+	minPartSize           = 5 * 1024 * 1024  // 5 MiB; AWS S3 minimum non-final part size
 )
 
 // Router handles S3 API requests using path-style URLs: /<bucket>/<key>
