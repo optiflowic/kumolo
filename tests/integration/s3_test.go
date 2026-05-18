@@ -135,7 +135,9 @@ func TestS3MultipartUpload(t *testing.T) {
 
 	t.Run("CompleteRoundtrip", func(t *testing.T) {
 		const key = "multipart-object"
-		parts := []string{"part-one-data", "part-two-data", "part-three-data"}
+		// Non-final parts must be >= 5 MiB; only the last part may be smaller.
+		bigPart := strings.Repeat("x", 5*1024*1024)
+		parts := []string{bigPart, bigPart, "part-three-data"}
 		want := strings.Join(parts, "")
 
 		createOut, err := clients.s3.CreateMultipartUpload(ctx, &awss3.CreateMultipartUploadInput{
@@ -362,6 +364,9 @@ func TestS3MultipartUpload(t *testing.T) {
 			})
 		})
 
+		// Parts must be >= 5 MiB so the order check fires before the size check
+		// when submitting them in descending order below.
+		bigPart := strings.Repeat("x", 5*1024*1024)
 		var etags [2]string
 		for i := range etags {
 			upOut, err := clients.s3.UploadPart(ctx, &awss3.UploadPartInput{
@@ -369,7 +374,7 @@ func TestS3MultipartUpload(t *testing.T) {
 				Key:        aws.String(key),
 				UploadId:   aws.String(uploadID),
 				PartNumber: aws.Int32(int32(i + 1)),
-				Body:       strings.NewReader("data"),
+				Body:       strings.NewReader(bigPart),
 			})
 			require.NoError(t, err)
 			etags[i] = aws.ToString(upOut.ETag)
@@ -403,6 +408,8 @@ func TestS3MultipartUpload(t *testing.T) {
 		require.NoError(t, err)
 		uploadID := aws.ToString(createOut.UploadId)
 
+		// Part 1 (non-final) must be >= 5 MiB.
+		partBodies := []string{strings.Repeat("x", 5*1024*1024), "part data"}
 		var completedParts []s3types.CompletedPart
 		for i := 0; i < numParts; i++ {
 			upOut, err := clients.s3.UploadPart(ctx, &awss3.UploadPartInput{
@@ -410,7 +417,7 @@ func TestS3MultipartUpload(t *testing.T) {
 				Key:        aws.String(key),
 				UploadId:   aws.String(uploadID),
 				PartNumber: aws.Int32(int32(i + 1)),
-				Body:       strings.NewReader("part data"),
+				Body:       strings.NewReader(partBodies[i]),
 			})
 			require.NoError(t, err)
 			completedParts = append(completedParts, s3types.CompletedPart{
