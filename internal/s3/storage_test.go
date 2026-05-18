@@ -3922,6 +3922,233 @@ func TestBucketConfigStorage(t *testing.T) {
 		)
 	})
 
+	t.Run("parseBucketDefaultRetention", func(t *testing.T) {
+		now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+
+		cases := []struct {
+			name      string
+			xml       string
+			wantNil   bool
+			wantMode  string
+			wantUntil time.Time
+		}{
+			{
+				name:    "empty string",
+				xml:     "",
+				wantNil: true,
+			},
+			{
+				name:    "no Rule element",
+				xml:     `<ObjectLockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ObjectLockEnabled>Enabled</ObjectLockEnabled></ObjectLockConfiguration>`,
+				wantNil: true,
+			},
+			{
+				name:    "invalid XML",
+				xml:     `not-xml`,
+				wantNil: true,
+			},
+			{
+				name:    "Days=0 and Years=0",
+				xml:     `<ObjectLockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>COMPLIANCE</Mode></DefaultRetention></Rule></ObjectLockConfiguration>`,
+				wantNil: true,
+			},
+			{
+				name:    "invalid mode",
+				xml:     `<ObjectLockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>INVALID</Mode><Days>1</Days></DefaultRetention></Rule></ObjectLockConfiguration>`,
+				wantNil: true,
+			},
+			{
+				name:      "COMPLIANCE mode with Days",
+				xml:       `<ObjectLockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>COMPLIANCE</Mode><Days>10</Days></DefaultRetention></Rule></ObjectLockConfiguration>`,
+				wantNil:   false,
+				wantMode:  "COMPLIANCE",
+				wantUntil: now.AddDate(0, 0, 10),
+			},
+			{
+				name:      "GOVERNANCE mode with Years",
+				xml:       `<ObjectLockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>GOVERNANCE</Mode><Years>2</Years></DefaultRetention></Rule></ObjectLockConfiguration>`,
+				wantNil:   false,
+				wantMode:  "GOVERNANCE",
+				wantUntil: now.AddDate(2, 0, 0),
+			},
+			{
+				name:      "Days and Years both set — Days wins",
+				xml:       `<ObjectLockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>COMPLIANCE</Mode><Days>7</Days><Years>1</Years></DefaultRetention></Rule></ObjectLockConfiguration>`,
+				wantNil:   false,
+				wantMode:  "COMPLIANCE",
+				wantUntil: now.AddDate(0, 0, 7),
+			},
+			{
+				name:    "Days exceeds maximum (36500) — treated as invalid",
+				xml:     `<ObjectLockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>COMPLIANCE</Mode><Days>36501</Days></DefaultRetention></Rule></ObjectLockConfiguration>`,
+				wantNil: true,
+			},
+			{
+				name:    "Years exceeds maximum (100) — treated as invalid",
+				xml:     `<ObjectLockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>GOVERNANCE</Mode><Years>101</Years></DefaultRetention></Rule></ObjectLockConfiguration>`,
+				wantNil: true,
+			},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				got := parseBucketDefaultRetention(tc.xml, now)
+				if tc.wantNil {
+					assert.Nil(t, got)
+					return
+				}
+				require.NotNil(t, got)
+				assert.Equal(t, tc.wantMode, got.Mode)
+				assert.True(
+					t,
+					tc.wantUntil.Equal(got.RetainUntilDate),
+					"retain until: got %v want %v",
+					got.RetainUntilDate,
+					tc.wantUntil,
+				)
+			})
+		}
+	})
+
+	t.Run(
+		"PutObject applies bucket default retention when no explicit retention",
+		func(t *testing.T) {
+			const defaultRetentionXML = `<ObjectLockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>COMPLIANCE</Mode><Days>5</Days></DefaultRetention></Rule></ObjectLockConfiguration>`
+			now := time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)
+
+			t.Run("applies default retention when retention is nil", func(t *testing.T) {
+				s, bucket := setup(t)
+				s.now = func() time.Time { return now }
+				require.NoError(t, s.PutBucketVersioning(bucket, "Enabled"))
+				require.NoError(t, s.PutBucketObjectLock(bucket, defaultRetentionXML))
+
+				_, err := s.PutObject(
+					bucket,
+					"key",
+					strings.NewReader("data"),
+					"text/plain",
+					nil,
+					"",
+					"",
+					nil,
+					nil,
+				)
+				require.NoError(t, err)
+
+				ret, err := s.GetObjectRetention(bucket, "key", "")
+				require.NoError(t, err)
+				assert.Equal(t, "COMPLIANCE", ret.Mode)
+				assert.True(t, now.AddDate(0, 0, 5).Equal(ret.RetainUntilDate))
+			})
+
+			t.Run(
+				"explicit retention header takes precedence over bucket default",
+				func(t *testing.T) {
+					s, bucket := setup(t)
+					s.now = func() time.Time { return now }
+					require.NoError(t, s.PutBucketVersioning(bucket, "Enabled"))
+					require.NoError(t, s.PutBucketObjectLock(bucket, defaultRetentionXML))
+
+					explicit := &ObjectRetention{
+						Mode:            "GOVERNANCE",
+						RetainUntilDate: now.AddDate(0, 0, 30),
+					}
+					_, err := s.PutObject(
+						bucket,
+						"key",
+						strings.NewReader("data"),
+						"text/plain",
+						nil,
+						"",
+						"",
+						explicit,
+						nil,
+					)
+					require.NoError(t, err)
+
+					ret, err := s.GetObjectRetention(bucket, "key", "")
+					require.NoError(t, err)
+					assert.Equal(t, "GOVERNANCE", ret.Mode)
+					assert.True(t, now.AddDate(0, 0, 30).Equal(ret.RetainUntilDate))
+				},
+			)
+
+			t.Run(
+				"no default retention configured leaves object without retention",
+				func(t *testing.T) {
+					s, bucket := setup(t)
+					_, err := s.PutObject(
+						bucket,
+						"key",
+						strings.NewReader("data"),
+						"text/plain",
+						nil,
+						"",
+						"",
+						nil,
+						nil,
+					)
+					require.NoError(t, err)
+					_, err = s.GetObjectRetention(bucket, "key", "")
+					assert.ErrorIs(t, err, ErrNoObjectRetention)
+				},
+			)
+		},
+	)
+
+	t.Run(
+		"PutObjectIfNotExists applies bucket default retention when no explicit retention",
+		func(t *testing.T) {
+			const defaultRetentionXML = `<ObjectLockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>GOVERNANCE</Mode><Years>1</Years></DefaultRetention></Rule></ObjectLockConfiguration>`
+			now := time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)
+
+			s, bucket := setup(t)
+			s.now = func() time.Time { return now }
+			require.NoError(t, s.PutBucketVersioning(bucket, "Enabled"))
+			require.NoError(t, s.PutBucketObjectLock(bucket, defaultRetentionXML))
+
+			_, err := s.PutObjectIfNotExists(
+				bucket,
+				"key",
+				strings.NewReader("data"),
+				"text/plain",
+				nil,
+				"",
+				"",
+				nil,
+				nil,
+			)
+			require.NoError(t, err)
+
+			ret, err := s.GetObjectRetention(bucket, "key", "")
+			require.NoError(t, err)
+			assert.Equal(t, "GOVERNANCE", ret.Mode)
+			assert.True(t, now.AddDate(1, 0, 0).Equal(ret.RetainUntilDate))
+		},
+	)
+
+	t.Run(
+		"CreateMultipartUpload applies bucket default retention when no explicit retention",
+		func(t *testing.T) {
+			const defaultRetentionXML = `<ObjectLockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>COMPLIANCE</Mode><Days>3</Days></DefaultRetention></Rule></ObjectLockConfiguration>`
+			now := time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)
+
+			s, bucket := setup(t)
+			s.now = func() time.Time { return now }
+			require.NoError(t, s.PutBucketVersioning(bucket, "Enabled"))
+			require.NoError(t, s.PutBucketObjectLock(bucket, defaultRetentionXML))
+
+			uploadID, err := s.CreateMultipartUpload(bucket, "key", "text/plain", "", "", nil, nil)
+			require.NoError(t, err)
+
+			// Read the stored upload meta to verify retention was applied.
+			umeta, err := s.readUploadMeta(uploadID)
+			require.NoError(t, err)
+			require.NotNil(t, umeta.Retention)
+			assert.Equal(t, "COMPLIANCE", umeta.Retention.Mode)
+			assert.True(t, now.AddDate(0, 0, 3).Equal(umeta.Retention.RetainUntilDate))
+		},
+	)
+
 	// Error path tests via injectable helpers (use PublicAccessBlock as representative).
 	t.Run("put error paths", func(t *testing.T) {
 		t.Run("Put returns error when meta read fails", func(t *testing.T) {

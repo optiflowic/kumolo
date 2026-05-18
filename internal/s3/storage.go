@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"hash"
@@ -204,6 +205,9 @@ func (s *Storage) PutObject(
 	if !s.bucketExistsLocked(bucket) {
 		return ObjectMetadata{}, ErrBucketNotFound
 	}
+	if retention == nil {
+		retention = s.bucketDefaultRetentionLocked(bucket)
+	}
 
 	objPath := filepath.Join(bucket, key)
 	if dir := filepath.Dir(objPath); dir != bucket {
@@ -254,6 +258,9 @@ func (s *Storage) PutObjectIfNotExists(
 	defer s.mu.Unlock()
 	if !s.bucketExistsLocked(bucket) {
 		return ObjectMetadata{}, ErrBucketNotFound
+	}
+	if retention == nil {
+		retention = s.bucketDefaultRetentionLocked(bucket)
 	}
 
 	objPath := filepath.Join(bucket, key)
@@ -1516,6 +1523,9 @@ func (s *Storage) CreateMultipartUpload(
 	if !s.bucketExistsLocked(bucket) {
 		return "", ErrBucketNotFound
 	}
+	if retention == nil {
+		retention = s.bucketDefaultRetentionLocked(bucket)
+	}
 	var b [16]byte
 	if _, err := s.randRead(b[:]); err != nil {
 		return "", fmt.Errorf("generate upload ID: %w", err)
@@ -2281,4 +2291,54 @@ func (s *Storage) verDirIsEmpty(verDir string) bool {
 		}
 	}
 	return true
+}
+
+// parseBucketDefaultRetention parses a stored ObjectLockConfiguration XML and
+// returns the computed ObjectRetention if a DefaultRetention rule is present.
+// Returns nil when no rule is configured or the XML is unparseable.
+func parseBucketDefaultRetention(xmlBody string, now time.Time) *ObjectRetention {
+	if xmlBody == "" {
+		return nil
+	}
+	var cfg struct {
+		Rule *struct {
+			DefaultRetention *struct {
+				Mode  string `xml:"Mode"`
+				Days  int    `xml:"Days"`
+				Years int    `xml:"Years"`
+			} `xml:"DefaultRetention"`
+		} `xml:"Rule"`
+	}
+	if err := xml.Unmarshal([]byte(xmlBody), &cfg); err != nil || cfg.Rule == nil ||
+		cfg.Rule.DefaultRetention == nil {
+		return nil
+	}
+	dr := cfg.Rule.DefaultRetention
+	if dr.Mode != "GOVERNANCE" && dr.Mode != "COMPLIANCE" {
+		return nil
+	}
+	// Clamp to AWS-documented limits (Days: 1–36500, Years: 1–100) to prevent
+	// pathologically large values from producing nonsensical retention dates.
+	const maxDays, maxYears = 36500, 100
+	var retainUntil time.Time
+	switch {
+	case dr.Days > 0 && dr.Days <= maxDays:
+		retainUntil = now.UTC().AddDate(0, 0, dr.Days)
+	case dr.Years > 0 && dr.Years <= maxYears:
+		retainUntil = now.UTC().AddDate(dr.Years, 0, 0)
+	default:
+		return nil
+	}
+	return &ObjectRetention{Mode: dr.Mode, RetainUntilDate: retainUntil}
+}
+
+// bucketDefaultRetentionLocked returns the bucket-level default ObjectRetention,
+// or nil if none is configured or the meta file cannot be read. Caller must
+// hold at least a read lock.
+func (s *Storage) bucketDefaultRetentionLocked(bucket string) *ObjectRetention {
+	meta, err := s.readBucketMeta(bucket)
+	if err != nil {
+		return nil // silently return nil on read error; bucket was just confirmed to exist
+	}
+	return parseBucketDefaultRetention(meta.ObjectLock, s.now())
 }
