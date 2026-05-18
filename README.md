@@ -76,81 +76,13 @@ The same pattern applies to DynamoDB, STS, and other supported services.
 
 ## Supported Services
 
-### S3
+| Service      | Operations |
+|--------------|------------|
+| **S3**       | Bucket CRUD, Object CRUD, Multipart Upload, Versioning, Tagging, CORS, Policy, Lifecycle, ACL, Encryption, Object Lock, and more |
+| **DynamoDB** | Table CRUD, Item operations (Get/Put/Delete/Update), Query, Scan, Batch operations, Transactions, TTL, Tags, Kinesis streaming destinations |
+| **STS**      | GetCallerIdentity, AssumeRole, GetSessionToken |
 
-**Bucket operations**
-
-| Operation | Notes |
-|-----------|-------|
-| ListBuckets | |
-| CreateBucket | |
-| HeadBucket | |
-| DeleteBucket | |
-| GetBucketLocation | |
-| GetBucketVersioning / PutBucketVersioning | |
-| GetBucketPolicy / PutBucketPolicy / DeleteBucketPolicy | |
-| GetBucketTagging / PutBucketTagging / DeleteBucketTagging | |
-| GetBucketCors / PutBucketCors / DeleteBucketCors | |
-| GetBucketAcl / PutBucketAcl | |
-| GetBucketPublicAccessBlock / PutBucketPublicAccessBlock / DeleteBucketPublicAccessBlock | |
-| GetBucketEncryption / PutBucketEncryption / DeleteBucketEncryption | |
-| GetBucketOwnershipControls / PutBucketOwnershipControls / DeleteBucketOwnershipControls | |
-| GetBucketNotificationConfiguration / PutBucketNotificationConfiguration | |
-| GetBucketLifecycleConfiguration / PutBucketLifecycleConfiguration / DeleteBucketLifecycleConfiguration | |
-| GetBucketWebsite / PutBucketWebsite / DeleteBucketWebsite | |
-| GetBucketLogging / PutBucketLogging | |
-| GetBucketAccelerateConfiguration / PutBucketAccelerateConfiguration | |
-| GetBucketReplication / PutBucketReplication / DeleteBucketReplication | |
-| GetBucketRequestPayment / PutBucketRequestPayment | |
-| GetBucketObjectLockConfiguration / PutBucketObjectLockConfiguration | |
-| ListObjectsV1 / ListObjectsV2 | |
-| ListObjectVersions | |
-| ListMultipartUploads | |
-| DeleteObjects | |
-
-**Object operations**
-
-| Operation | Notes |
-|-----------|-------|
-| GetObject | Range requests, conditional GET (If-Match, If-None-Match, If-Modified-Since, If-Unmodified-Since) |
-| PutObject | SSE, Object Lock, storage class, checksums (CRC32, SHA256, SHA1, CRC32C), conditional write (If-None-Match) |
-| HeadObject | |
-| DeleteObject | |
-| CopyObject | COPY/REPLACE metadata directive, SSE, Object Lock |
-| GetObjectAcl / PutObjectAcl | |
-| GetObjectTagging / PutObjectTagging / DeleteObjectTagging | |
-| GetObjectRetention / PutObjectRetention | GOVERNANCE and COMPLIANCE modes |
-| GetObjectLegalHold / PutObjectLegalHold | |
-| GetObjectAttributes | |
-| RestoreObject | GLACIER and DEEP_ARCHIVE |
-| CreateMultipartUpload / UploadPart / UploadPartCopy / CompleteMultipartUpload / AbortMultipartUpload | |
-| ListParts | |
-
-### DynamoDB
-
-| Operation | Notes |
-|-----------|-------|
-| CreateTable / DeleteTable / DescribeTable / ListTables | |
-| UpdateTable | |
-| PutItem / GetItem / DeleteItem / UpdateItem | |
-| BatchGetItem / BatchWriteItem | |
-| Query | |
-| Scan | |
-| TransactGetItems / TransactWriteItems | |
-| UpdateTimeToLive / DescribeTimeToLive | TTL expiry enforced on read |
-| TagResource / UntagResource / ListTagsOfResource | |
-| DescribeContinuousBackups / UpdateContinuousBackups | |
-| DescribeKinesisStreamingDestination / EnableKinesisStreamingDestination / DisableKinesisStreamingDestination | |
-| DescribeLimits | |
-| DescribeEndpoints | |
-
-### STS
-
-| Operation | Notes |
-|-----------|-------|
-| GetCallerIdentity | |
-| AssumeRole | |
-| GetSessionToken | |
+For the full list of supported operations, see the [documentation](https://optiflowic.github.io/kumolo).
 
 ## Configuration
 
