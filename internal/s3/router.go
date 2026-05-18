@@ -367,12 +367,16 @@ func (ro *Router) handleListObjects(w http.ResponseWriter, r *http.Request, buck
 			isTruncated = true
 			break
 		}
+		sc := obj.Metadata.StorageClass
+		if sc == "" {
+			sc = "STANDARD"
+		}
 		contents = append(contents, xmlObjectContent{
 			Key:          obj.Key,
 			LastModified: obj.Metadata.LastModified.UTC(),
 			ETag:         obj.Metadata.ETag,
 			Size:         obj.Metadata.Size,
-			StorageClass: "STANDARD",
+			StorageClass: sc,
 		})
 		nextMarker = obj.Key
 	}
@@ -514,12 +518,16 @@ func (ro *Router) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 			isTruncated = true
 			break
 		}
+		sc := obj.Metadata.StorageClass
+		if sc == "" {
+			sc = "STANDARD"
+		}
 		content := xmlObjectContent{
 			Key:          obj.Key,
 			LastModified: obj.Metadata.LastModified.UTC(),
 			ETag:         obj.Metadata.ETag,
 			Size:         obj.Metadata.Size,
-			StorageClass: "STANDARD",
+			StorageClass: sc,
 		}
 		if fetchOwner {
 			content.Owner = &xmlOwner{ID: "owner", DisplayName: "owner"}
@@ -1555,10 +1563,14 @@ func (ro *Router) handleListMultipartUploads(
 	)
 	xmlUploads := make([]xmlMultipartUpload, len(uploads))
 	for i, u := range uploads {
+		sc := u.StorageClass
+		if sc == "" {
+			sc = "STANDARD"
+		}
 		xmlUploads[i] = xmlMultipartUpload{
 			Key:          u.Key,
 			UploadID:     u.UploadID,
-			StorageClass: "STANDARD",
+			StorageClass: sc,
 			Initiated:    u.Initiated.UTC(),
 		}
 	}
@@ -1679,6 +1691,10 @@ func (ro *Router) handleListObjectVersions(w http.ResponseWriter, r *http.Reques
 		IsTruncated: false,
 	}
 	for _, v := range versions {
+		sc := v.StorageClass
+		if sc == "" {
+			sc = "STANDARD"
+		}
 		result.Versions = append(result.Versions, xmlObjectVersion{
 			Key:          v.Key,
 			VersionId:    v.VersionID,
@@ -1686,7 +1702,7 @@ func (ro *Router) handleListObjectVersions(w http.ResponseWriter, r *http.Reques
 			LastModified: v.LastModified.UTC().Format(time.RFC3339),
 			ETag:         v.ETag,
 			Size:         v.Size,
-			StorageClass: "STANDARD",
+			StorageClass: sc,
 			Owner:        xmlOwner{ID: "owner", DisplayName: "owner"},
 		})
 	}

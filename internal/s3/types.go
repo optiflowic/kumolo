@@ -53,6 +53,7 @@ type VersionInfo struct {
 	LastModified    time.Time
 	ETag            string
 	Size            int64
+	StorageClass    string
 	NoncurrentSince time.Time // zero when IsLatest is true
 }
 
@@ -89,9 +90,10 @@ type CompletePart struct {
 
 // MultipartUploadInfo describes an in-progress multipart upload.
 type MultipartUploadInfo struct {
-	UploadID  string
-	Key       string
-	Initiated time.Time
+	UploadID     string
+	Key          string
+	Initiated    time.Time
+	StorageClass string
 }
 
 // PartInfo describes an uploaded part.
