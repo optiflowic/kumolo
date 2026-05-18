@@ -3973,6 +3973,16 @@ func TestBucketConfigStorage(t *testing.T) {
 				wantMode:  "COMPLIANCE",
 				wantUntil: now.AddDate(0, 0, 7),
 			},
+			{
+				name:    "Days exceeds maximum (36500) — treated as invalid",
+				xml:     `<ObjectLockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>COMPLIANCE</Mode><Days>36501</Days></DefaultRetention></Rule></ObjectLockConfiguration>`,
+				wantNil: true,
+			},
+			{
+				name:    "Years exceeds maximum (100) — treated as invalid",
+				xml:     `<ObjectLockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>GOVERNANCE</Mode><Years>101</Years></DefaultRetention></Rule></ObjectLockConfiguration>`,
+				wantNil: true,
+			},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {

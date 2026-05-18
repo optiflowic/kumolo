@@ -2317,11 +2317,14 @@ func parseBucketDefaultRetention(xmlBody string, now time.Time) *ObjectRetention
 	if dr.Mode != "GOVERNANCE" && dr.Mode != "COMPLIANCE" {
 		return nil
 	}
+	// Clamp to AWS-documented limits (Days: 1–36500, Years: 1–100) to prevent
+	// pathologically large values from producing nonsensical retention dates.
+	const maxDays, maxYears = 36500, 100
 	var retainUntil time.Time
 	switch {
-	case dr.Days > 0:
+	case dr.Days > 0 && dr.Days <= maxDays:
 		retainUntil = now.UTC().AddDate(0, 0, dr.Days)
-	case dr.Years > 0:
+	case dr.Years > 0 && dr.Years <= maxYears:
 		retainUntil = now.UTC().AddDate(dr.Years, 0, 0)
 	default:
 		return nil
