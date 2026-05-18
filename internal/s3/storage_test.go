@@ -3953,6 +3953,11 @@ func TestBucketConfigStorage(t *testing.T) {
 				wantNil: true,
 			},
 			{
+				name:    "invalid mode",
+				xml:     `<ObjectLockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>INVALID</Mode><Days>1</Days></DefaultRetention></Rule></ObjectLockConfiguration>`,
+				wantNil: true,
+			},
+			{
 				name:      "COMPLIANCE mode with Days",
 				xml:       `<ObjectLockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>COMPLIANCE</Mode><Days>10</Days></DefaultRetention></Rule></ObjectLockConfiguration>`,
 				wantNil:   false,
