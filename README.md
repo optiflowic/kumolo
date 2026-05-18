@@ -82,7 +82,7 @@ The same pattern applies to DynamoDB, STS, and other supported services.
 | **DynamoDB** | Table CRUD, Item operations (Get/Put/Delete/Update), Query, Scan, Batch operations, Transactions, TTL, Tags, Kinesis streaming destinations |
 | **STS**      | GetCallerIdentity, AssumeRole, GetSessionToken |
 
-For the full list of supported operations, see the [documentation](https://optiflowic.github.io/kumolo).
+For the full list of supported operations, see the [documentation](https://optiflowic.github.io/kumolo-docs).
 
 ## Configuration
 
