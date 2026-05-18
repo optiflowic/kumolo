@@ -37,6 +37,7 @@ type ObjectMetadata struct {
 	IsDeleteMarker   bool              `json:"isDeleteMarker,omitempty"`
 	SSEAlgorithm     string            `json:"sseAlgorithm,omitempty"`
 	SSEKMSKeyID      string            `json:"sseKmsKeyId,omitempty"`
+	StorageClass     string            `json:"storageClass,omitempty"`
 	RestoreInitiated bool              `json:"restoreInitiated,omitempty"`
 	Retention        *ObjectRetention  `json:"retention,omitempty"`
 	LegalHold        *ObjectLegalHold  `json:"legalHold,omitempty"`

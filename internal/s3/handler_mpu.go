@@ -30,6 +30,7 @@ func (ro *Router) handleCreateMultipartUpload(
 	if !ok {
 		return
 	}
+	storageClass := r.Header.Get(amzStorageClass)
 	uploadID, err := ro.storage.CreateMultipartUpload(
 		bucket,
 		key,
@@ -38,6 +39,7 @@ func (ro *Router) handleCreateMultipartUpload(
 		sseKMSKeyID,
 		retention,
 		legalHold,
+		storageClass,
 	)
 	if err != nil {
 		switch {

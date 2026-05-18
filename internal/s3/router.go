@@ -30,6 +30,7 @@ const (
 	amzDeleteMarker                = "X-Amz-Delete-Marker"
 	amzSSE                         = "X-Amz-Server-Side-Encryption"
 	amzSSEKMSKeyID                 = "X-Amz-Server-Side-Encryption-Aws-Kms-Key-Id"
+	amzStorageClass                = "X-Amz-Storage-Class"
 	amzMetadataDirective           = "X-Amz-Metadata-Directive"
 	amzCopySourceRange             = "X-Amz-Copy-Source-Range"
 	amzBypassGovernanceRetention   = "X-Amz-Bypass-Governance-Retention" // #nosec G101 -- HTTP header name, not a credential

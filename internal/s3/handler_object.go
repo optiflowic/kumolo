@@ -83,6 +83,7 @@ func (ro *Router) handleCopyObject(
 	if !ok {
 		return
 	}
+	storageClass := r.Header.Get(amzStorageClass)
 	meta, err := ro.storage.CopyObject(
 		srcBucket,
 		srcKey,
@@ -95,6 +96,7 @@ func (ro *Router) handleCopyObject(
 		sseKMSKeyID,
 		retention,
 		legalHold,
+		storageClass,
 	)
 	if err != nil {
 		switch {
@@ -187,6 +189,7 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 	if !ok {
 		return
 	}
+	storageClass := r.Header.Get(amzStorageClass)
 	putFn := ro.storage.PutObject
 	if r.Header.Get("If-None-Match") == "*" {
 		putFn = ro.storage.PutObjectIfNotExists
@@ -210,6 +213,7 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 		sseKMSKeyID,
 		retention,
 		legalHold,
+		storageClass,
 	)
 	if err != nil {
 		var oae *ObjectAlreadyExistsError
@@ -678,6 +682,18 @@ func (ro *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 		return
 	}
 	defer func() { _ = f.Close() }()
+	if isArchiveStorageClass(meta.StorageClass) && !meta.RestoreInitiated {
+		slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			"object not restored",
+			"bucket",
+			bucket,
+			"key",
+			key,
+		)
+		writeError(w, r, http.StatusForbidden, "InvalidObjectState",
+			"The operation is not valid for the object's storage class.")
+		return
+	}
 	// Pre-check If-Match / If-Unmodified-Since before setting response headers.
 	// http.ServeContent returns an empty 412; AWS S3 requires an XML error body.
 	if im := r.Header.Get("If-Match"); im != "" {
@@ -972,6 +988,20 @@ func (ro *Router) handleRestoreObject(w http.ResponseWriter, r *http.Request, bu
 		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
+	if !isArchiveStorageClass(meta.StorageClass) {
+		slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			"restore rejected: object is not in archive storage class",
+			"bucket",
+			bucket,
+			"key",
+			key,
+			"storageClass",
+			meta.StorageClass,
+		)
+		writeError(w, r, http.StatusConflict, "InvalidObjectState",
+			"The operation is not valid for the object's storage class.")
+		return
+	}
 	if meta.RestoreInitiated {
 		slog.Info( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
 			"restore already initiated",
@@ -1119,6 +1149,10 @@ func parseObjectLockHeaders(
 	}
 
 	return retention, legalHold, true
+}
+
+func isArchiveStorageClass(sc string) bool {
+	return sc == "GLACIER" || sc == "DEEP_ARCHIVE"
 }
 
 // validObjectAttributes is the set of attribute names accepted by GetObjectAttributes.
