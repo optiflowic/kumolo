@@ -482,6 +482,9 @@ func (ro *Router) handleHeadObject(w http.ResponseWriter, r *http.Request, bucke
 		w.Header().Set(amzMetaPrefix+k, v)
 	}
 	setSSEHeaders(w, meta)
+	if meta.StorageClass != "" {
+		w.Header().Set(amzStorageClass, meta.StorageClass)
+	}
 	// tagging count is best-effort; errors are intentionally ignored so that a
 	// missing or unreadable tags file never prevents a successful object response.
 	if tags, err := ro.storage.GetObjectTagging(bucket, key); err == nil && len(tags) > 0 {
@@ -761,6 +764,9 @@ func (ro *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 		w.Header().Set(amzMetaPrefix+k, v)
 	}
 	setSSEHeaders(w, meta)
+	if meta.StorageClass != "" {
+		w.Header().Set(amzStorageClass, meta.StorageClass)
+	}
 	// tagging count is best-effort; errors are intentionally ignored so that a
 	// missing or unreadable tags file never prevents a successful object response.
 	if tags, err := ro.storage.GetObjectTagging(bucket, key); err == nil && len(tags) > 0 {
@@ -1238,7 +1244,10 @@ func (ro *Router) handleGetObjectAttributes(
 		resp.ETag = strings.Trim(meta.ETag, `"`)
 	}
 	if _, ok := requested["StorageClass"]; ok {
-		resp.StorageClass = "STANDARD"
+		resp.StorageClass = meta.StorageClass
+		if resp.StorageClass == "" {
+			resp.StorageClass = "STANDARD"
+		}
 	}
 	if _, ok := requested["ObjectSize"]; ok {
 		size := meta.Size

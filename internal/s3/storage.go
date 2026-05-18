@@ -899,6 +899,7 @@ func (s *Storage) ListObjectVersions(bucket string) ([]VersionInfo, []DeleteMark
 				LastModified:    e.meta.LastModified,
 				ETag:            e.meta.ETag,
 				Size:            e.meta.Size,
+				StorageClass:    e.meta.StorageClass,
 				NoncurrentSince: e.meta.NoncurrentSince,
 			})
 		}
@@ -1926,9 +1927,10 @@ func (s *Storage) ListMultipartUploads(bucket string) ([]MultipartUploadInfo, er
 			continue
 		}
 		uploads = append(uploads, MultipartUploadInfo{
-			UploadID:  uploadID,
-			Key:       umeta.Key,
-			Initiated: umeta.Initiated,
+			UploadID:     uploadID,
+			Key:          umeta.Key,
+			Initiated:    umeta.Initiated,
+			StorageClass: umeta.StorageClass,
 		})
 	}
 	return uploads, nil
