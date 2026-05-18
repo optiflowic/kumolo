@@ -2207,6 +2207,21 @@ func TestRouterListObjectsV2(t *testing.T) {
 		require.Len(t, result2.CommonPrefixes, 1)
 		assert.Equal(t, "b/", result2.CommonPrefixes[0].Prefix)
 	})
+
+	t.Run("returns actual StorageClass in XML response", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		putReq := putRequest("/my-bucket/obj.txt", "data")
+		putReq.Header.Set(amzStorageClass, "GLACIER")
+		ro.ServeHTTP(httptest.NewRecorder(), putReq)
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket?list-type=2", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), "<StorageClass>GLACIER</StorageClass>")
+	})
 }
 
 func TestRouterCopyObject(t *testing.T) {
@@ -3800,6 +3815,21 @@ func TestRouterListObjects(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Contains(t, w.Body.String(), "<MaxKeys>1000</MaxKeys>")
+	})
+
+	t.Run("returns actual StorageClass in XML response", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		putReq := putRequest("/my-bucket/obj.txt", "data")
+		putReq.Header.Set(amzStorageClass, "GLACIER")
+		ro.ServeHTTP(httptest.NewRecorder(), putReq)
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), "<StorageClass>GLACIER</StorageClass>")
 	})
 }
 
@@ -7266,6 +7296,52 @@ func TestSSEResponseHeaders(t *testing.T) {
 	})
 }
 
+func TestStorageClassResponseHeaders(t *testing.T) {
+	t.Run("HeadObject returns X-Amz-Storage-Class for non-STANDARD object", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			headObjectMeta: ObjectMetadata{StorageClass: "GLACIER"},
+		})
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, httptest.NewRequest(http.MethodHead, "/b/k", nil))
+		assert.Equal(t, "GLACIER", w.Header().Get(amzStorageClass))
+	})
+
+	t.Run("HeadObject does not set X-Amz-Storage-Class for STANDARD object", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			headObjectMeta: ObjectMetadata{},
+		})
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, httptest.NewRequest(http.MethodHead, "/b/k", nil))
+		assert.Empty(t, w.Header().Get(amzStorageClass))
+	})
+
+	t.Run("GetObject returns X-Amz-Storage-Class for non-STANDARD object", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			getObjectMeta: ObjectMetadata{
+				StorageClass:     "DEEP_ARCHIVE",
+				RestoreInitiated: true,
+				ContentType:      "text/plain",
+				ETag:             `"abc"`,
+			},
+		})
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/b/k", nil))
+		assert.Equal(t, "DEEP_ARCHIVE", w.Header().Get(amzStorageClass))
+	})
+
+	t.Run("GetObject does not set X-Amz-Storage-Class for STANDARD object", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			getObjectMeta: ObjectMetadata{
+				ContentType: "text/plain",
+				ETag:        `"abc"`,
+			},
+		})
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/b/k", nil))
+		assert.Empty(t, w.Header().Get(amzStorageClass))
+	})
+}
+
 func TestObjectLockConfigHandlers(t *testing.T) {
 	const validXML = `<ObjectLockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ObjectLockEnabled>Enabled</ObjectLockEnabled></ObjectLockConfiguration>`
 
@@ -7949,6 +8025,26 @@ func TestGetObjectAttributes(t *testing.T) {
 		ro.ServeHTTP(w, req)
 		require.Equal(t, http.StatusOK, w.Code)
 		assert.Contains(t, w.Body.String(), "<StorageClass>STANDARD</StorageClass>")
+	})
+
+	t.Run("returns actual StorageClass for non-STANDARD object", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/attr-bucket", nil))
+		putReq := httptest.NewRequest(
+			http.MethodPut,
+			"/attr-bucket/glacier.txt",
+			strings.NewReader("data"),
+		)
+		putReq.Header.Set("Content-Type", "text/plain")
+		putReq.Header.Set(amzStorageClass, "GLACIER")
+		ro.ServeHTTP(httptest.NewRecorder(), putReq)
+
+		req := httptest.NewRequest(http.MethodGet, "/attr-bucket/glacier.txt?attributes", nil)
+		req.Header.Set("x-amz-object-attributes", "StorageClass")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), "<StorageClass>GLACIER</StorageClass>")
 	})
 
 	t.Run("returns multiple attributes when requested together", func(t *testing.T) {

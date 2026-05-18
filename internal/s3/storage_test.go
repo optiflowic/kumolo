@@ -1565,6 +1565,33 @@ func TestStorageClass(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "STANDARD", meta.StorageClass)
 	})
+
+	t.Run("ListObjectVersions returns StorageClass for versioned objects", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("b", "", true))
+		require.NoError(t, s.PutBucketVersioning("b", "Enabled"))
+		_, err := s.PutObject("b", "obj.txt", strings.NewReader("data"), "text/plain",
+			nil, "", "", nil, nil, "GLACIER",
+		)
+		require.NoError(t, err)
+
+		versions, _, err := s.ListObjectVersions("b")
+		require.NoError(t, err)
+		require.Len(t, versions, 1)
+		assert.Equal(t, "GLACIER", versions[0].StorageClass)
+	})
+
+	t.Run("ListMultipartUploads returns StorageClass from upload metadata", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("b", "", false))
+		_, err := s.CreateMultipartUpload("b", "key", "text/plain", "", "", nil, nil, "GLACIER")
+		require.NoError(t, err)
+
+		uploads, err := s.ListMultipartUploads("b")
+		require.NoError(t, err)
+		require.Len(t, uploads, 1)
+		assert.Equal(t, "GLACIER", uploads[0].StorageClass)
+	})
 }
 
 func TestGetObject(t *testing.T) {
