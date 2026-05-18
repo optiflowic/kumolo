@@ -685,8 +685,10 @@ func (ro *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 	if isArchiveStorageClass(meta.StorageClass) && !meta.RestoreInitiated {
 		slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
 			"object not restored",
-			"bucket", bucket,
-			"key", key,
+			"bucket",
+			bucket,
+			"key",
+			key,
 		)
 		writeError(w, r, http.StatusForbidden, "InvalidObjectState",
 			"The operation is not valid for the object's storage class.")
@@ -989,9 +991,12 @@ func (ro *Router) handleRestoreObject(w http.ResponseWriter, r *http.Request, bu
 	if !isArchiveStorageClass(meta.StorageClass) {
 		slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
 			"restore rejected: object is not in archive storage class",
-			"bucket", bucket,
-			"key", key,
-			"storageClass", meta.StorageClass,
+			"bucket",
+			bucket,
+			"key",
+			key,
+			"storageClass",
+			meta.StorageClass,
 		)
 		writeError(w, r, http.StatusConflict, "InvalidObjectState",
 			"The operation is not valid for the object's storage class.")

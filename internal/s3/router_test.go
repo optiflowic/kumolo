@@ -7095,18 +7095,21 @@ func TestRestoreObject(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "InvalidObjectState")
 	})
 
-	t.Run("POST returns 409 InvalidObjectState for object with empty storage class", func(t *testing.T) {
-		ro := newRouterWithMock(&mockStore{
-			bucketExists:   true,
-			headObjectMeta: ObjectMetadata{},
-		})
-		req := httptest.NewRequest(http.MethodPost, "/my-bucket/obj.txt?restore",
-			strings.NewReader(`<RestoreRequest/>`))
-		w := httptest.NewRecorder()
-		ro.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusConflict, w.Code)
-		assert.Contains(t, w.Body.String(), "InvalidObjectState")
-	})
+	t.Run(
+		"POST returns 409 InvalidObjectState for object with empty storage class",
+		func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{
+				bucketExists:   true,
+				headObjectMeta: ObjectMetadata{},
+			})
+			req := httptest.NewRequest(http.MethodPost, "/my-bucket/obj.txt?restore",
+				strings.NewReader(`<RestoreRequest/>`))
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusConflict, w.Code)
+			assert.Contains(t, w.Body.String(), "InvalidObjectState")
+		},
+	)
 
 	t.Run("POST returns 202 for DEEP_ARCHIVE object", func(t *testing.T) {
 		ro := newRouterWithMock(&mockStore{
@@ -7144,7 +7147,11 @@ func TestStorageClassAccessControl(t *testing.T) {
 		putReq := httptest.NewRequest(http.MethodPut, "/b/k", strings.NewReader("data"))
 		putReq.Header.Set(amzStorageClass, "GLACIER")
 		ro.ServeHTTP(httptest.NewRecorder(), putReq)
-		restoreReq := httptest.NewRequest(http.MethodPost, "/b/k?restore", strings.NewReader(`<RestoreRequest/>`))
+		restoreReq := httptest.NewRequest(
+			http.MethodPost,
+			"/b/k?restore",
+			strings.NewReader(`<RestoreRequest/>`),
+		)
 		ro.ServeHTTP(httptest.NewRecorder(), restoreReq)
 		req := httptest.NewRequest(http.MethodGet, "/b/k", nil)
 		w := httptest.NewRecorder()
@@ -7152,21 +7159,24 @@ func TestStorageClassAccessControl(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
 
-	t.Run("GET on unrestored DEEP_ARCHIVE object returns 403 InvalidObjectState", func(t *testing.T) {
-		ro := newRouterWithMock(&mockStore{
-			getObjectMeta: ObjectMetadata{
-				StorageClass:     "DEEP_ARCHIVE",
-				RestoreInitiated: false,
-				ContentType:      "text/plain",
-				ETag:             `"abc"`,
-			},
-		})
-		req := httptest.NewRequest(http.MethodGet, "/b/k", nil)
-		w := httptest.NewRecorder()
-		ro.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusForbidden, w.Code)
-		assert.Contains(t, w.Body.String(), "InvalidObjectState")
-	})
+	t.Run(
+		"GET on unrestored DEEP_ARCHIVE object returns 403 InvalidObjectState",
+		func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{
+				getObjectMeta: ObjectMetadata{
+					StorageClass:     "DEEP_ARCHIVE",
+					RestoreInitiated: false,
+					ContentType:      "text/plain",
+					ETag:             `"abc"`,
+				},
+			})
+			req := httptest.NewRequest(http.MethodGet, "/b/k", nil)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusForbidden, w.Code)
+			assert.Contains(t, w.Body.String(), "InvalidObjectState")
+		},
+	)
 }
 
 func TestSSEResponseHeaders(t *testing.T) {
