@@ -1499,126 +1499,158 @@ func TestCopyObject(t *testing.T) {
 		assert.Equal(t, "ON", dstMeta.LegalHold.Status)
 	})
 
-	t.Run(
-		"CopyObject applies bucket default retention when no explicit retention",
-		func(t *testing.T) {
-			const defaultRetentionXML = `<ObjectLockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>COMPLIANCE</Mode><Days>7</Days></DefaultRetention></Rule></ObjectLockConfiguration>`
-			now := time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)
+	t.Run("default_retention", func(t *testing.T) {
+		const defaultRetentionXML = `<ObjectLockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>COMPLIANCE</Mode><Days>7</Days></DefaultRetention></Rule></ObjectLockConfiguration>`
+		now := time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)
 
-			t.Run("applies default retention when retention is nil", func(t *testing.T) {
-				s := newTestStorage(t)
-				require.NoError(t, s.CreateBucket("src-bucket", "", false))
-				require.NoError(t, s.CreateBucket("dst-bucket", "", true))
-				s.now = func() time.Time { return now }
-				require.NoError(t, s.PutBucketObjectLock("dst-bucket", defaultRetentionXML))
-				_, err := s.PutObject(
-					"src-bucket",
-					"orig.txt",
-					strings.NewReader("hello"),
-					"text/plain",
-					nil,
-					"",
-					"",
-					nil,
-					nil,
-					"",
-				)
-				require.NoError(t, err)
-
-				_, err = s.CopyObject(
-					"src-bucket",
-					"orig.txt",
-					"",
-					"dst-bucket",
-					"copy.txt",
-					"",
-					nil,
-					"",
-					"",
-					nil,
-					nil,
-					"",
-				)
-				require.NoError(t, err)
-
-				ret, err := s.GetObjectRetention("dst-bucket", "copy.txt", "")
-				require.NoError(t, err)
-				assert.Equal(t, "COMPLIANCE", ret.Mode)
-				assert.True(t, now.AddDate(0, 0, 7).Equal(ret.RetainUntilDate))
-			})
-
-			t.Run("explicit retention takes precedence over bucket default", func(t *testing.T) {
-				s := newTestStorage(t)
-				require.NoError(t, s.CreateBucket("src-bucket", "", false))
-				require.NoError(t, s.CreateBucket("dst-bucket", "", true))
-				s.now = func() time.Time { return now }
-				require.NoError(t, s.PutBucketObjectLock("dst-bucket", defaultRetentionXML))
-				_, err := s.PutObject(
-					"src-bucket",
-					"orig.txt",
-					strings.NewReader("hello"),
-					"text/plain",
-					nil,
-					"",
-					"",
-					nil,
-					nil,
-					"",
-				)
-				require.NoError(t, err)
-
-				explicit := &ObjectRetention{
-					Mode:            "GOVERNANCE",
-					RetainUntilDate: now.AddDate(0, 0, 30),
-				}
-				_, err = s.CopyObject(
-					"src-bucket",
-					"orig.txt",
-					"",
-					"dst-bucket",
-					"copy.txt",
-					"",
-					nil,
-					"",
-					"",
-					explicit,
-					nil,
-					"",
-				)
-				require.NoError(t, err)
-
-				ret, err := s.GetObjectRetention("dst-bucket", "copy.txt", "")
-				require.NoError(t, err)
-				assert.Equal(t, "GOVERNANCE", ret.Mode)
-				assert.True(t, now.AddDate(0, 0, 30).Equal(ret.RetainUntilDate))
-			})
-
-			t.Run(
-				"no default retention configured leaves object without retention",
-				func(t *testing.T) {
-					s, _ := setup(t)
-					_, err := s.CopyObject(
-						"src-bucket",
-						"orig.txt",
-						"",
-						"dst-bucket",
-						"copy.txt",
-						"",
-						nil,
-						"",
-						"",
-						nil,
-						nil,
-						"",
-					)
-					require.NoError(t, err)
-
-					_, err = s.GetObjectRetention("dst-bucket", "copy.txt", "")
-					assert.ErrorIs(t, err, ErrNoObjectRetention)
-				},
+		t.Run("applies default retention when retention is nil", func(t *testing.T) {
+			s := newTestStorage(t)
+			require.NoError(t, s.CreateBucket("src-bucket", "", false))
+			require.NoError(t, s.CreateBucket("dst-bucket", "", true))
+			s.now = func() time.Time { return now }
+			require.NoError(t, s.PutBucketObjectLock("dst-bucket", defaultRetentionXML))
+			_, err := s.PutObject(
+				"src-bucket",
+				"orig.txt",
+				strings.NewReader("hello"),
+				"text/plain",
+				nil,
+				"",
+				"",
+				nil,
+				nil,
+				"",
 			)
-		},
-	)
+			require.NoError(t, err)
+
+			_, err = s.CopyObject(
+				"src-bucket",
+				"orig.txt",
+				"",
+				"dst-bucket",
+				"copy.txt",
+				"",
+				nil,
+				"",
+				"",
+				nil,
+				nil,
+				"",
+			)
+			require.NoError(t, err)
+
+			ret, err := s.GetObjectRetention("dst-bucket", "copy.txt", "")
+			require.NoError(t, err)
+			assert.Equal(t, "COMPLIANCE", ret.Mode)
+			assert.True(t, now.AddDate(0, 0, 7).Equal(ret.RetainUntilDate))
+		})
+
+		t.Run("explicit retention takes precedence over bucket default", func(t *testing.T) {
+			s := newTestStorage(t)
+			require.NoError(t, s.CreateBucket("src-bucket", "", false))
+			require.NoError(t, s.CreateBucket("dst-bucket", "", true))
+			s.now = func() time.Time { return now }
+			require.NoError(t, s.PutBucketObjectLock("dst-bucket", defaultRetentionXML))
+			_, err := s.PutObject(
+				"src-bucket",
+				"orig.txt",
+				strings.NewReader("hello"),
+				"text/plain",
+				nil,
+				"",
+				"",
+				nil,
+				nil,
+				"",
+			)
+			require.NoError(t, err)
+
+			explicit := &ObjectRetention{
+				Mode:            "GOVERNANCE",
+				RetainUntilDate: now.AddDate(0, 0, 30),
+			}
+			_, err = s.CopyObject(
+				"src-bucket",
+				"orig.txt",
+				"",
+				"dst-bucket",
+				"copy.txt",
+				"",
+				nil,
+				"",
+				"",
+				explicit,
+				nil,
+				"",
+			)
+			require.NoError(t, err)
+
+			ret, err := s.GetObjectRetention("dst-bucket", "copy.txt", "")
+			require.NoError(t, err)
+			assert.Equal(t, "GOVERNANCE", ret.Mode)
+			assert.True(t, now.AddDate(0, 0, 30).Equal(ret.RetainUntilDate))
+		})
+
+		t.Run("no default retention rule leaves object without retention", func(t *testing.T) {
+			s := newTestStorage(t)
+			require.NoError(t, s.CreateBucket("src-bucket", "", false))
+			require.NoError(t, s.CreateBucket("dst-bucket", "", true))
+			_, err := s.PutObject(
+				"src-bucket",
+				"orig.txt",
+				strings.NewReader("hello"),
+				"text/plain",
+				nil,
+				"",
+				"",
+				nil,
+				nil,
+				"",
+			)
+			require.NoError(t, err)
+
+			_, err = s.CopyObject(
+				"src-bucket",
+				"orig.txt",
+				"",
+				"dst-bucket",
+				"copy.txt",
+				"",
+				nil,
+				"",
+				"",
+				nil,
+				nil,
+				"",
+			)
+			require.NoError(t, err)
+
+			_, err = s.GetObjectRetention("dst-bucket", "copy.txt", "")
+			assert.ErrorIs(t, err, ErrNoObjectRetention)
+		})
+
+		t.Run("object lock disabled leaves object without retention", func(t *testing.T) {
+			s, _ := setup(t)
+			_, err := s.CopyObject(
+				"src-bucket",
+				"orig.txt",
+				"",
+				"dst-bucket",
+				"copy.txt",
+				"",
+				nil,
+				"",
+				"",
+				nil,
+				nil,
+				"",
+			)
+			require.NoError(t, err)
+
+			_, err = s.GetObjectRetention("dst-bucket", "copy.txt", "")
+			assert.ErrorIs(t, err, ErrNoObjectRetention)
+		})
+	})
 }
 
 func TestStorageClass(t *testing.T) {
