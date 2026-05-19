@@ -3355,6 +3355,16 @@ func TestParseUpdateExpression_ErrorPaths(t *testing.T) {
 		},
 	)
 
+	t.Run("SET if_not_exists second arg is function call (AWS rejects this)", func(t *testing.T) {
+		_, err := parseUpdateExpression(
+			"SET a = if_not_exists(b, if_not_exists(c, :v))",
+			noNames,
+			map[string]any{":v": map[string]any{"N": "0"}},
+		)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "second argument cannot be a function call")
+	})
+
 	t.Run("SET list_append missing closing paren", func(t *testing.T) {
 		_, err := parseUpdateExpression(
 			"SET a = list_append(a, :v",

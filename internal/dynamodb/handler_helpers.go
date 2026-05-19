@@ -395,6 +395,11 @@ func parseIfNotExists(
 			"invalid if_not_exists: first argument must be a path, not a value: %q", pathStr,
 		)
 	}
+	if strings.HasPrefix(operandStr, "if_not_exists(") {
+		return ifNotExistsOp{}, fmt.Errorf(
+			"invalid if_not_exists: second argument cannot be a function call: %q", operandStr,
+		)
+	}
 	pathName, err := resolveAttrName(pathStr, attrNames)
 	if err != nil {
 		return ifNotExistsOp{}, err
