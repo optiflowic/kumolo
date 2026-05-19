@@ -3312,6 +3312,71 @@ func TestParseUpdateExpression_ErrorPaths(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "ExpressionAttributeValues missing")
 	})
+
+	t.Run("SET if_not_exists missing closing paren", func(t *testing.T) {
+		_, err := parseUpdateExpression(
+			"SET a = if_not_exists(a, :v",
+			noNames,
+			map[string]any{":v": map[string]any{"N": "1"}},
+		)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid if_not_exists")
+	})
+
+	t.Run("SET if_not_exists single arg no comma", func(t *testing.T) {
+		_, err := parseUpdateExpression("SET a = if_not_exists(only_one)", noNames, noVals)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid if_not_exists")
+	})
+
+	t.Run("SET if_not_exists check arg missing from ExpressionAttributeValues", func(t *testing.T) {
+		_, err := parseUpdateExpression(
+			"SET a = if_not_exists(:missing, :fallback)",
+			noNames,
+			map[string]any{":fallback": map[string]any{"N": "1"}},
+		)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "ExpressionAttributeValues missing")
+	})
+
+	t.Run(
+		"SET if_not_exists check arg #name missing from ExpressionAttributeNames",
+		func(t *testing.T) {
+			_, err := parseUpdateExpression(
+				"SET a = if_not_exists(#missing, :fallback)",
+				noNames,
+				map[string]any{":fallback": map[string]any{"N": "1"}},
+			)
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "ExpressionAttributeNames missing")
+		},
+	)
+
+	t.Run("SET list_append missing closing paren", func(t *testing.T) {
+		_, err := parseUpdateExpression(
+			"SET a = list_append(a, :v",
+			noNames,
+			map[string]any{":v": map[string]any{"L": []any{}}},
+		)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid list_append")
+	})
+
+	t.Run("SET list_append single arg no comma", func(t *testing.T) {
+		_, err := parseUpdateExpression("SET a = list_append(only_one)", noNames, noVals)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid list_append")
+	})
+
+	t.Run("SET list_append left arg missing from ExpressionAttributeValues", func(t *testing.T) {
+		_, err := parseUpdateExpression(
+			"SET a = list_append(:missing, :right)",
+			noNames,
+			map[string]any{":right": map[string]any{"L": []any{}}},
+		)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "ExpressionAttributeValues missing")
+	})
 }
 
 // --- applyAddOp unit tests ---
@@ -5471,11 +5536,13 @@ func TestHandleUpdateItem_IfNotExists(t *testing.T) {
 		assert.Equal(t, map[string]any{"N": "5"}, attrs["count"])
 	})
 
-	t.Run("sets attribute from different check attr when check attr does not exist", func(t *testing.T) {
-		ro := setup(t)
-		require.Equal(t, 200, dynamo(t, ro, "PutItem",
-			`{"TableName":"test-table","Item":{"pk":{"S":"k3"}}}`).Code)
-		w := dynamo(t, ro, "UpdateItem", `{
+	t.Run(
+		"sets attribute from different check attr when check attr does not exist",
+		func(t *testing.T) {
+			ro := setup(t)
+			require.Equal(t, 200, dynamo(t, ro, "PutItem",
+				`{"TableName":"test-table","Item":{"pk":{"S":"k3"}}}`).Code)
+			w := dynamo(t, ro, "UpdateItem", `{
 			"TableName": "test-table",
 			"Key": {"pk": {"S": "k3"}},
 			"UpdateExpression": "SET #a = if_not_exists(#b, :default)",
@@ -5483,12 +5550,13 @@ func TestHandleUpdateItem_IfNotExists(t *testing.T) {
 			"ExpressionAttributeValues": {":default": {"S": "fallback"}},
 			"ReturnValues": "ALL_NEW"
 		}`)
-		require.Equal(t, 200, w.Code)
-		var resp map[string]any
-		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-		attrs := resp["Attributes"].(map[string]any)
-		assert.Equal(t, map[string]any{"S": "fallback"}, attrs["target"])
-	})
+			require.Equal(t, 200, w.Code)
+			var resp map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+			attrs := resp["Attributes"].(map[string]any)
+			assert.Equal(t, map[string]any{"S": "fallback"}, attrs["target"])
+		},
+	)
 
 	t.Run("400 when default value placeholder is missing", func(t *testing.T) {
 		ro := setup(t)
@@ -5515,8 +5583,12 @@ func TestHandleUpdateItem_ListAppend(t *testing.T) {
 
 	t.Run("appends items to existing list", func(t *testing.T) {
 		ro := setup(t)
-		require.Equal(t, 200, dynamo(t, ro, "PutItem",
-			`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"tags":{"L":[{"S":"a"},{"S":"b"}]}}}`).Code)
+		require.Equal(t, 200, dynamo(
+			t,
+			ro,
+			"PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"tags":{"L":[{"S":"a"},{"S":"b"}]}}}`,
+		).Code)
 		w := dynamo(t, ro, "UpdateItem", `{
 			"TableName": "test-table",
 			"Key": {"pk": {"S": "k1"}},
@@ -5597,7 +5669,7 @@ func TestHandleUpdateItem_ListAppend(t *testing.T) {
 		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
-	t.Run("500 when list_append arg is not a List type", func(t *testing.T) {
+	t.Run("400 when list_append left arg is not a List type", func(t *testing.T) {
 		ro := setup(t)
 		require.Equal(t, 200, dynamo(t, ro, "PutItem",
 			`{"TableName":"test-table","Item":{"pk":{"S":"k5"},"tags":{"S":"not-a-list"}}}`).Code)
@@ -5610,4 +5682,58 @@ func TestHandleUpdateItem_ListAppend(t *testing.T) {
 		}`)
 		assert.Equal(t, 400, w.Code)
 	})
+
+	t.Run("400 when list_append right arg is not a List type", func(t *testing.T) {
+		ro := setup(t)
+		require.Equal(t, 200, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k6"},"tags":{"L":[{"S":"a"}]}}}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "k6"}},
+			"UpdateExpression": "SET #t = list_append(#t, :notlist)",
+			"ExpressionAttributeNames": {"#t": "tags"},
+			"ExpressionAttributeValues": {":notlist": {"S": "not-a-list"}}
+		}`)
+		assert.Equal(t, 400, w.Code)
+	})
+
+	t.Run("list_append when left attr is absent treats it as empty list", func(t *testing.T) {
+		ro := setup(t)
+		require.Equal(t, 200, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k7"}}}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "k7"}},
+			"UpdateExpression": "SET #t = list_append(#t, :new)",
+			"ExpressionAttributeNames": {"#t": "tags"},
+			"ExpressionAttributeValues": {":new": {"L": [{"S": "x"}]}},
+			"ReturnValues": "ALL_NEW"
+		}`)
+		require.Equal(t, 200, w.Code)
+		var out map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+		attrs := out["Attributes"].(map[string]any)
+		assert.Equal(t, map[string]any{"L": []any{map[string]any{"S": "x"}}}, attrs["tags"])
+	})
+}
+
+func TestHandleUpdateItem_MultipleSetAssignments(t *testing.T) {
+	ro := newTestRouter(t)
+	require.Equal(t, 200, dynamo(t, ro, "CreateTable", createTableBody).Code)
+	require.Equal(t, 200, dynamo(t, ro, "PutItem",
+		`{"TableName":"test-table","Item":{"pk":{"S":"m1"}}}`).Code)
+
+	w := dynamo(t, ro, "UpdateItem", `{
+		"TableName": "test-table",
+		"Key": {"pk": {"S": "m1"}},
+		"UpdateExpression": "SET a = :v1, b = :v2",
+		"ExpressionAttributeValues": {":v1": {"S": "foo"}, ":v2": {"S": "bar"}},
+		"ReturnValues": "ALL_NEW"
+	}`)
+	require.Equal(t, 200, w.Code)
+	var out map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+	attrs := out["Attributes"].(map[string]any)
+	assert.Equal(t, map[string]any{"S": "foo"}, attrs["a"])
+	assert.Equal(t, map[string]any{"S": "bar"}, attrs["b"])
 }

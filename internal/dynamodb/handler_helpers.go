@@ -150,11 +150,19 @@ func parseUpdateExpression(
 					if len(argParts) != 2 {
 						return nil, fmt.Errorf("invalid if_not_exists: %q", rhs)
 					}
-					check, err := resolveFuncArg(strings.TrimSpace(argParts[0]), attrNames, attrValues)
+					check, err := resolveFuncArg(
+						strings.TrimSpace(argParts[0]),
+						attrNames,
+						attrValues,
+					)
 					if err != nil {
 						return nil, err
 					}
-					fallback, err := resolveFuncArg(strings.TrimSpace(argParts[1]), attrNames, attrValues)
+					fallback, err := resolveFuncArg(
+						strings.TrimSpace(argParts[1]),
+						attrNames,
+						attrValues,
+					)
 					if err != nil {
 						return nil, err
 					}
@@ -168,11 +176,19 @@ func parseUpdateExpression(
 					if len(argParts) != 2 {
 						return nil, fmt.Errorf("invalid list_append: %q", rhs)
 					}
-					left, err := resolveFuncArg(strings.TrimSpace(argParts[0]), attrNames, attrValues)
+					left, err := resolveFuncArg(
+						strings.TrimSpace(argParts[0]),
+						attrNames,
+						attrValues,
+					)
 					if err != nil {
 						return nil, err
 					}
-					right, err := resolveFuncArg(strings.TrimSpace(argParts[1]), attrNames, attrValues)
+					right, err := resolveFuncArg(
+						strings.TrimSpace(argParts[1]),
+						attrNames,
+						attrValues,
+					)
 					if err != nil {
 						return nil, err
 					}
@@ -338,7 +354,11 @@ func splitSetAssignments(s string) []string {
 }
 
 // resolveFuncArg resolves one SET-clause function argument: :val → literal, #name/name → attr ref.
-func resolveFuncArg(ref string, attrNames map[string]string, attrValues map[string]any) (setFuncArg, error) {
+func resolveFuncArg(
+	ref string,
+	attrNames map[string]string,
+	attrValues map[string]any,
+) (setFuncArg, error) {
 	if strings.HasPrefix(ref, ":") {
 		v, ok := attrValues[ref]
 		if !ok {
@@ -381,7 +401,7 @@ func toListAttr(v any) ([]any, error) {
 		return nil, nil
 	}
 	m, ok := v.(map[string]any)
-	if !ok {
+	if !ok { // untestable: DynamoDB item values are always typed maps
 		return nil, fmt.Errorf("not a typed value")
 	}
 	l, ok := m["L"].([]any)
