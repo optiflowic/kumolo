@@ -147,6 +147,15 @@ func TestEvalFilterExpr(t *testing.T) {
 		{"size in between lo", "age BETWEEN size(name) AND :forty", true, false},
 		// size() as BETWEEN LHS (covers parseComparison SIZE + BETWEEN path)
 		{"size as between lhs", "size(name) BETWEEN :four AND :five", true, false},
+		// IN operator
+		{"in match first", "name IN (:alice, :bob)", true, false},
+		{"in match second", "name IN (:bob, :alice)", true, false},
+		{"in no match", "name IN (:bob, :al)", false, false},
+		{"in single value match", "name IN (:alice)", true, false},
+		{"in single value no match", "name IN (:bob)", false, false},
+		{"in with name ref", "#n IN (:alice, :bob)", true, false},
+		{"in attr error", "#missing IN (:alice)", false, true},
+		{"in value error", "name IN (:missing)", false, true},
 	}
 
 	for _, tc := range tests {
@@ -275,6 +284,39 @@ func TestHandleScanWithFilterExpression(t *testing.T) {
 			body: `{
 				"TableName":"test-table",
 				"FilterExpression":"#s = :deleted",
+				"ExpressionAttributeNames":{"#s":"status"},
+				"ExpressionAttributeValues":{":deleted":{"S":"deleted"}}
+			}`,
+			wantCount:   0,
+			wantScanned: 3,
+		},
+		{
+			name: "filter with IN operator matches two",
+			body: `{
+				"TableName":"test-table",
+				"FilterExpression":"#s IN (:active, :inactive)",
+				"ExpressionAttributeNames":{"#s":"status"},
+				"ExpressionAttributeValues":{":active":{"S":"active"},":inactive":{"S":"inactive"}}
+			}`,
+			wantCount:   3,
+			wantScanned: 3,
+		},
+		{
+			name: "filter with IN operator matches one",
+			body: `{
+				"TableName":"test-table",
+				"FilterExpression":"#s IN (:inactive)",
+				"ExpressionAttributeNames":{"#s":"status"},
+				"ExpressionAttributeValues":{":inactive":{"S":"inactive"}}
+			}`,
+			wantCount:   1,
+			wantScanned: 3,
+		},
+		{
+			name: "filter with IN operator matches none",
+			body: `{
+				"TableName":"test-table",
+				"FilterExpression":"#s IN (:deleted)",
 				"ExpressionAttributeNames":{"#s":"status"},
 				"ExpressionAttributeValues":{":deleted":{"S":"deleted"}}
 			}`,
@@ -476,6 +518,11 @@ func TestParseFilterExprErrors(t *testing.T) {
 		{"size no lparen", "size name) = :five"},
 		{"size attr path error", "size(:val) = :five"},
 		{"size no rparen", "size(name = :five"},
+		// IN operator parse errors
+		{"in no lparen", "name IN :val)"},
+		{"in no rparen", "name IN (:val"},
+		{"in bad first operand", "name IN (,"},
+		{"in bad subsequent operand", "name IN (:val, ("},
 	}
 
 	for _, tc := range tests {
