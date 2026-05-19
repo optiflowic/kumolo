@@ -58,11 +58,70 @@ func resolveAttrName(ref string, attrNames map[string]string) (string, error) {
 	return actual, nil
 }
 
+// parseUpdatePath parses an UpdateExpression path token (e.g. "#a.#b[0].c") into
+// a sequence of projSegments with all #nameRef placeholders resolved.
+func parseUpdatePath(token string, attrNames map[string]string) ([]projSegment, error) {
+	var segs []projSegment
+	dotParts := strings.Split(token, ".")
+	for _, part := range dotParts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			return nil, fmt.Errorf("invalid path: %q", token)
+		}
+		lb := strings.Index(part, "[")
+		if lb == 0 {
+			return nil, fmt.Errorf("invalid path %q: attribute name expected before '['", token)
+		}
+		attrToken := part
+		if lb > 0 {
+			attrToken = part[:lb]
+		}
+		name, err := resolveAttrName(attrToken, attrNames)
+		if err != nil {
+			return nil, err
+		}
+		segs = append(segs, projSegment{attr: name})
+		if lb == -1 {
+			continue
+		}
+		rest := part[lb:]
+		for len(rest) > 0 {
+			if rest[0] != '[' {
+				return nil, fmt.Errorf("invalid path %q: unexpected %q", token, rest)
+			}
+			rb := strings.Index(rest, "]")
+			if rb == -1 {
+				return nil, fmt.Errorf("invalid path %q: missing ']'", token)
+			}
+			idxStr := rest[1:rb]
+			n, err := strconv.Atoi(idxStr)
+			if err != nil || n < 0 {
+				return nil, fmt.Errorf("invalid list index %q in path %q", idxStr, token)
+			}
+			segs = append(segs, projSegment{attr: "", index: n})
+			rest = rest[rb+1:]
+		}
+	}
+	return segs, nil
+}
+
 // addOp is a sentinel stored in the updates map for an ADD clause operation.
 type addOp struct{ val any }
 
 // deleteOp is a sentinel stored in the updates map for a DELETE clause operation.
 type deleteOp struct{ val any }
+
+// nestedSetOp sets val at a multi-segment document path (e.g. SET meta.count = :v).
+// The segs contain already-resolved attribute names (no #nameRef placeholders).
+type nestedSetOp struct {
+	segs []projSegment
+	val  any // resolved value or ifNotExistsOp / listAppendOp sentinel
+}
+
+// nestedRemoveOp removes the attribute at a multi-segment document path (e.g. REMOVE meta.count).
+type nestedRemoveOp struct {
+	segs []projSegment
+}
 
 // setOperand evaluates a SET-clause operand against the current item at apply time.
 type setOperand interface {
@@ -145,18 +204,20 @@ func parseUpdateExpression(
 				if len(parts) != 2 {
 					return nil, fmt.Errorf("invalid SET clause: %q", assignment)
 				}
-				name, err := resolveAttrName(strings.TrimSpace(parts[0]), attrNames)
+				lhs := strings.TrimSpace(parts[0])
+				segs, err := parseUpdatePath(lhs, attrNames)
 				if err != nil {
 					return nil, err
 				}
 				rhs := strings.TrimSpace(parts[1])
+				var rhsVal any
 				switch {
 				case strings.HasPrefix(rhs, "if_not_exists("):
 					op, err := parseIfNotExists(rhs, attrNames, attrValues)
 					if err != nil {
 						return nil, err
 					}
-					updates[name] = op
+					rhsVal = op
 				case strings.HasPrefix(rhs, "list_append("):
 					openIdx := len("list_append")
 					closeIdx := findClose(rhs, openIdx)
@@ -176,22 +237,33 @@ func parseUpdateExpression(
 					if err != nil {
 						return nil, err
 					}
-					updates[name] = listAppendOp{left: left, right: right}
+					rhsVal = listAppendOp{left: left, right: right}
 				default:
 					val, ok := attrValues[rhs]
 					if !ok {
 						return nil, fmt.Errorf("ExpressionAttributeValues missing %q", rhs)
 					}
-					updates[name] = val
+					rhsVal = val
+				}
+				if len(segs) == 1 && segs[0].attr != "" {
+					updates[segs[0].attr] = rhsVal
+				} else {
+					// Nested path: use the raw LHS as map key (unique per assignment).
+					updates[lhs] = nestedSetOp{segs: segs, val: rhsVal}
 				}
 			}
 		case "REMOVE":
 			for _, token := range strings.Split(sec.content, ",") {
-				name, err := resolveAttrName(strings.TrimSpace(token), attrNames)
+				tok := strings.TrimSpace(token)
+				segs, err := parseUpdatePath(tok, attrNames)
 				if err != nil {
 					return nil, err
 				}
-				updates[name] = nil
+				if len(segs) == 1 && segs[0].attr != "" {
+					updates[segs[0].attr] = nil
+				} else {
+					updates[tok] = nestedRemoveOp{segs: segs}
+				}
 			}
 		case "ADD":
 			for _, pair := range strings.Split(sec.content, ",") {

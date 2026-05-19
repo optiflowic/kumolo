@@ -9,6 +9,176 @@ import (
 	"time"
 )
 
+// applyNestedSet writes val at the document path described by segs within item.
+// segs must contain resolved attribute names (no #nameRef placeholders).
+// Returns a ValidationException-compatible error when an intermediate map parent is missing.
+func applyNestedSet(item map[string]any, segs []projSegment, val any) error {
+	if len(segs) == 0 {
+		return nil
+	}
+	if segs[0].attr == "" {
+		return fmt.Errorf(
+			"the document path provided in the update expression is invalid for update",
+		)
+	}
+	if len(segs) == 1 {
+		if val == nil {
+			delete(item, segs[0].attr)
+		} else {
+			item[segs[0].attr] = val
+		}
+		return nil
+	}
+	parent, ok := item[segs[0].attr]
+	if !ok {
+		return fmt.Errorf(
+			"the document path provided in the update expression is invalid for update",
+		)
+	}
+	return setAtDynamoValue(parent, segs[1:], val)
+}
+
+// setAtDynamoValue navigates into a DynamoDB typed value following segs and sets the leaf.
+// Maps and slices are modified in place via Go reference semantics.
+func setAtDynamoValue(dynVal any, segs []projSegment, val any) error {
+	seg := segs[0]
+	rest := segs[1:]
+	isLeaf := len(rest) == 0
+	m, ok := dynVal.(map[string]any)
+	if !ok {
+		return fmt.Errorf(
+			"the document path provided in the update expression is invalid for update",
+		)
+	}
+	if seg.attr != "" {
+		mRaw, ok := m["M"]
+		if !ok {
+			return fmt.Errorf(
+				"the document path provided in the update expression is invalid for update",
+			)
+		}
+		mMap, ok := mRaw.(map[string]any)
+		if !ok {
+			return fmt.Errorf(
+				"the document path provided in the update expression is invalid for update",
+			)
+		}
+		if isLeaf {
+			if val == nil {
+				delete(mMap, seg.attr)
+			} else {
+				mMap[seg.attr] = val
+			}
+			return nil
+		}
+		child, childOk := mMap[seg.attr]
+		if !childOk {
+			return fmt.Errorf(
+				"the document path provided in the update expression is invalid for update",
+			)
+		}
+		return setAtDynamoValue(child, rest, val)
+	}
+	// List index step.
+	lRaw, ok := m["L"]
+	if !ok {
+		return fmt.Errorf(
+			"the document path provided in the update expression is invalid for update",
+		)
+	}
+	lSlice, ok := lRaw.([]any)
+	if !ok {
+		return fmt.Errorf(
+			"the document path provided in the update expression is invalid for update",
+		)
+	}
+	if isLeaf {
+		if seg.index < len(lSlice) {
+			lSlice[seg.index] = val
+		} else {
+			// AWS appends when index is beyond the current end.
+			m["L"] = append(lSlice, val)
+		}
+		return nil
+	}
+	if seg.index >= len(lSlice) {
+		return fmt.Errorf(
+			"the document path provided in the update expression is invalid for update",
+		)
+	}
+	return setAtDynamoValue(lSlice[seg.index], rest, val)
+}
+
+// applyNestedRemove removes the attribute at the document path described by segs within item.
+// Missing intermediate nodes are treated as a no-op (AWS: "If the attributes don't exist, nothing happens").
+func applyNestedRemove(item map[string]any, segs []projSegment) error {
+	if len(segs) == 0 {
+		return nil
+	}
+	if segs[0].attr == "" {
+		return nil
+	}
+	if len(segs) == 1 {
+		delete(item, segs[0].attr)
+		return nil
+	}
+	parent, ok := item[segs[0].attr]
+	if !ok {
+		return nil // no-op
+	}
+	return removeAtDynamoValue(parent, segs[1:])
+}
+
+// removeAtDynamoValue navigates into a DynamoDB typed value following segs and removes the leaf.
+func removeAtDynamoValue(dynVal any, segs []projSegment) error {
+	seg := segs[0]
+	rest := segs[1:]
+	isLeaf := len(rest) == 0
+	m, ok := dynVal.(map[string]any)
+	if !ok {
+		return nil // can't navigate — no-op
+	}
+	if seg.attr != "" {
+		mRaw, ok := m["M"]
+		if !ok {
+			return nil
+		}
+		mMap, ok := mRaw.(map[string]any)
+		if !ok {
+			return nil
+		}
+		if isLeaf {
+			delete(mMap, seg.attr)
+			return nil
+		}
+		child, ok := mMap[seg.attr]
+		if !ok {
+			return nil
+		}
+		return removeAtDynamoValue(child, rest)
+	}
+	// List index step: remove element and shift remaining elements.
+	lRaw, ok := m["L"]
+	if !ok {
+		return nil
+	}
+	lSlice, ok := lRaw.([]any)
+	if !ok {
+		return nil
+	}
+	if seg.index >= len(lSlice) {
+		return nil
+	}
+	if isLeaf {
+		newSlice := make([]any, 0, len(lSlice)-1)
+		newSlice = append(newSlice, lSlice[:seg.index]...)
+		newSlice = append(newSlice, lSlice[seg.index+1:]...)
+		m["L"] = newSlice
+		return nil
+	}
+	return removeAtDynamoValue(lSlice[seg.index], rest)
+}
+
 // isTTLExpired reports whether item's TTL attribute has a past Unix-second timestamp; non-numeric/missing attrs return false.
 func isTTLExpired(item map[string]any, ttl *TTLSpec) bool {
 	if ttl == nil || !ttl.Enabled || ttl.AttributeName == "" {
@@ -227,6 +397,27 @@ func (s *Storage) UpdateItem(
 				return nil, nil, fmt.Errorf("%w: %v", ErrValidationException, err)
 			}
 			item[attr] = result
+		case nestedSetOp:
+			var resolved any
+			switch v := op.val.(type) {
+			case ifNotExistsOp:
+				resolved = v.resolve(item)
+			case listAppendOp:
+				var err error
+				resolved, err = applyListAppendOp(item, v)
+				if err != nil {
+					return nil, nil, fmt.Errorf("%w: %v", ErrValidationException, err)
+				}
+			default:
+				resolved = op.val
+			}
+			if err := applyNestedSet(item, op.segs, resolved); err != nil {
+				return nil, nil, fmt.Errorf("%w: %v", ErrValidationException, err)
+			}
+		case nestedRemoveOp:
+			if err := applyNestedRemove(item, op.segs); err != nil {
+				return nil, nil, fmt.Errorf("%w: %v", ErrValidationException, err)
+			}
 		default:
 			item[attr] = val
 		}

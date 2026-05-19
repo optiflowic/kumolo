@@ -5863,3 +5863,183 @@ func TestHandleUpdateItem_MultipleSetAssignments(t *testing.T) {
 	assert.Equal(t, map[string]any{"S": "foo"}, attrs["a"])
 	assert.Equal(t, map[string]any{"S": "bar"}, attrs["b"])
 }
+
+// --- Nested document path tests (#207, #201) ---
+
+func TestNestedPathUpdateItem(t *testing.T) {
+	ro := newTestRouter(t)
+	require.Equal(t, 200, dynamo(t, ro, "CreateTable", createTableBody).Code)
+
+	// Seed an item with a nested map and a list.
+	require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+		"TableName": "test-table",
+		"Item": {
+			"pk": {"S": "n1"},
+			"meta": {"M": {"count": {"N": "0"}, "label": {"S": "old"}}},
+			"tags": {"L": [{"S": "a"}, {"S": "b"}]}
+		}
+	}`).Code)
+
+	t.Run("SET nested map attribute via dot notation", func(t *testing.T) {
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n1"}},
+			"UpdateExpression": "SET #meta.#count = :val",
+			"ExpressionAttributeNames": {"#meta": "meta", "#count": "count"},
+			"ExpressionAttributeValues": {":val": {"N": "99"}},
+			"ReturnValues": "ALL_NEW"
+		}`)
+		require.Equal(t, 200, w.Code)
+		var out map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+		attrs := out["Attributes"].(map[string]any)
+		metaM := attrs["meta"].(map[string]any)["M"].(map[string]any)
+		assert.Equal(t, map[string]any{"N": "99"}, metaM["count"])
+		assert.Equal(t, map[string]any{"S": "old"}, metaM["label"]) // unchanged
+	})
+
+	t.Run("SET list element by index", func(t *testing.T) {
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n1"}},
+			"UpdateExpression": "SET #tags[1] = :val",
+			"ExpressionAttributeNames": {"#tags": "tags"},
+			"ExpressionAttributeValues": {":val": {"S": "replaced"}},
+			"ReturnValues": "ALL_NEW"
+		}`)
+		require.Equal(t, 200, w.Code)
+		var out map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+		attrs := out["Attributes"].(map[string]any)
+		list := attrs["tags"].(map[string]any)["L"].([]any)
+		assert.Equal(t, map[string]any{"S": "a"}, list[0])
+		assert.Equal(t, map[string]any{"S": "replaced"}, list[1])
+	})
+
+	t.Run("REMOVE nested map attribute", func(t *testing.T) {
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n1"}},
+			"UpdateExpression": "REMOVE #meta.#label",
+			"ExpressionAttributeNames": {"#meta": "meta", "#label": "label"},
+			"ReturnValues": "ALL_NEW"
+		}`)
+		require.Equal(t, 200, w.Code)
+		var out map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+		attrs := out["Attributes"].(map[string]any)
+		metaM := attrs["meta"].(map[string]any)["M"].(map[string]any)
+		_, hasLabel := metaM["label"]
+		assert.False(t, hasLabel)
+		// count should still be there
+		_, hasCount := metaM["count"]
+		assert.True(t, hasCount)
+	})
+
+	t.Run("REMOVE list element shifts remaining", func(t *testing.T) {
+		// Re-seed tags to a known state.
+		require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {
+				"pk": {"S": "n2"},
+				"tags": {"L": [{"S": "x"}, {"S": "y"}, {"S": "z"}]}
+			}
+		}`).Code)
+
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n2"}},
+			"UpdateExpression": "REMOVE tags[1]",
+			"ReturnValues": "ALL_NEW"
+		}`)
+		require.Equal(t, 200, w.Code)
+		var out map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+		attrs := out["Attributes"].(map[string]any)
+		list := attrs["tags"].(map[string]any)["L"].([]any)
+		require.Len(t, list, 2)
+		assert.Equal(t, map[string]any{"S": "x"}, list[0])
+		assert.Equal(t, map[string]any{"S": "z"}, list[1])
+	})
+
+	t.Run("SET nested path parent missing returns ValidationException", func(t *testing.T) {
+		require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {"pk": {"S": "n3"}}
+		}`).Code)
+
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n3"}},
+			"UpdateExpression": "SET missing.field = :val",
+			"ExpressionAttributeValues": {":val": {"S": "x"}},
+			"ReturnValues": "ALL_NEW"
+		}`)
+		assert.Equal(t, 400, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+}
+
+func TestNestedPathFilterExpression(t *testing.T) {
+	ro := newTestRouter(t)
+	require.Equal(t, 200, dynamo(t, ro, "CreateTable", createTableBody).Code)
+
+	require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+		"TableName": "test-table",
+		"Item": {
+			"pk": {"S": "p1"},
+			"address": {"M": {"city": {"S": "NYC"}, "zip": {"S": "10001"}}}
+		}
+	}`).Code)
+	require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+		"TableName": "test-table",
+		"Item": {
+			"pk": {"S": "p2"},
+			"address": {"M": {"city": {"S": "LA"}, "zip": {"S": "90001"}}}
+		}
+	}`).Code)
+	require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+		"TableName": "test-table",
+		"Item": {"pk": {"S": "p3"}}
+	}`).Code)
+
+	t.Run("Scan FilterExpression dot notation match", func(t *testing.T) {
+		w := dynamo(t, ro, "Scan", `{
+			"TableName": "test-table",
+			"FilterExpression": "#addr.#city = :nyc",
+			"ExpressionAttributeNames": {"#addr": "address", "#city": "city"},
+			"ExpressionAttributeValues": {":nyc": {"S": "NYC"}}
+		}`)
+		require.Equal(t, 200, w.Code)
+		var out map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+		items := out["Items"].([]any)
+		require.Len(t, items, 1)
+		assert.Equal(t, "p1", items[0].(map[string]any)["pk"].(map[string]any)["S"])
+	})
+
+	t.Run("Scan FilterExpression attribute_exists nested", func(t *testing.T) {
+		w := dynamo(t, ro, "Scan", `{
+			"TableName": "test-table",
+			"FilterExpression": "attribute_exists(address.city)"
+		}`)
+		require.Equal(t, 200, w.Code)
+		var out map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+		items := out["Items"].([]any)
+		require.Len(t, items, 2) // p1 and p2
+	})
+
+	t.Run("Scan FilterExpression attribute_not_exists nested", func(t *testing.T) {
+		w := dynamo(t, ro, "Scan", `{
+			"TableName": "test-table",
+			"FilterExpression": "attribute_not_exists(address.city)"
+		}`)
+		require.Equal(t, 200, w.Code)
+		var out map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+		items := out["Items"].([]any)
+		require.Len(t, items, 1)
+		assert.Equal(t, "p3", items[0].(map[string]any)["pk"].(map[string]any)["S"])
+	})
+}
