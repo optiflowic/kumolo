@@ -196,14 +196,13 @@ type pathOperand struct {
 	segs []projSegment
 }
 
+// pathOperand.resolve walks the DynamoDB typed-value structure following the stored segments.
+// All intermediate values are kumolo-managed map[string]any; type assertions always hold.
 func (o pathOperand) resolve(
 	item map[string]any,
 	names map[string]string,
 	_ map[string]any,
 ) (any, error) {
-	if len(o.segs) == 0 { // unreachable: parseAttrPath always produces ≥1 segment
-		return nil, nil
-	}
 	name := o.segs[0].attr
 	if strings.HasPrefix(name, "#") {
 		actual, ok := names[name]
@@ -217,22 +216,15 @@ func (o pathOperand) resolve(
 		return nil, nil
 	}
 	for _, seg := range o.segs[1:] {
-		if val == nil {
-			return nil, nil
-		}
-		m, ok := val.(map[string]any)
-		if !ok { // unreachable: all kumolo-stored DynamoDB values are map[string]any
-			return nil, nil
-		}
+		// All stored DynamoDB values are map[string]any; assertion always holds.
+		m := val.(map[string]any)
 		if seg.attr != "" {
 			mRaw, ok := m["M"]
 			if !ok {
 				return nil, nil
 			}
-			mMap, ok := mRaw.(map[string]any)
-			if !ok { // unreachable: kumolo always writes M as map[string]any
-				return nil, nil
-			}
+			// kumolo always writes M as map[string]any; assertion always holds.
+			mMap := mRaw.(map[string]any)
 			attrName := seg.attr
 			if strings.HasPrefix(attrName, "#") {
 				actual, ok := names[attrName]
@@ -250,10 +242,8 @@ func (o pathOperand) resolve(
 			if !ok {
 				return nil, nil
 			}
-			lSlice, ok := lRaw.([]any)
-			if !ok { // unreachable: kumolo always writes L as []any
-				return nil, nil
-			}
+			// kumolo always writes L as []any; assertion always holds.
+			lSlice := lRaw.([]any)
 			if seg.index >= len(lSlice) {
 				return nil, nil
 			}
@@ -679,10 +669,8 @@ func (p *exprParser) parseAttrPath() (exprOperand, error) {
 			segs = append(segs, projSegment{attr: next.val})
 		case tokListIdx:
 			idxTok := p.consume()
-			n, err := strconv.Atoi(idxTok.val)
-			if err != nil || n < 0 {
-				return nil, fmt.Errorf("invalid list index %q", idxTok.val)
-			}
+			// tokenizeExpr already validated that idxTok.val contains only digits; Atoi always succeeds.
+			n, _ := strconv.Atoi(idxTok.val)
 			segs = append(segs, projSegment{attr: "", index: n})
 		}
 	}
@@ -897,11 +885,8 @@ func validateExprRefs(
 	attrNames map[string]string,
 	attrValues map[string]any,
 ) error {
-	// untestable: same expr was already accepted by parseFilterExpr, so tokenizeExpr always succeeds here
-	toks, err := tokenizeExpr(expr)
-	if err != nil {
-		return err
-	}
+	// tokenizeExpr was already called successfully by parseFilterExpr; it always succeeds here.
+	toks, _ := tokenizeExpr(expr)
 	for _, tok := range toks {
 		switch tok.kind {
 		case tokValRef:

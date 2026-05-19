@@ -1452,6 +1452,20 @@ func TestNestedPathFilterExpr(t *testing.T) {
 			values: values,
 			want:   false,
 		},
+		{
+			name:   "dot path into list value returns false (no M key)",
+			expr:   "tags.city = :nyc",
+			names:  map[string]string{},
+			values: values,
+			want:   false, // tags is {"L": [...]}, has no "M" key → path not found
+		},
+		{
+			name:   "list index into map value returns false (no L key)",
+			expr:   "address[0] = :admin",
+			names:  map[string]string{},
+			values: values,
+			want:   false, // address is {"M": {...}}, has no "L" key → path not found
+		},
 	}
 
 	for _, tc := range tests {
@@ -1498,4 +1512,15 @@ func TestParseAttrPathErrors(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "expected attribute name after")
 	})
+
+	t.Run(
+		"attribute_exists with value ref triggers default branch in parseAttrPath",
+		func(t *testing.T) {
+			// attribute_exists(:v) — parseAttrPath is called expecting an ident/nameRef
+			// but the first token is a tokValRef, hitting the default error branch.
+			_, err := evalFilterExpr("attribute_exists(:v)", item, map[string]string{}, values)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "expected attribute path")
+		},
+	)
 }
