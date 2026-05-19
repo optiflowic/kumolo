@@ -88,7 +88,7 @@ type ifNotExistsOp struct {
 }
 
 func (o ifNotExistsOp) resolve(item map[string]any) any {
-	if v := item[o.path]; v != nil {
+	if v, exists := item[o.path]; exists {
 		return v
 	}
 	return o.operand.resolve(item)
@@ -158,11 +158,12 @@ func parseUpdateExpression(
 					}
 					updates[name] = op
 				case strings.HasPrefix(rhs, "list_append("):
-					if !strings.HasSuffix(rhs, ")") ||
-						strings.Count(rhs, "(") != strings.Count(rhs, ")") {
+					openIdx := len("list_append")
+					closeIdx := findClose(rhs, openIdx)
+					if closeIdx != len(rhs)-1 {
 						return nil, fmt.Errorf("invalid list_append: %q", rhs)
 					}
-					inner := rhs[len("list_append(") : len(rhs)-1]
+					inner := rhs[openIdx+1 : closeIdx]
 					leftStr, rightStr, ok := splitTwoArgs(inner)
 					if !ok {
 						return nil, fmt.Errorf("invalid list_append: %q", rhs)
@@ -336,6 +337,23 @@ func splitSetAssignments(s string) []string {
 	return result
 }
 
+// findClose returns the index of the ')' that closes the '(' at idx, or -1.
+func findClose(s string, idx int) int {
+	depth := 0
+	for i := idx; i < len(s); i++ {
+		switch s[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
 // splitTwoArgs finds the first top-level comma in s and returns the two trimmed parts.
 // ok is false when no top-level comma is found.
 func splitTwoArgs(s string) (left, right string, ok bool) {
@@ -352,7 +370,7 @@ func splitTwoArgs(s string) (left, right string, ok bool) {
 			}
 		}
 	}
-	return "", s, false
+	return "", "", false
 }
 
 // parseIfNotExists parses an if_not_exists(path, operand) expression.
@@ -362,16 +380,17 @@ func parseIfNotExists(
 	attrNames map[string]string,
 	attrValues map[string]any,
 ) (ifNotExistsOp, error) {
-	if !strings.HasSuffix(rhs, ")") ||
-		strings.Count(rhs, "(") != strings.Count(rhs, ")") {
+	openIdx := len("if_not_exists")
+	closeIdx := findClose(rhs, openIdx)
+	if closeIdx != len(rhs)-1 {
 		return ifNotExistsOp{}, fmt.Errorf("invalid if_not_exists: %q", rhs)
 	}
-	inner := rhs[len("if_not_exists(") : len(rhs)-1]
+	inner := rhs[openIdx+1 : closeIdx]
 	pathStr, operandStr, ok := splitTwoArgs(inner)
 	if !ok {
 		return ifNotExistsOp{}, fmt.Errorf("invalid if_not_exists: %q", rhs)
 	}
-	if strings.HasPrefix(pathStr, ":") {
+	if strings.HasPrefix(pathStr, ":") || strings.ContainsRune(pathStr, '(') {
 		return ifNotExistsOp{}, fmt.Errorf(
 			"invalid if_not_exists: first argument must be a path, not a value: %q", pathStr,
 		)

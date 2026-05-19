@@ -5715,6 +5715,7 @@ func TestHandleUpdateItem_ListAppend(t *testing.T) {
 			"ExpressionAttributeValues": {":new": {"L": [{"S": "x"}]}}
 		}`)
 		assert.Equal(t, 400, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
 	t.Run("400 when list_append right arg is not a List type", func(t *testing.T) {
@@ -5729,6 +5730,7 @@ func TestHandleUpdateItem_ListAppend(t *testing.T) {
 			"ExpressionAttributeValues": {":notlist": {"S": "not-a-list"}}
 		}`)
 		assert.Equal(t, 400, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 
 	t.Run("400 when left attr is absent (not a List type)", func(t *testing.T) {
