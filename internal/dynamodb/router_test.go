@@ -5697,7 +5697,7 @@ func TestHandleUpdateItem_ListAppend(t *testing.T) {
 		assert.Equal(t, 400, w.Code)
 	})
 
-	t.Run("list_append when left attr is absent treats it as empty list", func(t *testing.T) {
+	t.Run("400 when left attr is absent (not a List type)", func(t *testing.T) {
 		ro := setup(t)
 		require.Equal(t, 200, dynamo(t, ro, "PutItem",
 			`{"TableName":"test-table","Item":{"pk":{"S":"k7"}}}`).Code)
@@ -5706,14 +5706,10 @@ func TestHandleUpdateItem_ListAppend(t *testing.T) {
 			"Key": {"pk": {"S": "k7"}},
 			"UpdateExpression": "SET #t = list_append(#t, :new)",
 			"ExpressionAttributeNames": {"#t": "tags"},
-			"ExpressionAttributeValues": {":new": {"L": [{"S": "x"}]}},
-			"ReturnValues": "ALL_NEW"
+			"ExpressionAttributeValues": {":new": {"L": [{"S": "x"}]}}
 		}`)
-		require.Equal(t, 200, w.Code)
-		var out map[string]any
-		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
-		attrs := out["Attributes"].(map[string]any)
-		assert.Equal(t, map[string]any{"L": []any{map[string]any{"S": "x"}}}, attrs["tags"])
+		assert.Equal(t, 400, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 }
 

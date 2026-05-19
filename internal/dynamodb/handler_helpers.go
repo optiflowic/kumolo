@@ -397,10 +397,10 @@ func applyListAppendOp(item map[string]any, op listAppendOp) (any, error) {
 	return map[string]any{"L": combined}, nil
 }
 
-// toListAttr extracts the []any from a DynamoDB L-typed value; nil input returns (nil, nil).
+// toListAttr extracts the []any from a DynamoDB L-typed value.
 func toListAttr(v any) ([]any, error) {
 	if v == nil {
-		return nil, nil
+		return nil, fmt.Errorf("not a List type")
 	}
 	m, ok := v.(map[string]any)
 	if !ok { // untestable: DynamoDB item values are always typed maps
