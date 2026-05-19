@@ -818,6 +818,91 @@ func validateExprRefs(
 	return nil
 }
 
+// refsInExpr returns all #nameRef and :valRef tokens found anywhere in expr.
+// Works for all DynamoDB expression types (filter, condition, update, projection,
+// key condition) without requiring full parsing.
+func refsInExpr(expr string) (nameRefs, valRefs []string) {
+	i := 0
+	for i < len(expr) {
+		switch {
+		case expr[i] == '#':
+			j := i + 1
+			for j < len(expr) && (isExprLetter(expr[j]) || isExprDigit(expr[j])) {
+				j++
+			}
+			if j > i+1 {
+				nameRefs = append(nameRefs, expr[i:j])
+			}
+			i = j
+		case expr[i] == ':':
+			j := i + 1
+			for j < len(expr) && (isExprLetter(expr[j]) || isExprDigit(expr[j])) {
+				j++
+			}
+			if j > i+1 {
+				valRefs = append(valRefs, expr[i:j])
+			}
+			i = j
+		default:
+			i++
+		}
+	}
+	return
+}
+
+// validateUnusedExprRefs returns an error if any key in attrNames or attrValues
+// is not referenced by at least one of the provided expression strings.
+// When all expressions are empty, having any entry in attrNames or attrValues is
+// itself an error (AWS: "can only be specified when using expressions").
+func validateUnusedExprRefs(
+	attrNames map[string]string,
+	attrValues map[string]any,
+	exprs ...string,
+) error {
+	hasExpr := false
+	for _, e := range exprs {
+		if e != "" {
+			hasExpr = true
+			break
+		}
+	}
+	if !hasExpr {
+		if len(attrNames) > 0 {
+			return fmt.Errorf("ExpressionAttributeNames can only be specified when using expressions")
+		}
+		if len(attrValues) > 0 {
+			return fmt.Errorf("ExpressionAttributeValues can only be specified when using expressions")
+		}
+		return nil
+	}
+	usedNames := map[string]struct{}{}
+	usedVals := map[string]struct{}{}
+	for _, expr := range exprs {
+		names, vals := refsInExpr(expr)
+		for _, n := range names {
+			usedNames[n] = struct{}{}
+		}
+		for _, v := range vals {
+			usedVals[v] = struct{}{}
+		}
+	}
+	for k := range attrNames {
+		if _, ok := usedNames[k]; !ok {
+			return fmt.Errorf(
+				"Value provided in ExpressionAttributeNames unused in expressions: keys: {%s}", k,
+			)
+		}
+	}
+	for k := range attrValues {
+		if _, ok := usedVals[k]; !ok {
+			return fmt.Errorf(
+				"Value provided in ExpressionAttributeValues unused in expressions: keys: {%s}", k,
+			)
+		}
+	}
+	return nil
+}
+
 // evalFilterExpr evaluates a DynamoDB filter/condition expression against an item.
 func evalFilterExpr(
 	expr string,

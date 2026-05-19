@@ -5138,3 +5138,242 @@ func TestHandleDisableKinesisStreamingDestination(t *testing.T) {
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
 }
+
+func TestUnusedExpressionAttributeRefs(t *testing.T) {
+	setup := func(t *testing.T) *Router {
+		t.Helper()
+		ro := newTestRouter(t)
+		require.Equal(t, 200, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		require.Equal(t, 200, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"1"},"status":{"S":"active"}}}`).Code)
+		return ro
+	}
+
+	// Scan
+	t.Run("Scan: unused ExpressionAttributeNames returns 400", func(t *testing.T) {
+		ro := setup(t)
+		w := dynamo(t, ro, "Scan", `{
+			"TableName":"test-table",
+			"FilterExpression":"status = :active",
+			"ExpressionAttributeNames":{"#unused":"something"},
+			"ExpressionAttributeValues":{":active":{"S":"active"}}
+		}`)
+		assert.Equal(t, 400, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+	t.Run("Scan: unused ExpressionAttributeValues returns 400", func(t *testing.T) {
+		ro := setup(t)
+		w := dynamo(t, ro, "Scan", `{
+			"TableName":"test-table",
+			"FilterExpression":"#s = :active",
+			"ExpressionAttributeNames":{"#s":"status"},
+			"ExpressionAttributeValues":{":active":{"S":"active"},":unused":{"S":"x"}}
+		}`)
+		assert.Equal(t, 400, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+	t.Run("Scan: ExpressionAttributeNames with no expression returns 400", func(t *testing.T) {
+		ro := setup(t)
+		w := dynamo(t, ro, "Scan", `{
+			"TableName":"test-table",
+			"ExpressionAttributeNames":{"#s":"status"}
+		}`)
+		assert.Equal(t, 400, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+	t.Run("Scan: ExpressionAttributeValues with no expression returns 400", func(t *testing.T) {
+		ro := setup(t)
+		w := dynamo(t, ro, "Scan", `{
+			"TableName":"test-table",
+			"ExpressionAttributeValues":{":active":{"S":"active"}}
+		}`)
+		assert.Equal(t, 400, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	// Query
+	t.Run("Query: unused ExpressionAttributeNames returns 400", func(t *testing.T) {
+		ro := setup(t)
+		w := dynamo(t, ro, "Query", `{
+			"TableName":"test-table",
+			"KeyConditionExpression":"pk = :pk",
+			"ExpressionAttributeNames":{"#unused":"something"},
+			"ExpressionAttributeValues":{":pk":{"S":"1"}}
+		}`)
+		assert.Equal(t, 400, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+	t.Run("Query: unused ExpressionAttributeValues returns 400", func(t *testing.T) {
+		ro := setup(t)
+		w := dynamo(t, ro, "Query", `{
+			"TableName":"test-table",
+			"KeyConditionExpression":"pk = :pk",
+			"ExpressionAttributeValues":{":pk":{"S":"1"},":unused":{"S":"x"}}
+		}`)
+		assert.Equal(t, 400, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	// GetItem
+	t.Run("GetItem: unused ExpressionAttributeNames returns 400", func(t *testing.T) {
+		ro := setup(t)
+		w := dynamo(t, ro, "GetItem", `{
+			"TableName":"test-table",
+			"Key":{"pk":{"S":"1"}},
+			"ProjectionExpression":"status",
+			"ExpressionAttributeNames":{"#unused":"something"}
+		}`)
+		assert.Equal(t, 400, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+	t.Run("GetItem: ExpressionAttributeNames with no expression returns 400", func(t *testing.T) {
+		ro := setup(t)
+		w := dynamo(t, ro, "GetItem", `{
+			"TableName":"test-table",
+			"Key":{"pk":{"S":"1"}},
+			"ExpressionAttributeNames":{"#s":"status"}
+		}`)
+		assert.Equal(t, 400, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	// PutItem
+	t.Run("PutItem: unused ExpressionAttributeValues returns 400", func(t *testing.T) {
+		ro := setup(t)
+		w := dynamo(t, ro, "PutItem", `{
+			"TableName":"test-table",
+			"Item":{"pk":{"S":"2"}},
+			"ConditionExpression":"attribute_not_exists(pk)",
+			"ExpressionAttributeValues":{":unused":{"S":"x"}}
+		}`)
+		assert.Equal(t, 400, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+	t.Run("PutItem: ExpressionAttributeValues with no expression returns 400", func(t *testing.T) {
+		ro := setup(t)
+		w := dynamo(t, ro, "PutItem", `{
+			"TableName":"test-table",
+			"Item":{"pk":{"S":"2"}},
+			"ExpressionAttributeValues":{":unused":{"S":"x"}}
+		}`)
+		assert.Equal(t, 400, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	// DeleteItem
+	t.Run("DeleteItem: unused ExpressionAttributeNames returns 400", func(t *testing.T) {
+		ro := setup(t)
+		w := dynamo(t, ro, "DeleteItem", `{
+			"TableName":"test-table",
+			"Key":{"pk":{"S":"1"}},
+			"ConditionExpression":"attribute_exists(pk)",
+			"ExpressionAttributeNames":{"#unused":"something"}
+		}`)
+		assert.Equal(t, 400, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	// UpdateItem
+	t.Run("UpdateItem: unused ExpressionAttributeValues returns 400", func(t *testing.T) {
+		ro := setup(t)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName":"test-table",
+			"Key":{"pk":{"S":"1"}},
+			"UpdateExpression":"SET #s = :active",
+			"ExpressionAttributeNames":{"#s":"status"},
+			"ExpressionAttributeValues":{":active":{"S":"active"},":unused":{"S":"x"}}
+		}`)
+		assert.Equal(t, 400, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+	t.Run("UpdateItem: ExpressionAttributeNames with no expression returns 400", func(t *testing.T) {
+		ro := setup(t)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName":"test-table",
+			"Key":{"pk":{"S":"1"}},
+			"ExpressionAttributeNames":{"#s":"status"}
+		}`)
+		assert.Equal(t, 400, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	// TransactGetItems
+	t.Run("TransactGetItems: unused ExpressionAttributeNames returns 400", func(t *testing.T) {
+		ro := setup(t)
+		w := dynamo(t, ro, "TransactGetItems", `{
+			"TransactItems":[{
+				"Get":{
+					"TableName":"test-table",
+					"Key":{"pk":{"S":"1"}},
+					"ProjectionExpression":"status",
+					"ExpressionAttributeNames":{"#unused":"something"}
+				}
+			}]
+		}`)
+		assert.Equal(t, 400, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	// TransactWriteItems
+	t.Run("TransactWriteItems Put: unused ExpressionAttributeValues returns 400", func(t *testing.T) {
+		ro := setup(t)
+		w := dynamo(t, ro, "TransactWriteItems", `{
+			"TransactItems":[{
+				"Put":{
+					"TableName":"test-table",
+					"Item":{"pk":{"S":"2"}},
+					"ConditionExpression":"attribute_not_exists(pk)",
+					"ExpressionAttributeValues":{":unused":{"S":"x"}}
+				}
+			}]
+		}`)
+		assert.Equal(t, 400, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+	t.Run("TransactWriteItems Delete: unused ExpressionAttributeNames returns 400", func(t *testing.T) {
+		ro := setup(t)
+		w := dynamo(t, ro, "TransactWriteItems", `{
+			"TransactItems":[{
+				"Delete":{
+					"TableName":"test-table",
+					"Key":{"pk":{"S":"1"}},
+					"ConditionExpression":"attribute_exists(pk)",
+					"ExpressionAttributeNames":{"#unused":"something"}
+				}
+			}]
+		}`)
+		assert.Equal(t, 400, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+	t.Run("TransactWriteItems Update: unused ExpressionAttributeValues returns 400", func(t *testing.T) {
+		ro := setup(t)
+		w := dynamo(t, ro, "TransactWriteItems", `{
+			"TransactItems":[{
+				"Update":{
+					"TableName":"test-table",
+					"Key":{"pk":{"S":"1"}},
+					"UpdateExpression":"SET #s = :active",
+					"ExpressionAttributeNames":{"#s":"status"},
+					"ExpressionAttributeValues":{":active":{"S":"active"},":unused":{"S":"x"}}
+				}
+			}]
+		}`)
+		assert.Equal(t, 400, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+	t.Run("TransactWriteItems ConditionCheck: unused ExpressionAttributeNames returns 400", func(t *testing.T) {
+		ro := setup(t)
+		w := dynamo(t, ro, "TransactWriteItems", `{
+			"TransactItems":[{
+				"ConditionCheck":{
+					"TableName":"test-table",
+					"Key":{"pk":{"S":"1"}},
+					"ConditionExpression":"attribute_exists(pk)",
+					"ExpressionAttributeNames":{"#unused":"something"}
+				}
+			}]
+		}`)
+		assert.Equal(t, 400, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+}

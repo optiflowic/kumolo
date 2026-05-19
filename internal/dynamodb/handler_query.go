@@ -112,6 +112,14 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 			return
 		}
 	}
+	if err := validateUnusedExprRefs(
+		req.ExpressionAttributeNames, req.ExpressionAttributeValues,
+		req.FilterExpression, req.ProjectionExpression,
+	); err != nil {
+		writeError(w, http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException", err.Error())
+		return
+	}
 	opts := ScanOptions{
 		Limit:             req.Limit,
 		ExclusiveStartKey: req.ExclusiveStartKey,
@@ -256,6 +264,14 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 		return
 	}
 
+	if err := validateUnusedExprRefs(
+		req.ExpressionAttributeNames, req.ExpressionAttributeValues,
+		req.KeyConditionExpression, req.FilterExpression, req.ProjectionExpression,
+	); err != nil {
+		writeError(w, http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException", err.Error())
+		return
+	}
 	hashKeyName, hashKeyValue, skCond, err := parseKeyConditionExpression(
 		req.KeyConditionExpression,
 		req.ExpressionAttributeNames,

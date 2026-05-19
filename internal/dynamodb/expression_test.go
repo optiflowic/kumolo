@@ -1206,3 +1206,83 @@ func TestApplyProjectionToItems(t *testing.T) {
 		}, got)
 	})
 }
+
+func TestRefsInExpr(t *testing.T) {
+	tests := []struct {
+		expr      string
+		wantNames []string
+		wantVals  []string
+	}{
+		{"#n = :v", []string{"#n"}, []string{":v"}},
+		{"size(#n) > :zero", []string{"#n"}, []string{":zero"}},
+		{"#a BETWEEN :lo AND :hi", []string{"#a"}, []string{":lo", ":hi"}},
+		{"#s IN (:a, :b, :c)", []string{"#s"}, []string{":a", ":b", ":c"}},
+		{"SET #n = :v, #count = #count + :inc", []string{"#n", "#count", "#count"}, []string{":v", ":inc"}},
+		{"status = :active", nil, []string{":active"}},
+		{"attribute_exists(pk)", nil, nil},
+		{"", nil, nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.expr, func(t *testing.T) {
+			gotNames, gotVals := refsInExpr(tc.expr)
+			assert.Equal(t, tc.wantNames, gotNames)
+			assert.Equal(t, tc.wantVals, gotVals)
+		})
+	}
+}
+
+func TestValidateUnusedExprRefs(t *testing.T) {
+	names := map[string]string{"#s": "status"}
+	vals := map[string]any{":active": map[string]any{"S": "active"}}
+
+	t.Run("all refs used", func(t *testing.T) {
+		require.NoError(t, validateUnusedExprRefs(names, vals, "#s = :active"))
+	})
+
+	t.Run("no attrs no exprs", func(t *testing.T) {
+		require.NoError(t, validateUnusedExprRefs(nil, nil))
+	})
+
+	t.Run("unused name ref", func(t *testing.T) {
+		err := validateUnusedExprRefs(names, vals, "status = :active")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "ExpressionAttributeNames")
+		assert.Contains(t, err.Error(), "#s")
+	})
+
+	t.Run("unused val ref", func(t *testing.T) {
+		err := validateUnusedExprRefs(nil, vals, "status = :other")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "ExpressionAttributeValues")
+		assert.Contains(t, err.Error(), ":active")
+	})
+
+	t.Run("names with no expressions", func(t *testing.T) {
+		err := validateUnusedExprRefs(names, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "ExpressionAttributeNames can only be specified when using expressions")
+	})
+
+	t.Run("values with no expressions", func(t *testing.T) {
+		err := validateUnusedExprRefs(nil, vals)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "ExpressionAttributeValues can only be specified when using expressions")
+	})
+
+	t.Run("used across multiple expressions", func(t *testing.T) {
+		// #s used in filterExpr, :active used in projExpr... but refs don't appear in projExpr.
+		// Key: if #s is used in ANY of the exprs, it's not unused.
+		require.NoError(t, validateUnusedExprRefs(
+			names, vals,
+			"#s = :active",     // filterExpr uses both
+			"pk",               // projExpr uses neither — that's fine
+		))
+	})
+
+	t.Run("empty expr strings count as no-expr", func(t *testing.T) {
+		// All exprs are empty strings → equivalent to no expressions
+		err := validateUnusedExprRefs(names, nil, "", "")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "can only be specified when using expressions")
+	})
+}

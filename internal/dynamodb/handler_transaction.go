@@ -65,6 +65,14 @@ func (ro *Router) handleTransactGetItems(w http.ResponseWriter, body []byte) {
 			)
 			return
 		}
+		if err := validateUnusedExprRefs(
+			ti.Get.ExpressionAttributeNames, nil,
+			ti.Get.ProjectionExpression,
+		); err != nil {
+			writeError(w, http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ValidationException", err.Error())
+			return
+		}
 		gets[i] = TransactGetInput{
 			TableName: ti.Get.TableName,
 			Key:       ti.Get.Key,
@@ -202,6 +210,14 @@ func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 	for _, ti := range req.TransactItems {
 		switch {
 		case ti.Put != nil:
+			if err := validateUnusedExprRefs(
+				ti.Put.ExpressionAttributeNames, ti.Put.ExpressionAttributeValues,
+				ti.Put.ConditionExpression,
+			); err != nil {
+				writeError(w, http.StatusBadRequest,
+					"com.amazonaws.dynamodb.v20120810#ValidationException", err.Error())
+				return
+			}
 			var cond *ConditionCheck
 			if ti.Put.ConditionExpression != "" {
 				cond = &ConditionCheck{
@@ -220,6 +236,14 @@ func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 			})
 
 		case ti.Delete != nil:
+			if err := validateUnusedExprRefs(
+				ti.Delete.ExpressionAttributeNames, ti.Delete.ExpressionAttributeValues,
+				ti.Delete.ConditionExpression,
+			); err != nil {
+				writeError(w, http.StatusBadRequest,
+					"com.amazonaws.dynamodb.v20120810#ValidationException", err.Error())
+				return
+			}
 			var cond *ConditionCheck
 			if ti.Delete.ConditionExpression != "" {
 				cond = &ConditionCheck{
@@ -238,6 +262,14 @@ func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 			})
 
 		case ti.Update != nil:
+			if err := validateUnusedExprRefs(
+				ti.Update.ExpressionAttributeNames, ti.Update.ExpressionAttributeValues,
+				ti.Update.UpdateExpression, ti.Update.ConditionExpression,
+			); err != nil {
+				writeError(w, http.StatusBadRequest,
+					"com.amazonaws.dynamodb.v20120810#ValidationException", err.Error())
+				return
+			}
 			updates, err := parseUpdateExpression(
 				ti.Update.UpdateExpression,
 				ti.Update.ExpressionAttributeNames,
@@ -279,6 +311,14 @@ func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 					"com.amazonaws.dynamodb.v20120810#ValidationException",
 					"ConditionExpression is required for ConditionCheck",
 				)
+				return
+			}
+			if err := validateUnusedExprRefs(
+				ti.ConditionCheck.ExpressionAttributeNames, ti.ConditionCheck.ExpressionAttributeValues,
+				ti.ConditionCheck.ConditionExpression,
+			); err != nil {
+				writeError(w, http.StatusBadRequest,
+					"com.amazonaws.dynamodb.v20120810#ValidationException", err.Error())
 				return
 			}
 			cond := &ConditionCheck{
