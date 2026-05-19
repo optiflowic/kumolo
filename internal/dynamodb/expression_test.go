@@ -2,6 +2,8 @@ package dynamodb
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -156,6 +158,8 @@ func TestEvalFilterExpr(t *testing.T) {
 		{"in with name ref", "#n IN (:alice, :bob)", true, false},
 		{"in attr error", "#missing IN (:alice)", false, true},
 		{"in value error", "name IN (:missing)", false, true},
+		// match found at first position but subsequent value is unresolvable — must error
+		{"in match hides later error", "name IN (:alice, :missing)", false, true},
 	}
 
 	for _, tc := range tests {
@@ -428,6 +432,18 @@ func TestHandleQueryWithFilterExpression(t *testing.T) {
 			wantCount:   0,
 			wantScanned: 3,
 		},
+		{
+			name: "query with IN filter",
+			body: `{
+				"TableName":"orders",
+				"KeyConditionExpression":"userId = :uid",
+				"FilterExpression":"#s IN (:shipped, :pending)",
+				"ExpressionAttributeNames":{"#s":"status"},
+				"ExpressionAttributeValues":{":uid":{"S":"u1"},":shipped":{"S":"shipped"},":pending":{"S":"pending"}}
+			}`,
+			wantCount:   3,
+			wantScanned: 3,
+		},
 	}
 
 	for _, tc := range tests {
@@ -455,6 +471,14 @@ func TestHandleQueryWithFilterExpression(t *testing.T) {
 		assert.Equal(t, 400, w.Code)
 		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
+}
+
+func buildINExpr(n int) string {
+	vals := make([]string, n)
+	for i := range vals {
+		vals[i] = fmt.Sprintf(":v%d", i)
+	}
+	return "name IN (" + strings.Join(vals, ", ") + ")"
 }
 
 func TestParseFilterExprErrors(t *testing.T) {
@@ -523,6 +547,7 @@ func TestParseFilterExprErrors(t *testing.T) {
 		{"in no rparen", "name IN (:val"},
 		{"in bad first operand", "name IN (,"},
 		{"in bad subsequent operand", "name IN (:val, ("},
+		{"in over 100 values", buildINExpr(101)},
 	}
 
 	for _, tc := range tests {
