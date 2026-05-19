@@ -10,25 +10,9 @@ import (
 )
 
 // applyNestedSet writes val at the document path described by segs within item.
-// segs must contain resolved attribute names (no #nameRef placeholders).
+// segs must contain ≥2 resolved segments (no #nameRef placeholders); segs[0].attr must be non-empty.
 // Returns a ValidationException-compatible error when an intermediate map parent is missing.
 func applyNestedSet(item map[string]any, segs []projSegment, val any) error {
-	if len(segs) == 0 {
-		return nil
-	}
-	if segs[0].attr == "" {
-		return fmt.Errorf(
-			"the document path provided in the update expression is invalid for update",
-		)
-	}
-	if len(segs) == 1 {
-		if val == nil {
-			delete(item, segs[0].attr)
-		} else {
-			item[segs[0].attr] = val
-		}
-		return nil
-	}
 	parent, ok := item[segs[0].attr]
 	if !ok {
 		return fmt.Errorf(
@@ -44,12 +28,8 @@ func setAtDynamoValue(dynVal any, segs []projSegment, val any) error {
 	seg := segs[0]
 	rest := segs[1:]
 	isLeaf := len(rest) == 0
-	m, ok := dynVal.(map[string]any)
-	if !ok {
-		return fmt.Errorf(
-			"the document path provided in the update expression is invalid for update",
-		)
-	}
+	// All kumolo-stored DynamoDB values are map[string]any; the assertion always holds.
+	m := dynVal.(map[string]any)
 	if seg.attr != "" {
 		mRaw, ok := m["M"]
 		if !ok {
@@ -57,18 +37,10 @@ func setAtDynamoValue(dynVal any, segs []projSegment, val any) error {
 				"the document path provided in the update expression is invalid for update",
 			)
 		}
-		mMap, ok := mRaw.(map[string]any)
-		if !ok {
-			return fmt.Errorf(
-				"the document path provided in the update expression is invalid for update",
-			)
-		}
+		// kumolo always writes M as map[string]any; the assertion always holds.
+		mMap := mRaw.(map[string]any)
 		if isLeaf {
-			if val == nil {
-				delete(mMap, seg.attr)
-			} else {
-				mMap[seg.attr] = val
-			}
+			mMap[seg.attr] = val
 			return nil
 		}
 		child, childOk := mMap[seg.attr]
@@ -86,12 +58,8 @@ func setAtDynamoValue(dynVal any, segs []projSegment, val any) error {
 			"the document path provided in the update expression is invalid for update",
 		)
 	}
-	lSlice, ok := lRaw.([]any)
-	if !ok {
-		return fmt.Errorf(
-			"the document path provided in the update expression is invalid for update",
-		)
-	}
+	// kumolo always writes L as []any; the assertion always holds.
+	lSlice := lRaw.([]any)
 	if isLeaf {
 		if seg.index < len(lSlice) {
 			lSlice[seg.index] = val
@@ -110,21 +78,12 @@ func setAtDynamoValue(dynVal any, segs []projSegment, val any) error {
 }
 
 // applyNestedRemove removes the attribute at the document path described by segs within item.
+// segs must contain ≥2 resolved segments; segs[0].attr must be non-empty.
 // Missing intermediate nodes are treated as a no-op (AWS: "If the attributes don't exist, nothing happens").
 func applyNestedRemove(item map[string]any, segs []projSegment) error {
-	if len(segs) == 0 {
-		return nil
-	}
-	if segs[0].attr == "" {
-		return nil
-	}
-	if len(segs) == 1 {
-		delete(item, segs[0].attr)
-		return nil
-	}
 	parent, ok := item[segs[0].attr]
 	if !ok {
-		return nil // no-op
+		return nil // no-op: missing top-level attribute
 	}
 	return removeAtDynamoValue(parent, segs[1:])
 }
@@ -134,19 +93,15 @@ func removeAtDynamoValue(dynVal any, segs []projSegment) error {
 	seg := segs[0]
 	rest := segs[1:]
 	isLeaf := len(rest) == 0
-	m, ok := dynVal.(map[string]any)
-	if !ok {
-		return nil // can't navigate — no-op
-	}
+	// All kumolo-stored DynamoDB values are map[string]any; the assertion always holds.
+	m := dynVal.(map[string]any)
 	if seg.attr != "" {
 		mRaw, ok := m["M"]
 		if !ok {
 			return nil
 		}
-		mMap, ok := mRaw.(map[string]any)
-		if !ok {
-			return nil
-		}
+		// kumolo always writes M as map[string]any; the assertion always holds.
+		mMap := mRaw.(map[string]any)
 		if isLeaf {
 			delete(mMap, seg.attr)
 			return nil
@@ -162,10 +117,8 @@ func removeAtDynamoValue(dynVal any, segs []projSegment) error {
 	if !ok {
 		return nil
 	}
-	lSlice, ok := lRaw.([]any)
-	if !ok {
-		return nil
-	}
+	// kumolo always writes L as []any; the assertion always holds.
+	lSlice := lRaw.([]any)
 	if seg.index >= len(lSlice) {
 		return nil
 	}
