@@ -257,6 +257,11 @@ type betweenCondNode struct {
 	hi   exprOperand
 }
 
+type inCondNode struct {
+	attr   exprOperand
+	values []exprOperand
+}
+
 func (n andCondNode) eval(
 	item map[string]any,
 	names map[string]string,
@@ -436,6 +441,34 @@ func (n betweenCondNode) eval(
 	c1, err1 := dynamoValueCmp(attrVal, loVal)
 	c2, err2 := dynamoValueCmp(attrVal, hiVal)
 	return err1 == nil && err2 == nil && c1 >= 0 && c2 <= 0, nil
+}
+
+func (n inCondNode) eval(
+	item map[string]any,
+	names map[string]string,
+	values map[string]any,
+) (bool, error) {
+	attrVal, err := n.attr.resolve(item, names, values)
+	if err != nil {
+		return false, err
+	}
+	attrJ, _ := json.Marshal(attrVal)
+	resolved := make([]string, len(n.values))
+	for i, v := range n.values {
+		val, err := v.resolve(item, names, values)
+		if err != nil {
+			return false, err
+		}
+		vj, _ := json.Marshal(val)
+		resolved[i] = string(vj)
+	}
+	attrJStr := string(attrJ)
+	for _, vj := range resolved {
+		if attrJStr == vj {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 type exprParser struct {
@@ -688,6 +721,36 @@ func (p *exprParser) parseComparison() (condNode, error) {
 			return nil, err
 		}
 		return betweenCondNode{left, lo, hi}, nil
+	}
+
+	if p.isKeyword("IN") {
+		p.consume()
+		if _, err := p.expectKind(tokLParen); err != nil {
+			return nil, err
+		}
+		first, err := p.parseOperand()
+		if err != nil {
+			return nil, err
+		}
+		inValues := []exprOperand{first}
+		for p.peek().kind == tokComma {
+			p.consume()
+			val, err := p.parseOperand()
+			if err != nil {
+				return nil, err
+			}
+			inValues = append(inValues, val)
+			if len(inValues) > 100 {
+				return nil, fmt.Errorf(
+					"IN operator supports at most 100 values, got %d",
+					len(inValues),
+				)
+			}
+		}
+		if _, err := p.expectKind(tokRParen); err != nil {
+			return nil, err
+		}
+		return inCondNode{left, inValues}, nil
 	}
 
 	t := p.peek()
