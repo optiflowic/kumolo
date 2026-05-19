@@ -802,7 +802,10 @@ func validateExprRefs(
 	attrNames map[string]string,
 	attrValues map[string]any,
 ) error {
-	toks, _ := tokenizeExpr(expr) // always succeeds: same expr already accepted by parseFilterExpr
+	toks, err := tokenizeExpr(expr) // always succeeds: same expr already accepted by parseFilterExpr
+	if err != nil {
+		return err
+	}
 	for _, tok := range toks {
 		switch tok.kind {
 		case tokValRef:
