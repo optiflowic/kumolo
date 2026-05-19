@@ -131,8 +131,6 @@ func tokenizeExpr(expr string) ([]exprToken, error) {
 // exprOperand resolves to a DynamoDB typed value from an item, names, or values.
 type exprOperand interface {
 	resolve(item map[string]any, names map[string]string, values map[string]any) (any, error)
-	// attrName returns the attribute name for exists checks; ("", false) if not a path.
-	attrName(names map[string]string) (string, bool)
 }
 
 type nameRefOperand struct{ ref string }
@@ -150,11 +148,6 @@ func (o nameRefOperand) resolve(
 	return item[actual], nil
 }
 
-func (o nameRefOperand) attrName(names map[string]string) (string, bool) {
-	actual, ok := names[o.ref]
-	return actual, ok
-}
-
 type valRefOperand struct{ ref string }
 
 // Callers must invoke validateExprRefs before eval to guarantee o.ref is present.
@@ -166,8 +159,6 @@ func (o valRefOperand) resolve(
 	return values[o.ref], nil
 }
 
-func (o valRefOperand) attrName(_ map[string]string) (string, bool) { return "", false }
-
 type plainOperand struct{ name string }
 
 func (o plainOperand) resolve(
@@ -177,8 +168,6 @@ func (o plainOperand) resolve(
 ) (any, error) {
 	return item[o.name], nil
 }
-
-func (o plainOperand) attrName(_ map[string]string) (string, bool) { return o.name, true }
 
 type sizeOperand struct{ path exprOperand }
 
@@ -201,8 +190,6 @@ func (o sizeOperand) resolve(
 	return map[string]any{"N": fmt.Sprintf("%d", n)}, nil
 }
 
-func (o sizeOperand) attrName(_ map[string]string) (string, bool) { return "", false }
-
 // pathOperand resolves a multi-segment document path like a.b[0].c or #ref.attr.
 // Segments are stored as raw tokens; #nameRef segments are resolved at eval time.
 type pathOperand struct {
@@ -214,7 +201,7 @@ func (o pathOperand) resolve(
 	names map[string]string,
 	_ map[string]any,
 ) (any, error) {
-	if len(o.segs) == 0 {
+	if len(o.segs) == 0 { // unreachable: parseAttrPath always produces ≥1 segment
 		return nil, nil
 	}
 	name := o.segs[0].attr
@@ -234,7 +221,7 @@ func (o pathOperand) resolve(
 			return nil, nil
 		}
 		m, ok := val.(map[string]any)
-		if !ok {
+		if !ok { // unreachable: all kumolo-stored DynamoDB values are map[string]any
 			return nil, nil
 		}
 		if seg.attr != "" {
@@ -243,7 +230,7 @@ func (o pathOperand) resolve(
 				return nil, nil
 			}
 			mMap, ok := mRaw.(map[string]any)
-			if !ok {
+			if !ok { // unreachable: kumolo always writes M as map[string]any
 				return nil, nil
 			}
 			attrName := seg.attr
@@ -264,7 +251,7 @@ func (o pathOperand) resolve(
 				return nil, nil
 			}
 			lSlice, ok := lRaw.([]any)
-			if !ok {
+			if !ok { // unreachable: kumolo always writes L as []any
 				return nil, nil
 			}
 			if seg.index >= len(lSlice) {
@@ -274,20 +261,6 @@ func (o pathOperand) resolve(
 		}
 	}
 	return val, nil
-}
-
-// attrName returns the single top-level attribute name for single-segment paths.
-// Multi-segment paths and list-index-only paths return ("", false).
-func (o pathOperand) attrName(names map[string]string) (string, bool) {
-	if len(o.segs) != 1 || o.segs[0].attr == "" {
-		return "", false
-	}
-	name := o.segs[0].attr
-	if strings.HasPrefix(name, "#") {
-		actual, ok := names[name]
-		return actual, ok
-	}
-	return name, true
 }
 
 func dynamoAttrSize(val any) (int, error) {

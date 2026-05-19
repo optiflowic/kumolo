@@ -702,13 +702,6 @@ func TestExprNodesDirect(t *testing.T) {
 	names := map[string]string{"#n": "name"}
 	values := map[string]any{":alice": map[string]any{"S": "Alice"}}
 
-	t.Run("valRefOperand attrName returns empty string and false", func(t *testing.T) {
-		op := valRefOperand{":alice"}
-		got, ok := op.attrName(names)
-		assert.Equal(t, "", got)
-		assert.False(t, ok)
-	})
-
 	t.Run("attrExistsCondNode with valRefOperand resolves via resolve()", func(t *testing.T) {
 		// attrExistsCondNode now uses resolve() for all operand types.
 		// Parse-time validation prevents :valRef from being passed here in practice,
@@ -717,6 +710,14 @@ func TestExprNodesDirect(t *testing.T) {
 		got, err := node.eval(item, names, values)
 		require.NoError(t, err)
 		assert.True(t, got) // :alice resolves to a non-nil value → exists
+	})
+
+	t.Run("attrExistsCondNode propagates resolve error", func(t *testing.T) {
+		// nameRefOperand returns an error when the #name is missing from ExpressionAttributeNames.
+		node := attrExistsCondNode{operand: nameRefOperand{"#missing"}, negate: false}
+		_, err := node.eval(item, map[string]string{}, values)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "#missing")
 	})
 
 	t.Run("tokenKindName fallback for unknown kind", func(t *testing.T) {
@@ -733,13 +734,6 @@ func TestExprNodesDirect(t *testing.T) {
 		_, err := node.eval(item, names, values)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "unknown operator")
-	})
-
-	t.Run("sizeOperand attrName returns empty string and false", func(t *testing.T) {
-		op := sizeOperand{path: plainOperand{"name"}}
-		got, ok := op.attrName(nil)
-		assert.Equal(t, "", got)
-		assert.False(t, ok)
 	})
 
 	t.Run("sizeOperand resolve propagates path error", func(t *testing.T) {
@@ -1491,4 +1485,17 @@ func TestNestedPathTokenizer(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestParseAttrPathErrors(t *testing.T) {
+	item := map[string]any{"name": map[string]any{"S": "Alice"}}
+	values := map[string]any{":v": map[string]any{"S": "Alice"}}
+
+	t.Run("dot followed by value ref is parse error", func(t *testing.T) {
+		// "a.:v = :v" — after the dot, the parser expects an ident or nameRef,
+		// but encounters a valRef token, triggering "expected attribute name after '.'"
+		_, err := evalFilterExpr("a.:v = :v", item, map[string]string{}, values)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "expected attribute name after")
+	})
 }
