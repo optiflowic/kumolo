@@ -102,6 +102,10 @@ func TestEvalFilterExpr(t *testing.T) {
 		{"not true", "NOT #n = :bob", true, false},
 		{"not false", "NOT #n = :alice", false, false},
 		{"not eval error", "NOT #missing = :alice", false, true},
+		// eval() error propagation through AND/OR/NOT via size() on unsupported type
+		{"and left eval error", "size(boolFlag) = :zero AND #n = :alice", false, true},
+		{"or left eval error", "size(boolFlag) = :zero OR #n = :alice", false, true},
+		{"not eval size error", "NOT size(boolFlag) = :zero", false, true},
 		// Parentheses
 		{"parens", "(#n = :alice OR #n = :bob) AND #a = :thirty", true, false},
 		// Plain attr name (no #)
@@ -115,15 +119,15 @@ func TestEvalFilterExpr(t *testing.T) {
 		// AND/OR left-side error propagation
 		{"and left error", "#missing = :alice AND name = :alice", false, true},
 		{"or left error", "#missing = :alice OR name = :alice", false, true},
-		// validateValRefs: missing :valRef propagates through AND/OR/NOT
+		// validateExprRefs: missing :valRef propagates through AND/OR/NOT
 		{"and left valref missing", "name = :missing AND #n = :alice", false, true},
 		{"or left valref missing", "name = :missing OR #n = :alice", false, true},
 		{"not valref missing", "NOT name = :missing", false, true},
-		// BETWEEN resolve errors
+		// BETWEEN resolve errors (caught by validateExprRefs)
 		{"between attr error", "#missing BETWEEN :twenty AND :forty", false, true},
 		{"between lo error", "#a BETWEEN :missing AND :forty", false, true},
 		{"between hi error", "#a BETWEEN :twenty AND :missing", false, true},
-		// resolve errors on RHS/value positions via #nameRef (covers eval error paths after validateValRefs)
+		// validateExprRefs: missing #nameRef in various positions
 		{"cmp rhs name ref missing", "name = #undefined", false, true},
 		{"between lo name ref missing", "age BETWEEN #undefined AND :forty", false, true},
 		{"between hi name ref missing", "age BETWEEN :twenty AND #undefined", false, true},
@@ -244,6 +248,18 @@ func TestApplyFilterExpression(t *testing.T) {
 		require.Error(t, err)
 	})
 
+	t.Run("eval error on item during filtering returns error", func(t *testing.T) {
+		// size() on a BOOL attribute errors at eval time (passes validateExprRefs).
+		boolItems := []map[string]any{
+			{"pk": map[string]any{"S": "1"}, "flag": map[string]any{"BOOL": true}},
+		}
+		_, err := applyFilterExpression(boolItems, "size(flag) = :zero",
+			map[string]string{},
+			map[string]any{":zero": map[string]any{"N": "0"}},
+		)
+		require.Error(t, err)
+	})
+
 	t.Run("missing val ref with items returns error", func(t *testing.T) {
 		_, err := applyFilterExpression(items, "#s = :missing",
 			map[string]string{"#s": "status"},
@@ -260,6 +276,24 @@ func TestApplyFilterExpression(t *testing.T) {
 		)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), ":missing")
+	})
+
+	t.Run("missing name ref with items returns error", func(t *testing.T) {
+		_, err := applyFilterExpression(items, "#missing = :active",
+			map[string]string{},
+			map[string]any{":active": map[string]any{"S": "active"}},
+		)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "#missing")
+	})
+
+	t.Run("missing name ref with no items returns error", func(t *testing.T) {
+		_, err := applyFilterExpression(nil, "#missing = :active",
+			map[string]string{},
+			map[string]any{":active": map[string]any{"S": "active"}},
+		)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "#missing")
 	})
 }
 
@@ -407,6 +441,29 @@ func TestHandleScanWithFilterExpression(t *testing.T) {
 		assert.Equal(t, 400, w.Code)
 		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
+
+	t.Run("missing name ref on non-empty table returns 400", func(t *testing.T) {
+		ro := setup(t)
+		w := dynamo(t, ro, "Scan", `{
+			"TableName":"test-table",
+			"FilterExpression":"#missing = :active",
+			"ExpressionAttributeValues":{":active":{"S":"active"}}
+		}`)
+		assert.Equal(t, 400, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("missing name ref on empty table returns 400", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, 200, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "Scan", `{
+			"TableName":"test-table",
+			"FilterExpression":"#missing = :active",
+			"ExpressionAttributeValues":{":active":{"S":"active"}}
+		}`)
+		assert.Equal(t, 400, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
 }
 
 func TestHandleQueryWithFilterExpression(t *testing.T) {
@@ -534,6 +591,18 @@ func TestHandleQueryWithFilterExpression(t *testing.T) {
 			"FilterExpression":"#s = :missing",
 			"ExpressionAttributeNames":{"#s":"status"},
 			"ExpressionAttributeValues":{":uid":{"S":"no-such-user"}}
+		}`)
+		assert.Equal(t, 400, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("missing name ref when key matches no items returns 400", func(t *testing.T) {
+		ro := setup(t)
+		w := dynamo(t, ro, "Query", `{
+			"TableName":"orders",
+			"KeyConditionExpression":"userId = :uid",
+			"FilterExpression":"#missing = :active",
+			"ExpressionAttributeValues":{":uid":{"S":"no-such-user"},":active":{"S":"active"}}
 		}`)
 		assert.Equal(t, 400, w.Code)
 		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
@@ -716,6 +785,83 @@ func TestExprNodesDirect(t *testing.T) {
 	t.Run("dynamoAttrSize unknown type returns error", func(t *testing.T) {
 		_, err := dynamoAttrSize(map[string]any{"BOOL": true})
 		assert.Error(t, err)
+	})
+
+	// Direct eval() error path tests: call node.eval() without validateExprRefs
+	// so that missing #nameRef reaches the resolve() error instead of being caught early.
+	emptyNames := map[string]string{}
+
+	t.Run("nameRefOperand resolve error", func(t *testing.T) {
+		op := nameRefOperand{"#missing"}
+		_, err := op.resolve(item, emptyNames, values)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "#missing")
+	})
+
+	t.Run("cmpCondNode left resolve error", func(t *testing.T) {
+		node := cmpCondNode{left: nameRefOperand{"#missing"}, op: "=", right: valRefOperand{":alice"}}
+		_, err := node.eval(item, emptyNames, values)
+		require.Error(t, err)
+	})
+
+	t.Run("cmpCondNode right resolve error", func(t *testing.T) {
+		node := cmpCondNode{left: plainOperand{"name"}, op: "=", right: nameRefOperand{"#missing"}}
+		_, err := node.eval(item, emptyNames, values)
+		require.Error(t, err)
+	})
+
+	t.Run("beginsWithCondNode path resolve error", func(t *testing.T) {
+		node := beginsWithCondNode{path: nameRefOperand{"#missing"}, prefix: valRefOperand{":alice"}}
+		_, err := node.eval(item, emptyNames, values)
+		require.Error(t, err)
+	})
+
+	t.Run("beginsWithCondNode prefix resolve error", func(t *testing.T) {
+		node := beginsWithCondNode{path: plainOperand{"name"}, prefix: nameRefOperand{"#missing"}}
+		_, err := node.eval(item, emptyNames, values)
+		require.Error(t, err)
+	})
+
+	t.Run("containsCondNode path resolve error", func(t *testing.T) {
+		node := containsCondNode{path: nameRefOperand{"#missing"}, val: valRefOperand{":alice"}}
+		_, err := node.eval(item, emptyNames, values)
+		require.Error(t, err)
+	})
+
+	t.Run("containsCondNode val resolve error", func(t *testing.T) {
+		node := containsCondNode{path: plainOperand{"name"}, val: nameRefOperand{"#missing"}}
+		_, err := node.eval(item, emptyNames, values)
+		require.Error(t, err)
+	})
+
+	t.Run("betweenCondNode attr resolve error", func(t *testing.T) {
+		node := betweenCondNode{attr: nameRefOperand{"#missing"}, lo: valRefOperand{":alice"}, hi: valRefOperand{":alice"}}
+		_, err := node.eval(item, emptyNames, values)
+		require.Error(t, err)
+	})
+
+	t.Run("betweenCondNode lo resolve error", func(t *testing.T) {
+		node := betweenCondNode{attr: plainOperand{"name"}, lo: nameRefOperand{"#missing"}, hi: valRefOperand{":alice"}}
+		_, err := node.eval(item, emptyNames, values)
+		require.Error(t, err)
+	})
+
+	t.Run("betweenCondNode hi resolve error", func(t *testing.T) {
+		node := betweenCondNode{attr: plainOperand{"name"}, lo: valRefOperand{":alice"}, hi: nameRefOperand{"#missing"}}
+		_, err := node.eval(item, emptyNames, values)
+		require.Error(t, err)
+	})
+
+	t.Run("inCondNode attr resolve error", func(t *testing.T) {
+		node := inCondNode{attr: nameRefOperand{"#missing"}, values: []exprOperand{valRefOperand{":alice"}}}
+		_, err := node.eval(item, emptyNames, values)
+		require.Error(t, err)
+	})
+
+	t.Run("inCondNode value resolve error", func(t *testing.T) {
+		node := inCondNode{attr: plainOperand{"name"}, values: []exprOperand{nameRefOperand{"#missing"}}}
+		_, err := node.eval(item, emptyNames, values)
+		require.Error(t, err)
 	})
 }
 

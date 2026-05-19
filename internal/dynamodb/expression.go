@@ -122,6 +122,7 @@ type exprOperand interface {
 
 type nameRefOperand struct{ ref string }
 
+// Callers must invoke validateExprRefs before eval to guarantee o.ref is present.
 func (o nameRefOperand) resolve(
 	item map[string]any,
 	names map[string]string,
@@ -141,7 +142,7 @@ func (o nameRefOperand) attrName(names map[string]string) (string, bool) {
 
 type valRefOperand struct{ ref string }
 
-// Callers must invoke validateValRefs before eval to guarantee o.ref is present.
+// Callers must invoke validateExprRefs before eval to guarantee o.ref is present.
 func (o valRefOperand) resolve(
 	_ map[string]any,
 	_ map[string]string,
@@ -345,10 +346,8 @@ func (n attrExistsCondNode) eval(
 ) (bool, error) {
 	attrName, ok := n.operand.attrName(names)
 	if !ok {
-		// nameRefOperand returns false when the #ref is absent from ExpressionAttributeNames.
-		if nr, isRef := n.operand.(nameRefOperand); isRef {
-			return false, fmt.Errorf("ExpressionAttributeNames missing %q", nr.ref)
-		}
+		// Reachable only when operand is not an attr path (e.g. valRefOperand).
+		// #nameRef operands are guaranteed valid by validateExprRefs before eval.
 		return false, fmt.Errorf("attribute_exists/attribute_not_exists requires an attribute path")
 	}
 	_, exists := item[attrName]
@@ -794,61 +793,27 @@ func parseFilterExpr(expr string) (condNode, error) {
 	return node, nil
 }
 
-// validateValRefs walks the condNode AST and returns an error if any :valRef
-// token is absent from attrValues. Called before item evaluation so that missing
+// validateExprRefs tokenizes expr and returns an error if any :valRef token is
+// absent from attrValues or any #nameRef token is absent from attrNames.
+// Called after parseFilterExpr succeeds and before item evaluation so that missing
 // references are caught even when the result set is empty.
-//
-// Parser guarantees: LHS/path/attr positions are always attr-path or size()
-// operands — never valRefOperands — so only RHS/value positions need checking.
-// attrExistsCondNode has no case because its operand is always an attr path.
-func validateValRefs(node condNode, attrValues map[string]any) error {
-	switch n := node.(type) {
-	case andCondNode:
-		if err := validateValRefs(n.left, attrValues); err != nil {
-			return err
-		}
-		return validateValRefs(n.right, attrValues)
-	case orCondNode:
-		if err := validateValRefs(n.left, attrValues); err != nil {
-			return err
-		}
-		return validateValRefs(n.right, attrValues)
-	case notCondNode:
-		return validateValRefs(n.operand, attrValues)
-	case cmpCondNode:
-		// n.left is always an attr path or size(); only n.right can be a :valRef.
-		return validateOperandValRef(n.right, attrValues)
-	case beginsWithCondNode:
-		// n.path is always an attr path; only n.prefix can be a :valRef.
-		return validateOperandValRef(n.prefix, attrValues)
-	case containsCondNode:
-		// n.path is always an attr path; only n.val can be a :valRef.
-		return validateOperandValRef(n.val, attrValues)
-	case betweenCondNode:
-		// n.attr is always an attr path; lo and hi can be :valRefs.
-		if err := validateOperandValRef(n.lo, attrValues); err != nil {
-			return err
-		}
-		return validateOperandValRef(n.hi, attrValues)
-	case inCondNode:
-		// n.attr is always an attr path; only values can be :valRefs.
-		for _, v := range n.values {
-			if err := validateOperandValRef(v, attrValues); err != nil {
-				return err
+func validateExprRefs(
+	expr string,
+	attrNames map[string]string,
+	attrValues map[string]any,
+) error {
+	toks, _ := tokenizeExpr(expr) // always succeeds: same expr already accepted by parseFilterExpr
+	for _, tok := range toks {
+		switch tok.kind {
+		case tokValRef:
+			if _, ok := attrValues[tok.val]; !ok {
+				return fmt.Errorf("ExpressionAttributeValues missing %q", tok.val)
+			}
+		case tokNameRef:
+			if _, ok := attrNames[tok.val]; !ok {
+				return fmt.Errorf("ExpressionAttributeNames missing %q", tok.val)
 			}
 		}
-	}
-	return nil
-}
-
-func validateOperandValRef(op exprOperand, attrValues map[string]any) error {
-	switch o := op.(type) {
-	case valRefOperand:
-		if _, ok := attrValues[o.ref]; !ok {
-			return fmt.Errorf("ExpressionAttributeValues missing %q", o.ref)
-		}
-	case sizeOperand:
-		return validateOperandValRef(o.path, attrValues)
 	}
 	return nil
 }
@@ -864,7 +829,7 @@ func evalFilterExpr(
 	if err != nil {
 		return false, err
 	}
-	if err := validateValRefs(node, attrValues); err != nil {
+	if err := validateExprRefs(expr, attrNames, attrValues); err != nil {
 		return false, err
 	}
 	return node.eval(item, attrNames, attrValues)
@@ -1103,7 +1068,7 @@ func applyFilterExpression(
 	if err != nil {
 		return nil, err
 	}
-	if err := validateValRefs(node, attrValues); err != nil {
+	if err := validateExprRefs(filterExpr, attrNames, attrValues); err != nil {
 		return nil, err
 	}
 	var filtered []map[string]any
