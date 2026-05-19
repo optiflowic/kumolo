@@ -5558,13 +5558,31 @@ func TestHandleUpdateItem_IfNotExists(t *testing.T) {
 		},
 	)
 
-	t.Run("400 when default value placeholder is missing", func(t *testing.T) {
+	t.Run("uses fallback attr ref when check attr does not exist", func(t *testing.T) {
 		ro := setup(t)
 		require.Equal(t, 200, dynamo(t, ro, "PutItem",
-			`{"TableName":"test-table","Item":{"pk":{"S":"k4"}}}`).Code)
+			`{"TableName":"test-table","Item":{"pk":{"S":"k4"},"src":{"N":"42"}}}`).Code)
 		w := dynamo(t, ro, "UpdateItem", `{
 			"TableName": "test-table",
 			"Key": {"pk": {"S": "k4"}},
+			"UpdateExpression": "SET #a = if_not_exists(#a, #src)",
+			"ExpressionAttributeNames": {"#a": "target", "#src": "src"},
+			"ReturnValues": "ALL_NEW"
+		}`)
+		require.Equal(t, 200, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		attrs := resp["Attributes"].(map[string]any)
+		assert.Equal(t, map[string]any{"N": "42"}, attrs["target"])
+	})
+
+	t.Run("400 when default value placeholder is missing", func(t *testing.T) {
+		ro := setup(t)
+		require.Equal(t, 200, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k5"}}}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "k5"}},
 			"UpdateExpression": "SET #c = if_not_exists(#c, :missing)",
 			"ExpressionAttributeNames": {"#c": "count"}
 		}`)
