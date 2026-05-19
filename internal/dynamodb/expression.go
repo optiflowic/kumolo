@@ -802,7 +802,9 @@ func validateExprRefs(
 	attrNames map[string]string,
 	attrValues map[string]any,
 ) error {
-	toks, err := tokenizeExpr(expr) // always succeeds: same expr already accepted by parseFilterExpr
+	toks, err := tokenizeExpr(
+		expr,
+	) // always succeeds: same expr already accepted by parseFilterExpr
 	if err != nil {
 		return err
 	}
