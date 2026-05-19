@@ -35,6 +35,14 @@ func (ro *Router) handleBatchGetItem(w http.ResponseWriter, body []byte) {
 	}
 	responses := make(map[string][]map[string]any, len(req.RequestItems))
 	for tableName, tableReq := range req.RequestItems {
+		if err := validateUnusedExprRefs(
+			tableReq.ExpressionAttributeNames, nil,
+			tableReq.ProjectionExpression,
+		); err != nil {
+			writeError(w, http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ValidationException", err.Error())
+			return
+		}
 		items, err := ro.storage.BatchGetItems(tableName, tableReq.Keys)
 		if err != nil {
 			if errors.Is(err, ErrTableNotFound) {

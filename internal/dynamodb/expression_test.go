@@ -799,7 +799,11 @@ func TestExprNodesDirect(t *testing.T) {
 	})
 
 	t.Run("cmpCondNode left resolve error", func(t *testing.T) {
-		node := cmpCondNode{left: nameRefOperand{"#missing"}, op: "=", right: valRefOperand{":alice"}}
+		node := cmpCondNode{
+			left:  nameRefOperand{"#missing"},
+			op:    "=",
+			right: valRefOperand{":alice"},
+		}
 		_, err := node.eval(item, emptyNames, values)
 		require.Error(t, err)
 	})
@@ -811,7 +815,10 @@ func TestExprNodesDirect(t *testing.T) {
 	})
 
 	t.Run("beginsWithCondNode path resolve error", func(t *testing.T) {
-		node := beginsWithCondNode{path: nameRefOperand{"#missing"}, prefix: valRefOperand{":alice"}}
+		node := beginsWithCondNode{
+			path:   nameRefOperand{"#missing"},
+			prefix: valRefOperand{":alice"},
+		}
 		_, err := node.eval(item, emptyNames, values)
 		require.Error(t, err)
 	})
@@ -835,31 +842,49 @@ func TestExprNodesDirect(t *testing.T) {
 	})
 
 	t.Run("betweenCondNode attr resolve error", func(t *testing.T) {
-		node := betweenCondNode{attr: nameRefOperand{"#missing"}, lo: valRefOperand{":alice"}, hi: valRefOperand{":alice"}}
+		node := betweenCondNode{
+			attr: nameRefOperand{"#missing"},
+			lo:   valRefOperand{":alice"},
+			hi:   valRefOperand{":alice"},
+		}
 		_, err := node.eval(item, emptyNames, values)
 		require.Error(t, err)
 	})
 
 	t.Run("betweenCondNode lo resolve error", func(t *testing.T) {
-		node := betweenCondNode{attr: plainOperand{"name"}, lo: nameRefOperand{"#missing"}, hi: valRefOperand{":alice"}}
+		node := betweenCondNode{
+			attr: plainOperand{"name"},
+			lo:   nameRefOperand{"#missing"},
+			hi:   valRefOperand{":alice"},
+		}
 		_, err := node.eval(item, emptyNames, values)
 		require.Error(t, err)
 	})
 
 	t.Run("betweenCondNode hi resolve error", func(t *testing.T) {
-		node := betweenCondNode{attr: plainOperand{"name"}, lo: valRefOperand{":alice"}, hi: nameRefOperand{"#missing"}}
+		node := betweenCondNode{
+			attr: plainOperand{"name"},
+			lo:   valRefOperand{":alice"},
+			hi:   nameRefOperand{"#missing"},
+		}
 		_, err := node.eval(item, emptyNames, values)
 		require.Error(t, err)
 	})
 
 	t.Run("inCondNode attr resolve error", func(t *testing.T) {
-		node := inCondNode{attr: nameRefOperand{"#missing"}, values: []exprOperand{valRefOperand{":alice"}}}
+		node := inCondNode{
+			attr:   nameRefOperand{"#missing"},
+			values: []exprOperand{valRefOperand{":alice"}},
+		}
 		_, err := node.eval(item, emptyNames, values)
 		require.Error(t, err)
 	})
 
 	t.Run("inCondNode value resolve error", func(t *testing.T) {
-		node := inCondNode{attr: plainOperand{"name"}, values: []exprOperand{nameRefOperand{"#missing"}}}
+		node := inCondNode{
+			attr:   plainOperand{"name"},
+			values: []exprOperand{nameRefOperand{"#missing"}},
+		}
 		_, err := node.eval(item, emptyNames, values)
 		require.Error(t, err)
 	})
@@ -1217,7 +1242,11 @@ func TestRefsInExpr(t *testing.T) {
 		{"size(#n) > :zero", []string{"#n"}, []string{":zero"}},
 		{"#a BETWEEN :lo AND :hi", []string{"#a"}, []string{":lo", ":hi"}},
 		{"#s IN (:a, :b, :c)", []string{"#s"}, []string{":a", ":b", ":c"}},
-		{"SET #n = :v, #count = #count + :inc", []string{"#n", "#count", "#count"}, []string{":v", ":inc"}},
+		{
+			"SET #n = :v, #count = #count + :inc",
+			[]string{"#n", "#count", "#count"},
+			[]string{":v", ":inc"},
+		},
 		{"status = :active", nil, []string{":active"}},
 		{"attribute_exists(pk)", nil, nil},
 		{"", nil, nil},
@@ -1260,13 +1289,21 @@ func TestValidateUnusedExprRefs(t *testing.T) {
 	t.Run("names with no expressions", func(t *testing.T) {
 		err := validateUnusedExprRefs(names, nil)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "ExpressionAttributeNames can only be specified when using expressions")
+		assert.Contains(
+			t,
+			err.Error(),
+			"ExpressionAttributeNames can only be specified when using expressions",
+		)
 	})
 
 	t.Run("values with no expressions", func(t *testing.T) {
 		err := validateUnusedExprRefs(nil, vals)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "ExpressionAttributeValues can only be specified when using expressions")
+		assert.Contains(
+			t,
+			err.Error(),
+			"ExpressionAttributeValues can only be specified when using expressions",
+		)
 	})
 
 	t.Run("used across multiple expressions", func(t *testing.T) {
@@ -1274,8 +1311,8 @@ func TestValidateUnusedExprRefs(t *testing.T) {
 		// Key: if #s is used in ANY of the exprs, it's not unused.
 		require.NoError(t, validateUnusedExprRefs(
 			names, vals,
-			"#s = :active",     // filterExpr uses both
-			"pk",               // projExpr uses neither — that's fine
+			"#s = :active", // filterExpr uses both
+			"pk",           // projExpr uses neither — that's fine
 		))
 	})
 

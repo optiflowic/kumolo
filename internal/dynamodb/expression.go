@@ -868,10 +868,14 @@ func validateUnusedExprRefs(
 	}
 	if !hasExpr {
 		if len(attrNames) > 0 {
-			return fmt.Errorf("ExpressionAttributeNames can only be specified when using expressions")
+			return fmt.Errorf(
+				"ExpressionAttributeNames can only be specified when using expressions",
+			)
 		}
 		if len(attrValues) > 0 {
-			return fmt.Errorf("ExpressionAttributeValues can only be specified when using expressions")
+			return fmt.Errorf(
+				"ExpressionAttributeValues can only be specified when using expressions",
+			)
 		}
 		return nil
 	}
