@@ -65,14 +65,14 @@ type addOp struct{ val any }
 type deleteOp struct{ val any }
 
 // setFuncArg is one argument to a SET-clause function (if_not_exists, list_append).
-// Exactly one of attr or val is meaningful: if attr != "", resolve from the item at apply time.
 type setFuncArg struct {
-	attr string // non-empty: look up in item at apply time
-	val  any    // attr=="": use this literal value
+	isAttr bool   // true: resolve attr from item at apply time; false: use val literally
+	attr   string // isAttr==true: attribute name to look up
+	val    any    // isAttr==false: literal value to use
 }
 
 func (a setFuncArg) resolve(item map[string]any) any {
-	if a.attr != "" {
+	if a.isAttr {
 		return item[a.attr]
 	}
 	return a.val
@@ -370,7 +370,7 @@ func resolveFuncArg(
 	if err != nil {
 		return setFuncArg{}, err
 	}
-	return setFuncArg{attr: name}, nil
+	return setFuncArg{isAttr: true, attr: name}, nil
 }
 
 // applyIfNotExistsOp returns the value to assign to the target attribute.
