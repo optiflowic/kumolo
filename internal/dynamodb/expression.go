@@ -453,8 +453,6 @@ func (n inCondNode) eval(
 		return false, err
 	}
 	attrJ, _ := json.Marshal(attrVal)
-	// Resolve all candidate values before comparing so that an unresolvable
-	// reference always surfaces as an error, even when an earlier value matches.
 	resolved := make([]string, len(n.values))
 	for i, v := range n.values {
 		val, err := v.resolve(item, names, values)
@@ -742,12 +740,15 @@ func (p *exprParser) parseComparison() (condNode, error) {
 				return nil, err
 			}
 			inValues = append(inValues, val)
+			if len(inValues) > 100 {
+				return nil, fmt.Errorf(
+					"IN operator supports at most 100 values, got %d",
+					len(inValues),
+				)
+			}
 		}
 		if _, err := p.expectKind(tokRParen); err != nil {
 			return nil, err
-		}
-		if len(inValues) > 100 {
-			return nil, fmt.Errorf("IN operator supports at most 100 values, got %d", len(inValues))
 		}
 		return inCondNode{left, inValues}, nil
 	}
