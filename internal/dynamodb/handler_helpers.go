@@ -142,7 +142,8 @@ func parseUpdateExpression(
 				rhs := strings.TrimSpace(parts[1])
 				switch {
 				case strings.HasPrefix(rhs, "if_not_exists("):
-					if !strings.HasSuffix(rhs, ")") {
+					if !strings.HasSuffix(rhs, ")") ||
+						strings.Count(rhs, "(") != strings.Count(rhs, ")") {
 						return nil, fmt.Errorf("invalid if_not_exists: %q", rhs)
 					}
 					inner := rhs[len("if_not_exists(") : len(rhs)-1]
@@ -168,7 +169,8 @@ func parseUpdateExpression(
 					}
 					updates[name] = ifNotExistsOp{check: check, fallback: fallback}
 				case strings.HasPrefix(rhs, "list_append("):
-					if !strings.HasSuffix(rhs, ")") {
+					if !strings.HasSuffix(rhs, ")") ||
+						strings.Count(rhs, "(") != strings.Count(rhs, ")") {
 						return nil, fmt.Errorf("invalid list_append: %q", rhs)
 					}
 					inner := rhs[len("list_append(") : len(rhs)-1]
