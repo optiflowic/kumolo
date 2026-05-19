@@ -10,3 +10,9 @@ linters:
         linters:
           - gosec
         text: "G302"
+      # AWS API parameter names (ExpressionAttributeNames, ExpressionAttributeValues) must
+      # appear capitalized in error messages to match real AWS error responses.
+      - path: internal/dynamodb/expression\.go
+        linters:
+          - staticcheck
+        text: "ST1005"

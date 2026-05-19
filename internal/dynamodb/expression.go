@@ -122,6 +122,7 @@ type exprOperand interface {
 
 type nameRefOperand struct{ ref string }
 
+// Callers must invoke validateExprRefs before eval to guarantee o.ref is present.
 func (o nameRefOperand) resolve(
 	item map[string]any,
 	names map[string]string,
@@ -141,16 +142,13 @@ func (o nameRefOperand) attrName(names map[string]string) (string, bool) {
 
 type valRefOperand struct{ ref string }
 
+// Callers must invoke validateExprRefs before eval to guarantee o.ref is present.
 func (o valRefOperand) resolve(
 	_ map[string]any,
 	_ map[string]string,
 	values map[string]any,
 ) (any, error) {
-	v, ok := values[o.ref]
-	if !ok {
-		return nil, fmt.Errorf("ExpressionAttributeValues missing %q", o.ref)
-	}
-	return v, nil
+	return values[o.ref], nil
 }
 
 func (o valRefOperand) attrName(_ map[string]string) (string, bool) { return "", false }
@@ -348,10 +346,8 @@ func (n attrExistsCondNode) eval(
 ) (bool, error) {
 	attrName, ok := n.operand.attrName(names)
 	if !ok {
-		// nameRefOperand returns false when the #ref is absent from ExpressionAttributeNames.
-		if nr, isRef := n.operand.(nameRefOperand); isRef {
-			return false, fmt.Errorf("ExpressionAttributeNames missing %q", nr.ref)
-		}
+		// Reachable only when operand is not an attr path (e.g. valRefOperand).
+		// #nameRef operands are guaranteed valid by validateExprRefs before eval.
 		return false, fmt.Errorf("attribute_exists/attribute_not_exists requires an attribute path")
 	}
 	_, exists := item[attrName]
@@ -797,6 +793,127 @@ func parseFilterExpr(expr string) (condNode, error) {
 	return node, nil
 }
 
+// validateExprRefs tokenizes expr and returns an error if any :valRef token is
+// absent from attrValues or any #nameRef token is absent from attrNames.
+// Called after parseFilterExpr succeeds and before item evaluation so that missing
+// references are caught even when the result set is empty.
+func validateExprRefs(
+	expr string,
+	attrNames map[string]string,
+	attrValues map[string]any,
+) error {
+	toks, err := tokenizeExpr(
+		expr,
+	) // always succeeds: same expr already accepted by parseFilterExpr
+	if err != nil {
+		return err
+	}
+	for _, tok := range toks {
+		switch tok.kind {
+		case tokValRef:
+			if _, ok := attrValues[tok.val]; !ok {
+				return fmt.Errorf("ExpressionAttributeValues missing %q", tok.val)
+			}
+		case tokNameRef:
+			if _, ok := attrNames[tok.val]; !ok {
+				return fmt.Errorf("ExpressionAttributeNames missing %q", tok.val)
+			}
+		}
+	}
+	return nil
+}
+
+// refsInExpr returns all #nameRef and :valRef tokens found anywhere in expr.
+// Works for all DynamoDB expression types (filter, condition, update, projection,
+// key condition) without requiring full parsing.
+func refsInExpr(expr string) (nameRefs, valRefs []string) {
+	i := 0
+	for i < len(expr) {
+		switch expr[i] {
+		case '#':
+			j := i + 1
+			for j < len(expr) && (isExprLetter(expr[j]) || isExprDigit(expr[j])) {
+				j++
+			}
+			if j > i+1 {
+				nameRefs = append(nameRefs, expr[i:j])
+			}
+			i = j
+		case ':':
+			j := i + 1
+			for j < len(expr) && (isExprLetter(expr[j]) || isExprDigit(expr[j])) {
+				j++
+			}
+			if j > i+1 {
+				valRefs = append(valRefs, expr[i:j])
+			}
+			i = j
+		default:
+			i++
+		}
+	}
+	return
+}
+
+// validateUnusedExprRefs returns an error if any key in attrNames or attrValues
+// is not referenced by at least one of the provided expression strings.
+// When all expressions are empty, having any entry in attrNames or attrValues is
+// itself an error (AWS: "can only be specified when using expressions").
+func validateUnusedExprRefs(
+	attrNames map[string]string,
+	attrValues map[string]any,
+	exprs ...string,
+) error {
+	hasExpr := false
+	for _, e := range exprs {
+		if e != "" {
+			hasExpr = true
+			break
+		}
+	}
+	if !hasExpr {
+		if len(attrNames) > 0 {
+			return fmt.Errorf(
+				"ExpressionAttributeNames can only be specified when using expressions",
+			)
+		}
+		if len(attrValues) > 0 {
+			return fmt.Errorf(
+				"ExpressionAttributeValues can only be specified when using expressions",
+			)
+		}
+		return nil
+	}
+	usedNames := map[string]struct{}{}
+	usedVals := map[string]struct{}{}
+	for _, expr := range exprs {
+		names, vals := refsInExpr(expr)
+		for _, n := range names {
+			usedNames[n] = struct{}{}
+		}
+		for _, v := range vals {
+			usedVals[v] = struct{}{}
+		}
+	}
+	for k := range attrNames {
+		if _, ok := usedNames[k]; !ok {
+			return fmt.Errorf(
+				"Value provided in ExpressionAttributeNames unused in expressions: keys: {%s}",
+				k,
+			)
+		}
+	}
+	for k := range attrValues {
+		if _, ok := usedVals[k]; !ok {
+			return fmt.Errorf(
+				"Value provided in ExpressionAttributeValues unused in expressions: keys: {%s}",
+				k,
+			)
+		}
+	}
+	return nil
+}
+
 // evalFilterExpr evaluates a DynamoDB filter/condition expression against an item.
 func evalFilterExpr(
 	expr string,
@@ -806,6 +923,9 @@ func evalFilterExpr(
 ) (bool, error) {
 	node, err := parseFilterExpr(expr)
 	if err != nil {
+		return false, err
+	}
+	if err := validateExprRefs(expr, attrNames, attrValues); err != nil {
 		return false, err
 	}
 	return node.eval(item, attrNames, attrValues)
@@ -1042,6 +1162,9 @@ func applyFilterExpression(
 	}
 	node, err := parseFilterExpr(filterExpr)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateExprRefs(filterExpr, attrNames, attrValues); err != nil {
 		return nil, err
 	}
 	var filtered []map[string]any

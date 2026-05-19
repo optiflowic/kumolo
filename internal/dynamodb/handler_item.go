@@ -45,6 +45,14 @@ func (ro *Router) handlePutItem(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
+	if err := validateUnusedExprRefs(
+		req.ExpressionAttributeNames, req.ExpressionAttributeValues,
+		req.ConditionExpression,
+	); err != nil {
+		writeError(w, http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException", err.Error())
+		return
+	}
 	var cond *ConditionCheck
 	if req.ConditionExpression != "" {
 		cond = &ConditionCheck{
@@ -125,6 +133,14 @@ func (ro *Router) handleGetItem(w http.ResponseWriter, body []byte) {
 			"com.amazonaws.dynamodb.v20120810#ValidationException",
 			"TableName is required",
 		)
+		return
+	}
+	if err := validateUnusedExprRefs(
+		req.ExpressionAttributeNames, nil,
+		req.ProjectionExpression,
+	); err != nil {
+		writeError(w, http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException", err.Error())
 		return
 	}
 	item, err := ro.storage.GetItem(req.TableName, req.Key)
@@ -226,6 +242,14 @@ func (ro *Router) handleDeleteItem(w http.ResponseWriter, body []byte) {
 			"com.amazonaws.dynamodb.v20120810#ValidationException",
 			"Value '"+req.ReturnValues+"' at 'returnValues' failed to satisfy constraint: Member must satisfy enum value set: [ALL_OLD, NONE]",
 		)
+		return
+	}
+	if err := validateUnusedExprRefs(
+		req.ExpressionAttributeNames, req.ExpressionAttributeValues,
+		req.ConditionExpression,
+	); err != nil {
+		writeError(w, http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException", err.Error())
 		return
 	}
 	var cond *ConditionCheck
@@ -330,6 +354,14 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 		return
 	}
 
+	if err := validateUnusedExprRefs(
+		req.ExpressionAttributeNames, req.ExpressionAttributeValues,
+		req.UpdateExpression, req.ConditionExpression,
+	); err != nil {
+		writeError(w, http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException", err.Error())
+		return
+	}
 	var updates map[string]any
 	switch {
 	case req.UpdateExpression != "":
