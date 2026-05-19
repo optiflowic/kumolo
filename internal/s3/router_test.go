@@ -3234,6 +3234,24 @@ func TestRouterMultipartUpload(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "InvalidPart")
 	})
 
+	t.Run("CompleteMultipartUpload returns 400 for entity too small", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{completeMultipartUploadErr: ErrEntityTooSmall})
+		body, _ := xml.Marshal(
+			completeMultipartUploadRequest{
+				Parts: []xmlCompletePart{{PartNumber: 1, ETag: `"abc"`}},
+			},
+		)
+		req := httptest.NewRequest(
+			http.MethodPost,
+			"/my-bucket/key?uploadId=abc",
+			strings.NewReader(string(body)),
+		)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "EntityTooSmall")
+	})
+
 	t.Run("CompleteMultipartUpload returns 400 for invalid part order", func(t *testing.T) {
 		ro := newRouterWithMock(&mockStore{completeMultipartUploadErr: ErrInvalidPartOrder})
 		body, _ := xml.Marshal(
