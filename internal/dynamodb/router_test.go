@@ -3380,6 +3380,19 @@ func TestParseUpdateExpression_ErrorPaths(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "ExpressionAttributeValues missing")
 	})
+
+	t.Run(
+		"SET list_append left arg #name missing from ExpressionAttributeNames",
+		func(t *testing.T) {
+			_, err := parseUpdateExpression(
+				"SET a = list_append(#missing, :right)",
+				noNames,
+				map[string]any{":right": map[string]any{"L": []any{}}},
+			)
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "ExpressionAttributeNames missing")
+		},
+	)
 }
 
 // --- applyAddOp unit tests ---

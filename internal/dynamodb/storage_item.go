@@ -220,11 +220,7 @@ func (s *Storage) UpdateItem(
 				item[attr] = result
 			}
 		case ifNotExistsOp:
-			v, err := op.resolve(item)
-			if err != nil {
-				return nil, nil, fmt.Errorf("%w: %v", ErrValidationException, err)
-			}
-			item[attr] = v
+			item[attr] = op.resolve(item)
 		case listAppendOp:
 			result, err := applyListAppendOp(item, op)
 			if err != nil {

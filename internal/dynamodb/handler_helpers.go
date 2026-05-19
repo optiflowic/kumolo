@@ -66,18 +66,18 @@ type deleteOp struct{ val any }
 
 // setOperand evaluates a SET-clause operand against the current item at apply time.
 type setOperand interface {
-	resolve(item map[string]any) (any, error)
+	resolve(item map[string]any) any
 }
 
 // setLiteral is a literal ExpressionAttributeValue.
 type setLiteral struct{ val any }
 
-func (o setLiteral) resolve(_ map[string]any) (any, error) { return o.val, nil }
+func (o setLiteral) resolve(_ map[string]any) any { return o.val }
 
 // setAttrRef resolves an attribute from the current item.
 type setAttrRef struct{ attr string }
 
-func (o setAttrRef) resolve(item map[string]any) (any, error) { return item[o.attr], nil }
+func (o setAttrRef) resolve(item map[string]any) any { return item[o.attr] }
 
 // ifNotExistsOp: SET target = if_not_exists(path, operand).
 // Per AWS spec the first argument must be a path (not a value placeholder).
@@ -87,9 +87,9 @@ type ifNotExistsOp struct {
 	operand setOperand // value to use when path is absent
 }
 
-func (o ifNotExistsOp) resolve(item map[string]any) (any, error) {
+func (o ifNotExistsOp) resolve(item map[string]any) any {
 	if v := item[o.path]; v != nil {
-		return v, nil
+		return v
 	}
 	return o.operand.resolve(item)
 }
@@ -412,19 +412,11 @@ func parseOperand(
 
 // applyListAppendOp concatenates two List-typed operands and returns the result.
 func applyListAppendOp(item map[string]any, op listAppendOp) (any, error) {
-	leftVal, err := op.left.resolve(item)
+	leftList, err := toListAttr(op.left.resolve(item))
 	if err != nil {
 		return nil, fmt.Errorf("list_append left: %v", err)
 	}
-	rightVal, err := op.right.resolve(item)
-	if err != nil {
-		return nil, fmt.Errorf("list_append right: %v", err)
-	}
-	leftList, err := toListAttr(leftVal)
-	if err != nil {
-		return nil, fmt.Errorf("list_append left: %v", err)
-	}
-	rightList, err := toListAttr(rightVal)
+	rightList, err := toListAttr(op.right.resolve(item))
 	if err != nil {
 		return nil, fmt.Errorf("list_append right: %v", err)
 	}
