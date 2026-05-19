@@ -403,6 +403,14 @@ func (s *Storage) applyTransactActionLocked(action TransactWriteAction) error {
 				} else {
 					item[attr] = result
 				}
+			case ifNotExistsOp:
+				item[attr] = applyIfNotExistsOp(item, op)
+			case listAppendOp:
+				result, err := applyListAppendOp(item, op)
+				if err != nil {
+					return fmt.Errorf("%w: %v", ErrValidationException, err)
+				}
+				item[attr] = result
 			default:
 				item[attr] = val
 			}

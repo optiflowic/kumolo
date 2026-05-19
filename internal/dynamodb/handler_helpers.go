@@ -64,6 +64,32 @@ type addOp struct{ val any }
 // deleteOp is a sentinel stored in the updates map for a DELETE clause operation.
 type deleteOp struct{ val any }
 
+// setFuncArg is one argument to a SET-clause function (if_not_exists, list_append).
+// Exactly one of attr or val is meaningful: if attr != "", resolve from the item at apply time.
+type setFuncArg struct {
+	attr string // non-empty: look up in item at apply time
+	val  any    // attr=="": use this literal value
+}
+
+func (a setFuncArg) resolve(item map[string]any) any {
+	if a.attr != "" {
+		return item[a.attr]
+	}
+	return a.val
+}
+
+// ifNotExistsOp: SET target = if_not_exists(check, fallback)
+type ifNotExistsOp struct {
+	check    setFuncArg
+	fallback setFuncArg
+}
+
+// listAppendOp: SET target = list_append(left, right)
+type listAppendOp struct {
+	left  setFuncArg
+	right setFuncArg
+}
+
 // parseUpdateExpression converts an UpdateExpression + attribute maps into a
 // flat updates map (attribute name → operation):
 //   - nil value   → REMOVE the attribute
@@ -104,7 +130,7 @@ func parseUpdateExpression(
 	for _, sec := range sections {
 		switch sec.keyword {
 		case "SET":
-			for _, assignment := range strings.Split(sec.content, ",") {
+			for _, assignment := range splitSetAssignments(sec.content) {
 				parts := strings.SplitN(strings.TrimSpace(assignment), "=", 2)
 				if len(parts) != 2 {
 					return nil, fmt.Errorf("invalid SET clause: %q", assignment)
@@ -113,12 +139,51 @@ func parseUpdateExpression(
 				if err != nil {
 					return nil, err
 				}
-				placeholder := strings.TrimSpace(parts[1])
-				val, ok := attrValues[placeholder]
-				if !ok {
-					return nil, fmt.Errorf("ExpressionAttributeValues missing %q", placeholder)
+				rhs := strings.TrimSpace(parts[1])
+				switch {
+				case strings.HasPrefix(rhs, "if_not_exists("):
+					if !strings.HasSuffix(rhs, ")") {
+						return nil, fmt.Errorf("invalid if_not_exists: %q", rhs)
+					}
+					inner := rhs[len("if_not_exists(") : len(rhs)-1]
+					argParts := strings.SplitN(inner, ",", 2)
+					if len(argParts) != 2 {
+						return nil, fmt.Errorf("invalid if_not_exists: %q", rhs)
+					}
+					check, err := resolveFuncArg(strings.TrimSpace(argParts[0]), attrNames, attrValues)
+					if err != nil {
+						return nil, err
+					}
+					fallback, err := resolveFuncArg(strings.TrimSpace(argParts[1]), attrNames, attrValues)
+					if err != nil {
+						return nil, err
+					}
+					updates[name] = ifNotExistsOp{check: check, fallback: fallback}
+				case strings.HasPrefix(rhs, "list_append("):
+					if !strings.HasSuffix(rhs, ")") {
+						return nil, fmt.Errorf("invalid list_append: %q", rhs)
+					}
+					inner := rhs[len("list_append(") : len(rhs)-1]
+					argParts := strings.SplitN(inner, ",", 2)
+					if len(argParts) != 2 {
+						return nil, fmt.Errorf("invalid list_append: %q", rhs)
+					}
+					left, err := resolveFuncArg(strings.TrimSpace(argParts[0]), attrNames, attrValues)
+					if err != nil {
+						return nil, err
+					}
+					right, err := resolveFuncArg(strings.TrimSpace(argParts[1]), attrNames, attrValues)
+					if err != nil {
+						return nil, err
+					}
+					updates[name] = listAppendOp{left: left, right: right}
+				default:
+					val, ok := attrValues[rhs]
+					if !ok {
+						return nil, fmt.Errorf("ExpressionAttributeValues missing %q", rhs)
+					}
+					updates[name] = val
 				}
-				updates[name] = val
 			}
 		case "REMOVE":
 			for _, token := range strings.Split(sec.content, ",") {
@@ -248,6 +313,82 @@ func applyDeleteOp(current, delta any) (any, error) {
 		}
 	}
 	return nil, fmt.Errorf("DELETE: unsupported type; only set types (SS/NS/BS) are valid")
+}
+
+// splitSetAssignments splits a SET clause on top-level commas (not inside parentheses).
+func splitSetAssignments(s string) []string {
+	var result []string
+	depth := 0
+	start := 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+		case ',':
+			if depth == 0 {
+				result = append(result, s[start:i])
+				start = i + 1
+			}
+		}
+	}
+	result = append(result, s[start:])
+	return result
+}
+
+// resolveFuncArg resolves one SET-clause function argument: :val → literal, #name/name → attr ref.
+func resolveFuncArg(ref string, attrNames map[string]string, attrValues map[string]any) (setFuncArg, error) {
+	if strings.HasPrefix(ref, ":") {
+		v, ok := attrValues[ref]
+		if !ok {
+			return setFuncArg{}, fmt.Errorf("ExpressionAttributeValues missing %q", ref)
+		}
+		return setFuncArg{val: v}, nil
+	}
+	name, err := resolveAttrName(ref, attrNames)
+	if err != nil {
+		return setFuncArg{}, err
+	}
+	return setFuncArg{attr: name}, nil
+}
+
+// applyIfNotExistsOp returns the value to assign to the target attribute.
+func applyIfNotExistsOp(item map[string]any, op ifNotExistsOp) any {
+	if v := op.check.resolve(item); v != nil {
+		return v
+	}
+	return op.fallback.resolve(item)
+}
+
+// applyListAppendOp concatenates two List-typed arguments and returns the result.
+func applyListAppendOp(item map[string]any, op listAppendOp) (any, error) {
+	leftList, err := toListAttr(op.left.resolve(item))
+	if err != nil {
+		return nil, fmt.Errorf("list_append left: %v", err)
+	}
+	rightList, err := toListAttr(op.right.resolve(item))
+	if err != nil {
+		return nil, fmt.Errorf("list_append right: %v", err)
+	}
+	combined := append(append([]any(nil), leftList...), rightList...)
+	return map[string]any{"L": combined}, nil
+}
+
+// toListAttr extracts the []any from a DynamoDB L-typed value; nil input returns (nil, nil).
+func toListAttr(v any) ([]any, error) {
+	if v == nil {
+		return nil, nil
+	}
+	m, ok := v.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("not a typed value")
+	}
+	l, ok := m["L"].([]any)
+	if !ok {
+		return nil, fmt.Errorf("not a List type")
+	}
+	return l, nil
 }
 
 func setUnion(a, b []any) []any {

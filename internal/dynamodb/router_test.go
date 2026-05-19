@@ -5424,3 +5424,190 @@ func TestUnusedExpressionAttributeRefs(t *testing.T) {
 		},
 	)
 }
+
+func TestHandleUpdateItem_IfNotExists(t *testing.T) {
+	setup := func(t *testing.T) *Router {
+		t.Helper()
+		ro := newTestRouter(t)
+		require.Equal(t, 200, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		return ro
+	}
+
+	t.Run("sets attribute to default when it does not exist", func(t *testing.T) {
+		ro := setup(t)
+		require.Equal(t, 200, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k1"}}}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "k1"}},
+			"UpdateExpression": "SET #c = if_not_exists(#c, :zero)",
+			"ExpressionAttributeNames": {"#c": "count"},
+			"ExpressionAttributeValues": {":zero": {"N": "0"}},
+			"ReturnValues": "ALL_NEW"
+		}`)
+		require.Equal(t, 200, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		attrs := resp["Attributes"].(map[string]any)
+		assert.Equal(t, map[string]any{"N": "0"}, attrs["count"])
+	})
+
+	t.Run("keeps existing value when attribute already exists", func(t *testing.T) {
+		ro := setup(t)
+		require.Equal(t, 200, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k2"},"count":{"N":"5"}}}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "k2"}},
+			"UpdateExpression": "SET #c = if_not_exists(#c, :zero)",
+			"ExpressionAttributeNames": {"#c": "count"},
+			"ExpressionAttributeValues": {":zero": {"N": "0"}},
+			"ReturnValues": "ALL_NEW"
+		}`)
+		require.Equal(t, 200, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		attrs := resp["Attributes"].(map[string]any)
+		assert.Equal(t, map[string]any{"N": "5"}, attrs["count"])
+	})
+
+	t.Run("sets attribute from different check attr when check attr does not exist", func(t *testing.T) {
+		ro := setup(t)
+		require.Equal(t, 200, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k3"}}}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "k3"}},
+			"UpdateExpression": "SET #a = if_not_exists(#b, :default)",
+			"ExpressionAttributeNames": {"#a": "target", "#b": "source"},
+			"ExpressionAttributeValues": {":default": {"S": "fallback"}},
+			"ReturnValues": "ALL_NEW"
+		}`)
+		require.Equal(t, 200, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		attrs := resp["Attributes"].(map[string]any)
+		assert.Equal(t, map[string]any{"S": "fallback"}, attrs["target"])
+	})
+
+	t.Run("400 when default value placeholder is missing", func(t *testing.T) {
+		ro := setup(t)
+		require.Equal(t, 200, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k4"}}}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "k4"}},
+			"UpdateExpression": "SET #c = if_not_exists(#c, :missing)",
+			"ExpressionAttributeNames": {"#c": "count"}
+		}`)
+		assert.Equal(t, 400, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+}
+
+func TestHandleUpdateItem_ListAppend(t *testing.T) {
+	setup := func(t *testing.T) *Router {
+		t.Helper()
+		ro := newTestRouter(t)
+		require.Equal(t, 200, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		return ro
+	}
+
+	t.Run("appends items to existing list", func(t *testing.T) {
+		ro := setup(t)
+		require.Equal(t, 200, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"tags":{"L":[{"S":"a"},{"S":"b"}]}}}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "k1"}},
+			"UpdateExpression": "SET #t = list_append(#t, :new)",
+			"ExpressionAttributeNames": {"#t": "tags"},
+			"ExpressionAttributeValues": {":new": {"L": [{"S": "c"}]}},
+			"ReturnValues": "ALL_NEW"
+		}`)
+		require.Equal(t, 200, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		attrs := resp["Attributes"].(map[string]any)
+		tags := attrs["tags"].(map[string]any)["L"].([]any)
+		require.Len(t, tags, 3)
+		assert.Equal(t, map[string]any{"S": "a"}, tags[0])
+		assert.Equal(t, map[string]any{"S": "b"}, tags[1])
+		assert.Equal(t, map[string]any{"S": "c"}, tags[2])
+	})
+
+	t.Run("prepends items when value is on the left", func(t *testing.T) {
+		ro := setup(t)
+		require.Equal(t, 200, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k2"},"tags":{"L":[{"S":"b"}]}}}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "k2"}},
+			"UpdateExpression": "SET #t = list_append(:new, #t)",
+			"ExpressionAttributeNames": {"#t": "tags"},
+			"ExpressionAttributeValues": {":new": {"L": [{"S": "a"}]}},
+			"ReturnValues": "ALL_NEW"
+		}`)
+		require.Equal(t, 200, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		attrs := resp["Attributes"].(map[string]any)
+		tags := attrs["tags"].(map[string]any)["L"].([]any)
+		require.Len(t, tags, 2)
+		assert.Equal(t, map[string]any{"S": "a"}, tags[0])
+		assert.Equal(t, map[string]any{"S": "b"}, tags[1])
+	})
+
+	t.Run("creates list from two value refs when attribute does not exist", func(t *testing.T) {
+		ro := setup(t)
+		require.Equal(t, 200, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k3"}}}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "k3"}},
+			"UpdateExpression": "SET #t = list_append(:a, :b)",
+			"ExpressionAttributeNames": {"#t": "tags"},
+			"ExpressionAttributeValues": {
+				":a": {"L": [{"S": "x"}]},
+				":b": {"L": [{"S": "y"}]}
+			},
+			"ReturnValues": "ALL_NEW"
+		}`)
+		require.Equal(t, 200, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		attrs := resp["Attributes"].(map[string]any)
+		tags := attrs["tags"].(map[string]any)["L"].([]any)
+		require.Len(t, tags, 2)
+		assert.Equal(t, map[string]any{"S": "x"}, tags[0])
+		assert.Equal(t, map[string]any{"S": "y"}, tags[1])
+	})
+
+	t.Run("400 when list_append value placeholder is missing", func(t *testing.T) {
+		ro := setup(t)
+		require.Equal(t, 200, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k4"}}}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "k4"}},
+			"UpdateExpression": "SET #t = list_append(#t, :missing)",
+			"ExpressionAttributeNames": {"#t": "tags"}
+		}`)
+		assert.Equal(t, 400, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("500 when list_append arg is not a List type", func(t *testing.T) {
+		ro := setup(t)
+		require.Equal(t, 200, dynamo(t, ro, "PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k5"},"tags":{"S":"not-a-list"}}}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "k5"}},
+			"UpdateExpression": "SET #t = list_append(#t, :new)",
+			"ExpressionAttributeNames": {"#t": "tags"},
+			"ExpressionAttributeValues": {":new": {"L": [{"S": "x"}]}}
+		}`)
+		assert.Equal(t, 400, w.Code)
+	})
+}
