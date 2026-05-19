@@ -115,10 +115,21 @@ func TestEvalFilterExpr(t *testing.T) {
 		// AND/OR left-side error propagation
 		{"and left error", "#missing = :alice AND name = :alice", false, true},
 		{"or left error", "#missing = :alice OR name = :alice", false, true},
+		// validateValRefs: missing :valRef propagates through AND/OR/NOT
+		{"and left valref missing", "name = :missing AND #n = :alice", false, true},
+		{"or left valref missing", "name = :missing OR #n = :alice", false, true},
+		{"not valref missing", "NOT name = :missing", false, true},
 		// BETWEEN resolve errors
 		{"between attr error", "#missing BETWEEN :twenty AND :forty", false, true},
 		{"between lo error", "#a BETWEEN :missing AND :forty", false, true},
 		{"between hi error", "#a BETWEEN :twenty AND :missing", false, true},
+		// resolve errors on RHS/value positions via #nameRef (covers eval error paths after validateValRefs)
+		{"cmp rhs name ref missing", "name = #undefined", false, true},
+		{"between lo name ref missing", "age BETWEEN #undefined AND :forty", false, true},
+		{"between hi name ref missing", "age BETWEEN :twenty AND #undefined", false, true},
+		{"begins_with prefix name ref missing", "begins_with(name, #undefined)", false, true},
+		{"contains val name ref missing", "contains(#tags, #undefined)", false, true},
+		{"in value name ref missing", "name IN (#undefined)", false, true},
 		// begins_with resolve errors and edge cases
 		{"begins_with path error", "begins_with(#missing, :al)", false, true},
 		{"begins_with prefix error", "begins_with(#n, :missing)", false, true},
@@ -231,6 +242,24 @@ func TestApplyFilterExpression(t *testing.T) {
 			map[string]any{":active": map[string]any{"S": "active"}},
 		)
 		require.Error(t, err)
+	})
+
+	t.Run("missing val ref with items returns error", func(t *testing.T) {
+		_, err := applyFilterExpression(items, "#s = :missing",
+			map[string]string{"#s": "status"},
+			map[string]any{},
+		)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), ":missing")
+	})
+
+	t.Run("missing val ref with no items returns error", func(t *testing.T) {
+		_, err := applyFilterExpression(nil, "#s = :missing",
+			map[string]string{"#s": "status"},
+			map[string]any{},
+		)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), ":missing")
 	})
 }
 
@@ -353,6 +382,31 @@ func TestHandleScanWithFilterExpression(t *testing.T) {
 		assert.Equal(t, 400, w.Code)
 		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
+
+	t.Run("missing val ref on non-empty table returns 400", func(t *testing.T) {
+		ro := setup(t)
+		w := dynamo(t, ro, "Scan", `{
+			"TableName":"test-table",
+			"FilterExpression":"#s IN (:active, :missing)",
+			"ExpressionAttributeNames":{"#s":"status"},
+			"ExpressionAttributeValues":{":active":{"S":"active"}}
+		}`)
+		assert.Equal(t, 400, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("missing val ref on empty table returns 400", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, 200, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "Scan", `{
+			"TableName":"test-table",
+			"FilterExpression":"#s IN (:active, :missing)",
+			"ExpressionAttributeNames":{"#s":"status"},
+			"ExpressionAttributeValues":{":active":{"S":"active"}}
+		}`)
+		assert.Equal(t, 400, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
 }
 
 func TestHandleQueryWithFilterExpression(t *testing.T) {
@@ -467,6 +521,19 @@ func TestHandleQueryWithFilterExpression(t *testing.T) {
 			"FilterExpression":"#s !! :val",
 			"ExpressionAttributeNames":{"#s":"status"},
 			"ExpressionAttributeValues":{":uid":{"S":"u1"},":val":{"S":"x"}}
+		}`)
+		assert.Equal(t, 400, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("missing val ref when key matches no items returns 400", func(t *testing.T) {
+		ro := setup(t)
+		w := dynamo(t, ro, "Query", `{
+			"TableName":"orders",
+			"KeyConditionExpression":"userId = :uid",
+			"FilterExpression":"#s = :missing",
+			"ExpressionAttributeNames":{"#s":"status"},
+			"ExpressionAttributeValues":{":uid":{"S":"no-such-user"}}
 		}`)
 		assert.Equal(t, 400, w.Code)
 		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")

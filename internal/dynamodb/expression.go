@@ -141,16 +141,13 @@ func (o nameRefOperand) attrName(names map[string]string) (string, bool) {
 
 type valRefOperand struct{ ref string }
 
+// Callers must invoke validateValRefs before eval to guarantee o.ref is present.
 func (o valRefOperand) resolve(
 	_ map[string]any,
 	_ map[string]string,
 	values map[string]any,
 ) (any, error) {
-	v, ok := values[o.ref]
-	if !ok {
-		return nil, fmt.Errorf("ExpressionAttributeValues missing %q", o.ref)
-	}
-	return v, nil
+	return values[o.ref], nil
 }
 
 func (o valRefOperand) attrName(_ map[string]string) (string, bool) { return "", false }
@@ -797,6 +794,65 @@ func parseFilterExpr(expr string) (condNode, error) {
 	return node, nil
 }
 
+// validateValRefs walks the condNode AST and returns an error if any :valRef
+// token is absent from attrValues. Called before item evaluation so that missing
+// references are caught even when the result set is empty.
+//
+// Parser guarantees: LHS/path/attr positions are always attr-path or size()
+// operands — never valRefOperands — so only RHS/value positions need checking.
+// attrExistsCondNode has no case because its operand is always an attr path.
+func validateValRefs(node condNode, attrValues map[string]any) error {
+	switch n := node.(type) {
+	case andCondNode:
+		if err := validateValRefs(n.left, attrValues); err != nil {
+			return err
+		}
+		return validateValRefs(n.right, attrValues)
+	case orCondNode:
+		if err := validateValRefs(n.left, attrValues); err != nil {
+			return err
+		}
+		return validateValRefs(n.right, attrValues)
+	case notCondNode:
+		return validateValRefs(n.operand, attrValues)
+	case cmpCondNode:
+		// n.left is always an attr path or size(); only n.right can be a :valRef.
+		return validateOperandValRef(n.right, attrValues)
+	case beginsWithCondNode:
+		// n.path is always an attr path; only n.prefix can be a :valRef.
+		return validateOperandValRef(n.prefix, attrValues)
+	case containsCondNode:
+		// n.path is always an attr path; only n.val can be a :valRef.
+		return validateOperandValRef(n.val, attrValues)
+	case betweenCondNode:
+		// n.attr is always an attr path; lo and hi can be :valRefs.
+		if err := validateOperandValRef(n.lo, attrValues); err != nil {
+			return err
+		}
+		return validateOperandValRef(n.hi, attrValues)
+	case inCondNode:
+		// n.attr is always an attr path; only values can be :valRefs.
+		for _, v := range n.values {
+			if err := validateOperandValRef(v, attrValues); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateOperandValRef(op exprOperand, attrValues map[string]any) error {
+	switch o := op.(type) {
+	case valRefOperand:
+		if _, ok := attrValues[o.ref]; !ok {
+			return fmt.Errorf("ExpressionAttributeValues missing %q", o.ref)
+		}
+	case sizeOperand:
+		return validateOperandValRef(o.path, attrValues)
+	}
+	return nil
+}
+
 // evalFilterExpr evaluates a DynamoDB filter/condition expression against an item.
 func evalFilterExpr(
 	expr string,
@@ -806,6 +862,9 @@ func evalFilterExpr(
 ) (bool, error) {
 	node, err := parseFilterExpr(expr)
 	if err != nil {
+		return false, err
+	}
+	if err := validateValRefs(node, attrValues); err != nil {
 		return false, err
 	}
 	return node.eval(item, attrNames, attrValues)
@@ -1042,6 +1101,9 @@ func applyFilterExpression(
 	}
 	node, err := parseFilterExpr(filterExpr)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateValRefs(node, attrValues); err != nil {
 		return nil, err
 	}
 	var filtered []map[string]any
