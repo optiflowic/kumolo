@@ -824,8 +824,8 @@ func validateExprRefs(
 func refsInExpr(expr string) (nameRefs, valRefs []string) {
 	i := 0
 	for i < len(expr) {
-		switch {
-		case expr[i] == '#':
+		switch expr[i] {
+		case '#':
 			j := i + 1
 			for j < len(expr) && (isExprLetter(expr[j]) || isExprDigit(expr[j])) {
 				j++
@@ -834,7 +834,7 @@ func refsInExpr(expr string) (nameRefs, valRefs []string) {
 				nameRefs = append(nameRefs, expr[i:j])
 			}
 			i = j
-		case expr[i] == ':':
+		case ':':
 			j := i + 1
 			for j < len(expr) && (isExprLetter(expr[j]) || isExprDigit(expr[j])) {
 				j++
@@ -893,14 +893,16 @@ func validateUnusedExprRefs(
 	for k := range attrNames {
 		if _, ok := usedNames[k]; !ok {
 			return fmt.Errorf(
-				"Value provided in ExpressionAttributeNames unused in expressions: keys: {%s}", k,
+				"Value provided in ExpressionAttributeNames unused in expressions: keys: {%s}",
+				k,
 			)
 		}
 	}
 	for k := range attrValues {
 		if _, ok := usedVals[k]; !ok {
 			return fmt.Errorf(
-				"Value provided in ExpressionAttributeValues unused in expressions: keys: {%s}", k,
+				"Value provided in ExpressionAttributeValues unused in expressions: keys: {%s}",
+				k,
 			)
 		}
 	}
