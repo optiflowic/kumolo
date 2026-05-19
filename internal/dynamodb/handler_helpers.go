@@ -64,30 +64,40 @@ type addOp struct{ val any }
 // deleteOp is a sentinel stored in the updates map for a DELETE clause operation.
 type deleteOp struct{ val any }
 
-// setFuncArg is one argument to a SET-clause function (if_not_exists, list_append).
-type setFuncArg struct {
-	isAttr bool   // true: resolve attr from item at apply time; false: use val literally
-	attr   string // isAttr==true: attribute name to look up
-	val    any    // isAttr==false: literal value to use
+// setOperand evaluates a SET-clause operand against the current item at apply time.
+type setOperand interface {
+	resolve(item map[string]any) (any, error)
 }
 
-func (a setFuncArg) resolve(item map[string]any) any {
-	if a.isAttr {
-		return item[a.attr]
-	}
-	return a.val
-}
+// setLiteral is a literal ExpressionAttributeValue.
+type setLiteral struct{ val any }
 
-// ifNotExistsOp: SET target = if_not_exists(check, fallback)
+func (o setLiteral) resolve(_ map[string]any) (any, error) { return o.val, nil }
+
+// setAttrRef resolves an attribute from the current item.
+type setAttrRef struct{ attr string }
+
+func (o setAttrRef) resolve(item map[string]any) (any, error) { return item[o.attr], nil }
+
+// ifNotExistsOp: SET target = if_not_exists(path, operand).
+// Per AWS spec the first argument must be a path (not a value placeholder).
+// Implements setOperand so it can appear as an argument to list_append.
 type ifNotExistsOp struct {
-	check    setFuncArg
-	fallback setFuncArg
+	path    string     // attribute path to check for existence
+	operand setOperand // value to use when path is absent
+}
+
+func (o ifNotExistsOp) resolve(item map[string]any) (any, error) {
+	if v := item[o.path]; v != nil {
+		return v, nil
+	}
+	return o.operand.resolve(item)
 }
 
 // listAppendOp: SET target = list_append(left, right)
 type listAppendOp struct {
-	left  setFuncArg
-	right setFuncArg
+	left  setOperand
+	right setOperand
 }
 
 // parseUpdateExpression converts an UpdateExpression + attribute maps into a
@@ -142,55 +152,26 @@ func parseUpdateExpression(
 				rhs := strings.TrimSpace(parts[1])
 				switch {
 				case strings.HasPrefix(rhs, "if_not_exists("):
-					if !strings.HasSuffix(rhs, ")") ||
-						strings.Count(rhs, "(") != strings.Count(rhs, ")") {
-						return nil, fmt.Errorf("invalid if_not_exists: %q", rhs)
-					}
-					inner := rhs[len("if_not_exists(") : len(rhs)-1]
-					argParts := strings.SplitN(inner, ",", 2)
-					if len(argParts) != 2 {
-						return nil, fmt.Errorf("invalid if_not_exists: %q", rhs)
-					}
-					check, err := resolveFuncArg(
-						strings.TrimSpace(argParts[0]),
-						attrNames,
-						attrValues,
-					)
+					op, err := parseIfNotExists(rhs, attrNames, attrValues)
 					if err != nil {
 						return nil, err
 					}
-					fallback, err := resolveFuncArg(
-						strings.TrimSpace(argParts[1]),
-						attrNames,
-						attrValues,
-					)
-					if err != nil {
-						return nil, err
-					}
-					updates[name] = ifNotExistsOp{check: check, fallback: fallback}
+					updates[name] = op
 				case strings.HasPrefix(rhs, "list_append("):
 					if !strings.HasSuffix(rhs, ")") ||
 						strings.Count(rhs, "(") != strings.Count(rhs, ")") {
 						return nil, fmt.Errorf("invalid list_append: %q", rhs)
 					}
 					inner := rhs[len("list_append(") : len(rhs)-1]
-					argParts := strings.SplitN(inner, ",", 2)
-					if len(argParts) != 2 {
+					leftStr, rightStr, ok := splitTwoArgs(inner)
+					if !ok {
 						return nil, fmt.Errorf("invalid list_append: %q", rhs)
 					}
-					left, err := resolveFuncArg(
-						strings.TrimSpace(argParts[0]),
-						attrNames,
-						attrValues,
-					)
+					left, err := parseOperand(leftStr, attrNames, attrValues)
 					if err != nil {
 						return nil, err
 					}
-					right, err := resolveFuncArg(
-						strings.TrimSpace(argParts[1]),
-						attrNames,
-						attrValues,
-					)
+					right, err := parseOperand(rightStr, attrNames, attrValues)
 					if err != nil {
 						return nil, err
 					}
@@ -355,41 +336,95 @@ func splitSetAssignments(s string) []string {
 	return result
 }
 
-// resolveFuncArg resolves one SET-clause function argument: :val → literal, #name/name → attr ref.
-func resolveFuncArg(
+// splitTwoArgs finds the first top-level comma in s and returns the two trimmed parts.
+// ok is false when no top-level comma is found.
+func splitTwoArgs(s string) (left, right string, ok bool) {
+	depth := 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+		case ',':
+			if depth == 0 {
+				return strings.TrimSpace(s[:i]), strings.TrimSpace(s[i+1:]), true
+			}
+		}
+	}
+	return "", s, false
+}
+
+// parseIfNotExists parses an if_not_exists(path, operand) expression.
+// Per AWS spec the first argument must be an attribute path, not a value placeholder.
+func parseIfNotExists(
+	rhs string,
+	attrNames map[string]string,
+	attrValues map[string]any,
+) (ifNotExistsOp, error) {
+	if !strings.HasSuffix(rhs, ")") ||
+		strings.Count(rhs, "(") != strings.Count(rhs, ")") {
+		return ifNotExistsOp{}, fmt.Errorf("invalid if_not_exists: %q", rhs)
+	}
+	inner := rhs[len("if_not_exists(") : len(rhs)-1]
+	pathStr, operandStr, ok := splitTwoArgs(inner)
+	if !ok {
+		return ifNotExistsOp{}, fmt.Errorf("invalid if_not_exists: %q", rhs)
+	}
+	if strings.HasPrefix(pathStr, ":") {
+		return ifNotExistsOp{}, fmt.Errorf(
+			"invalid if_not_exists: first argument must be a path, not a value: %q", pathStr,
+		)
+	}
+	pathName, err := resolveAttrName(pathStr, attrNames)
+	if err != nil {
+		return ifNotExistsOp{}, err
+	}
+	operand, err := parseOperand(operandStr, attrNames, attrValues)
+	if err != nil {
+		return ifNotExistsOp{}, err
+	}
+	return ifNotExistsOp{path: pathName, operand: operand}, nil
+}
+
+// parseOperand parses a SET-clause operand: ":val" → literal, "if_not_exists(...)" → nested op, else → attr ref.
+func parseOperand(
 	ref string,
 	attrNames map[string]string,
 	attrValues map[string]any,
-) (setFuncArg, error) {
+) (setOperand, error) {
 	if strings.HasPrefix(ref, ":") {
 		v, ok := attrValues[ref]
 		if !ok {
-			return setFuncArg{}, fmt.Errorf("ExpressionAttributeValues missing %q", ref)
+			return nil, fmt.Errorf("ExpressionAttributeValues missing %q", ref)
 		}
-		return setFuncArg{val: v}, nil
+		return setLiteral{val: v}, nil
+	}
+	if strings.HasPrefix(ref, "if_not_exists(") {
+		return parseIfNotExists(ref, attrNames, attrValues)
 	}
 	name, err := resolveAttrName(ref, attrNames)
 	if err != nil {
-		return setFuncArg{}, err
+		return nil, err
 	}
-	return setFuncArg{isAttr: true, attr: name}, nil
+	return setAttrRef{attr: name}, nil
 }
 
-// applyIfNotExistsOp returns the value to assign to the target attribute.
-func applyIfNotExistsOp(item map[string]any, op ifNotExistsOp) any {
-	if v := op.check.resolve(item); v != nil {
-		return v
-	}
-	return op.fallback.resolve(item)
-}
-
-// applyListAppendOp concatenates two List-typed arguments and returns the result.
+// applyListAppendOp concatenates two List-typed operands and returns the result.
 func applyListAppendOp(item map[string]any, op listAppendOp) (any, error) {
-	leftList, err := toListAttr(op.left.resolve(item))
+	leftVal, err := op.left.resolve(item)
 	if err != nil {
 		return nil, fmt.Errorf("list_append left: %v", err)
 	}
-	rightList, err := toListAttr(op.right.resolve(item))
+	rightVal, err := op.right.resolve(item)
+	if err != nil {
+		return nil, fmt.Errorf("list_append right: %v", err)
+	}
+	leftList, err := toListAttr(leftVal)
+	if err != nil {
+		return nil, fmt.Errorf("list_append left: %v", err)
+	}
+	rightList, err := toListAttr(rightVal)
 	if err != nil {
 		return nil, fmt.Errorf("list_append right: %v", err)
 	}
