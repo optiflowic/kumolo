@@ -95,7 +95,8 @@ func parseUpdatePath(token string, attrNames map[string]string) ([]projSegment, 
 			}
 			idxStr := rest[1:rb]
 			n, err := strconv.Atoi(idxStr)
-			if err != nil || n < 0 {
+			if err != nil ||
+				n < 0 { // negative index is syntactically valid but semantically rejected
 				return nil, fmt.Errorf("invalid list index %q in path %q", idxStr, token)
 			}
 			segs = append(segs, projSegment{attr: "", index: n})
