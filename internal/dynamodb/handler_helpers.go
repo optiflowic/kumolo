@@ -134,24 +134,65 @@ type setLiteral struct{ val any }
 
 func (o setLiteral) resolve(_ map[string]any) any { return o.val }
 
-// setAttrRef resolves an attribute from the current item.
-type setAttrRef struct{ attr string }
+// setAttrRef resolves an attribute (or nested path) from the current item.
+// segs contains already-resolved attribute names (no #nameRef placeholders).
+type setAttrRef struct{ segs []projSegment }
 
-func (o setAttrRef) resolve(item map[string]any) any { return item[o.attr] }
+func (o setAttrRef) resolve(item map[string]any) any { return resolveUpdatePath(item, o.segs) }
 
 // ifNotExistsOp: SET target = if_not_exists(path, operand).
 // Per AWS spec the first argument must be a path (not a value placeholder).
 // Implements setOperand so it can appear as an argument to list_append.
 type ifNotExistsOp struct {
-	path    string     // attribute path to check for existence
-	operand setOperand // value to use when path is absent
+	segs    []projSegment // already-resolved path segments
+	operand setOperand    // value to use when path is absent
 }
 
 func (o ifNotExistsOp) resolve(item map[string]any) any {
-	if v, exists := item[o.path]; exists {
+	if v := resolveUpdatePath(item, o.segs); v != nil {
 		return v
 	}
 	return o.operand.resolve(item)
+}
+
+// resolveUpdatePath walks item following segs (already-resolved, no #nameRef).
+// Returns nil when any segment is absent (missing attribute or out-of-bounds index).
+func resolveUpdatePath(item map[string]any, segs []projSegment) any {
+	if len(segs) == 0 { // unreachable: parseUpdatePath always returns ≥1 segment
+		return nil
+	}
+	val, ok := item[segs[0].attr]
+	if !ok {
+		return nil
+	}
+	for _, seg := range segs[1:] {
+		// All kumolo-stored DynamoDB values are map[string]any; assertion always holds.
+		m := val.(map[string]any)
+		if seg.attr != "" {
+			mRaw, ok := m["M"]
+			if !ok {
+				return nil
+			}
+			// kumolo always writes M as map[string]any; assertion always holds.
+			mMap := mRaw.(map[string]any)
+			val, ok = mMap[seg.attr]
+			if !ok {
+				return nil
+			}
+		} else {
+			lRaw, ok := m["L"]
+			if !ok {
+				return nil
+			}
+			// kumolo always writes L as []any; assertion always holds.
+			lSlice := lRaw.([]any)
+			if seg.index >= len(lSlice) {
+				return nil
+			}
+			val = lSlice[seg.index]
+		}
+	}
+	return val
 }
 
 // listAppendOp: SET target = list_append(left, right)
@@ -473,7 +514,7 @@ func parseIfNotExists(
 			"invalid if_not_exists: second argument cannot be a function call: %q", operandStr,
 		)
 	}
-	pathName, err := resolveAttrName(pathStr, attrNames)
+	segs, err := parseUpdatePath(pathStr, attrNames)
 	if err != nil {
 		return ifNotExistsOp{}, err
 	}
@@ -481,7 +522,7 @@ func parseIfNotExists(
 	if err != nil {
 		return ifNotExistsOp{}, err
 	}
-	return ifNotExistsOp{path: pathName, operand: operand}, nil
+	return ifNotExistsOp{segs: segs, operand: operand}, nil
 }
 
 // parseOperand parses a SET-clause operand: ":val" → literal, "if_not_exists(...)" → nested op, else → attr ref.
@@ -500,11 +541,11 @@ func parseOperand(
 	if strings.HasPrefix(ref, "if_not_exists(") {
 		return parseIfNotExists(ref, attrNames, attrValues)
 	}
-	name, err := resolveAttrName(ref, attrNames)
+	segs, err := parseUpdatePath(ref, attrNames)
 	if err != nil {
 		return nil, err
 	}
-	return setAttrRef{attr: name}, nil
+	return setAttrRef{segs: segs}, nil
 }
 
 // applyListAppendOp concatenates two List-typed operands and returns the result.

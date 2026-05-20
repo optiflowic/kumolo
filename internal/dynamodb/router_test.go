@@ -3355,6 +3355,19 @@ func TestParseUpdateExpression_ErrorPaths(t *testing.T) {
 		},
 	)
 
+	t.Run(
+		"SET if_not_exists nested path arg #name missing from ExpressionAttributeNames",
+		func(t *testing.T) {
+			_, err := parseUpdateExpression(
+				"SET a = if_not_exists(#a.#missing, :fallback)",
+				map[string]string{"#a": "a"},
+				map[string]any{":fallback": map[string]any{"N": "1"}},
+			)
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "ExpressionAttributeNames missing")
+		},
+	)
+
 	t.Run("SET if_not_exists second arg is function call (AWS rejects this)", func(t *testing.T) {
 		_, err := parseUpdateExpression(
 			"SET a = if_not_exists(b, if_not_exists(c, :v))",
@@ -6702,6 +6715,177 @@ func TestNestedPathUpdateItem(t *testing.T) {
 		}`)
 		require.Equal(t, 400, w.Code)
 	})
+
+	t.Run("SET nested path with if_not_exists nested path arg uses fallback", func(t *testing.T) {
+		// AWS spec: if_not_exists(a.b, :v) is valid — first arg may be a nested path.
+		require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {
+				"pk": {"S": "n20"},
+				"meta": {"M": {}}
+			}
+		}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n20"}},
+			"UpdateExpression": "SET #meta.#count = if_not_exists(#meta.#count, :zero)",
+			"ExpressionAttributeNames": {"#meta": "meta", "#count": "count"},
+			"ExpressionAttributeValues": {":zero": {"N": "0"}},
+			"ReturnValues": "ALL_NEW"
+		}`)
+		require.Equal(t, 200, w.Code)
+		var out map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+		attrs := out["Attributes"].(map[string]any)
+		metaM := attrs["meta"].(map[string]any)["M"].(map[string]any)
+		assert.Equal(t, map[string]any{"N": "0"}, metaM["count"]) // fallback: meta.count absent
+	})
+
+	t.Run(
+		"SET nested path with if_not_exists nested path arg preserves existing value",
+		func(t *testing.T) {
+			// When meta.count already exists, if_not_exists(#meta.#count, :zero) must return the existing value.
+			require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {
+				"pk": {"S": "n21"},
+				"meta": {"M": {"count": {"N": "5"}}}
+			}
+		}`).Code)
+			w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n21"}},
+			"UpdateExpression": "SET #meta.#count = if_not_exists(#meta.#count, :zero)",
+			"ExpressionAttributeNames": {"#meta": "meta", "#count": "count"},
+			"ExpressionAttributeValues": {":zero": {"N": "0"}},
+			"ReturnValues": "ALL_NEW"
+		}`)
+			require.Equal(t, 200, w.Code)
+			var out map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+			attrs := out["Attributes"].(map[string]any)
+			metaM := attrs["meta"].(map[string]any)["M"].(map[string]any)
+			assert.Equal(t, map[string]any{"N": "5"}, metaM["count"]) // existing value preserved
+		},
+	)
+
+	t.Run("SET nested path with list_append nested path arg appends", func(t *testing.T) {
+		// AWS spec: list_append(a.b, :v) is valid — first arg may be a nested path.
+		require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {
+				"pk": {"S": "n22"},
+				"meta": {"M": {"tags": {"L": [{"S": "a"}]}}}
+			}
+		}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n22"}},
+			"UpdateExpression": "SET #meta.#tags = list_append(#meta.#tags, :new)",
+			"ExpressionAttributeNames": {"#meta": "meta", "#tags": "tags"},
+			"ExpressionAttributeValues": {":new": {"L": [{"S": "b"}]}},
+			"ReturnValues": "ALL_NEW"
+		}`)
+		require.Equal(t, 200, w.Code)
+		var out map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+		attrs := out["Attributes"].(map[string]any)
+		metaM := attrs["meta"].(map[string]any)["M"].(map[string]any)
+		list := metaM["tags"].(map[string]any)["L"].([]any)
+		require.Len(t, list, 2)
+		assert.Equal(t, map[string]any{"S": "a"}, list[0])
+		assert.Equal(t, map[string]any{"S": "b"}, list[1])
+	})
+
+	t.Run(
+		"if_not_exists with nested path where intermediate is wrong type uses fallback",
+		func(t *testing.T) {
+			// resolveUpdatePath: m["M"] not found when intermediate DynamoDB value is not M type.
+			require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {"pk": {"S": "n23"}, "cnt": {"N": "5"}}
+		}`).Code)
+			w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n23"}},
+			"UpdateExpression": "SET x = if_not_exists(cnt.field, :default)",
+			"ExpressionAttributeValues": {":default": {"N": "0"}},
+			"ReturnValues": "ALL_NEW"
+		}`)
+			require.Equal(t, 200, w.Code)
+			var out map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+			attrs := out["Attributes"].(map[string]any)
+			assert.Equal(t, map[string]any{"N": "0"}, attrs["x"]) // fallback: cnt is not M type
+		},
+	)
+
+	t.Run("if_not_exists with list-index nested path returns existing element", func(t *testing.T) {
+		// resolveUpdatePath: L path success — returns existing list element.
+		require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {"pk": {"S": "n24"}, "tags": {"L": [{"S": "first"}]}}
+		}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n24"}},
+			"UpdateExpression": "SET x = if_not_exists(tags[0], :default)",
+			"ExpressionAttributeValues": {":default": {"S": "fallback"}},
+			"ReturnValues": "ALL_NEW"
+		}`)
+		require.Equal(t, 200, w.Code)
+		var out map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+		attrs := out["Attributes"].(map[string]any)
+		assert.Equal(t, map[string]any{"S": "first"}, attrs["x"]) // existing element returned
+	})
+
+	t.Run("if_not_exists with list-index out of bounds uses fallback", func(t *testing.T) {
+		// resolveUpdatePath: seg.index >= len(lSlice) → return nil.
+		require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {"pk": {"S": "n25"}, "tags": {"L": [{"S": "a"}]}}
+		}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n25"}},
+			"UpdateExpression": "SET x = if_not_exists(tags[5], :default)",
+			"ExpressionAttributeValues": {":default": {"S": "fallback"}},
+			"ReturnValues": "ALL_NEW"
+		}`)
+		require.Equal(t, 200, w.Code)
+		var out map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+		attrs := out["Attributes"].(map[string]any)
+		assert.Equal(
+			t,
+			map[string]any{"S": "fallback"},
+			attrs["x"],
+		) // index out of bounds → fallback
+	})
+
+	t.Run(
+		"if_not_exists with list-index where intermediate is not L type uses fallback",
+		func(t *testing.T) {
+			// resolveUpdatePath: m["L"] not found when DynamoDB value is M not L.
+			require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {"pk": {"S": "n26"}, "meta": {"M": {"x": {"N": "1"}}}}
+		}`).Code)
+			w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n26"}},
+			"UpdateExpression": "SET x = if_not_exists(meta[0], :default)",
+			"ExpressionAttributeValues": {":default": {"N": "0"}},
+			"ReturnValues": "ALL_NEW"
+		}`)
+			require.Equal(t, 200, w.Code)
+			var out map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+			attrs := out["Attributes"].(map[string]any)
+			assert.Equal(t, map[string]any{"N": "0"}, attrs["x"]) // meta is M not L → fallback
+		},
+	)
 }
 
 func TestNestedPathFilterExpression(t *testing.T) {
