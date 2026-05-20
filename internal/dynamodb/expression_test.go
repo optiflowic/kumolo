@@ -720,6 +720,31 @@ func TestExprNodesDirect(t *testing.T) {
 		assert.Contains(t, err.Error(), "#missing")
 	})
 
+	t.Run("pathOperand.resolve: first segment #nameRef missing returns error", func(t *testing.T) {
+		// validateExprRefs catches missing refs before eval in the normal pipeline,
+		// so this path is only reachable via direct construction.
+		op := pathOperand{segs: []projSegment{{attr: "#missing"}, {attr: "city"}}}
+		_, err := op.resolve(item, map[string]string{}, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "#missing")
+	})
+
+	t.Run(
+		"pathOperand.resolve: intermediate segment #nameRef missing returns error",
+		func(t *testing.T) {
+			// Same as above but the missing ref is in a subsequent segment, not the first.
+			itemWithAddr := map[string]any{
+				"address": map[string]any{"M": map[string]any{
+					"city": map[string]any{"S": "Tokyo"},
+				}},
+			}
+			op := pathOperand{segs: []projSegment{{attr: "address"}, {attr: "#missing"}}}
+			_, err := op.resolve(itemWithAddr, map[string]string{}, nil)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "#missing")
+		},
+	)
+
 	t.Run("tokenKindName fallback for unknown kind", func(t *testing.T) {
 		got := tokenKindName(tokenKind(999))
 		assert.Equal(t, "token(999)", got)
@@ -1468,11 +1493,38 @@ func TestNestedPathFilterExpr(t *testing.T) {
 		},
 	}
 
+	errTests := []struct {
+		name   string
+		expr   string
+		names  map[string]string
+		values map[string]any
+	}{
+		{
+			name:   "first segment #nameRef missing from ExpressionAttributeNames",
+			expr:   "#undefined.city = :nyc",
+			names:  map[string]string{}, // #undefined not present
+			values: values,
+		},
+		{
+			name:   "intermediate segment #nameRef missing from ExpressionAttributeNames",
+			expr:   "address.#undefined = :nyc",
+			names:  map[string]string{}, // #undefined not present
+			values: values,
+		},
+	}
+
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := evalFilterExpr(tc.expr, item, tc.names, tc.values)
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, got)
+		})
+	}
+	for _, tc := range errTests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := evalFilterExpr(tc.expr, item, tc.names, tc.values)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "ExpressionAttributeNames missing")
 		})
 	}
 }
