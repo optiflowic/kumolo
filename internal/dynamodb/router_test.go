@@ -4909,6 +4909,208 @@ func TestHandleTransactWriteItems(t *testing.T) {
 		}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
+
+	t.Run("Update nested SET with if_not_exists uses fallback", func(t *testing.T) {
+		// Exercises nestedSetOp + ifNotExistsOp sub-case in applyTransactActionLocked.
+		ro := newTestRouter(t)
+		createTable(t, ro)
+		dynamo(t, ro, "PutItem", `{
+			"TableName": "txn-table",
+			"Item": {"pk": {"S": "nife1"}, "meta": {"M": {}}}
+		}`)
+		w := dynamo(t, ro, "TransactWriteItems", `{
+			"TransactItems": [{
+				"Update": {
+					"TableName": "txn-table",
+					"Key": {"pk": {"S": "nife1"}},
+					"UpdateExpression": "SET #meta.#count = if_not_exists(#count, :zero)",
+					"ExpressionAttributeNames": {"#meta": "meta", "#count": "count"},
+					"ExpressionAttributeValues": {":zero": {"N": "0"}}
+				}
+			}]
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		item := getItem(t, ro, "nife1")
+		metaM := item["meta"].(map[string]any)["M"].(map[string]any)
+		assert.Equal(t, "0", metaM["count"].(map[string]any)["N"])
+	})
+
+	t.Run("Update nested SET with list_append appends to top-level list ref", func(t *testing.T) {
+		// Exercises nestedSetOp + listAppendOp sub-case in applyTransactActionLocked.
+		ro := newTestRouter(t)
+		createTable(t, ro)
+		dynamo(t, ro, "PutItem", `{
+			"TableName": "txn-table",
+			"Item": {
+				"pk": {"S": "nla1"},
+				"tags": {"L": [{"S": "a"}]},
+				"meta": {"M": {}}
+			}
+		}`)
+		w := dynamo(t, ro, "TransactWriteItems", `{
+			"TransactItems": [{
+				"Update": {
+					"TableName": "txn-table",
+					"Key": {"pk": {"S": "nla1"}},
+					"UpdateExpression": "SET #meta.#tags = list_append(#tags, :new)",
+					"ExpressionAttributeNames": {"#meta": "meta", "#tags": "tags"},
+					"ExpressionAttributeValues": {":new": {"L": [{"S": "b"}]}}
+				}
+			}]
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		item := getItem(t, ro, "nla1")
+		metaM := item["meta"].(map[string]any)["M"].(map[string]any)
+		list := metaM["tags"].(map[string]any)["L"].([]any)
+		require.Len(t, list, 2)
+		assert.Equal(t, map[string]any{"S": "a"}, list[0])
+		assert.Equal(t, map[string]any{"S": "b"}, list[1])
+	})
+
+	t.Run("400 when nested SET list_append arg is not a list in transaction", func(t *testing.T) {
+		// Exercises listAppendOp error inside nestedSetOp in applyTransactActionLocked.
+		ro := newTestRouter(t)
+		createTable(t, ro)
+		dynamo(t, ro, "PutItem", `{
+			"TableName": "txn-table",
+			"Item": {"pk": {"S": "nla2"}, "cnt": {"N": "5"}, "meta": {"M": {}}}
+		}`)
+		w := dynamo(t, ro, "TransactWriteItems", `{
+			"TransactItems": [{
+				"Update": {
+					"TableName": "txn-table",
+					"Key": {"pk": {"S": "nla2"}},
+					"UpdateExpression": "SET #meta.#x = list_append(#cnt, :new)",
+					"ExpressionAttributeNames": {"#meta": "meta", "#x": "x", "#cnt": "cnt"},
+					"ExpressionAttributeValues": {":new": {"L": [{"S": "b"}]}}
+				}
+			}]
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("400 when nested SET parent attribute is missing in transaction", func(t *testing.T) {
+		// Exercises applyNestedSet error path in nestedSetOp inside applyTransactActionLocked.
+		ro := newTestRouter(t)
+		createTable(t, ro)
+		dynamo(t, ro, "PutItem", `{
+			"TableName": "txn-table",
+			"Item": {"pk": {"S": "nse1"}}
+		}`)
+		w := dynamo(t, ro, "TransactWriteItems", `{
+			"TransactItems": [{
+				"Update": {
+					"TableName": "txn-table",
+					"Key": {"pk": {"S": "nse1"}},
+					"UpdateExpression": "SET missing.field = :val",
+					"ExpressionAttributeValues": {":val": {"S": "x"}}
+				}
+			}]
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("Update with nested SET dot notation applies correctly", func(t *testing.T) {
+		// Regression: applyTransactActionLocked must handle nestedSetOp (SET meta.count = :v).
+		ro := newTestRouter(t)
+		createTable(t, ro)
+		dynamo(t, ro, "PutItem", `{
+			"TableName": "txn-table",
+			"Item": {"pk": {"S": "ns1"}, "meta": {"M": {"count": {"N": "0"}}}}
+		}`)
+		w := dynamo(t, ro, "TransactWriteItems", `{
+			"TransactItems": [{
+				"Update": {
+					"TableName": "txn-table",
+					"Key": {"pk": {"S": "ns1"}},
+					"UpdateExpression": "SET #meta.#count = :val",
+					"ExpressionAttributeNames": {"#meta": "meta", "#count": "count"},
+					"ExpressionAttributeValues": {":val": {"N": "99"}}
+				}
+			}]
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		item := getItem(t, ro, "ns1")
+		metaM := item["meta"].(map[string]any)["M"].(map[string]any)
+		assert.Equal(t, "99", metaM["count"].(map[string]any)["N"])
+	})
+
+	t.Run("Update with nested REMOVE dot notation applies correctly", func(t *testing.T) {
+		// Regression: applyTransactActionLocked must handle nestedRemoveOp (REMOVE meta.label).
+		ro := newTestRouter(t)
+		createTable(t, ro)
+		dynamo(t, ro, "PutItem", `{
+			"TableName": "txn-table",
+			"Item": {"pk": {"S": "ns2"}, "meta": {"M": {"count": {"N": "1"}, "label": {"S": "x"}}}}
+		}`)
+		w := dynamo(t, ro, "TransactWriteItems", `{
+			"TransactItems": [{
+				"Update": {
+					"TableName": "txn-table",
+					"Key": {"pk": {"S": "ns2"}},
+					"UpdateExpression": "REMOVE #meta.#label",
+					"ExpressionAttributeNames": {"#meta": "meta", "#label": "label"}
+				}
+			}]
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		item := getItem(t, ro, "ns2")
+		metaM := item["meta"].(map[string]any)["M"].(map[string]any)
+		_, hasLabel := metaM["label"]
+		assert.False(t, hasLabel)
+		_, hasCount := metaM["count"]
+		assert.True(t, hasCount)
+	})
+
+	t.Run("Update with nested SET list index applies correctly", func(t *testing.T) {
+		// Regression: applyTransactActionLocked must handle nestedSetOp for list index (SET tags[1] = :v).
+		ro := newTestRouter(t)
+		createTable(t, ro)
+		dynamo(t, ro, "PutItem", `{
+			"TableName": "txn-table",
+			"Item": {"pk": {"S": "ns3"}, "tags": {"L": [{"S": "a"}, {"S": "b"}]}}
+		}`)
+		w := dynamo(t, ro, "TransactWriteItems", `{
+			"TransactItems": [{
+				"Update": {
+					"TableName": "txn-table",
+					"Key": {"pk": {"S": "ns3"}},
+					"UpdateExpression": "SET tags[1] = :val",
+					"ExpressionAttributeValues": {":val": {"S": "replaced"}}
+				}
+			}]
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		item := getItem(t, ro, "ns3")
+		list := item["tags"].(map[string]any)["L"].([]any)
+		assert.Equal(t, map[string]any{"S": "a"}, list[0])
+		assert.Equal(t, map[string]any{"S": "replaced"}, list[1])
+	})
+
+	t.Run("Update with nested REMOVE list index applies correctly", func(t *testing.T) {
+		// Regression: applyTransactActionLocked must handle nestedRemoveOp for list index (REMOVE tags[0]).
+		ro := newTestRouter(t)
+		createTable(t, ro)
+		dynamo(t, ro, "PutItem", `{
+			"TableName": "txn-table",
+			"Item": {"pk": {"S": "ns4"}, "tags": {"L": [{"S": "x"}, {"S": "y"}, {"S": "z"}]}}
+		}`)
+		w := dynamo(t, ro, "TransactWriteItems", `{
+			"TransactItems": [{
+				"Update": {
+					"TableName": "txn-table",
+					"Key": {"pk": {"S": "ns4"}},
+					"UpdateExpression": "REMOVE tags[1]"
+				}
+			}]
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		item := getItem(t, ro, "ns4")
+		list := item["tags"].(map[string]any)["L"].([]any)
+		require.Len(t, list, 2)
+		assert.Equal(t, map[string]any{"S": "x"}, list[0])
+		assert.Equal(t, map[string]any{"S": "z"}, list[1])
+	})
 }
 
 func TestHandleDescribeContinuousBackups(t *testing.T) {

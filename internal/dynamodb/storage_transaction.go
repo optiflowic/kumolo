@@ -411,6 +411,27 @@ func (s *Storage) applyTransactActionLocked(action TransactWriteAction) error {
 					return fmt.Errorf("%w: %v", ErrValidationException, err)
 				}
 				item[attr] = result
+			case nestedSetOp:
+				var resolved any
+				switch v := op.val.(type) {
+				case ifNotExistsOp:
+					resolved = v.resolve(item)
+				case listAppendOp:
+					var err error
+					resolved, err = applyListAppendOp(item, v)
+					if err != nil {
+						return fmt.Errorf("%w: %v", ErrValidationException, err)
+					}
+				default:
+					resolved = op.val
+				}
+				if err := applyNestedSet(item, op.segs, resolved); err != nil {
+					return fmt.Errorf("%w: %v", ErrValidationException, err)
+				}
+			case nestedRemoveOp:
+				if err := applyNestedRemove(item, op.segs); err != nil { // unreachable: applyNestedRemove always returns nil
+					return fmt.Errorf("%w: %v", ErrValidationException, err)
+				}
 			default: // unreachable: parseUpdateExpression only produces the sentinel types above
 				item[attr] = val
 			}
