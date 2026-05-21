@@ -4,6 +4,7 @@ import (
 	"encoding/xml"
 	"log/slog"
 	"net/http"
+	"strings"
 )
 
 const (
@@ -17,8 +18,7 @@ const (
 	fixedSecretKey    = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" // #nosec G101 -- well-known AWS docs example key, not a real credential
 	fixedSessionToken = "AQoDYXdzEJr"                              // #nosec G101 -- fixed placeholder token for local emulator
 	fixedExpiration   = "2099-01-01T00:00:00Z"
-	fixedRoleARN      = "arn:aws:sts::000000000000:assumed-role/kumolo-role/session"
-	fixedRoleID       = "AROAIOSFODNN7EXAMPLE:session"
+	fixedRoleIDPrefix = "AROAIOSFODNN7EXAMPLE"
 )
 
 type responseMetadata struct {
@@ -102,7 +102,7 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "GetCallerIdentity":
 		ro.handleGetCallerIdentity(w)
 	case "AssumeRole":
-		ro.handleAssumeRole(w)
+		ro.handleAssumeRole(w, r)
 	case "GetSessionToken":
 		ro.handleGetSessionToken(w)
 	default:
@@ -128,7 +128,47 @@ func (ro *Router) handleGetCallerIdentity(w http.ResponseWriter) {
 	})
 }
 
-func (ro *Router) handleAssumeRole(w http.ResponseWriter) {
+func (ro *Router) handleAssumeRole(w http.ResponseWriter, r *http.Request) {
+	roleArn := r.Form.Get("RoleArn")
+	sessionName := r.Form.Get("RoleSessionName")
+	if roleArn == "" {
+		slog.Debug("AssumeRole: missing required param", "param", "RoleArn")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"ValidationError",
+			"1 validation error detected: Value null at 'roleArn' failed to satisfy constraint: Member must not be null",
+		)
+		return
+	}
+	if sessionName == "" {
+		slog.Debug("AssumeRole: missing required param", "param", "RoleSessionName")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"ValidationError",
+			"1 validation error detected: Value null at 'roleSessionName' failed to satisfy constraint: Member must not be null",
+		)
+		return
+	}
+	idx := strings.LastIndex(roleArn, "/")
+	if idx == -1 || idx == len(roleArn)-1 {
+		slog.Debug(
+			"AssumeRole: invalid RoleArn format",
+			"roleArn",
+			roleArn,
+		) // #nosec G706 -- roleArn comes from the request form; log injection risk accepted for a local dev emulator
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"ValidationError",
+			"1 validation error detected: Value at 'roleArn' failed to satisfy constraint: Invalid ARN format",
+		)
+		return
+	}
+	roleName := roleArn[idx+1:]
+	responseARN := "arn:aws:sts::" + fixedAccount + ":assumed-role/" + roleName + "/" + sessionName
+	responseRoleID := fixedRoleIDPrefix + ":" + sessionName
 	writeXML(w, http.StatusOK, assumeRoleResponse{
 		Xmlns: xmlns,
 		AssumeRoleResult: assumeRoleResult{
@@ -139,8 +179,8 @@ func (ro *Router) handleAssumeRole(w http.ResponseWriter) {
 				Expiration:      fixedExpiration,
 			},
 			AssumedRoleUser: assumedRoleUser{
-				AssumedRoleID: fixedRoleID,
-				Arn:           fixedRoleARN,
+				AssumedRoleID: responseRoleID,
+				Arn:           responseARN,
 			},
 		},
 		ResponseMetadata: responseMetadata{RequestID: requestID},

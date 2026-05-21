@@ -33,9 +33,8 @@ func (w *failWriter) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
-func stsRequest(t *testing.T, action string) *httptest.ResponseRecorder {
+func stsRequest(t *testing.T, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	body := "Action=" + action + "&Version=2011-06-15"
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=utf-8")
 	w := httptest.NewRecorder()
@@ -43,8 +42,13 @@ func stsRequest(t *testing.T, action string) *httptest.ResponseRecorder {
 	return w
 }
 
+func stsAction(t *testing.T, action string) *httptest.ResponseRecorder {
+	t.Helper()
+	return stsRequest(t, "Action="+action+"&Version=2011-06-15")
+}
+
 func TestHandleGetCallerIdentity(t *testing.T) {
-	w := stsRequest(t, "GetCallerIdentity")
+	w := stsAction(t, "GetCallerIdentity")
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Header().Get("Content-Type"), "text/xml")
 
@@ -57,22 +61,71 @@ func TestHandleGetCallerIdentity(t *testing.T) {
 }
 
 func TestHandleAssumeRole(t *testing.T) {
-	w := stsRequest(t, "AssumeRole")
-	assert.Equal(t, http.StatusOK, w.Code)
-
-	var resp assumeRoleResponse
-	require.NoError(t, xml.Unmarshal(w.Body.Bytes(), &resp))
-	creds := resp.AssumeRoleResult.Credentials
-	assert.Equal(t, fixedAccessKeyID, creds.AccessKeyID)
-	assert.Equal(t, fixedSecretKey, creds.SecretAccessKey)
-	assert.Equal(t, fixedSessionToken, creds.SessionToken)
-	assert.Equal(t, fixedExpiration, creds.Expiration)
-	assert.Equal(t, fixedRoleARN, resp.AssumeRoleResult.AssumedRoleUser.Arn)
-	assert.Equal(t, fixedRoleID, resp.AssumeRoleResult.AssumedRoleUser.AssumedRoleID)
+	tests := []struct {
+		name        string
+		body        string
+		wantStatus  int
+		wantARN     string
+		wantRoleID  string
+		wantErrCode string
+	}{
+		{
+			name:       "valid request",
+			body:       "Action=AssumeRole&Version=2011-06-15&RoleArn=arn:aws:iam::123456789012:role/my-role&RoleSessionName=my-session",
+			wantStatus: http.StatusOK,
+			wantARN:    "arn:aws:sts::000000000000:assumed-role/my-role/my-session",
+			wantRoleID: fixedRoleIDPrefix + ":my-session",
+		},
+		{
+			name:        "missing RoleArn",
+			body:        "Action=AssumeRole&Version=2011-06-15&RoleSessionName=my-session",
+			wantStatus:  http.StatusBadRequest,
+			wantErrCode: "ValidationError",
+		},
+		{
+			name:        "missing RoleSessionName",
+			body:        "Action=AssumeRole&Version=2011-06-15&RoleArn=arn:aws:iam::123456789012:role/my-role",
+			wantStatus:  http.StatusBadRequest,
+			wantErrCode: "ValidationError",
+		},
+		{
+			name:        "RoleArn with no slash",
+			body:        "Action=AssumeRole&Version=2011-06-15&RoleArn=invalidarn&RoleSessionName=my-session",
+			wantStatus:  http.StatusBadRequest,
+			wantErrCode: "ValidationError",
+		},
+		{
+			name:        "RoleArn ending with slash",
+			body:        "Action=AssumeRole&Version=2011-06-15&RoleArn=arn:aws:iam::123456789012:role/&RoleSessionName=my-session",
+			wantStatus:  http.StatusBadRequest,
+			wantErrCode: "ValidationError",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := stsRequest(t, tt.body)
+			assert.Equal(t, tt.wantStatus, w.Code)
+			if tt.wantErrCode != "" {
+				var errResp errorResponse
+				require.NoError(t, xml.Unmarshal(w.Body.Bytes(), &errResp))
+				assert.Equal(t, tt.wantErrCode, errResp.Error.Code)
+				return
+			}
+			var resp assumeRoleResponse
+			require.NoError(t, xml.Unmarshal(w.Body.Bytes(), &resp))
+			creds := resp.AssumeRoleResult.Credentials
+			assert.Equal(t, fixedAccessKeyID, creds.AccessKeyID)
+			assert.Equal(t, fixedSecretKey, creds.SecretAccessKey)
+			assert.Equal(t, fixedSessionToken, creds.SessionToken)
+			assert.Equal(t, fixedExpiration, creds.Expiration)
+			assert.Equal(t, tt.wantARN, resp.AssumeRoleResult.AssumedRoleUser.Arn)
+			assert.Equal(t, tt.wantRoleID, resp.AssumeRoleResult.AssumedRoleUser.AssumedRoleID)
+		})
+	}
 }
 
 func TestHandleGetSessionToken(t *testing.T) {
-	w := stsRequest(t, "GetSessionToken")
+	w := stsAction(t, "GetSessionToken")
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp getSessionTokenResponse
@@ -102,7 +155,7 @@ func TestWriteXMLErrors(t *testing.T) {
 }
 
 func TestUnknownAction(t *testing.T) {
-	w := stsRequest(t, "UnknownAction")
+	w := stsAction(t, "UnknownAction")
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 
 	var resp errorResponse
