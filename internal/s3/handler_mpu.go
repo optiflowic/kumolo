@@ -634,6 +634,9 @@ func (ro *Router) handleListParts(
 	maxParts := 1000
 	if s := q.Get("max-parts"); s != "" {
 		if n, err := strconv.Atoi(s); err == nil && n >= 0 {
+			if n > 1000 {
+				n = 1000
+			}
 			maxParts = n
 		}
 	}

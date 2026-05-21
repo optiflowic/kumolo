@@ -1539,6 +1539,9 @@ func (ro *Router) handleListMultipartUploads(
 	maxUploads := 1000
 	if s := q.Get("max-uploads"); s != "" {
 		if n, err := strconv.Atoi(s); err == nil && n >= 0 {
+			if n > 1000 {
+				n = 1000
+			}
 			maxUploads = n
 		}
 	}
@@ -1775,12 +1778,12 @@ func (ro *Router) handleListObjectVersions(w http.ResponseWriter, r *http.Reques
 			if idx := strings.Index(rest, delimiter); idx >= 0 {
 				cp := prefix + rest[:idx+len(delimiter)]
 				if _, seen := commonPrefixes[cp]; !seen {
-					commonPrefixes[cp] = struct{}{}
-					count++
-					if count > maxKeys {
+					if count >= maxKeys {
 						result.IsTruncated = true
 						break
 					}
+					commonPrefixes[cp] = struct{}{}
+					count++
 				}
 				continue
 			}
@@ -1821,12 +1824,12 @@ func (ro *Router) handleListObjectVersions(w http.ResponseWriter, r *http.Reques
 				if idx := strings.Index(rest, delimiter); idx >= 0 {
 					cp := prefix + rest[:idx+len(delimiter)]
 					if _, seen := commonPrefixes[cp]; !seen {
-						commonPrefixes[cp] = struct{}{}
-						count++
-						if count > maxKeys {
+						if count >= maxKeys {
 							result.IsTruncated = true
 							break
 						}
+						commonPrefixes[cp] = struct{}{}
+						count++
 					}
 					continue
 				}

@@ -98,3 +98,4 @@ tags
 
 # direnv
 .direnv/
+.review/
