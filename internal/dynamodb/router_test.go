@@ -431,6 +431,74 @@ func TestHandleListTables(t *testing.T) {
 		w := dynamo(t, ro, "ListTables", `{bad}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
+
+	t.Run("returns tables sorted alphabetically", func(t *testing.T) {
+		ro := newTestRouter(t)
+		for _, name := range []string{"zzz", "aaa", "mmm"} {
+			body := fmt.Sprintf(
+				`{"TableName": %q, "KeySchema": [{"AttributeName": "pk", "KeyType": "HASH"}], "AttributeDefinitions": [{"AttributeName": "pk", "AttributeType": "S"}], "BillingMode": "PAY_PER_REQUEST"}`,
+				name,
+			)
+			require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", body).Code)
+		}
+		w := dynamo(t, ro, "ListTables", `{}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		names := resp["TableNames"].([]any)
+		assert.Equal(t, []any{"aaa", "mmm", "zzz"}, names)
+		assert.Nil(t, resp["LastEvaluatedTableName"])
+	})
+
+	t.Run("paginates with Limit", func(t *testing.T) {
+		ro := newTestRouter(t)
+		for _, name := range []string{"aaa", "bbb", "ccc"} {
+			body := fmt.Sprintf(
+				`{"TableName": %q, "KeySchema": [{"AttributeName": "pk", "KeyType": "HASH"}], "AttributeDefinitions": [{"AttributeName": "pk", "AttributeType": "S"}], "BillingMode": "PAY_PER_REQUEST"}`,
+				name,
+			)
+			require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", body).Code)
+		}
+		w := dynamo(t, ro, "ListTables", `{"Limit": 2}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		names := resp["TableNames"].([]any)
+		assert.Equal(t, []any{"aaa", "bbb"}, names)
+		assert.Equal(t, "bbb", resp["LastEvaluatedTableName"])
+	})
+
+	t.Run("paginates with ExclusiveStartTableName", func(t *testing.T) {
+		ro := newTestRouter(t)
+		for _, name := range []string{"aaa", "bbb", "ccc"} {
+			body := fmt.Sprintf(
+				`{"TableName": %q, "KeySchema": [{"AttributeName": "pk", "KeyType": "HASH"}], "AttributeDefinitions": [{"AttributeName": "pk", "AttributeType": "S"}], "BillingMode": "PAY_PER_REQUEST"}`,
+				name,
+			)
+			require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", body).Code)
+		}
+		w := dynamo(t, ro, "ListTables", `{"ExclusiveStartTableName": "bbb"}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		names := resp["TableNames"].([]any)
+		assert.Equal(t, []any{"ccc"}, names)
+		assert.Nil(t, resp["LastEvaluatedTableName"])
+	})
+
+	t.Run("400 for out-of-range Limit", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "ListTables", `{"Limit": 0}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("400 for Limit over 100", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "ListTables", `{"Limit": 101}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
 }
 
 func TestHandlePutItem(t *testing.T) {
@@ -2723,6 +2791,19 @@ func TestHandleBatchGetItem(t *testing.T) {
 		}`)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
+
+	t.Run("400 when total keys exceed 100", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTblBody).Code)
+		keys := make([]string, 101)
+		for i := range keys {
+			keys[i] = fmt.Sprintf(`{"pk": {"S": "k%d"}}`, i)
+		}
+		body := fmt.Sprintf(`{"RequestItems": {"tbl": {"Keys": [%s]}}}`, strings.Join(keys, ","))
+		w := dynamo(t, ro, "BatchGetItem", body)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
 }
 
 func TestHandleBatchWriteItem(t *testing.T) {
@@ -2824,6 +2905,19 @@ func TestHandleBatchWriteItem(t *testing.T) {
 			"RequestItems": {"tbl": [{"PutRequest": {"Item": {"pk": {"S": "k"}}}}]}
 		}`)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+
+	t.Run("400 when total write operations exceed 25", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTblBody).Code)
+		ops := make([]string, 26)
+		for i := range ops {
+			ops[i] = fmt.Sprintf(`{"PutRequest": {"Item": {"pk": {"S": "k%d"}}}}`, i)
+		}
+		body := fmt.Sprintf(`{"RequestItems": {"tbl": [%s]}}`, strings.Join(ops, ","))
+		w := dynamo(t, ro, "BatchWriteItem", body)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 }
 

@@ -33,6 +33,19 @@ func (ro *Router) handleBatchGetItem(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
+	totalKeys := 0
+	for _, tableReq := range req.RequestItems {
+		totalKeys += len(tableReq.Keys)
+	}
+	if totalKeys > 100 {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"Too many items requested for the BatchGetItem call",
+		)
+		return
+	}
 	responses := make(map[string][]map[string]any, len(req.RequestItems))
 	for tableName, tableReq := range req.RequestItems {
 		if err := validateUnusedExprRefs(
@@ -136,6 +149,19 @@ func (ro *Router) handleBatchWriteItem(w http.ResponseWriter, body []byte) {
 			http.StatusBadRequest,
 			"com.amazonaws.dynamodb.v20120810#ValidationException",
 			"RequestItems is required",
+		)
+		return
+	}
+	totalOps := 0
+	for _, writeReqs := range req.RequestItems {
+		totalOps += len(writeReqs)
+	}
+	if totalOps > 25 {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"Too many items requested for the BatchWriteItem call",
 		)
 		return
 	}
