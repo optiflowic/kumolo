@@ -3,8 +3,10 @@ package dynamodb
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 )
 
 func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
@@ -219,7 +221,7 @@ func (ro *Router) handleDescribeTable(w http.ResponseWriter, body []byte) {
 
 func (ro *Router) handleListTables(w http.ResponseWriter, body []byte) {
 	var req struct {
-		Limit                   int    `json:"Limit"`
+		Limit                   *int   `json:"Limit"`
 		ExclusiveStartTableName string `json:"ExclusiveStartTableName"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
@@ -230,6 +232,22 @@ func (ro *Router) handleListTables(w http.ResponseWriter, body []byte) {
 			"invalid request body",
 		)
 		return
+	}
+	limit := 100
+	if req.Limit != nil {
+		if *req.Limit < 1 || *req.Limit > 100 {
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				fmt.Sprintf(
+					"Value %d at 'limit' failed to satisfy constraint: Member must have value between 1 and 100, inclusive",
+					*req.Limit,
+				),
+			)
+			return
+		}
+		limit = *req.Limit
 	}
 	names, err := ro.storage.ListTables()
 	if err != nil {
@@ -245,8 +263,31 @@ func (ro *Router) handleListTables(w http.ResponseWriter, body []byte) {
 	if names == nil {
 		names = []string{}
 	}
+	sort.Strings(names)
+	// Apply ExclusiveStartTableName pagination cursor.
+	// If the cursor table was deleted between calls, resume from the next alphabetically following name.
+	if req.ExclusiveStartTableName != "" {
+		start := len(names) // default: empty result if cursor is past all names
+		for i, name := range names {
+			if name == req.ExclusiveStartTableName {
+				start = i + 1
+				break
+			}
+			if name > req.ExclusiveStartTableName {
+				start = i
+				break
+			}
+		}
+		names = names[start:]
+	}
+	resp := map[string]any{}
+	if len(names) > limit {
+		resp["LastEvaluatedTableName"] = names[limit-1]
+		names = names[:limit]
+	}
+	resp["TableNames"] = names
 	slog.Debug("listed DynamoDB tables", "count", len(names))
-	writeJSON(w, http.StatusOK, map[string]any{"TableNames": names})
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (ro *Router) handleUpdateTable(w http.ResponseWriter, body []byte) {
