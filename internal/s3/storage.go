@@ -180,9 +180,14 @@ func (s *Storage) ListBuckets() ([]BucketInfo, error) {
 		if info, err := e.Info(); err == nil {
 			creationDate = info.ModTime()
 		}
+		var region string
+		if meta, err := s.readBucketMeta(e.Name()); err == nil {
+			region = meta.Region
+		}
 		buckets = append(buckets, BucketInfo{
 			Name:         e.Name(),
 			CreationDate: creationDate,
+			Region:       region,
 		})
 	}
 	slices.SortFunc(buckets, func(a, b BucketInfo) int {

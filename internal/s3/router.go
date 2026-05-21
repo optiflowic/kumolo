@@ -1442,7 +1442,11 @@ func (ro *Router) handleListBuckets(w http.ResponseWriter, r *http.Request) {
 	slog.Debug("listed buckets", "count", len(buckets))
 	xmlBuckets := make([]xmlBucket, len(buckets))
 	for i, b := range buckets {
-		xmlBuckets[i] = xmlBucket{Name: b.Name, CreationDate: b.CreationDate.UTC()}
+		xmlBuckets[i] = xmlBucket{
+			Name:         b.Name,
+			CreationDate: b.CreationDate.UTC(),
+			BucketRegion: b.Region,
+		}
 	}
 	writeXML(w, http.StatusOK, listBucketsResult{
 		Owner:   xmlOwner{ID: "owner", DisplayName: "owner"},
@@ -1659,10 +1663,40 @@ func (ro *Router) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 	bypassGovernance := r.Header.Get(amzBypassGovernanceRetention) == "true"
 	result := deleteObjectsResult{}
 	for _, obj := range req.Objects {
-		err := ro.storage.DeleteObject(bucket, obj.Key, bypassGovernance)
-		if err != nil && !errors.Is(err, ErrObjectNotFound) {
+		var (
+			deleteMarker          bool
+			deleteMarkerVersionID string
+			deletedVersionID      string
+			deleteErr             error
+		)
+		if obj.VersionId != "" {
+			// Delete a specific version.
+			isMarker, err := ro.storage.DeleteObjectVersion(
+				bucket,
+				obj.Key,
+				obj.VersionId,
+				bypassGovernance,
+			)
+			deleteErr = err
+			if err == nil {
+				deletedVersionID = obj.VersionId
+				deleteMarker = isMarker
+				if isMarker {
+					deleteMarkerVersionID = obj.VersionId
+				}
+			}
+		} else {
+			// Versioning-aware delete: creates a delete marker when versioning is enabled.
+			vid, isMarker, err := ro.storage.DeleteObjectVersioned(bucket, obj.Key, bypassGovernance)
+			deleteErr = err
+			if err == nil && isMarker {
+				deleteMarker = true
+				deleteMarkerVersionID = vid
+			}
+		}
+		if deleteErr != nil && !errors.Is(deleteErr, ErrObjectNotFound) {
 			var code, message string
-			if errors.Is(err, ErrObjectLocked) {
+			if errors.Is(deleteErr, ErrObjectLocked) {
 				slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
 					"delete rejected: object locked",
 					"bucket",
@@ -1680,20 +1714,26 @@ func (ro *Router) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 					"key",
 					obj.Key,
 					"err",
-					err,
+					deleteErr,
 				)
 				code = "InternalError"
-				message = err.Error()
+				message = deleteErr.Error()
 			}
 			result.Errors = append(result.Errors, xmlDeleteError{
-				Key:     obj.Key,
-				Code:    code,
-				Message: message,
+				Key:       obj.Key,
+				VersionId: obj.VersionId,
+				Code:      code,
+				Message:   message,
 			})
 			continue
 		}
 		if !req.Quiet {
-			result.Deleted = append(result.Deleted, xmlDeletedObject(obj))
+			result.Deleted = append(result.Deleted, xmlDeletedObject{
+				Key:                   obj.Key,
+				VersionId:             deletedVersionID,
+				DeleteMarker:          deleteMarker,
+				DeleteMarkerVersionId: deleteMarkerVersionID,
+			})
 		}
 	}
 	slog.Info( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
@@ -1873,13 +1913,25 @@ func (ro *Router) handleListObjectVersions(w http.ResponseWriter, r *http.Reques
 
 func (ro *Router) handleHeadBucket(w http.ResponseWriter, r *http.Request, bucket string) {
 	w.Header().Set("Content-Length", "0")
-	if !ro.storage.BucketExists(bucket) {
-		slog.Debug( // #nosec G706 -- bucket name is validated by S3 naming rules before reaching this point
-			"bucket not found",
+	region, err := ro.storage.GetBucketRegion(bucket)
+	if err != nil {
+		if errors.Is(err, ErrBucketNotFound) {
+			slog.Debug( // #nosec G706 -- bucket name is validated by S3 naming rules before reaching this point
+				"bucket not found",
+				"bucket",
+				bucket,
+			)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		slog.Error( // #nosec G706 -- bucket name is validated by S3 naming rules before reaching this point
+			"failed to get bucket region",
 			"bucket",
 			bucket,
+			"err",
+			err,
 		)
-		w.WriteHeader(http.StatusNotFound)
+		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 	slog.Debug( // #nosec G706 -- bucket name is validated by S3 naming rules before reaching this point
@@ -1887,6 +1939,10 @@ func (ro *Router) handleHeadBucket(w http.ResponseWriter, r *http.Request, bucke
 		"bucket",
 		bucket,
 	)
+	if region == "" {
+		region = "us-east-1"
+	}
+	w.Header().Set("x-amz-bucket-region", region)
 	w.WriteHeader(http.StatusOK)
 }
 

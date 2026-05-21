@@ -138,6 +138,22 @@ func TestRouterListBuckets(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Contains(t, w.Body.String(), "my-bucket")
 	})
+
+	t.Run("includes BucketRegion in list when region is set", func(t *testing.T) {
+		ro := newTestRouter(t)
+		createReq := httptest.NewRequest(http.MethodPut, "/my-bucket", nil)
+		createReq.Header.Set(
+			"Authorization",
+			"AWS4-HMAC-SHA256 Credential=AKID/20230101/eu-west-1/s3/aws4_request, SignedHeaders=host, Signature=sig",
+		)
+		ro.ServeHTTP(httptest.NewRecorder(), createReq)
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), "<BucketRegion>eu-west-1</BucketRegion>")
+	})
 }
 
 func TestRouterCreateBucket(t *testing.T) {
@@ -223,7 +239,23 @@ func TestRouterDeleteBucket(t *testing.T) {
 }
 
 func TestHeadBucket(t *testing.T) {
-	t.Run("returns 200 for existing bucket", func(t *testing.T) {
+	t.Run("returns 200 with x-amz-bucket-region for existing bucket", func(t *testing.T) {
+		ro := newTestRouter(t)
+		createReq := httptest.NewRequest(http.MethodPut, "/my-bucket", nil)
+		createReq.Header.Set(
+			"Authorization",
+			"AWS4-HMAC-SHA256 Credential=AKID/20230101/us-west-2/s3/aws4_request, SignedHeaders=host, Signature=sig",
+		)
+		ro.ServeHTTP(httptest.NewRecorder(), createReq)
+
+		req := httptest.NewRequest(http.MethodHead, "/my-bucket", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "us-west-2", w.Header().Get("x-amz-bucket-region"))
+	})
+
+	t.Run("returns us-east-1 when region is unset", func(t *testing.T) {
 		ro := newTestRouter(t)
 		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
 
@@ -231,6 +263,7 @@ func TestHeadBucket(t *testing.T) {
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "us-east-1", w.Header().Get("x-amz-bucket-region"))
 	})
 
 	t.Run("returns 404 for nonexistent bucket", func(t *testing.T) {
@@ -239,6 +272,14 @@ func TestHeadBucket(t *testing.T) {
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+
+	t.Run("returns 500 on storage error", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{getBucketRegionErr: errors.New("disk failure")})
+		req := httptest.NewRequest(http.MethodHead, "/my-bucket", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
 }
 
@@ -3699,6 +3740,70 @@ func TestRouterDeleteObjects(t *testing.T) {
 		assert.Contains(t, body, "<Error>")
 		assert.Contains(t, body, "AccessDenied")
 	})
+
+	t.Run("creates delete marker on versioning-enabled bucket", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/obj.txt", "data"))
+		enableVersioning(t, ro, "my-bucket")
+
+		req := httptest.NewRequest(
+			http.MethodPost,
+			"/my-bucket?delete",
+			strings.NewReader(`<Delete><Object><Key>obj.txt</Key></Object></Delete>`),
+		)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		body := w.Body.String()
+		assert.Contains(t, body, "<DeleteMarker>true</DeleteMarker>")
+		assert.Contains(t, body, "<DeleteMarkerVersionId>")
+		assert.NotContains(t, body, "<Error>")
+	})
+
+	t.Run("deletes specific version when VersionId specified", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		enableVersioning(t, ro, "my-bucket")
+
+		// Upload two versions.
+		w1 := httptest.NewRecorder()
+		ro.ServeHTTP(w1, putRequest("/my-bucket/obj.txt", "v1"))
+		vid1 := w1.Header().Get(amzVersionID)
+		require.NotEmpty(t, vid1)
+
+		ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/obj.txt", "v2"))
+
+		xmlBody := fmt.Sprintf(
+			`<Delete><Object><Key>obj.txt</Key><VersionId>%s</VersionId></Object></Delete>`,
+			vid1,
+		)
+		req := httptest.NewRequest(http.MethodPost, "/my-bucket?delete", strings.NewReader(xmlBody))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		body := w.Body.String()
+		assert.Contains(t, body, "<VersionId>"+vid1+"</VersionId>")
+		assert.NotContains(t, body, "<DeleteMarker>true</DeleteMarker>")
+		assert.NotContains(t, body, "<Error>")
+	})
+}
+
+// enableVersioning is a helper that enables versioning on a bucket.
+func enableVersioning(t *testing.T, ro *Router, bucket string) {
+	t.Helper()
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/"+bucket+"?versioning",
+		strings.NewReader(
+			`<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`,
+		),
+	)
+	w := httptest.NewRecorder()
+	ro.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
 }
 
 // putRequest is a helper that creates a PUT request with a text/plain body.
