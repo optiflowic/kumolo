@@ -486,6 +486,25 @@ func TestHandleListTables(t *testing.T) {
 		assert.Nil(t, resp["LastEvaluatedTableName"])
 	})
 
+	t.Run("resumes alphabetically when cursor table is absent", func(t *testing.T) {
+		ro := newTestRouter(t)
+		for _, name := range []string{"aaa", "ccc"} {
+			body := fmt.Sprintf(
+				`{"TableName": %q, "KeySchema": [{"AttributeName": "pk", "KeyType": "HASH"}], "AttributeDefinitions": [{"AttributeName": "pk", "AttributeType": "S"}], "BillingMode": "PAY_PER_REQUEST"}`,
+				name,
+			)
+			require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", body).Code)
+		}
+		// "bbb" was never created; cursor should resume from "ccc"
+		w := dynamo(t, ro, "ListTables", `{"ExclusiveStartTableName": "bbb"}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		names := resp["TableNames"].([]any)
+		assert.Equal(t, []any{"ccc"}, names)
+		assert.Nil(t, resp["LastEvaluatedTableName"])
+	})
+
 	t.Run("400 for out-of-range Limit", func(t *testing.T) {
 		ro := newTestRouter(t)
 		w := dynamo(t, ro, "ListTables", `{"Limit": 0}`)

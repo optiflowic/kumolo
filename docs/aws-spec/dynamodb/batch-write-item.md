@@ -31,13 +31,12 @@
 
 | Error | HTTP | Condition |
 |---|---|---|
-| `ValidationException` | 400 | Missing RequestItems; invalid item content |
+| `ValidationException` | 400 | Missing RequestItems; total write ops > 25; invalid item content |
 | `ResourceNotFoundException` | 400 | Table does not exist |
 | `InternalServerError` | 500 | Storage failure |
 
 ## kumolo-Specific Deviations
 
-- **25-operation limit is not enforced**: real AWS returns `ValidationException` when total write operations exceed 25.
 - `UnprocessedItems` is always empty; real AWS may return unprocessed items on throttle.
 - `ReturnConsumedCapacity` and `ReturnItemCollectionMetrics` are not returned.
 - Duplicate PK within the same table is not detected (real AWS: `ValidationException`).

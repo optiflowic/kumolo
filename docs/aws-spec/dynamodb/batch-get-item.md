@@ -35,13 +35,12 @@ Per-table `ConsistentRead` — accepted without error, ignored.
 
 | Error | HTTP | Condition |
 |---|---|---|
-| `ValidationException` | 400 | Missing RequestItems; invalid ProjectionExpression; unused ExpressionAttributeNames refs |
+| `ValidationException` | 400 | Missing RequestItems; total keys > 100; invalid ProjectionExpression; unused ExpressionAttributeNames refs |
 | `ResourceNotFoundException` | 400 | Table does not exist |
 | `InternalServerError` | 500 | Storage failure |
 
 ## kumolo-Specific Deviations
 
-- **100-item limit is not enforced**: real AWS returns `ValidationException` when total Keys across all tables exceeds 100.
 - `ConsistentRead` per-table is accepted but ignored.
 - `ReturnConsumedCapacity` is not returned.
 - `UnprocessedKeys` is always empty; real AWS may return unprocessed items on throttle.

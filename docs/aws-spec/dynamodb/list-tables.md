@@ -22,9 +22,5 @@
 
 | Error | HTTP | Condition |
 |---|---|---|
+| `ValidationException` | 400 | Invalid request body; `Limit` out of range [1–100] |
 | `InternalServerError` | 500 | Storage failure |
-
-## kumolo-Specific Deviations
-
-- **Pagination is not implemented**: `Limit` and `ExclusiveStartTableName` are parsed but ignored; all tables are always returned in a single response without `LastEvaluatedTableName`. Real AWS caps at 100 per page.
-- `ValidationException` for out-of-range `Limit` (< 1 or > 100) is not enforced.

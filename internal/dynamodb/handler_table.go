@@ -265,11 +265,16 @@ func (ro *Router) handleListTables(w http.ResponseWriter, body []byte) {
 	}
 	sort.Strings(names)
 	// Apply ExclusiveStartTableName pagination cursor.
+	// If the cursor table was deleted between calls, resume from the next alphabetically following name.
 	if req.ExclusiveStartTableName != "" {
-		start := 0
+		start := len(names) // default: empty result if cursor is past all names
 		for i, name := range names {
 			if name == req.ExclusiveStartTableName {
 				start = i + 1
+				break
+			}
+			if name > req.ExclusiveStartTableName {
+				start = i
 				break
 			}
 		}
