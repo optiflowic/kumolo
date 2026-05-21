@@ -31,6 +31,7 @@ Ignored parameters (accepted without error): `DurationSeconds`, `ExternalId`, `P
 | Error | HTTP | Condition |
 |---|---|---|
 | `ValidationError` | 400 | `RoleArn` or `RoleSessionName` is missing |
+| `ValidationError` | 400 | `RoleArn` contains no `/` or ends with `/` (role name segment is empty) |
 
 ## kumolo Deviations
 

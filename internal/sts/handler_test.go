@@ -88,6 +88,18 @@ func TestHandleAssumeRole(t *testing.T) {
 			wantStatus:  http.StatusBadRequest,
 			wantErrCode: "ValidationError",
 		},
+		{
+			name:        "RoleArn with no slash",
+			body:        "Action=AssumeRole&Version=2011-06-15&RoleArn=invalidarn&RoleSessionName=my-session",
+			wantStatus:  http.StatusBadRequest,
+			wantErrCode: "ValidationError",
+		},
+		{
+			name:        "RoleArn ending with slash",
+			body:        "Action=AssumeRole&Version=2011-06-15&RoleArn=arn:aws:iam::123456789012:role/&RoleSessionName=my-session",
+			wantStatus:  http.StatusBadRequest,
+			wantErrCode: "ValidationError",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

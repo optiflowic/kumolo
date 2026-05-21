@@ -151,7 +151,22 @@ func (ro *Router) handleAssumeRole(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
-	roleName := roleArn[strings.LastIndex(roleArn, "/")+1:]
+	idx := strings.LastIndex(roleArn, "/")
+	if idx == -1 || idx == len(roleArn)-1 {
+		slog.Debug(
+			"AssumeRole: invalid RoleArn format",
+			"roleArn",
+			roleArn,
+		) // #nosec G706 -- roleArn comes from the request form; log injection risk accepted for a local dev emulator
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"ValidationError",
+			"1 validation error detected: Value at 'roleArn' failed to satisfy constraint: Invalid ARN format",
+		)
+		return
+	}
+	roleName := roleArn[idx+1:]
 	responseARN := "arn:aws:sts::" + fixedAccount + ":assumed-role/" + roleName + "/" + sessionName
 	responseRoleID := fixedRoleIDPrefix + ":" + sessionName
 	writeXML(w, http.StatusOK, assumeRoleResponse{
