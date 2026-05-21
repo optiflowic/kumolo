@@ -208,11 +208,18 @@ type completeMultipartUploadResult struct {
 }
 
 type listMultipartUploadsResult struct {
-	XMLName     xml.Name             `xml:"ListMultipartUploadsResult"`
-	Bucket      string               `xml:"Bucket"`
-	MaxUploads  int                  `xml:"MaxUploads"`
-	IsTruncated bool                 `xml:"IsTruncated"`
-	Uploads     []xmlMultipartUpload `xml:"Upload"`
+	XMLName            xml.Name             `xml:"ListMultipartUploadsResult"`
+	Bucket             string               `xml:"Bucket"`
+	KeyMarker          string               `xml:"KeyMarker"`
+	UploadIdMarker     string               `xml:"UploadIdMarker"`
+	NextKeyMarker      string               `xml:"NextKeyMarker,omitempty"`
+	NextUploadIdMarker string               `xml:"NextUploadIdMarker,omitempty"`
+	Prefix             string               `xml:"Prefix"`
+	Delimiter          string               `xml:"Delimiter,omitempty"`
+	MaxUploads         int                  `xml:"MaxUploads"`
+	IsTruncated        bool                 `xml:"IsTruncated"`
+	Uploads            []xmlMultipartUpload `xml:"Upload"`
+	CommonPrefixes     []xmlCommonPrefix    `xml:"CommonPrefixes"`
 }
 
 type xmlMultipartUpload struct {
@@ -223,14 +230,16 @@ type xmlMultipartUpload struct {
 }
 
 type listPartsResult struct {
-	XMLName      xml.Name  `xml:"ListPartsResult"`
-	Bucket       string    `xml:"Bucket"`
-	Key          string    `xml:"Key"`
-	UploadID     string    `xml:"UploadId"`
-	StorageClass string    `xml:"StorageClass"`
-	MaxParts     int       `xml:"MaxParts"`
-	IsTruncated  bool      `xml:"IsTruncated"`
-	Parts        []xmlPart `xml:"Part"`
+	XMLName              xml.Name  `xml:"ListPartsResult"`
+	Bucket               string    `xml:"Bucket"`
+	Key                  string    `xml:"Key"`
+	UploadID             string    `xml:"UploadId"`
+	StorageClass         string    `xml:"StorageClass"`
+	PartNumberMarker     int       `xml:"PartNumberMarker"`
+	NextPartNumberMarker int       `xml:"NextPartNumberMarker,omitempty"`
+	MaxParts             int       `xml:"MaxParts"`
+	IsTruncated          bool      `xml:"IsTruncated"`
+	Parts                []xmlPart `xml:"Part"`
 }
 
 type xmlPart struct {
@@ -282,16 +291,20 @@ type xmlVersioningConfiguration struct {
 }
 
 type xmlListVersionsResult struct {
-	XMLName         xml.Name           `xml:"ListVersionsResult"`
-	Xmlns           string             `xml:"xmlns,attr"`
-	Name            string             `xml:"Name"`
-	Prefix          string             `xml:"Prefix"`
-	KeyMarker       string             `xml:"KeyMarker"`
-	VersionIdMarker string             `xml:"VersionIdMarker"`
-	MaxKeys         int                `xml:"MaxKeys"`
-	IsTruncated     bool               `xml:"IsTruncated"`
-	Versions        []xmlObjectVersion `xml:"Version"`
-	DeleteMarkers   []xmlDeleteMarker  `xml:"DeleteMarker"`
+	XMLName             xml.Name           `xml:"ListVersionsResult"`
+	Xmlns               string             `xml:"xmlns,attr"`
+	Name                string             `xml:"Name"`
+	Prefix              string             `xml:"Prefix"`
+	KeyMarker           string             `xml:"KeyMarker"`
+	VersionIdMarker     string             `xml:"VersionIdMarker"`
+	NextKeyMarker       string             `xml:"NextKeyMarker,omitempty"`
+	NextVersionIdMarker string             `xml:"NextVersionIdMarker,omitempty"`
+	Delimiter           string             `xml:"Delimiter,omitempty"`
+	MaxKeys             int                `xml:"MaxKeys"`
+	IsTruncated         bool               `xml:"IsTruncated"`
+	Versions            []xmlObjectVersion `xml:"Version"`
+	DeleteMarkers       []xmlDeleteMarker  `xml:"DeleteMarker"`
+	CommonPrefixes      []xmlCommonPrefix  `xml:"CommonPrefixes"`
 }
 
 type xmlObjectVersion struct {

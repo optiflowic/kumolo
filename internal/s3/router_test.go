@@ -3909,6 +3909,99 @@ func TestRouterListMultipartUploads(t *testing.T) {
 
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
+
+	t.Run("max-uploads limits result count and sets IsTruncated", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		for _, key := range []string{"a.txt", "b.txt", "c.txt"} {
+			ro.ServeHTTP(
+				httptest.NewRecorder(),
+				httptest.NewRequest(http.MethodPost, "/my-bucket/"+key+"?uploads", nil),
+			)
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket?uploads&max-uploads=2", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		var result listMultipartUploadsResult
+		require.NoError(t, xml.Unmarshal(w.Body.Bytes(), &result))
+		assert.Equal(t, 2, len(result.Uploads))
+		assert.True(t, result.IsTruncated)
+		assert.NotEmpty(t, result.NextKeyMarker)
+		assert.NotEmpty(t, result.NextUploadIdMarker)
+	})
+
+	t.Run("key-marker skips uploads at or before the marker", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		for _, key := range []string{"a.txt", "b.txt", "c.txt"} {
+			ro.ServeHTTP(
+				httptest.NewRecorder(),
+				httptest.NewRequest(http.MethodPost, "/my-bucket/"+key+"?uploads", nil),
+			)
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket?uploads&key-marker=b.txt", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		var result listMultipartUploadsResult
+		require.NoError(t, xml.Unmarshal(w.Body.Bytes(), &result))
+		require.Len(t, result.Uploads, 1)
+		assert.Equal(t, "c.txt", result.Uploads[0].Key)
+		assert.False(t, result.IsTruncated)
+	})
+
+	t.Run("prefix filters uploads", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		for _, key := range []string{"img/a.png", "img/b.png", "doc/a.pdf"} {
+			ro.ServeHTTP(
+				httptest.NewRecorder(),
+				httptest.NewRequest(http.MethodPost, "/my-bucket/"+key+"?uploads", nil),
+			)
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket?uploads&prefix=img/", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		var result listMultipartUploadsResult
+		require.NoError(t, xml.Unmarshal(w.Body.Bytes(), &result))
+		assert.Len(t, result.Uploads, 2)
+		for _, u := range result.Uploads {
+			assert.True(t, strings.HasPrefix(u.Key, "img/"))
+		}
+	})
+
+	t.Run("delimiter groups common prefixes", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		for _, key := range []string{"photos/a.jpg", "photos/b.jpg", "videos/a.mp4"} {
+			ro.ServeHTTP(
+				httptest.NewRecorder(),
+				httptest.NewRequest(http.MethodPost, "/my-bucket/"+key+"?uploads", nil),
+			)
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket?uploads&delimiter=/", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		var result listMultipartUploadsResult
+		require.NoError(t, xml.Unmarshal(w.Body.Bytes(), &result))
+		assert.Empty(t, result.Uploads)
+		prefixes := make([]string, len(result.CommonPrefixes))
+		for i, cp := range result.CommonPrefixes {
+			prefixes[i] = cp.Prefix
+		}
+		assert.ElementsMatch(t, []string{"photos/", "videos/"}, prefixes)
+	})
 }
 
 func TestRouterListParts(t *testing.T) {
@@ -3988,6 +4081,114 @@ func TestRouterListParts(t *testing.T) {
 		ro.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+
+	setupUploadWithParts := func(t *testing.T, numParts int) (*Router, string) {
+		t.Helper()
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		initW := httptest.NewRecorder()
+		ro.ServeHTTP(
+			initW,
+			httptest.NewRequest(http.MethodPost, "/my-bucket/big.txt?uploads", nil),
+		)
+		require.Equal(t, http.StatusOK, initW.Code)
+		var initResult struct {
+			UploadID string `xml:"UploadId"`
+		}
+		require.NoError(t, xml.Unmarshal(initW.Body.Bytes(), &initResult))
+		uploadID := initResult.UploadID
+		for i := 1; i <= numParts; i++ {
+			ro.ServeHTTP(
+				httptest.NewRecorder(),
+				httptest.NewRequest(
+					http.MethodPut,
+					fmt.Sprintf("/my-bucket/big.txt?partNumber=%d&uploadId=%s", i, uploadID),
+					strings.NewReader("part data"),
+				),
+			)
+		}
+		return ro, uploadID
+	}
+
+	t.Run("max-parts limits result count and sets IsTruncated", func(t *testing.T) {
+		ro, uploadID := setupUploadWithParts(t, 5)
+
+		req := httptest.NewRequest(
+			http.MethodGet,
+			"/my-bucket/big.txt?uploadId="+uploadID+"&max-parts=3",
+			nil,
+		)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		var result listPartsResult
+		require.NoError(t, xml.Unmarshal(w.Body.Bytes(), &result))
+		assert.Len(t, result.Parts, 3)
+		assert.True(t, result.IsTruncated)
+		assert.Equal(t, 3, result.NextPartNumberMarker)
+	})
+
+	t.Run("part-number-marker skips parts at or below the marker", func(t *testing.T) {
+		ro, uploadID := setupUploadWithParts(t, 5)
+
+		req := httptest.NewRequest(
+			http.MethodGet,
+			"/my-bucket/big.txt?uploadId="+uploadID+"&part-number-marker=3",
+			nil,
+		)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		var result listPartsResult
+		require.NoError(t, xml.Unmarshal(w.Body.Bytes(), &result))
+		require.Len(t, result.Parts, 2)
+		assert.Equal(t, 4, result.Parts[0].PartNumber)
+		assert.Equal(t, 5, result.Parts[1].PartNumber)
+		assert.False(t, result.IsTruncated)
+	})
+
+	t.Run("second page via part-number-marker returns remaining parts", func(t *testing.T) {
+		ro, uploadID := setupUploadWithParts(t, 4)
+
+		// First page.
+		req1 := httptest.NewRequest(
+			http.MethodGet,
+			"/my-bucket/big.txt?uploadId="+uploadID+"&max-parts=2",
+			nil,
+		)
+		w1 := httptest.NewRecorder()
+		ro.ServeHTTP(w1, req1)
+		require.Equal(t, http.StatusOK, w1.Code)
+		var page1 listPartsResult
+		require.NoError(t, xml.Unmarshal(w1.Body.Bytes(), &page1))
+		require.True(t, page1.IsTruncated)
+
+		// Second page using NextPartNumberMarker.
+		req2 := httptest.NewRequest(
+			http.MethodGet,
+			fmt.Sprintf(
+				"/my-bucket/big.txt?uploadId=%s&max-parts=2&part-number-marker=%d",
+				uploadID,
+				page1.NextPartNumberMarker,
+			),
+			nil,
+		)
+		w2 := httptest.NewRecorder()
+		ro.ServeHTTP(w2, req2)
+		require.Equal(t, http.StatusOK, w2.Code)
+		var page2 listPartsResult
+		require.NoError(t, xml.Unmarshal(w2.Body.Bytes(), &page2))
+		assert.Len(t, page2.Parts, 2)
+		assert.False(t, page2.IsTruncated)
+		// Pages must not overlap.
+		for _, p1 := range page1.Parts {
+			for _, p2 := range page2.Parts {
+				assert.NotEqual(t, p1.PartNumber, p2.PartNumber)
+			}
+		}
 	})
 }
 
@@ -5905,6 +6106,90 @@ func TestRouterListObjectVersions(t *testing.T) {
 		assert.Contains(t, body, "<DeleteMarker>")
 		assert.Contains(t, body, "<Key>obj.txt</Key>")
 		assert.Contains(t, body, "<VersionId>")
+	})
+
+	t.Run("max-keys limits versions and sets IsTruncated", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		require.NoError(t, ro.storage.(*Storage).PutBucketVersioning("my-bucket", "Enabled"))
+		for _, key := range []string{"a.txt", "b.txt", "c.txt"} {
+			ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/"+key, "data"))
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket?versions&max-keys=2", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		var result xmlListVersionsResult
+		require.NoError(t, xml.Unmarshal(w.Body.Bytes(), &result))
+		assert.Len(t, result.Versions, 2)
+		assert.True(t, result.IsTruncated)
+		assert.NotEmpty(t, result.NextKeyMarker)
+	})
+
+	t.Run("key-marker skips versions at or before the marker", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		require.NoError(t, ro.storage.(*Storage).PutBucketVersioning("my-bucket", "Enabled"))
+		for _, key := range []string{"a.txt", "b.txt", "c.txt"} {
+			ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/"+key, "data"))
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket?versions&key-marker=b.txt", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		var result xmlListVersionsResult
+		require.NoError(t, xml.Unmarshal(w.Body.Bytes(), &result))
+		require.Len(t, result.Versions, 1)
+		assert.Equal(t, "c.txt", result.Versions[0].Key)
+		assert.False(t, result.IsTruncated)
+	})
+
+	t.Run("prefix filters versions", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		require.NoError(t, ro.storage.(*Storage).PutBucketVersioning("my-bucket", "Enabled"))
+		for _, key := range []string{"img/a.png", "img/b.png", "doc/a.pdf"} {
+			ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/"+key, "data"))
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket?versions&prefix=img/", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		var result xmlListVersionsResult
+		require.NoError(t, xml.Unmarshal(w.Body.Bytes(), &result))
+		assert.Len(t, result.Versions, 2)
+		for _, v := range result.Versions {
+			assert.True(t, strings.HasPrefix(v.Key, "img/"))
+		}
+	})
+
+	t.Run("delimiter groups versions into common prefixes", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		require.NoError(t, ro.storage.(*Storage).PutBucketVersioning("my-bucket", "Enabled"))
+		for _, key := range []string{"photos/a.jpg", "photos/b.jpg", "videos/a.mp4"} {
+			ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/"+key, "data"))
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket?versions&delimiter=/", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		var result xmlListVersionsResult
+		require.NoError(t, xml.Unmarshal(w.Body.Bytes(), &result))
+		assert.Empty(t, result.Versions)
+		prefixes := make([]string, len(result.CommonPrefixes))
+		for i, cp := range result.CommonPrefixes {
+			prefixes[i] = cp.Prefix
+		}
+		assert.ElementsMatch(t, []string{"photos/", "videos/"}, prefixes)
 	})
 }
 
