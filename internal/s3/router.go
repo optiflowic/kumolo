@@ -1671,6 +1671,9 @@ func (ro *Router) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 		)
 		if obj.VersionId != "" {
 			// Delete a specific version.
+			// Always echo the requested VersionId in <Deleted>, even when the
+			// version does not exist (ErrObjectNotFound is treated as success).
+			deletedVersionID = obj.VersionId
 			isMarker, err := ro.storage.DeleteObjectVersion(
 				bucket,
 				obj.Key,
@@ -1679,7 +1682,6 @@ func (ro *Router) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 			)
 			deleteErr = err
 			if err == nil {
-				deletedVersionID = obj.VersionId
 				deleteMarker = isMarker
 				if isMarker {
 					deleteMarkerVersionID = obj.VersionId
