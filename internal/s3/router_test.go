@@ -1659,6 +1659,31 @@ func TestRouterGetObject(t *testing.T) {
 			assert.Contains(t, w.Body.String(), "InvalidRange")
 		},
 	)
+
+	t.Run("returns Object Lock retention and legal hold headers", func(t *testing.T) {
+		ro := newTestRouter(t)
+		createReq := httptest.NewRequest(http.MethodPut, "/my-bucket", nil)
+		createReq.Header.Set(amzObjectLockEnabled, "true")
+		ro.ServeHTTP(httptest.NewRecorder(), createReq)
+
+		putReq := httptest.NewRequest(
+			http.MethodPut,
+			"/my-bucket/obj.txt",
+			strings.NewReader("data"),
+		)
+		putReq.Header.Set(amzObjectLockMode, "GOVERNANCE")
+		putReq.Header.Set(amzObjectLockRetainUntilDate, "2099-01-01T00:00:00Z")
+		putReq.Header.Set(amzObjectLockLegalHold, "ON")
+		ro.ServeHTTP(httptest.NewRecorder(), putReq)
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket/obj.txt", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "GOVERNANCE", w.Header().Get(amzObjectLockMode))
+		assert.NotEmpty(t, w.Header().Get(amzObjectLockRetainUntilDate))
+		assert.Equal(t, "ON", w.Header().Get(amzObjectLockLegalHold))
+	})
 }
 
 // failBodyWriter wraps ResponseRecorder and returns an error on Write after headers are sent.
@@ -1922,6 +1947,31 @@ func TestRouterHeadObject(t *testing.T) {
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusPreconditionFailed, w.Code)
+	})
+
+	t.Run("returns Object Lock retention and legal hold headers", func(t *testing.T) {
+		ro := newTestRouter(t)
+		createReq := httptest.NewRequest(http.MethodPut, "/my-bucket", nil)
+		createReq.Header.Set(amzObjectLockEnabled, "true")
+		ro.ServeHTTP(httptest.NewRecorder(), createReq)
+
+		putReq := httptest.NewRequest(
+			http.MethodPut,
+			"/my-bucket/obj.txt",
+			strings.NewReader("data"),
+		)
+		putReq.Header.Set(amzObjectLockMode, "COMPLIANCE")
+		putReq.Header.Set(amzObjectLockRetainUntilDate, "2099-01-01T00:00:00Z")
+		putReq.Header.Set(amzObjectLockLegalHold, "ON")
+		ro.ServeHTTP(httptest.NewRecorder(), putReq)
+
+		req := httptest.NewRequest(http.MethodHead, "/my-bucket/obj.txt", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "COMPLIANCE", w.Header().Get(amzObjectLockMode))
+		assert.NotEmpty(t, w.Header().Get(amzObjectLockRetainUntilDate))
+		assert.Equal(t, "ON", w.Header().Get(amzObjectLockLegalHold))
 	})
 }
 
@@ -3787,6 +3837,39 @@ func TestRouterDeleteObjects(t *testing.T) {
 		body := w.Body.String()
 		assert.Contains(t, body, "<VersionId>"+vid1+"</VersionId>")
 		assert.NotContains(t, body, "<DeleteMarker>true</DeleteMarker>")
+		assert.NotContains(t, body, "<Error>")
+	})
+
+	t.Run("deletes a delete marker by VersionId and reports DeleteMarker true", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/obj.txt", "data"))
+		enableVersioning(t, ro, "my-bucket")
+
+		// Create a delete marker by deleting without VersionId.
+		dw := httptest.NewRecorder()
+		ro.ServeHTTP(dw, httptest.NewRequest(http.MethodDelete, "/my-bucket/obj.txt", nil))
+		markerVersionId := dw.Header().Get(amzVersionID)
+		require.NotEmpty(t, markerVersionId)
+
+		// Delete the delete marker itself via DeleteObjects with its VersionId.
+		xmlBody := fmt.Sprintf(
+			`<Delete><Object><Key>obj.txt</Key><VersionId>%s</VersionId></Object></Delete>`,
+			markerVersionId,
+		)
+		req := httptest.NewRequest(http.MethodPost, "/my-bucket?delete", strings.NewReader(xmlBody))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		body := w.Body.String()
+		assert.Contains(t, body, "<DeleteMarker>true</DeleteMarker>")
+		assert.Contains(
+			t,
+			body,
+			"<DeleteMarkerVersionId>"+markerVersionId+"</DeleteMarkerVersionId>",
+		)
+		assert.Contains(t, body, "<VersionId>"+markerVersionId+"</VersionId>")
 		assert.NotContains(t, body, "<Error>")
 	})
 }

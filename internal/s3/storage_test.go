@@ -2040,6 +2040,29 @@ func TestDeleteObject(t *testing.T) {
 
 		assert.DirExists(t, filepath.Join(rootPath, "my-bucket", "a"))
 	})
+
+	t.Run(
+		"returns ErrObjectLocked when object has active GOVERNANCE retention",
+		func(t *testing.T) {
+			s := newTestStorage(t)
+			require.NoError(t, s.CreateBucket("my-bucket", "", true))
+			_, err := s.PutObject(
+				"my-bucket",
+				"obj.txt",
+				strings.NewReader("data"),
+				"text/plain",
+				nil,
+				"",
+				"",
+				&ObjectRetention{Mode: "GOVERNANCE", RetainUntilDate: time.Now().Add(time.Hour)},
+				nil,
+				"",
+			)
+			require.NoError(t, err)
+
+			assert.ErrorIs(t, s.DeleteObject("my-bucket", "obj.txt", false), ErrObjectLocked)
+		},
+	)
 }
 
 func TestHeadObject(t *testing.T) {
