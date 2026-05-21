@@ -103,6 +103,9 @@ func parseUpdatePath(token string, attrNames map[string]string) ([]projSegment, 
 			rest = rest[rb+1:]
 		}
 	}
+	if len(segs)-1 > 32 {
+		return nil, fmt.Errorf("nesting levels have exceeded supported limits")
+	}
 	return segs, nil
 }
 

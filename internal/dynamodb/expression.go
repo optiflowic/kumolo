@@ -674,6 +674,9 @@ func (p *exprParser) parseAttrPath() (exprOperand, error) {
 			segs = append(segs, projSegment{attr: "", index: n})
 		}
 	}
+	if len(segs)-1 > 32 {
+		return nil, fmt.Errorf("nesting levels have exceeded supported limits")
+	}
 	if len(segs) == 1 {
 		if strings.HasPrefix(segs[0].attr, "#") {
 			return nameRefOperand{segs[0].attr}, nil

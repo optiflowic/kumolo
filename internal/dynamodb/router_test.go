@@ -3478,6 +3478,18 @@ func TestParseUpdateExpression_ErrorPaths(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid path")
 	})
+
+	t.Run("SET path with 33 dereferences exceeds limit", func(t *testing.T) {
+		// 34 segments = 33 dereference operators, one more than the allowed 32.
+		path := "a.b.c.d.e.f.g.h.i.j.k.l.m.n.o.p.q.r.s.t.u.v.w.x.y.z.a1.b1.c1.d1.e1.f1.g1.h1"
+		_, err := parseUpdateExpression(
+			"SET "+path+" = :v",
+			noNames,
+			map[string]any{":v": map[string]any{"S": "x"}},
+		)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "nesting levels")
+	})
 }
 
 // --- applyAddOp unit tests ---

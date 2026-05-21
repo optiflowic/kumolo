@@ -65,6 +65,8 @@ Returns the size of the attribute:
 - `pathOperand` in `expression.go` handles multi-segment paths for filter/condition expressions.
   For single-segment paths, `nameRefOperand` / `plainOperand` are used as before.
 - `parseAttrPath()` builds the segment list from the token stream (token-based parser).
+- `parseUpdatePath()` in `handler_helpers.go` builds segments for UpdateExpression paths (string-split approach, since the path string is already pre-tokenized by the UpdateExpression clause parser).
+- Both parsers enforce the 32-dereference-operator limit; error message: "Nesting Levels have exceeded supported limits".
 - `attribute_exists` / `attribute_not_exists` use `resolve()` for all operand types;
   a nil return from `resolve()` is treated as "absent" (safe because DynamoDB typed values
   are never nil in kumolo storage).

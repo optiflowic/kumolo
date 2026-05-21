@@ -1575,4 +1575,12 @@ func TestParseAttrPathErrors(t *testing.T) {
 			assert.Contains(t, err.Error(), "expected attribute path")
 		},
 	)
+
+	t.Run("path with 33 dereferences exceeds limit and returns error", func(t *testing.T) {
+		// 34 segments = 33 dereference operators, one more than the allowed 32.
+		path := "a.b.c.d.e.f.g.h.i.j.k.l.m.n.o.p.q.r.s.t.u.v.w.x.y.z.a1.b1.c1.d1.e1.f1.g1.h1"
+		_, err := evalFilterExpr(path+" = :v", item, map[string]string{}, values)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "nesting levels")
+	})
 }
