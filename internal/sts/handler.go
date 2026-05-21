@@ -132,6 +132,7 @@ func (ro *Router) handleAssumeRole(w http.ResponseWriter, r *http.Request) {
 	roleArn := r.Form.Get("RoleArn")
 	sessionName := r.Form.Get("RoleSessionName")
 	if roleArn == "" {
+		slog.Debug("AssumeRole: missing required param", "param", "RoleArn")
 		writeError(
 			w,
 			http.StatusBadRequest,
@@ -141,6 +142,7 @@ func (ro *Router) handleAssumeRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if sessionName == "" {
+		slog.Debug("AssumeRole: missing required param", "param", "RoleSessionName")
 		writeError(
 			w,
 			http.StatusBadRequest,
