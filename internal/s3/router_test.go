@@ -6251,9 +6251,7 @@ func TestRouterListObjectVersions(t *testing.T) {
 		assert.NotEmpty(t, result.NextKeyMarker)
 	})
 
-	// makeDeleteMarkerOnly creates a key that has only a delete marker (no surviving version).
-	// It PUTs the key (creating version V), issues an unversioned DELETE (creating a delete marker),
-	// then permanently deletes version V, leaving only the delete marker.
+	// sets up delete-marker-only state: PUT → DELETE → DELETE?versionId removes the surviving version.
 	makeDeleteMarkerOnly := func(t *testing.T, ro *Router, bucket, key string) {
 		t.Helper()
 		putW := httptest.NewRecorder()
