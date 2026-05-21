@@ -1784,6 +1784,8 @@ func (ro *Router) handleListObjectVersions(w http.ResponseWriter, r *http.Reques
 					}
 					commonPrefixes[cp] = struct{}{}
 					count++
+					nextKeyMarker = cp
+					nextVersionIdMarker = ""
 				}
 				continue
 			}
@@ -1830,6 +1832,8 @@ func (ro *Router) handleListObjectVersions(w http.ResponseWriter, r *http.Reques
 						}
 						commonPrefixes[cp] = struct{}{}
 						count++
+						nextKeyMarker = cp
+						nextVersionIdMarker = ""
 					}
 					continue
 				}
