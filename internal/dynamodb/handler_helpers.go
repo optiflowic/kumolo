@@ -287,7 +287,7 @@ func parseUpdateExpression(
 					}
 					rhsVal = val
 				}
-				if len(segs) == 1 && segs[0].attr != "" {
+				if len(segs) == 1 {
 					updates[segs[0].attr] = rhsVal
 				} else {
 					// Nested path: use the raw LHS as map key (unique per assignment).
@@ -301,7 +301,7 @@ func parseUpdateExpression(
 				if err != nil {
 					return nil, err
 				}
-				if len(segs) == 1 && segs[0].attr != "" {
+				if len(segs) == 1 {
 					updates[segs[0].attr] = nil
 				} else {
 					updates[tok] = nestedRemoveOp{segs: segs}
