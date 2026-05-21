@@ -702,19 +702,48 @@ func TestExprNodesDirect(t *testing.T) {
 	names := map[string]string{"#n": "name"}
 	values := map[string]any{":alice": map[string]any{"S": "Alice"}}
 
-	t.Run("valRefOperand attrName returns empty string and false", func(t *testing.T) {
-		op := valRefOperand{":alice"}
-		got, ok := op.attrName(names)
-		assert.Equal(t, "", got)
-		assert.False(t, ok)
+	t.Run("attrExistsCondNode with valRefOperand resolves via resolve()", func(t *testing.T) {
+		// attrExistsCondNode now uses resolve() for all operand types.
+		// Parse-time validation prevents :valRef from being passed here in practice,
+		// but the direct-construction case evaluates without error.
+		node := attrExistsCondNode{operand: valRefOperand{":alice"}, negate: false}
+		got, err := node.eval(item, names, values)
+		require.NoError(t, err)
+		assert.True(t, got) // :alice resolves to a non-nil value → exists
 	})
 
-	t.Run("attrExistsCondNode with non-path operand returns error", func(t *testing.T) {
-		node := attrExistsCondNode{operand: valRefOperand{":alice"}, negate: false}
-		_, err := node.eval(item, names, values)
+	t.Run("attrExistsCondNode propagates resolve error", func(t *testing.T) {
+		// nameRefOperand returns an error when the #name is missing from ExpressionAttributeNames.
+		node := attrExistsCondNode{operand: nameRefOperand{"#missing"}, negate: false}
+		_, err := node.eval(item, map[string]string{}, values)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "attribute_exists")
+		assert.Contains(t, err.Error(), "#missing")
 	})
+
+	t.Run("pathOperand.resolve: first segment #nameRef missing returns error", func(t *testing.T) {
+		// validateExprRefs catches missing refs before eval in the normal pipeline,
+		// so this path is only reachable via direct construction.
+		op := pathOperand{segs: []projSegment{{attr: "#missing"}, {attr: "city"}}}
+		_, err := op.resolve(item, map[string]string{}, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "#missing")
+	})
+
+	t.Run(
+		"pathOperand.resolve: intermediate segment #nameRef missing returns error",
+		func(t *testing.T) {
+			// Same as above but the missing ref is in a subsequent segment, not the first.
+			itemWithAddr := map[string]any{
+				"address": map[string]any{"M": map[string]any{
+					"city": map[string]any{"S": "Tokyo"},
+				}},
+			}
+			op := pathOperand{segs: []projSegment{{attr: "address"}, {attr: "#missing"}}}
+			_, err := op.resolve(itemWithAddr, map[string]string{}, nil)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "#missing")
+		},
+	)
 
 	t.Run("tokenKindName fallback for unknown kind", func(t *testing.T) {
 		got := tokenKindName(tokenKind(999))
@@ -730,13 +759,6 @@ func TestExprNodesDirect(t *testing.T) {
 		_, err := node.eval(item, names, values)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "unknown operator")
-	})
-
-	t.Run("sizeOperand attrName returns empty string and false", func(t *testing.T) {
-		op := sizeOperand{path: plainOperand{"name"}}
-		got, ok := op.attrName(nil)
-		assert.Equal(t, "", got)
-		assert.False(t, ok)
 	})
 
 	t.Run("sizeOperand resolve propagates path error", func(t *testing.T) {
@@ -1321,5 +1343,244 @@ func TestValidateUnusedExprRefs(t *testing.T) {
 		err := validateUnusedExprRefs(names, nil, "", "")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "can only be specified when using expressions")
+	})
+}
+
+func TestNestedPathFilterExpr(t *testing.T) {
+	item := map[string]any{
+		"pk": map[string]any{"S": "1"},
+		"address": map[string]any{"M": map[string]any{
+			"city": map[string]any{"S": "NYC"},
+			"zip":  map[string]any{"S": "10001"},
+		}},
+		"tags": map[string]any{"L": []any{
+			map[string]any{"S": "admin"},
+			map[string]any{"S": "user"},
+		}},
+		"nested": map[string]any{"M": map[string]any{
+			"inner": map[string]any{"M": map[string]any{
+				"val": map[string]any{"N": "42"},
+			}},
+		}},
+	}
+	names := map[string]string{
+		"#addr":   "address",
+		"#city":   "city",
+		"#tags":   "tags",
+		"#nested": "nested",
+		"#inner":  "inner",
+		"#val":    "val",
+	}
+	values := map[string]any{
+		":nyc":    map[string]any{"S": "NYC"},
+		":la":     map[string]any{"S": "LA"},
+		":admin":  map[string]any{"S": "admin"},
+		":user":   map[string]any{"S": "user"},
+		":forty2": map[string]any{"N": "42"},
+	}
+
+	tests := []struct {
+		name   string
+		expr   string
+		names  map[string]string
+		values map[string]any
+		want   bool
+	}{
+		{
+			name:   "dot notation nameref match",
+			expr:   "#addr.#city = :nyc",
+			names:  names,
+			values: values,
+			want:   true,
+		},
+		{
+			name:   "dot notation nameref no match",
+			expr:   "#addr.#city = :la",
+			names:  names,
+			values: values,
+			want:   false,
+		},
+		{
+			name:   "plain dot notation match",
+			expr:   "address.city = :nyc",
+			names:  map[string]string{},
+			values: values,
+			want:   true,
+		},
+		{
+			name:   "list index match",
+			expr:   "#tags[0] = :admin",
+			names:  names,
+			values: values,
+			want:   true,
+		},
+		{
+			name:   "list index second element",
+			expr:   "#tags[1] = :user",
+			names:  names,
+			values: values,
+			want:   true,
+		},
+		{
+			name:   "list index out of range returns false",
+			expr:   "#tags[5] = :admin",
+			names:  names,
+			values: values,
+			want:   false,
+		},
+		{
+			name:   "three-level nesting",
+			expr:   "#nested.#inner.#val = :forty2",
+			names:  names,
+			values: values,
+			want:   true,
+		},
+		{
+			name:   "attribute_exists nested present",
+			expr:   "attribute_exists(#addr.#city)",
+			names:  names,
+			values: values,
+			want:   true,
+		},
+		{
+			name:   "attribute_exists nested absent",
+			expr:   "attribute_exists(#addr.country)",
+			names:  names,
+			values: values,
+			want:   false,
+		},
+		{
+			name:   "attribute_not_exists nested absent",
+			expr:   "attribute_not_exists(#addr.country)",
+			names:  names,
+			values: values,
+			want:   true,
+		},
+		{
+			name:   "attribute_exists list index present",
+			expr:   "attribute_exists(#tags[0])",
+			names:  names,
+			values: values,
+			want:   true,
+		},
+		{
+			name:   "attribute_exists list index out of range",
+			expr:   "attribute_exists(#tags[9])",
+			names:  names,
+			values: values,
+			want:   false,
+		},
+		{
+			name:   "missing intermediate map returns false not error",
+			expr:   "missing.city = :nyc",
+			names:  map[string]string{},
+			values: values,
+			want:   false,
+		},
+		{
+			name:   "dot path into list value returns false (no M key)",
+			expr:   "tags.city = :nyc",
+			names:  map[string]string{},
+			values: values,
+			want:   false, // tags is {"L": [...]}, has no "M" key → path not found
+		},
+		{
+			name:   "list index into map value returns false (no L key)",
+			expr:   "address[0] = :admin",
+			names:  map[string]string{},
+			values: values,
+			want:   false, // address is {"M": {...}}, has no "L" key → path not found
+		},
+	}
+
+	errTests := []struct {
+		name   string
+		expr   string
+		names  map[string]string
+		values map[string]any
+	}{
+		{
+			name:   "first segment #nameRef missing from ExpressionAttributeNames",
+			expr:   "#undefined.city = :nyc",
+			names:  map[string]string{}, // #undefined not present
+			values: values,
+		},
+		{
+			name:   "intermediate segment #nameRef missing from ExpressionAttributeNames",
+			expr:   "address.#undefined = :nyc",
+			names:  map[string]string{}, // #undefined not present
+			values: values,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := evalFilterExpr(tc.expr, item, tc.names, tc.values)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+	for _, tc := range errTests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := evalFilterExpr(tc.expr, item, tc.names, tc.values)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "ExpressionAttributeNames missing")
+		})
+	}
+}
+
+func TestNestedPathTokenizer(t *testing.T) {
+	tests := []struct {
+		name    string
+		expr    string
+		wantErr bool
+	}{
+		{"dot separator is valid", "a.b = :v", false},
+		{"list index is valid", "a[0] = :v", false},
+		{"nameref dot nameref", "#a.#b = :v", false},
+		{"invalid list index no digits", "a[] = :v", true},
+		{"invalid list index no close bracket", "a[0 = :v", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := tokenizeExpr(tc.expr)
+			if tc.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestParseAttrPathErrors(t *testing.T) {
+	item := map[string]any{"name": map[string]any{"S": "Alice"}}
+	values := map[string]any{":v": map[string]any{"S": "Alice"}}
+
+	t.Run("dot followed by value ref is parse error", func(t *testing.T) {
+		// "a.:v = :v" — after the dot, the parser expects an ident or nameRef,
+		// but encounters a valRef token, triggering "expected attribute name after '.'"
+		_, err := evalFilterExpr("a.:v = :v", item, map[string]string{}, values)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "expected attribute name after")
+	})
+
+	t.Run(
+		"attribute_exists with value ref triggers default branch in parseAttrPath",
+		func(t *testing.T) {
+			// attribute_exists(:v) — parseAttrPath is called expecting an ident/nameRef
+			// but the first token is a tokValRef, hitting the default error branch.
+			_, err := evalFilterExpr("attribute_exists(:v)", item, map[string]string{}, values)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "expected attribute path")
+		},
+	)
+
+	t.Run("path with 33 dereferences exceeds limit and returns error", func(t *testing.T) {
+		// 34 segments = 33 dereference operators, one more than the allowed 32.
+		path := "a.b.c.d.e.f.g.h.i.j.k.l.m.n.o.p.q.r.s.t.u.v.w.x.y.z.a1.b1.c1.d1.e1.f1.g1.h1"
+		_, err := evalFilterExpr(path+" = :v", item, map[string]string{}, values)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "nesting levels")
 	})
 }

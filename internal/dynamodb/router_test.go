@@ -3355,6 +3355,19 @@ func TestParseUpdateExpression_ErrorPaths(t *testing.T) {
 		},
 	)
 
+	t.Run(
+		"SET if_not_exists nested path arg #name missing from ExpressionAttributeNames",
+		func(t *testing.T) {
+			_, err := parseUpdateExpression(
+				"SET a = if_not_exists(#a.#missing, :fallback)",
+				map[string]string{"#a": "a"},
+				map[string]any{":fallback": map[string]any{"N": "1"}},
+			)
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "ExpressionAttributeNames missing")
+		},
+	)
+
 	t.Run("SET if_not_exists second arg is function call (AWS rejects this)", func(t *testing.T) {
 		_, err := parseUpdateExpression(
 			"SET a = if_not_exists(b, if_not_exists(c, :v))",
@@ -3403,6 +3416,80 @@ func TestParseUpdateExpression_ErrorPaths(t *testing.T) {
 			assert.Contains(t, err.Error(), "ExpressionAttributeNames missing")
 		},
 	)
+
+	t.Run("SET nested path with leading bracket is invalid", func(t *testing.T) {
+		// "[0].field = :v" — parseUpdatePath rejects paths that start with '['
+		_, err := parseUpdateExpression(
+			"SET [0].field = :v",
+			noNames,
+			map[string]any{":v": map[string]any{"S": "x"}},
+		)
+		assert.Error(t, err)
+	})
+
+	t.Run("SET nested path with missing closing bracket is invalid", func(t *testing.T) {
+		_, err := parseUpdateExpression(
+			"SET a[0 = :v",
+			noNames,
+			map[string]any{":v": map[string]any{"S": "x"}},
+		)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "missing ']'")
+	})
+
+	t.Run("SET nested path with non-numeric index is invalid", func(t *testing.T) {
+		_, err := parseUpdateExpression(
+			"SET a[abc] = :v",
+			noNames,
+			map[string]any{":v": map[string]any{"S": "x"}},
+		)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid list index")
+	})
+
+	t.Run("SET nested path with negative index is invalid", func(t *testing.T) {
+		_, err := parseUpdateExpression(
+			"SET a[-1] = :v",
+			noNames,
+			map[string]any{":v": map[string]any{"S": "x"}},
+		)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid list index")
+	})
+
+	t.Run("SET nested path with trailing garbage after index is invalid", func(t *testing.T) {
+		// "a[0]extra" — after consuming [0], 'e' is not '[', triggering unexpected-char error.
+		_, err := parseUpdateExpression(
+			"SET a[0]extra = :v",
+			noNames,
+			map[string]any{":v": map[string]any{"S": "x"}},
+		)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unexpected")
+	})
+
+	t.Run("SET path with empty segment between dots is invalid", func(t *testing.T) {
+		// "a..b" splits into ["a", "", "b"]; the empty segment triggers the invalid-path error.
+		_, err := parseUpdateExpression(
+			"SET a..b = :v",
+			noNames,
+			map[string]any{":v": map[string]any{"S": "x"}},
+		)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid path")
+	})
+
+	t.Run("SET path with 33 dereferences exceeds limit", func(t *testing.T) {
+		// 34 segments = 33 dereference operators, one more than the allowed 32.
+		path := "a.b.c.d.e.f.g.h.i.j.k.l.m.n.o.p.q.r.s.t.u.v.w.x.y.z.a1.b1.c1.d1.e1.f1.g1.h1"
+		_, err := parseUpdateExpression(
+			"SET "+path+" = :v",
+			noNames,
+			map[string]any{":v": map[string]any{"S": "x"}},
+		)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "nesting levels")
+	})
 }
 
 // --- applyAddOp unit tests ---
@@ -4783,6 +4870,272 @@ func TestHandleTransactWriteItems(t *testing.T) {
 		}`)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
+
+	t.Run("Update with if_not_exists uses fallback when absent", func(t *testing.T) {
+		// Exercises ifNotExistsOp case in applyTransactActionLocked.
+		ro := newTestRouter(t)
+		createTable(t, ro)
+		w := dynamo(t, ro, "TransactWriteItems", `{
+			"TransactItems": [{
+				"Update": {
+					"TableName": "txn-table",
+					"Key": {"pk": {"S": "ife1"}},
+					"UpdateExpression": "SET cnt = if_not_exists(cnt, :zero)",
+					"ExpressionAttributeValues": {":zero": {"N": "0"}}
+				}
+			}]
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		item := getItem(t, ro, "ife1")
+		assert.Equal(t, "0", item["cnt"].(map[string]any)["N"])
+	})
+
+	t.Run("Update with list_append appends to existing list", func(t *testing.T) {
+		// Exercises listAppendOp case in applyTransactActionLocked.
+		ro := newTestRouter(t)
+		createTable(t, ro)
+		dynamo(t, ro, "PutItem",
+			`{"TableName":"txn-table","Item":{"pk":{"S":"la1"},"tags":{"L":[{"S":"a"}]}}}`,
+		)
+		w := dynamo(t, ro, "TransactWriteItems", `{
+			"TransactItems": [{
+				"Update": {
+					"TableName": "txn-table",
+					"Key": {"pk": {"S": "la1"}},
+					"UpdateExpression": "SET tags = list_append(tags, :new)",
+					"ExpressionAttributeValues": {":new": {"L": [{"S": "b"}]}}
+				}
+			}]
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		item := getItem(t, ro, "la1")
+		list := item["tags"].(map[string]any)["L"].([]any)
+		require.Len(t, list, 2)
+		assert.Equal(t, map[string]any{"S": "a"}, list[0])
+		assert.Equal(t, map[string]any{"S": "b"}, list[1])
+	})
+
+	t.Run("400 when Update list_append left arg is not a list", func(t *testing.T) {
+		// Exercises the error path in listAppendOp case of applyTransactActionLocked.
+		ro := newTestRouter(t)
+		createTable(t, ro)
+		dynamo(t, ro, "PutItem",
+			`{"TableName":"txn-table","Item":{"pk":{"S":"la2"},"cnt":{"N":"5"}}}`,
+		)
+		w := dynamo(t, ro, "TransactWriteItems", `{
+			"TransactItems": [{
+				"Update": {
+					"TableName": "txn-table",
+					"Key": {"pk": {"S": "la2"}},
+					"UpdateExpression": "SET cnt = list_append(cnt, :new)",
+					"ExpressionAttributeValues": {":new": {"L": [{"S": "x"}]}}
+				}
+			}]
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("Update nested SET with if_not_exists uses fallback", func(t *testing.T) {
+		// Exercises nestedSetOp + ifNotExistsOp sub-case in applyTransactActionLocked.
+		ro := newTestRouter(t)
+		createTable(t, ro)
+		dynamo(t, ro, "PutItem", `{
+			"TableName": "txn-table",
+			"Item": {"pk": {"S": "nife1"}, "meta": {"M": {}}}
+		}`)
+		w := dynamo(t, ro, "TransactWriteItems", `{
+			"TransactItems": [{
+				"Update": {
+					"TableName": "txn-table",
+					"Key": {"pk": {"S": "nife1"}},
+					"UpdateExpression": "SET #meta.#count = if_not_exists(#count, :zero)",
+					"ExpressionAttributeNames": {"#meta": "meta", "#count": "count"},
+					"ExpressionAttributeValues": {":zero": {"N": "0"}}
+				}
+			}]
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		item := getItem(t, ro, "nife1")
+		metaM := item["meta"].(map[string]any)["M"].(map[string]any)
+		assert.Equal(t, "0", metaM["count"].(map[string]any)["N"])
+	})
+
+	t.Run("Update nested SET with list_append appends to top-level list ref", func(t *testing.T) {
+		// Exercises nestedSetOp + listAppendOp sub-case in applyTransactActionLocked.
+		ro := newTestRouter(t)
+		createTable(t, ro)
+		dynamo(t, ro, "PutItem", `{
+			"TableName": "txn-table",
+			"Item": {
+				"pk": {"S": "nla1"},
+				"tags": {"L": [{"S": "a"}]},
+				"meta": {"M": {}}
+			}
+		}`)
+		w := dynamo(t, ro, "TransactWriteItems", `{
+			"TransactItems": [{
+				"Update": {
+					"TableName": "txn-table",
+					"Key": {"pk": {"S": "nla1"}},
+					"UpdateExpression": "SET #meta.#tags = list_append(#tags, :new)",
+					"ExpressionAttributeNames": {"#meta": "meta", "#tags": "tags"},
+					"ExpressionAttributeValues": {":new": {"L": [{"S": "b"}]}}
+				}
+			}]
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		item := getItem(t, ro, "nla1")
+		metaM := item["meta"].(map[string]any)["M"].(map[string]any)
+		list := metaM["tags"].(map[string]any)["L"].([]any)
+		require.Len(t, list, 2)
+		assert.Equal(t, map[string]any{"S": "a"}, list[0])
+		assert.Equal(t, map[string]any{"S": "b"}, list[1])
+	})
+
+	t.Run("400 when nested SET list_append arg is not a list in transaction", func(t *testing.T) {
+		// Exercises listAppendOp error inside nestedSetOp in applyTransactActionLocked.
+		ro := newTestRouter(t)
+		createTable(t, ro)
+		dynamo(t, ro, "PutItem", `{
+			"TableName": "txn-table",
+			"Item": {"pk": {"S": "nla2"}, "cnt": {"N": "5"}, "meta": {"M": {}}}
+		}`)
+		w := dynamo(t, ro, "TransactWriteItems", `{
+			"TransactItems": [{
+				"Update": {
+					"TableName": "txn-table",
+					"Key": {"pk": {"S": "nla2"}},
+					"UpdateExpression": "SET #meta.#x = list_append(#cnt, :new)",
+					"ExpressionAttributeNames": {"#meta": "meta", "#x": "x", "#cnt": "cnt"},
+					"ExpressionAttributeValues": {":new": {"L": [{"S": "b"}]}}
+				}
+			}]
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("400 when nested SET parent attribute is missing in transaction", func(t *testing.T) {
+		// Exercises applyNestedSet error path in nestedSetOp inside applyTransactActionLocked.
+		ro := newTestRouter(t)
+		createTable(t, ro)
+		dynamo(t, ro, "PutItem", `{
+			"TableName": "txn-table",
+			"Item": {"pk": {"S": "nse1"}}
+		}`)
+		w := dynamo(t, ro, "TransactWriteItems", `{
+			"TransactItems": [{
+				"Update": {
+					"TableName": "txn-table",
+					"Key": {"pk": {"S": "nse1"}},
+					"UpdateExpression": "SET missing.field = :val",
+					"ExpressionAttributeValues": {":val": {"S": "x"}}
+				}
+			}]
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("Update with nested SET dot notation applies correctly", func(t *testing.T) {
+		// Regression: applyTransactActionLocked must handle nestedSetOp (SET meta.count = :v).
+		ro := newTestRouter(t)
+		createTable(t, ro)
+		dynamo(t, ro, "PutItem", `{
+			"TableName": "txn-table",
+			"Item": {"pk": {"S": "ns1"}, "meta": {"M": {"count": {"N": "0"}}}}
+		}`)
+		w := dynamo(t, ro, "TransactWriteItems", `{
+			"TransactItems": [{
+				"Update": {
+					"TableName": "txn-table",
+					"Key": {"pk": {"S": "ns1"}},
+					"UpdateExpression": "SET #meta.#count = :val",
+					"ExpressionAttributeNames": {"#meta": "meta", "#count": "count"},
+					"ExpressionAttributeValues": {":val": {"N": "99"}}
+				}
+			}]
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		item := getItem(t, ro, "ns1")
+		metaM := item["meta"].(map[string]any)["M"].(map[string]any)
+		assert.Equal(t, "99", metaM["count"].(map[string]any)["N"])
+	})
+
+	t.Run("Update with nested REMOVE dot notation applies correctly", func(t *testing.T) {
+		// Regression: applyTransactActionLocked must handle nestedRemoveOp (REMOVE meta.label).
+		ro := newTestRouter(t)
+		createTable(t, ro)
+		dynamo(t, ro, "PutItem", `{
+			"TableName": "txn-table",
+			"Item": {"pk": {"S": "ns2"}, "meta": {"M": {"count": {"N": "1"}, "label": {"S": "x"}}}}
+		}`)
+		w := dynamo(t, ro, "TransactWriteItems", `{
+			"TransactItems": [{
+				"Update": {
+					"TableName": "txn-table",
+					"Key": {"pk": {"S": "ns2"}},
+					"UpdateExpression": "REMOVE #meta.#label",
+					"ExpressionAttributeNames": {"#meta": "meta", "#label": "label"}
+				}
+			}]
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		item := getItem(t, ro, "ns2")
+		metaM := item["meta"].(map[string]any)["M"].(map[string]any)
+		_, hasLabel := metaM["label"]
+		assert.False(t, hasLabel)
+		_, hasCount := metaM["count"]
+		assert.True(t, hasCount)
+	})
+
+	t.Run("Update with nested SET list index applies correctly", func(t *testing.T) {
+		// Regression: applyTransactActionLocked must handle nestedSetOp for list index (SET tags[1] = :v).
+		ro := newTestRouter(t)
+		createTable(t, ro)
+		dynamo(t, ro, "PutItem", `{
+			"TableName": "txn-table",
+			"Item": {"pk": {"S": "ns3"}, "tags": {"L": [{"S": "a"}, {"S": "b"}]}}
+		}`)
+		w := dynamo(t, ro, "TransactWriteItems", `{
+			"TransactItems": [{
+				"Update": {
+					"TableName": "txn-table",
+					"Key": {"pk": {"S": "ns3"}},
+					"UpdateExpression": "SET tags[1] = :val",
+					"ExpressionAttributeValues": {":val": {"S": "replaced"}}
+				}
+			}]
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		item := getItem(t, ro, "ns3")
+		list := item["tags"].(map[string]any)["L"].([]any)
+		assert.Equal(t, map[string]any{"S": "a"}, list[0])
+		assert.Equal(t, map[string]any{"S": "replaced"}, list[1])
+	})
+
+	t.Run("Update with nested REMOVE list index applies correctly", func(t *testing.T) {
+		// Regression: applyTransactActionLocked must handle nestedRemoveOp for list index (REMOVE tags[0]).
+		ro := newTestRouter(t)
+		createTable(t, ro)
+		dynamo(t, ro, "PutItem", `{
+			"TableName": "txn-table",
+			"Item": {"pk": {"S": "ns4"}, "tags": {"L": [{"S": "x"}, {"S": "y"}, {"S": "z"}]}}
+		}`)
+		w := dynamo(t, ro, "TransactWriteItems", `{
+			"TransactItems": [{
+				"Update": {
+					"TableName": "txn-table",
+					"Key": {"pk": {"S": "ns4"}},
+					"UpdateExpression": "REMOVE tags[1]"
+				}
+			}]
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		item := getItem(t, ro, "ns4")
+		list := item["tags"].(map[string]any)["L"].([]any)
+		require.Len(t, list, 2)
+		assert.Equal(t, map[string]any{"S": "x"}, list[0])
+		assert.Equal(t, map[string]any{"S": "z"}, list[1])
+	})
 }
 
 func TestHandleDescribeContinuousBackups(t *testing.T) {
@@ -5862,4 +6215,751 @@ func TestHandleUpdateItem_MultipleSetAssignments(t *testing.T) {
 	attrs := out["Attributes"].(map[string]any)
 	assert.Equal(t, map[string]any{"S": "foo"}, attrs["a"])
 	assert.Equal(t, map[string]any{"S": "bar"}, attrs["b"])
+}
+
+// --- Nested document path tests (#207, #201) ---
+
+func TestNestedPathUpdateItem(t *testing.T) {
+	ro := newTestRouter(t)
+	require.Equal(t, 200, dynamo(t, ro, "CreateTable", createTableBody).Code)
+
+	// Seed an item with a nested map and a list.
+	require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+		"TableName": "test-table",
+		"Item": {
+			"pk": {"S": "n1"},
+			"meta": {"M": {"count": {"N": "0"}, "label": {"S": "old"}}},
+			"tags": {"L": [{"S": "a"}, {"S": "b"}]}
+		}
+	}`).Code)
+
+	t.Run("SET nested map attribute via dot notation", func(t *testing.T) {
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n1"}},
+			"UpdateExpression": "SET #meta.#count = :val",
+			"ExpressionAttributeNames": {"#meta": "meta", "#count": "count"},
+			"ExpressionAttributeValues": {":val": {"N": "99"}},
+			"ReturnValues": "ALL_NEW"
+		}`)
+		require.Equal(t, 200, w.Code)
+		var out map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+		attrs := out["Attributes"].(map[string]any)
+		metaM := attrs["meta"].(map[string]any)["M"].(map[string]any)
+		assert.Equal(t, map[string]any{"N": "99"}, metaM["count"])
+		assert.Equal(t, map[string]any{"S": "old"}, metaM["label"]) // unchanged
+	})
+
+	t.Run("SET list element by index", func(t *testing.T) {
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n1"}},
+			"UpdateExpression": "SET #tags[1] = :val",
+			"ExpressionAttributeNames": {"#tags": "tags"},
+			"ExpressionAttributeValues": {":val": {"S": "replaced"}},
+			"ReturnValues": "ALL_NEW"
+		}`)
+		require.Equal(t, 200, w.Code)
+		var out map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+		attrs := out["Attributes"].(map[string]any)
+		list := attrs["tags"].(map[string]any)["L"].([]any)
+		assert.Equal(t, map[string]any{"S": "a"}, list[0])
+		assert.Equal(t, map[string]any{"S": "replaced"}, list[1])
+	})
+
+	t.Run("REMOVE nested map attribute", func(t *testing.T) {
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n1"}},
+			"UpdateExpression": "REMOVE #meta.#label",
+			"ExpressionAttributeNames": {"#meta": "meta", "#label": "label"},
+			"ReturnValues": "ALL_NEW"
+		}`)
+		require.Equal(t, 200, w.Code)
+		var out map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+		attrs := out["Attributes"].(map[string]any)
+		metaM := attrs["meta"].(map[string]any)["M"].(map[string]any)
+		_, hasLabel := metaM["label"]
+		assert.False(t, hasLabel)
+		// count should still be there
+		_, hasCount := metaM["count"]
+		assert.True(t, hasCount)
+	})
+
+	t.Run("REMOVE list element shifts remaining", func(t *testing.T) {
+		// Re-seed tags to a known state.
+		require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {
+				"pk": {"S": "n2"},
+				"tags": {"L": [{"S": "x"}, {"S": "y"}, {"S": "z"}]}
+			}
+		}`).Code)
+
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n2"}},
+			"UpdateExpression": "REMOVE tags[1]",
+			"ReturnValues": "ALL_NEW"
+		}`)
+		require.Equal(t, 200, w.Code)
+		var out map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+		attrs := out["Attributes"].(map[string]any)
+		list := attrs["tags"].(map[string]any)["L"].([]any)
+		require.Len(t, list, 2)
+		assert.Equal(t, map[string]any{"S": "x"}, list[0])
+		assert.Equal(t, map[string]any{"S": "z"}, list[1])
+	})
+
+	t.Run("SET nested path parent missing returns ValidationException", func(t *testing.T) {
+		require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {"pk": {"S": "n3"}}
+		}`).Code)
+
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n3"}},
+			"UpdateExpression": "SET missing.field = :val",
+			"ExpressionAttributeValues": {":val": {"S": "x"}},
+			"ReturnValues": "ALL_NEW"
+		}`)
+		assert.Equal(t, 400, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("SET list element beyond end appends", func(t *testing.T) {
+		// AWS appends when the list index exceeds the current length.
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n1"}},
+			"UpdateExpression": "SET tags[99] = :val",
+			"ExpressionAttributeValues": {":val": {"S": "appended"}},
+			"ReturnValues": "ALL_NEW"
+		}`)
+		require.Equal(t, 200, w.Code)
+		var out map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+		attrs := out["Attributes"].(map[string]any)
+		list := attrs["tags"].(map[string]any)["L"].([]any)
+		assert.Equal(t, map[string]any{"S": "appended"}, list[len(list)-1])
+	})
+
+	t.Run(
+		"SET into intermediate list element returns ValidationException when non-leaf out-of-bounds",
+		func(t *testing.T) {
+			// SET tags[99].field = :val — the list index is out of bounds and is not the leaf.
+			w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n1"}},
+			"UpdateExpression": "SET tags[99].field = :val",
+			"ExpressionAttributeValues": {":val": {"S": "x"}},
+			"ReturnValues": "ALL_NEW"
+		}`)
+			assert.Equal(t, 400, w.Code)
+			assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+		},
+	)
+
+	t.Run("SET parent is not a map returns ValidationException", func(t *testing.T) {
+		// "name" is a scalar S attribute; SET name.field = :val must fail.
+		require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {"pk": {"S": "n4"}, "name": {"S": "Alice"}}
+		}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n4"}},
+			"UpdateExpression": "SET name.field = :val",
+			"ExpressionAttributeValues": {":val": {"S": "x"}},
+			"ReturnValues": "ALL_NEW"
+		}`)
+		assert.Equal(t, 400, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run("REMOVE nested map key that does not exist is a no-op", func(t *testing.T) {
+		require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {
+				"pk": {"S": "n5"},
+				"meta": {"M": {"count": {"N": "1"}}}
+			}
+		}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n5"}},
+			"UpdateExpression": "REMOVE meta.#missing",
+			"ExpressionAttributeNames": {"#missing": "nosuchkey"},
+			"ReturnValues": "ALL_NEW"
+		}`)
+		require.Equal(t, 200, w.Code)
+		var out map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+		attrs := out["Attributes"].(map[string]any)
+		metaM := attrs["meta"].(map[string]any)["M"].(map[string]any)
+		_, hasCount := metaM["count"]
+		assert.True(t, hasCount) // unchanged
+	})
+
+	t.Run("REMOVE list element out-of-bounds is a no-op", func(t *testing.T) {
+		require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {
+				"pk": {"S": "n6"},
+				"tags": {"L": [{"S": "only"}]}
+			}
+		}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n6"}},
+			"UpdateExpression": "REMOVE tags[99]",
+			"ReturnValues": "ALL_NEW"
+		}`)
+		require.Equal(t, 200, w.Code)
+		var out map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+		attrs := out["Attributes"].(map[string]any)
+		list := attrs["tags"].(map[string]any)["L"].([]any)
+		require.Len(t, list, 1) // still 1 element
+	})
+
+	t.Run("REMOVE into parent that is not a map is a no-op", func(t *testing.T) {
+		// "name" is a scalar; REMOVE name.field is a no-op per AWS spec.
+		require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {"pk": {"S": "n7"}, "name": {"S": "Alice"}}
+		}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n7"}},
+			"UpdateExpression": "REMOVE name.#field",
+			"ExpressionAttributeNames": {"#field": "first"},
+			"ReturnValues": "ALL_NEW"
+		}`)
+		require.Equal(t, 200, w.Code)
+		var out map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+		attrs := out["Attributes"].(map[string]any)
+		assert.Equal(t, map[string]any{"S": "Alice"}, attrs["name"]) // unchanged
+	})
+
+	t.Run("SET into list element attribute (3-level: attr→list[N]→attr)", func(t *testing.T) {
+		// Covers the non-leaf list index navigation path in setAtDynamoValue.
+		require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {
+				"pk": {"S": "n8"},
+				"items": {"L": [{"M": {"city": {"S": "Tokyo"}}}]}
+			}
+		}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n8"}},
+			"UpdateExpression": "SET #items[0].#city = :val",
+			"ExpressionAttributeNames": {"#items": "items", "#city": "city"},
+			"ExpressionAttributeValues": {":val": {"S": "Osaka"}},
+			"ReturnValues": "ALL_NEW"
+		}`)
+		require.Equal(t, 200, w.Code)
+		var out map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+		attrs := out["Attributes"].(map[string]any)
+		elem := attrs["items"].(map[string]any)["L"].([]any)[0].(map[string]any)["M"].(map[string]any)
+		assert.Equal(t, map[string]any{"S": "Osaka"}, elem["city"])
+	})
+
+	t.Run(
+		"SET 3-level nested path intermediate missing returns ValidationException",
+		func(t *testing.T) {
+			// SET a.nonexistent.c: covers mMap[seg.attr] not found for non-leaf in setAtDynamoValue.
+			require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {
+				"pk": {"S": "n9"},
+				"a": {"M": {}}
+			}
+		}`).Code)
+			w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n9"}},
+			"UpdateExpression": "SET a.#b.#c = :val",
+			"ExpressionAttributeNames": {"#b": "nonexistent", "#c": "c"},
+			"ExpressionAttributeValues": {":val": {"S": "x"}},
+			"ReturnValues": "ALL_NEW"
+		}`)
+			assert.Equal(t, 400, w.Code)
+			assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+		},
+	)
+
+	t.Run("SET list index on scalar value returns ValidationException", func(t *testing.T) {
+		// SET name[0] = :val where name is a scalar covers the 'L' key missing path.
+		require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {"pk": {"S": "n10"}, "name": {"S": "Alice"}}
+		}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n10"}},
+			"UpdateExpression": "SET #name[0] = :val",
+			"ExpressionAttributeNames": {"#name": "name"},
+			"ExpressionAttributeValues": {":val": {"S": "x"}},
+			"ReturnValues": "ALL_NEW"
+		}`)
+		assert.Equal(t, 400, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	t.Run(
+		"REMOVE list[N].attr is a no-op when element missing (3-level via list)",
+		func(t *testing.T) {
+			// Covers the non-leaf list navigation path in removeAtDynamoValue.
+			require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {
+				"pk": {"S": "n11"},
+				"items": {"L": [{"M": {"city": {"S": "Tokyo"}, "zip": {"S": "100"}}}]}
+			}
+		}`).Code)
+			w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n11"}},
+			"UpdateExpression": "REMOVE #items[0].#zip",
+			"ExpressionAttributeNames": {"#items": "items", "#zip": "zip"},
+			"ReturnValues": "ALL_NEW"
+		}`)
+			require.Equal(t, 200, w.Code)
+			var out map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+			attrs := out["Attributes"].(map[string]any)
+			elem := attrs["items"].(map[string]any)["L"].([]any)[0].(map[string]any)["M"].(map[string]any)
+			_, hasZip := elem["zip"]
+			assert.False(t, hasZip) // zip removed
+			_, hasCity := elem["city"]
+			assert.True(t, hasCity) // city unchanged
+		},
+	)
+
+	t.Run("REMOVE 3-level nested path intermediate missing is a no-op", func(t *testing.T) {
+		// Covers mMap[seg.attr] not found for non-leaf in removeAtDynamoValue.
+		require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {
+				"pk": {"S": "n12"},
+				"a": {"M": {}}
+			}
+		}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n12"}},
+			"UpdateExpression": "REMOVE a.#b.#c",
+			"ExpressionAttributeNames": {"#b": "nonexistent", "#c": "c"},
+			"ReturnValues": "ALL_NEW"
+		}`)
+		require.Equal(t, 200, w.Code) // no-op, no error
+	})
+
+	t.Run("REMOVE list index on scalar value is a no-op", func(t *testing.T) {
+		// Covers the 'L' key missing path in removeAtDynamoValue.
+		require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {"pk": {"S": "n13"}, "name": {"S": "Alice"}}
+		}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n13"}},
+			"UpdateExpression": "REMOVE #name[0]",
+			"ExpressionAttributeNames": {"#name": "name"},
+			"ReturnValues": "ALL_NEW"
+		}`)
+		require.Equal(t, 200, w.Code)
+		var out map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+		attrs := out["Attributes"].(map[string]any)
+		assert.Equal(t, map[string]any{"S": "Alice"}, attrs["name"]) // unchanged
+	})
+
+	t.Run("REMOVE nested path where top-level attribute is absent is a no-op", func(t *testing.T) {
+		// REMOVE nonexistent.field — top-level key missing → applyNestedRemove returns nil.
+		require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {"pk": {"S": "n14"}}
+		}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n14"}},
+			"UpdateExpression": "REMOVE noattr.#field",
+			"ExpressionAttributeNames": {"#field": "x"},
+			"ReturnValues": "ALL_NEW"
+		}`)
+		require.Equal(t, 200, w.Code) // no-op, no error
+	})
+
+	t.Run("SET nested path with if_not_exists uses fallback when absent", func(t *testing.T) {
+		// nestedSetOp with ifNotExistsOp as val; first arg of if_not_exists is a top-level ref
+		require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {
+				"pk": {"S": "n15"},
+				"meta": {"M": {}}
+			}
+		}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n15"}},
+			"UpdateExpression": "SET #meta.#count = if_not_exists(#count, :zero)",
+			"ExpressionAttributeNames": {"#meta": "meta", "#count": "count"},
+			"ExpressionAttributeValues": {":zero": {"N": "0"}},
+			"ReturnValues": "ALL_NEW"
+		}`)
+		require.Equal(t, 200, w.Code)
+		var out map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+		attrs := out["Attributes"].(map[string]any)
+		metaM := attrs["meta"].(map[string]any)["M"].(map[string]any)
+		assert.Equal(
+			t,
+			map[string]any{"N": "0"},
+			metaM["count"],
+		) // fallback used because count absent
+	})
+
+	t.Run("SET nested path with list_append appends to nested list", func(t *testing.T) {
+		// nestedSetOp with listAppendOp as val; left arg of list_append is a top-level ref
+		require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {
+				"pk": {"S": "n16"},
+				"tags": {"L": [{"S": "a"}]},
+				"meta": {"M": {}}
+			}
+		}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n16"}},
+			"UpdateExpression": "SET #meta.#tags = list_append(#tags, :new)",
+			"ExpressionAttributeNames": {"#meta": "meta", "#tags": "tags"},
+			"ExpressionAttributeValues": {":new": {"L": [{"S": "b"}]}},
+			"ReturnValues": "ALL_NEW"
+		}`)
+		require.Equal(t, 200, w.Code)
+		var out map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+		attrs := out["Attributes"].(map[string]any)
+		metaM := attrs["meta"].(map[string]any)["M"].(map[string]any)
+		list := metaM["tags"].(map[string]any)["L"].([]any)
+		require.Len(t, list, 2)
+		assert.Equal(t, map[string]any{"S": "a"}, list[0])
+		assert.Equal(t, map[string]any{"S": "b"}, list[1])
+	})
+
+	t.Run("SET 3-level deep M map path (a.b.c) succeeds", func(t *testing.T) {
+		// Exercises setAtDynamoValue's recursive call: attr→M→attr→M→attr (3-level M nesting).
+		require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {
+				"pk": {"S": "n17"},
+				"a": {"M": {"b": {"M": {"c": {"N": "1"}}}}}
+			}
+		}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n17"}},
+			"UpdateExpression": "SET a.b.c = :new",
+			"ExpressionAttributeValues": {":new": {"N": "2"}},
+			"ReturnValues": "ALL_NEW"
+		}`)
+		require.Equal(t, 200, w.Code)
+		var out map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+		attrs := out["Attributes"].(map[string]any)
+		aM := attrs["a"].(map[string]any)["M"].(map[string]any)
+		bM := aM["b"].(map[string]any)["M"].(map[string]any)
+		assert.Equal(t, map[string]any{"N": "2"}, bM["c"])
+	})
+
+	t.Run("REMOVE 3-level deep M map path (a.b.c) succeeds", func(t *testing.T) {
+		// Exercises removeAtDynamoValue's recursive call: attr→M→attr→M→attr (3-level M nesting).
+		require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {
+				"pk": {"S": "n18"},
+				"a": {"M": {"b": {"M": {"c": {"N": "1"}, "d": {"N": "2"}}}}}
+			}
+		}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n18"}},
+			"UpdateExpression": "REMOVE a.b.c",
+			"ReturnValues": "ALL_NEW"
+		}`)
+		require.Equal(t, 200, w.Code)
+		var out map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+		attrs := out["Attributes"].(map[string]any)
+		aM := attrs["a"].(map[string]any)["M"].(map[string]any)
+		bM := aM["b"].(map[string]any)["M"].(map[string]any)
+		_, hasC := bM["c"]
+		assert.False(t, hasC)
+		assert.Equal(t, map[string]any{"N": "2"}, bM["d"])
+	})
+
+	t.Run("400 when nested SET list_append left arg is not a list", func(t *testing.T) {
+		// Exercises the error path in nestedSetOp + listAppendOp in UpdateItem.
+		require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {
+				"pk": {"S": "n19"},
+				"a": {"M": {"b": {"N": "1"}}}
+			}
+		}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n19"}},
+			"UpdateExpression": "SET #a.#b = list_append(#a, :new)",
+			"ExpressionAttributeNames": {"#a": "a", "#b": "b"},
+			"ExpressionAttributeValues": {":new": {"L": [{"S": "x"}]}}
+		}`)
+		require.Equal(t, 400, w.Code)
+	})
+
+	t.Run("SET nested path with if_not_exists nested path arg uses fallback", func(t *testing.T) {
+		// AWS spec: if_not_exists(a.b, :v) is valid — first arg may be a nested path.
+		require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {
+				"pk": {"S": "n20"},
+				"meta": {"M": {}}
+			}
+		}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n20"}},
+			"UpdateExpression": "SET #meta.#count = if_not_exists(#meta.#count, :zero)",
+			"ExpressionAttributeNames": {"#meta": "meta", "#count": "count"},
+			"ExpressionAttributeValues": {":zero": {"N": "0"}},
+			"ReturnValues": "ALL_NEW"
+		}`)
+		require.Equal(t, 200, w.Code)
+		var out map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+		attrs := out["Attributes"].(map[string]any)
+		metaM := attrs["meta"].(map[string]any)["M"].(map[string]any)
+		assert.Equal(t, map[string]any{"N": "0"}, metaM["count"]) // fallback: meta.count absent
+	})
+
+	t.Run(
+		"SET nested path with if_not_exists nested path arg preserves existing value",
+		func(t *testing.T) {
+			// When meta.count already exists, if_not_exists(#meta.#count, :zero) must return the existing value.
+			require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {
+				"pk": {"S": "n21"},
+				"meta": {"M": {"count": {"N": "5"}}}
+			}
+		}`).Code)
+			w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n21"}},
+			"UpdateExpression": "SET #meta.#count = if_not_exists(#meta.#count, :zero)",
+			"ExpressionAttributeNames": {"#meta": "meta", "#count": "count"},
+			"ExpressionAttributeValues": {":zero": {"N": "0"}},
+			"ReturnValues": "ALL_NEW"
+		}`)
+			require.Equal(t, 200, w.Code)
+			var out map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+			attrs := out["Attributes"].(map[string]any)
+			metaM := attrs["meta"].(map[string]any)["M"].(map[string]any)
+			assert.Equal(t, map[string]any{"N": "5"}, metaM["count"]) // existing value preserved
+		},
+	)
+
+	t.Run("SET nested path with list_append nested path arg appends", func(t *testing.T) {
+		// AWS spec: list_append(a.b, :v) is valid — first arg may be a nested path.
+		require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {
+				"pk": {"S": "n22"},
+				"meta": {"M": {"tags": {"L": [{"S": "a"}]}}}
+			}
+		}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n22"}},
+			"UpdateExpression": "SET #meta.#tags = list_append(#meta.#tags, :new)",
+			"ExpressionAttributeNames": {"#meta": "meta", "#tags": "tags"},
+			"ExpressionAttributeValues": {":new": {"L": [{"S": "b"}]}},
+			"ReturnValues": "ALL_NEW"
+		}`)
+		require.Equal(t, 200, w.Code)
+		var out map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+		attrs := out["Attributes"].(map[string]any)
+		metaM := attrs["meta"].(map[string]any)["M"].(map[string]any)
+		list := metaM["tags"].(map[string]any)["L"].([]any)
+		require.Len(t, list, 2)
+		assert.Equal(t, map[string]any{"S": "a"}, list[0])
+		assert.Equal(t, map[string]any{"S": "b"}, list[1])
+	})
+
+	t.Run(
+		"if_not_exists with nested path where intermediate is wrong type uses fallback",
+		func(t *testing.T) {
+			// resolveUpdatePath: m["M"] not found when intermediate DynamoDB value is not M type.
+			require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {"pk": {"S": "n23"}, "cnt": {"N": "5"}}
+		}`).Code)
+			w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n23"}},
+			"UpdateExpression": "SET x = if_not_exists(cnt.field, :default)",
+			"ExpressionAttributeValues": {":default": {"N": "0"}},
+			"ReturnValues": "ALL_NEW"
+		}`)
+			require.Equal(t, 200, w.Code)
+			var out map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+			attrs := out["Attributes"].(map[string]any)
+			assert.Equal(t, map[string]any{"N": "0"}, attrs["x"]) // fallback: cnt is not M type
+		},
+	)
+
+	t.Run("if_not_exists with list-index nested path returns existing element", func(t *testing.T) {
+		// resolveUpdatePath: L path success — returns existing list element.
+		require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {"pk": {"S": "n24"}, "tags": {"L": [{"S": "first"}]}}
+		}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n24"}},
+			"UpdateExpression": "SET x = if_not_exists(tags[0], :default)",
+			"ExpressionAttributeValues": {":default": {"S": "fallback"}},
+			"ReturnValues": "ALL_NEW"
+		}`)
+		require.Equal(t, 200, w.Code)
+		var out map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+		attrs := out["Attributes"].(map[string]any)
+		assert.Equal(t, map[string]any{"S": "first"}, attrs["x"]) // existing element returned
+	})
+
+	t.Run("if_not_exists with list-index out of bounds uses fallback", func(t *testing.T) {
+		// resolveUpdatePath: seg.index >= len(lSlice) → return nil.
+		require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {"pk": {"S": "n25"}, "tags": {"L": [{"S": "a"}]}}
+		}`).Code)
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n25"}},
+			"UpdateExpression": "SET x = if_not_exists(tags[5], :default)",
+			"ExpressionAttributeValues": {":default": {"S": "fallback"}},
+			"ReturnValues": "ALL_NEW"
+		}`)
+		require.Equal(t, 200, w.Code)
+		var out map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+		attrs := out["Attributes"].(map[string]any)
+		assert.Equal(
+			t,
+			map[string]any{"S": "fallback"},
+			attrs["x"],
+		) // index out of bounds → fallback
+	})
+
+	t.Run(
+		"if_not_exists with list-index where intermediate is not L type uses fallback",
+		func(t *testing.T) {
+			// resolveUpdatePath: m["L"] not found when DynamoDB value is M not L.
+			require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+			"TableName": "test-table",
+			"Item": {"pk": {"S": "n26"}, "meta": {"M": {"x": {"N": "1"}}}}
+		}`).Code)
+			w := dynamo(t, ro, "UpdateItem", `{
+			"TableName": "test-table",
+			"Key": {"pk": {"S": "n26"}},
+			"UpdateExpression": "SET x = if_not_exists(meta[0], :default)",
+			"ExpressionAttributeValues": {":default": {"N": "0"}},
+			"ReturnValues": "ALL_NEW"
+		}`)
+			require.Equal(t, 200, w.Code)
+			var out map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+			attrs := out["Attributes"].(map[string]any)
+			assert.Equal(t, map[string]any{"N": "0"}, attrs["x"]) // meta is M not L → fallback
+		},
+	)
+}
+
+func TestNestedPathFilterExpression(t *testing.T) {
+	ro := newTestRouter(t)
+	require.Equal(t, 200, dynamo(t, ro, "CreateTable", createTableBody).Code)
+
+	require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+		"TableName": "test-table",
+		"Item": {
+			"pk": {"S": "p1"},
+			"address": {"M": {"city": {"S": "NYC"}, "zip": {"S": "10001"}}}
+		}
+	}`).Code)
+	require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+		"TableName": "test-table",
+		"Item": {
+			"pk": {"S": "p2"},
+			"address": {"M": {"city": {"S": "LA"}, "zip": {"S": "90001"}}}
+		}
+	}`).Code)
+	require.Equal(t, 200, dynamo(t, ro, "PutItem", `{
+		"TableName": "test-table",
+		"Item": {"pk": {"S": "p3"}}
+	}`).Code)
+
+	t.Run("Scan FilterExpression dot notation match", func(t *testing.T) {
+		w := dynamo(t, ro, "Scan", `{
+			"TableName": "test-table",
+			"FilterExpression": "#addr.#city = :nyc",
+			"ExpressionAttributeNames": {"#addr": "address", "#city": "city"},
+			"ExpressionAttributeValues": {":nyc": {"S": "NYC"}}
+		}`)
+		require.Equal(t, 200, w.Code)
+		var out map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+		items := out["Items"].([]any)
+		require.Len(t, items, 1)
+		assert.Equal(t, "p1", items[0].(map[string]any)["pk"].(map[string]any)["S"])
+	})
+
+	t.Run("Scan FilterExpression attribute_exists nested", func(t *testing.T) {
+		w := dynamo(t, ro, "Scan", `{
+			"TableName": "test-table",
+			"FilterExpression": "attribute_exists(address.city)"
+		}`)
+		require.Equal(t, 200, w.Code)
+		var out map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+		items := out["Items"].([]any)
+		require.Len(t, items, 2) // p1 and p2
+	})
+
+	t.Run("Scan FilterExpression attribute_not_exists nested", func(t *testing.T) {
+		w := dynamo(t, ro, "Scan", `{
+			"TableName": "test-table",
+			"FilterExpression": "attribute_not_exists(address.city)"
+		}`)
+		require.Equal(t, 200, w.Code)
+		var out map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+		items := out["Items"].([]any)
+		require.Len(t, items, 1)
+		assert.Equal(t, "p3", items[0].(map[string]any)["pk"].(map[string]any)["S"])
+	})
 }

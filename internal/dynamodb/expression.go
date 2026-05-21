@@ -25,6 +25,8 @@ const (
 	tokLTE               // <=
 	tokGT                // >
 	tokGTE               // >=
+	tokDot               // .  (document path separator)
+	tokListIdx           // [N] (list index; val holds the decimal digit string)
 )
 
 type exprToken struct {
@@ -98,6 +100,19 @@ func tokenizeExpr(expr string) ([]exprToken, error) {
 			}
 			toks = append(toks, exprToken{tokValRef, expr[i:j]})
 			i = j
+		case expr[i] == '.':
+			toks = append(toks, exprToken{tokDot, "."})
+			i++
+		case expr[i] == '[':
+			j := i + 1
+			for j < len(expr) && isExprDigit(expr[j]) {
+				j++
+			}
+			if j == i+1 || j >= len(expr) || expr[j] != ']' {
+				return nil, fmt.Errorf("invalid list index at position %d", i)
+			}
+			toks = append(toks, exprToken{tokListIdx, expr[i+1 : j]})
+			i = j + 1
 		case isExprLetter(expr[i]):
 			j := i
 			for j < len(expr) && (isExprLetter(expr[j]) || isExprDigit(expr[j])) {
@@ -116,8 +131,6 @@ func tokenizeExpr(expr string) ([]exprToken, error) {
 // exprOperand resolves to a DynamoDB typed value from an item, names, or values.
 type exprOperand interface {
 	resolve(item map[string]any, names map[string]string, values map[string]any) (any, error)
-	// attrName returns the attribute name for exists checks; ("", false) if not a path.
-	attrName(names map[string]string) (string, bool)
 }
 
 type nameRefOperand struct{ ref string }
@@ -135,11 +148,6 @@ func (o nameRefOperand) resolve(
 	return item[actual], nil
 }
 
-func (o nameRefOperand) attrName(names map[string]string) (string, bool) {
-	actual, ok := names[o.ref]
-	return actual, ok
-}
-
 type valRefOperand struct{ ref string }
 
 // Callers must invoke validateExprRefs before eval to guarantee o.ref is present.
@@ -151,8 +159,6 @@ func (o valRefOperand) resolve(
 	return values[o.ref], nil
 }
 
-func (o valRefOperand) attrName(_ map[string]string) (string, bool) { return "", false }
-
 type plainOperand struct{ name string }
 
 func (o plainOperand) resolve(
@@ -162,8 +168,6 @@ func (o plainOperand) resolve(
 ) (any, error) {
 	return item[o.name], nil
 }
-
-func (o plainOperand) attrName(_ map[string]string) (string, bool) { return o.name, true }
 
 type sizeOperand struct{ path exprOperand }
 
@@ -186,7 +190,68 @@ func (o sizeOperand) resolve(
 	return map[string]any{"N": fmt.Sprintf("%d", n)}, nil
 }
 
-func (o sizeOperand) attrName(_ map[string]string) (string, bool) { return "", false }
+// pathOperand resolves a multi-segment document path like a.b[0].c or #ref.attr.
+// Segments are stored as raw tokens; #nameRef segments are resolved at eval time.
+type pathOperand struct {
+	segs []projSegment
+}
+
+// pathOperand.resolve walks the DynamoDB typed-value structure following the stored segments.
+// All intermediate values are kumolo-managed map[string]any; type assertions always hold.
+func (o pathOperand) resolve(
+	item map[string]any,
+	names map[string]string,
+	_ map[string]any,
+) (any, error) {
+	name := o.segs[0].attr
+	if strings.HasPrefix(name, "#") {
+		actual, ok := names[name]
+		if !ok {
+			return nil, fmt.Errorf("ExpressionAttributeNames missing %q", name)
+		}
+		name = actual
+	}
+	val, ok := item[name]
+	if !ok {
+		return nil, nil
+	}
+	for _, seg := range o.segs[1:] {
+		// All stored DynamoDB values are map[string]any; assertion always holds.
+		m := val.(map[string]any)
+		if seg.attr != "" {
+			mRaw, ok := m["M"]
+			if !ok {
+				return nil, nil
+			}
+			// kumolo always writes M as map[string]any; assertion always holds.
+			mMap := mRaw.(map[string]any)
+			attrName := seg.attr
+			if strings.HasPrefix(attrName, "#") {
+				actual, ok := names[attrName]
+				if !ok {
+					return nil, fmt.Errorf("ExpressionAttributeNames missing %q", attrName)
+				}
+				attrName = actual
+			}
+			val, ok = mMap[attrName]
+			if !ok {
+				return nil, nil
+			}
+		} else {
+			lRaw, ok := m["L"]
+			if !ok {
+				return nil, nil
+			}
+			// kumolo always writes L as []any; assertion always holds.
+			lSlice := lRaw.([]any)
+			if seg.index >= len(lSlice) {
+				return nil, nil
+			}
+			val = lSlice[seg.index]
+		}
+	}
+	return val, nil
+}
 
 func dynamoAttrSize(val any) (int, error) {
 	m, ok := val.(map[string]any)
@@ -342,15 +407,15 @@ func (n cmpCondNode) eval(
 func (n attrExistsCondNode) eval(
 	item map[string]any,
 	names map[string]string,
-	_ map[string]any,
+	values map[string]any,
 ) (bool, error) {
-	attrName, ok := n.operand.attrName(names)
-	if !ok {
-		// Reachable only when operand is not an attr path (e.g. valRefOperand).
-		// #nameRef operands are guaranteed valid by validateExprRefs before eval.
-		return false, fmt.Errorf("attribute_exists/attribute_not_exists requires an attribute path")
+	// resolve returns nil when the path is absent (including any intermediate step).
+	// This works for both top-level and nested paths.
+	val, err := n.operand.resolve(item, names, values)
+	if err != nil {
+		return false, err
 	}
-	_, exists := item[attrName]
+	exists := val != nil
 	if n.negate {
 		return !exists, nil
 	}
@@ -586,14 +651,39 @@ func (p *exprParser) parsePrimary() (condNode, error) {
 func (p *exprParser) parseAttrPath() (exprOperand, error) {
 	t := p.peek()
 	switch t.kind {
-	case tokNameRef:
+	case tokNameRef, tokIdent:
 		p.consume()
-		return nameRefOperand{t.val}, nil
-	case tokIdent:
-		p.consume()
-		return plainOperand{t.val}, nil
+	default:
+		return nil, fmt.Errorf("expected attribute path, got %q", t.val)
 	}
-	return nil, fmt.Errorf("expected attribute path, got %q", t.val)
+	segs := []projSegment{{attr: t.val}}
+	for p.peek().kind == tokDot || p.peek().kind == tokListIdx {
+		switch p.peek().kind {
+		case tokDot:
+			p.consume()
+			next := p.peek()
+			if next.kind != tokNameRef && next.kind != tokIdent {
+				return nil, fmt.Errorf("expected attribute name after '.', got %q", next.val)
+			}
+			p.consume()
+			segs = append(segs, projSegment{attr: next.val})
+		case tokListIdx:
+			idxTok := p.consume()
+			// tokenizeExpr already validated that idxTok.val contains only digits; Atoi always succeeds.
+			n, _ := strconv.Atoi(idxTok.val)
+			segs = append(segs, projSegment{attr: "", index: n})
+		}
+	}
+	if len(segs)-1 > 32 {
+		return nil, fmt.Errorf("nesting levels have exceeded supported limits")
+	}
+	if len(segs) == 1 {
+		if strings.HasPrefix(segs[0].attr, "#") {
+			return nameRefOperand{segs[0].attr}, nil
+		}
+		return plainOperand{segs[0].attr}, nil
+	}
+	return pathOperand{segs: segs}, nil
 }
 
 func (p *exprParser) parseOperand() (exprOperand, error) {
@@ -605,12 +695,8 @@ func (p *exprParser) parseOperand() (exprOperand, error) {
 	case tokValRef:
 		p.consume()
 		return valRefOperand{t.val}, nil
-	case tokNameRef:
-		p.consume()
-		return nameRefOperand{t.val}, nil
-	case tokIdent:
-		p.consume()
-		return plainOperand{t.val}, nil
+	case tokNameRef, tokIdent:
+		return p.parseAttrPath()
 	}
 	return nil, fmt.Errorf("expected operand, got %q", t.val)
 }
@@ -802,11 +888,8 @@ func validateExprRefs(
 	attrNames map[string]string,
 	attrValues map[string]any,
 ) error {
-	// untestable: same expr was already accepted by parseFilterExpr, so tokenizeExpr always succeeds here
-	toks, err := tokenizeExpr(expr)
-	if err != nil {
-		return err
-	}
+	// tokenizeExpr was already called successfully by parseFilterExpr; it always succeeds here.
+	toks, _ := tokenizeExpr(expr)
 	for _, tok := range toks {
 		switch tok.kind {
 		case tokValRef:

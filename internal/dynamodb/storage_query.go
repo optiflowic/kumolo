@@ -148,7 +148,7 @@ func (s *Storage) Scan(
 		for i, item := range all {
 			k, kErr := itemKey(item, meta.KeySchema)
 			if kErr != nil {
-				continue // defensive: skip data-corrupted items missing required key attributes
+				continue // untestable: kumolo-written items always include required key attributes
 			}
 			if k == eskKey {
 				startIdx = i + 1
