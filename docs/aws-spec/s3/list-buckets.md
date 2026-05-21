@@ -54,5 +54,7 @@
 - Pagination (`max-buckets`, `continuation-token`) is not implemented; all buckets are
   returned in a single response.
 - `prefix` and `bucket-region` filtering are not implemented.
-- `BucketRegion` is not included in the `<Bucket>` elements of the response.
+- `BucketRegion` is optional per the AWS spec and is included only when the bucket has a
+  region set (i.e., parsed from the `Authorization` Credential scope at creation time).
+  Buckets created without an explicit region header omit the field.
 - Owner `ID` and `DisplayName` are hardcoded to `"owner"`.
