@@ -1532,6 +1532,20 @@ func (ro *Router) handleListMultipartUploads(
 	r *http.Request,
 	bucket string,
 ) {
+	q := r.URL.Query()
+	prefix := q.Get("prefix")
+	delimiter := q.Get("delimiter")
+	keyMarker := q.Get("key-marker")
+	maxUploads := 1000
+	if s := q.Get("max-uploads"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n >= 0 {
+			if n > 1000 {
+				n = 1000
+			}
+			maxUploads = n
+		}
+	}
+
 	uploads, err := ro.storage.ListMultipartUploads(bucket)
 	if err != nil {
 		if errors.Is(err, ErrBucketNotFound) {
@@ -1554,32 +1568,75 @@ func (ro *Router) handleListMultipartUploads(
 		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
+
+	var xmlUploads []xmlMultipartUpload
+	commonPrefixes := make(map[string]struct{})
+	var nextKeyMarker, nextUploadIdMarker string
+	var isTruncated bool
+
+	for _, u := range uploads {
+		if !strings.HasPrefix(u.Key, prefix) {
+			continue
+		}
+		if u.Key <= keyMarker {
+			continue
+		}
+		if delimiter != "" {
+			rest := strings.TrimPrefix(u.Key, prefix)
+			if idx := strings.Index(rest, delimiter); idx >= 0 {
+				commonPrefixes[prefix+rest[:idx+len(delimiter)]] = struct{}{}
+				continue
+			}
+		}
+		if len(xmlUploads) >= maxUploads {
+			isTruncated = true
+			break
+		}
+		sc := u.StorageClass
+		if sc == "" {
+			sc = "STANDARD"
+		}
+		xmlUploads = append(xmlUploads, xmlMultipartUpload{
+			Key:          u.Key,
+			UploadID:     u.UploadID,
+			StorageClass: sc,
+			Initiated:    u.Initiated.UTC(),
+		})
+		nextKeyMarker = u.Key
+		nextUploadIdMarker = u.UploadID
+	}
+
+	cps := make([]xmlCommonPrefix, 0, len(commonPrefixes))
+	for cp := range commonPrefixes {
+		cps = append(cps, xmlCommonPrefix{Prefix: cp})
+	}
+	slices.SortFunc(cps, func(a, b xmlCommonPrefix) int {
+		return strings.Compare(a.Prefix, b.Prefix)
+	})
+
 	slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
 		"listed multipart uploads",
 		"bucket",
 		bucket,
 		"count",
-		len(uploads),
+		len(xmlUploads),
 	)
-	xmlUploads := make([]xmlMultipartUpload, len(uploads))
-	for i, u := range uploads {
-		sc := u.StorageClass
-		if sc == "" {
-			sc = "STANDARD"
-		}
-		xmlUploads[i] = xmlMultipartUpload{
-			Key:          u.Key,
-			UploadID:     u.UploadID,
-			StorageClass: sc,
-			Initiated:    u.Initiated.UTC(),
-		}
+
+	result := listMultipartUploadsResult{
+		Bucket:         bucket,
+		KeyMarker:      keyMarker,
+		Prefix:         prefix,
+		Delimiter:      delimiter,
+		MaxUploads:     maxUploads,
+		IsTruncated:    isTruncated,
+		Uploads:        xmlUploads,
+		CommonPrefixes: cps,
 	}
-	writeXML(w, http.StatusOK, listMultipartUploadsResult{
-		Bucket:      bucket,
-		MaxUploads:  1000,
-		IsTruncated: false,
-		Uploads:     xmlUploads,
-	})
+	if isTruncated {
+		result.NextKeyMarker = nextKeyMarker
+		result.NextUploadIdMarker = nextUploadIdMarker
+	}
+	writeXML(w, http.StatusOK, result)
 }
 
 func (ro *Router) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bucket string) {
@@ -1652,6 +1709,17 @@ func (ro *Router) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 }
 
 func (ro *Router) handleListObjectVersions(w http.ResponseWriter, r *http.Request, bucket string) {
+	q := r.URL.Query()
+	prefix := q.Get("prefix")
+	delimiter := q.Get("delimiter")
+	keyMarker := q.Get("key-marker")
+	maxKeys := 1000
+	if s := q.Get("max-keys"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n >= 0 {
+			maxKeys = n
+		}
+	}
+
 	versions, deleteMarkers, err := ro.storage.ListObjectVersions(bucket)
 	if err != nil {
 		if errors.Is(err, ErrBucketNotFound) {
@@ -1687,10 +1755,45 @@ func (ro *Router) handleListObjectVersions(w http.ResponseWriter, r *http.Reques
 	result := xmlListVersionsResult{
 		Xmlns:       "http://s3.amazonaws.com/doc/2006-03-01/",
 		Name:        bucket,
-		MaxKeys:     1000,
+		Prefix:      prefix,
+		KeyMarker:   keyMarker,
+		Delimiter:   delimiter,
+		MaxKeys:     maxKeys,
 		IsTruncated: false,
 	}
+
+	commonPrefixes := make(map[string]struct{})
+	count := 0
+	var nextKeyMarker, nextVersionIdMarker string
+
 	for _, v := range versions {
+		if !strings.HasPrefix(v.Key, prefix) {
+			continue
+		}
+		if v.Key <= keyMarker {
+			continue
+		}
+		if delimiter != "" {
+			rest := strings.TrimPrefix(v.Key, prefix)
+			if idx := strings.Index(rest, delimiter); idx >= 0 {
+				cp := prefix + rest[:idx+len(delimiter)]
+				if _, seen := commonPrefixes[cp]; !seen {
+					if count >= maxKeys {
+						result.IsTruncated = true
+						break
+					}
+					commonPrefixes[cp] = struct{}{}
+					count++
+					nextKeyMarker = cp
+					nextVersionIdMarker = ""
+				}
+				continue
+			}
+		}
+		if count >= maxKeys {
+			result.IsTruncated = true
+			break
+		}
 		sc := v.StorageClass
 		if sc == "" {
 			sc = "STANDARD"
@@ -1705,15 +1808,65 @@ func (ro *Router) handleListObjectVersions(w http.ResponseWriter, r *http.Reques
 			StorageClass: sc,
 			Owner:        xmlOwner{ID: "owner", DisplayName: "owner"},
 		})
+		nextKeyMarker = v.Key
+		nextVersionIdMarker = v.VersionID
+		count++
 	}
-	for _, dm := range deleteMarkers {
-		result.DeleteMarkers = append(result.DeleteMarkers, xmlDeleteMarker{
-			Key:          dm.Key,
-			VersionId:    dm.VersionID,
-			IsLatest:     dm.IsLatest,
-			LastModified: dm.LastModified.UTC().Format(time.RFC3339),
-			Owner:        xmlOwner{ID: "owner", DisplayName: "owner"},
-		})
+
+	if !result.IsTruncated {
+		for _, dm := range deleteMarkers {
+			if !strings.HasPrefix(dm.Key, prefix) {
+				continue
+			}
+			if dm.Key <= keyMarker {
+				continue
+			}
+			if delimiter != "" {
+				rest := strings.TrimPrefix(dm.Key, prefix)
+				if idx := strings.Index(rest, delimiter); idx >= 0 {
+					cp := prefix + rest[:idx+len(delimiter)]
+					if _, seen := commonPrefixes[cp]; !seen {
+						if count >= maxKeys {
+							result.IsTruncated = true
+							break
+						}
+						commonPrefixes[cp] = struct{}{}
+						count++
+						nextKeyMarker = cp
+						nextVersionIdMarker = ""
+					}
+					continue
+				}
+			}
+			if count >= maxKeys {
+				result.IsTruncated = true
+				break
+			}
+			result.DeleteMarkers = append(result.DeleteMarkers, xmlDeleteMarker{
+				Key:          dm.Key,
+				VersionId:    dm.VersionID,
+				IsLatest:     dm.IsLatest,
+				LastModified: dm.LastModified.UTC().Format(time.RFC3339),
+				Owner:        xmlOwner{ID: "owner", DisplayName: "owner"},
+			})
+			nextKeyMarker = dm.Key
+			nextVersionIdMarker = dm.VersionID
+			count++
+		}
+	}
+
+	cps := make([]xmlCommonPrefix, 0, len(commonPrefixes))
+	for cp := range commonPrefixes {
+		cps = append(cps, xmlCommonPrefix{Prefix: cp})
+	}
+	slices.SortFunc(cps, func(a, b xmlCommonPrefix) int {
+		return strings.Compare(a.Prefix, b.Prefix)
+	})
+	result.CommonPrefixes = cps
+
+	if result.IsTruncated {
+		result.NextKeyMarker = nextKeyMarker
+		result.NextVersionIdMarker = nextVersionIdMarker
 	}
 	writeXML(w, http.StatusOK, result)
 }

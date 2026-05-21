@@ -625,11 +625,28 @@ func (ro *Router) handleListParts(
 	r *http.Request,
 	bucket, key string,
 ) {
-	uploadID := r.URL.Query().Get("uploadId")
+	q := r.URL.Query()
+	uploadID := q.Get("uploadId")
 	if uploadID == "" {
 		writeError(w, r, http.StatusBadRequest, "InvalidArgument", "uploadId is required.")
 		return
 	}
+	maxParts := 1000
+	if s := q.Get("max-parts"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n >= 0 {
+			if n > 1000 {
+				n = 1000
+			}
+			maxParts = n
+		}
+	}
+	partNumberMarker := 0
+	if s := q.Get("part-number-marker"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil {
+			partNumberMarker = n
+		}
+	}
+
 	umeta, parts, err := ro.storage.ListParts(uploadID)
 	if err != nil {
 		if errors.Is(err, ErrUploadNotFound) {
@@ -656,6 +673,28 @@ func (ro *Router) handleListParts(
 		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
+
+	var xmlParts []xmlPart
+	var isTruncated bool
+	var nextPartNumberMarker int
+
+	for _, p := range parts {
+		if p.PartNumber <= partNumberMarker {
+			continue
+		}
+		if len(xmlParts) >= maxParts {
+			isTruncated = true
+			break
+		}
+		xmlParts = append(xmlParts, xmlPart{
+			PartNumber:   p.PartNumber,
+			ETag:         p.ETag,
+			Size:         p.Size,
+			LastModified: p.LastModified.UTC(),
+		})
+		nextPartNumberMarker = p.PartNumber
+	}
+
 	slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
 		"listed parts",
 		"bucket",
@@ -665,24 +704,21 @@ func (ro *Router) handleListParts(
 		"uploadId",
 		uploadID,
 		"count",
-		len(parts),
+		len(xmlParts),
 	)
-	xmlParts := make([]xmlPart, len(parts))
-	for i, p := range parts {
-		xmlParts[i] = xmlPart{
-			PartNumber:   p.PartNumber,
-			ETag:         p.ETag,
-			Size:         p.Size,
-			LastModified: p.LastModified.UTC(),
-		}
+
+	result := listPartsResult{
+		Bucket:           umeta.Bucket,
+		Key:              umeta.Key,
+		UploadID:         uploadID,
+		StorageClass:     "STANDARD",
+		PartNumberMarker: partNumberMarker,
+		MaxParts:         maxParts,
+		IsTruncated:      isTruncated,
+		Parts:            xmlParts,
 	}
-	writeXML(w, http.StatusOK, listPartsResult{
-		Bucket:       umeta.Bucket,
-		Key:          umeta.Key,
-		UploadID:     uploadID,
-		StorageClass: "STANDARD",
-		MaxParts:     1000,
-		IsTruncated:  false,
-		Parts:        xmlParts,
-	})
+	if isTruncated {
+		result.NextPartNumberMarker = nextPartNumberMarker
+	}
+	writeXML(w, http.StatusOK, result)
 }
