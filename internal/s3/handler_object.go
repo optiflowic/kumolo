@@ -490,6 +490,14 @@ func (ro *Router) handleHeadObject(w http.ResponseWriter, r *http.Request, bucke
 	if tags, err := ro.storage.GetObjectTagging(bucket, key); err == nil && len(tags) > 0 {
 		w.Header().Set(amzTaggingCount, strconv.Itoa(len(tags)))
 	}
+	if meta.Retention != nil {
+		w.Header().Set(amzObjectLockMode, meta.Retention.Mode)
+		w.Header().
+			Set(amzObjectLockRetainUntilDate, meta.Retention.RetainUntilDate.UTC().Format(time.RFC3339))
+	}
+	if meta.LegalHold != nil {
+		w.Header().Set(amzObjectLockLegalHold, meta.LegalHold.Status)
+	}
 	if status := checkConditionals(w, r, meta.ETag, meta.LastModified); status != 0 {
 		slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
 			"conditional check short-circuited",
@@ -771,6 +779,14 @@ func (ro *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 	// missing or unreadable tags file never prevents a successful object response.
 	if tags, err := ro.storage.GetObjectTagging(bucket, key); err == nil && len(tags) > 0 {
 		w.Header().Set(amzTaggingCount, strconv.Itoa(len(tags)))
+	}
+	if meta.Retention != nil {
+		w.Header().Set(amzObjectLockMode, meta.Retention.Mode)
+		w.Header().
+			Set(amzObjectLockRetainUntilDate, meta.Retention.RetainUntilDate.UTC().Format(time.RFC3339))
+	}
+	if meta.LegalHold != nil {
+		w.Header().Set(amzObjectLockLegalHold, meta.LegalHold.Status)
 	}
 	http.ServeContent(w, r, "", meta.LastModified, f)
 }

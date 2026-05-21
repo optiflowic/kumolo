@@ -75,6 +75,7 @@ type Tag struct {
 type BucketInfo struct {
 	Name         string
 	CreationDate time.Time
+	Region       string
 }
 
 type ObjectInfo struct {
@@ -120,6 +121,7 @@ type xmlOwner struct {
 type xmlBucket struct {
 	Name         string    `xml:"Name"`
 	CreationDate time.Time `xml:"CreationDate"`
+	BucketRegion string    `xml:"BucketRegion,omitempty"`
 }
 
 type listObjectsResult struct {
@@ -266,7 +268,8 @@ type deleteObjectsRequest struct {
 }
 
 type xmlDeleteObject struct {
-	Key string `xml:"Key"`
+	Key       string `xml:"Key"`
+	VersionId string `xml:"VersionId"`
 }
 
 type deleteObjectsResult struct {
@@ -276,13 +279,17 @@ type deleteObjectsResult struct {
 }
 
 type xmlDeletedObject struct {
-	Key string `xml:"Key"`
+	Key                   string `xml:"Key"`
+	VersionId             string `xml:"VersionId,omitempty"`
+	DeleteMarker          bool   `xml:"DeleteMarker,omitempty"`
+	DeleteMarkerVersionId string `xml:"DeleteMarkerVersionId,omitempty"`
 }
 
 type xmlDeleteError struct {
-	Key     string `xml:"Key"`
-	Code    string `xml:"Code"`
-	Message string `xml:"Message"`
+	Key       string `xml:"Key"`
+	VersionId string `xml:"VersionId,omitempty"`
+	Code      string `xml:"Code"`
+	Message   string `xml:"Message"`
 }
 
 type xmlVersioningConfiguration struct {

@@ -138,6 +138,22 @@ func TestRouterListBuckets(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Contains(t, w.Body.String(), "my-bucket")
 	})
+
+	t.Run("includes BucketRegion in list when region is set", func(t *testing.T) {
+		ro := newTestRouter(t)
+		createReq := httptest.NewRequest(http.MethodPut, "/my-bucket", nil)
+		createReq.Header.Set(
+			"Authorization",
+			"AWS4-HMAC-SHA256 Credential=AKID/20230101/eu-west-1/s3/aws4_request, SignedHeaders=host, Signature=sig",
+		)
+		ro.ServeHTTP(httptest.NewRecorder(), createReq)
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), "<BucketRegion>eu-west-1</BucketRegion>")
+	})
 }
 
 func TestRouterCreateBucket(t *testing.T) {
@@ -223,7 +239,23 @@ func TestRouterDeleteBucket(t *testing.T) {
 }
 
 func TestHeadBucket(t *testing.T) {
-	t.Run("returns 200 for existing bucket", func(t *testing.T) {
+	t.Run("returns 200 with x-amz-bucket-region for existing bucket", func(t *testing.T) {
+		ro := newTestRouter(t)
+		createReq := httptest.NewRequest(http.MethodPut, "/my-bucket", nil)
+		createReq.Header.Set(
+			"Authorization",
+			"AWS4-HMAC-SHA256 Credential=AKID/20230101/us-west-2/s3/aws4_request, SignedHeaders=host, Signature=sig",
+		)
+		ro.ServeHTTP(httptest.NewRecorder(), createReq)
+
+		req := httptest.NewRequest(http.MethodHead, "/my-bucket", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "us-west-2", w.Header().Get(amzBucketRegion))
+	})
+
+	t.Run("returns us-east-1 when region is unset", func(t *testing.T) {
 		ro := newTestRouter(t)
 		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
 
@@ -231,6 +263,7 @@ func TestHeadBucket(t *testing.T) {
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "us-east-1", w.Header().Get(amzBucketRegion))
 	})
 
 	t.Run("returns 404 for nonexistent bucket", func(t *testing.T) {
@@ -239,6 +272,14 @@ func TestHeadBucket(t *testing.T) {
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+
+	t.Run("returns 500 on storage error", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{getBucketRegionErr: errors.New("disk failure")})
+		req := httptest.NewRequest(http.MethodHead, "/my-bucket", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
 }
 
@@ -975,9 +1016,9 @@ func TestRouterPutObject(t *testing.T) {
 			)
 			wrong := newChecksumHash(checksumCRC32)
 			_, _ = wrong.Write([]byte("wrong"))
-			req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "CRC32")
+			req.Header.Set(amzSdkChecksumAlgorithm, "CRC32")
 			req.Header.Set(
-				"X-Amz-Checksum-Crc32",
+				amzChecksumCRC32,
 				base64.StdEncoding.EncodeToString(wrong.Sum(nil)),
 			)
 			w := httptest.NewRecorder()
@@ -1003,9 +1044,9 @@ func TestRouterPutObject(t *testing.T) {
 			)
 			wrong := newChecksumHash(checksumCRC32)
 			_, _ = wrong.Write([]byte("wrong"))
-			req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "CRC32")
+			req.Header.Set(amzSdkChecksumAlgorithm, "CRC32")
 			req.Header.Set(
-				"X-Amz-Checksum-Crc32",
+				amzChecksumCRC32,
 				base64.StdEncoding.EncodeToString(wrong.Sum(nil)),
 			)
 			w := httptest.NewRecorder()
@@ -1045,8 +1086,8 @@ func TestRouterPutObject(t *testing.T) {
 		h := newChecksumHash(checksumCRC32)
 		_, _ = h.Write(data)
 		req := httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", bytes.NewReader(data))
-		req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "CRC32")
-		req.Header.Set("X-Amz-Checksum-Crc32", base64.StdEncoding.EncodeToString(h.Sum(nil)))
+		req.Header.Set(amzSdkChecksumAlgorithm, "CRC32")
+		req.Header.Set(amzChecksumCRC32, base64.StdEncoding.EncodeToString(h.Sum(nil)))
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
@@ -1060,10 +1101,10 @@ func TestRouterPutObject(t *testing.T) {
 			"/my-bucket/obj.txt",
 			strings.NewReader("hello world"),
 		)
-		req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "CRC32")
+		req.Header.Set(amzSdkChecksumAlgorithm, "CRC32")
 		wrong := newChecksumHash(checksumCRC32)
 		_, _ = wrong.Write([]byte("wrong"))
-		req.Header.Set("X-Amz-Checksum-Crc32", base64.StdEncoding.EncodeToString(wrong.Sum(nil)))
+		req.Header.Set(amzChecksumCRC32, base64.StdEncoding.EncodeToString(wrong.Sum(nil)))
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -1075,10 +1116,10 @@ func TestRouterPutObject(t *testing.T) {
 		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
 		data := []byte("hello world")
 		req := httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", bytes.NewReader(data))
-		req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "CRC32")
+		req.Header.Set(amzSdkChecksumAlgorithm, "CRC32")
 		wrong := newChecksumHash(checksumCRC32)
 		_, _ = wrong.Write([]byte("wrong"))
-		req.Header.Set("X-Amz-Checksum-Crc32", base64.StdEncoding.EncodeToString(wrong.Sum(nil)))
+		req.Header.Set(amzChecksumCRC32, base64.StdEncoding.EncodeToString(wrong.Sum(nil)))
 		ro.ServeHTTP(httptest.NewRecorder(), req)
 
 		// Object should not be retrievable after rollback.
@@ -1094,8 +1135,8 @@ func TestRouterPutObject(t *testing.T) {
 		h := newChecksumHash(checksumSHA256)
 		_, _ = h.Write(data)
 		req := httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", bytes.NewReader(data))
-		req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "SHA256")
-		req.Header.Set("X-Amz-Checksum-Sha256", base64.StdEncoding.EncodeToString(h.Sum(nil)))
+		req.Header.Set(amzSdkChecksumAlgorithm, "SHA256")
+		req.Header.Set(amzChecksumSHA256, base64.StdEncoding.EncodeToString(h.Sum(nil)))
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
@@ -1108,8 +1149,8 @@ func TestRouterPutObject(t *testing.T) {
 		h := newChecksumHash(checksumSHA1)
 		_, _ = h.Write(data)
 		req := httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", bytes.NewReader(data))
-		req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "SHA1")
-		req.Header.Set("X-Amz-Checksum-Sha1", base64.StdEncoding.EncodeToString(h.Sum(nil)))
+		req.Header.Set(amzSdkChecksumAlgorithm, "SHA1")
+		req.Header.Set(amzChecksumSHA1, base64.StdEncoding.EncodeToString(h.Sum(nil)))
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
@@ -1125,8 +1166,8 @@ func TestRouterPutObject(t *testing.T) {
 		)
 		wrong := newChecksumHash(checksumSHA1)
 		_, _ = wrong.Write([]byte("wrong"))
-		req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "SHA1")
-		req.Header.Set("X-Amz-Checksum-Sha1", base64.StdEncoding.EncodeToString(wrong.Sum(nil)))
+		req.Header.Set(amzSdkChecksumAlgorithm, "SHA1")
+		req.Header.Set(amzChecksumSHA1, base64.StdEncoding.EncodeToString(wrong.Sum(nil)))
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -1140,8 +1181,8 @@ func TestRouterPutObject(t *testing.T) {
 		h := newChecksumHash(checksumCRC32C)
 		_, _ = h.Write(data)
 		req := httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", bytes.NewReader(data))
-		req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "CRC32C")
-		req.Header.Set("X-Amz-Checksum-Crc32c", base64.StdEncoding.EncodeToString(h.Sum(nil)))
+		req.Header.Set(amzSdkChecksumAlgorithm, "CRC32C")
+		req.Header.Set(amzChecksumCRC32C, base64.StdEncoding.EncodeToString(h.Sum(nil)))
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
@@ -1157,8 +1198,8 @@ func TestRouterPutObject(t *testing.T) {
 		)
 		wrong := newChecksumHash(checksumCRC32C)
 		_, _ = wrong.Write([]byte("wrong"))
-		req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "CRC32C")
-		req.Header.Set("X-Amz-Checksum-Crc32c", base64.StdEncoding.EncodeToString(wrong.Sum(nil)))
+		req.Header.Set(amzSdkChecksumAlgorithm, "CRC32C")
+		req.Header.Set(amzChecksumCRC32C, base64.StdEncoding.EncodeToString(wrong.Sum(nil)))
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -1172,8 +1213,8 @@ func TestRouterPutObject(t *testing.T) {
 		h := newChecksumHash(checksumCRC64NVME)
 		_, _ = h.Write(data)
 		req := httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", bytes.NewReader(data))
-		req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "CRC64NVME")
-		req.Header.Set("X-Amz-Checksum-Crc64nvme", base64.StdEncoding.EncodeToString(h.Sum(nil)))
+		req.Header.Set(amzSdkChecksumAlgorithm, "CRC64NVME")
+		req.Header.Set(amzChecksumCRC64NVME, base64.StdEncoding.EncodeToString(h.Sum(nil)))
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
@@ -1187,11 +1228,11 @@ func TestRouterPutObject(t *testing.T) {
 			"/my-bucket/obj.txt",
 			strings.NewReader("hello world"),
 		)
-		req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "CRC64NVME")
+		req.Header.Set(amzSdkChecksumAlgorithm, "CRC64NVME")
 		wrong := newChecksumHash(checksumCRC64NVME)
 		_, _ = wrong.Write([]byte("wrong"))
 		req.Header.Set(
-			"X-Amz-Checksum-Crc64nvme",
+			amzChecksumCRC64NVME,
 			base64.StdEncoding.EncodeToString(wrong.Sum(nil)),
 		)
 		w := httptest.NewRecorder()
@@ -1204,7 +1245,7 @@ func TestRouterPutObject(t *testing.T) {
 		ro := newTestRouter(t)
 		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
 		req := httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", strings.NewReader("data"))
-		req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "MD5")
+		req.Header.Set(amzSdkChecksumAlgorithm, "MD5")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -1215,8 +1256,8 @@ func TestRouterPutObject(t *testing.T) {
 		ro := newTestRouter(t)
 		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
 		req := httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", strings.NewReader("data"))
-		req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "CRC32")
-		req.Header.Set("X-Amz-Checksum-Crc32", "!!!not-base64!!!")
+		req.Header.Set(amzSdkChecksumAlgorithm, "CRC32")
+		req.Header.Set(amzChecksumCRC32, "!!!not-base64!!!")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -1618,6 +1659,31 @@ func TestRouterGetObject(t *testing.T) {
 			assert.Contains(t, w.Body.String(), "InvalidRange")
 		},
 	)
+
+	t.Run("returns Object Lock retention and legal hold headers", func(t *testing.T) {
+		ro := newTestRouter(t)
+		createReq := httptest.NewRequest(http.MethodPut, "/my-bucket", nil)
+		createReq.Header.Set(amzObjectLockEnabled, "true")
+		ro.ServeHTTP(httptest.NewRecorder(), createReq)
+
+		putReq := httptest.NewRequest(
+			http.MethodPut,
+			"/my-bucket/obj.txt",
+			strings.NewReader("data"),
+		)
+		putReq.Header.Set(amzObjectLockMode, "GOVERNANCE")
+		putReq.Header.Set(amzObjectLockRetainUntilDate, "2099-01-01T00:00:00Z")
+		putReq.Header.Set(amzObjectLockLegalHold, "ON")
+		ro.ServeHTTP(httptest.NewRecorder(), putReq)
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket/obj.txt", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "GOVERNANCE", w.Header().Get(amzObjectLockMode))
+		assert.NotEmpty(t, w.Header().Get(amzObjectLockRetainUntilDate))
+		assert.Equal(t, "ON", w.Header().Get(amzObjectLockLegalHold))
+	})
 }
 
 // failBodyWriter wraps ResponseRecorder and returns an error on Write after headers are sent.
@@ -1881,6 +1947,31 @@ func TestRouterHeadObject(t *testing.T) {
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusPreconditionFailed, w.Code)
+	})
+
+	t.Run("returns Object Lock retention and legal hold headers", func(t *testing.T) {
+		ro := newTestRouter(t)
+		createReq := httptest.NewRequest(http.MethodPut, "/my-bucket", nil)
+		createReq.Header.Set(amzObjectLockEnabled, "true")
+		ro.ServeHTTP(httptest.NewRecorder(), createReq)
+
+		putReq := httptest.NewRequest(
+			http.MethodPut,
+			"/my-bucket/obj.txt",
+			strings.NewReader("data"),
+		)
+		putReq.Header.Set(amzObjectLockMode, "COMPLIANCE")
+		putReq.Header.Set(amzObjectLockRetainUntilDate, "2099-01-01T00:00:00Z")
+		putReq.Header.Set(amzObjectLockLegalHold, "ON")
+		ro.ServeHTTP(httptest.NewRecorder(), putReq)
+
+		req := httptest.NewRequest(http.MethodHead, "/my-bucket/obj.txt", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "COMPLIANCE", w.Header().Get(amzObjectLockMode))
+		assert.NotEmpty(t, w.Header().Get(amzObjectLockRetainUntilDate))
+		assert.Equal(t, "ON", w.Header().Get(amzObjectLockLegalHold))
 	})
 }
 
@@ -2249,7 +2340,7 @@ func TestRouterCopyObject(t *testing.T) {
 	t.Run("copies object and returns 200 with CopyObjectResult XML", func(t *testing.T) {
 		ro := setup(t)
 		req := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
-		req.Header.Set("x-amz-copy-source", "/src-bucket/orig.txt")
+		req.Header.Set(amzCopySource, "/src-bucket/orig.txt")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 
@@ -2262,7 +2353,7 @@ func TestRouterCopyObject(t *testing.T) {
 	t.Run("copied object is retrievable with correct content", func(t *testing.T) {
 		ro := setup(t)
 		copyReq := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
-		copyReq.Header.Set("x-amz-copy-source", "/src-bucket/orig.txt")
+		copyReq.Header.Set(amzCopySource, "/src-bucket/orig.txt")
 		ro.ServeHTTP(httptest.NewRecorder(), copyReq)
 
 		req := httptest.NewRequest(http.MethodGet, "/dst-bucket/copy.txt", nil)
@@ -2284,7 +2375,7 @@ func TestRouterCopyObject(t *testing.T) {
 		ro.ServeHTTP(httptest.NewRecorder(), putReq)
 
 		req := httptest.NewRequest(http.MethodPut, "/my-bucket/copy.txt", nil)
-		req.Header.Set("x-amz-copy-source", "/my-bucket/path%2Fto%2Fobj.txt")
+		req.Header.Set(amzCopySource, "/my-bucket/path%2Fto%2Fobj.txt")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
@@ -2297,7 +2388,7 @@ func TestRouterCopyObject(t *testing.T) {
 			httptest.NewRequest(http.MethodPut, "/dst-bucket", nil),
 		)
 		req := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
-		req.Header.Set("x-amz-copy-source", "/missing-bucket/obj.txt")
+		req.Header.Set(amzCopySource, "/missing-bucket/obj.txt")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNotFound, w.Code)
@@ -2307,7 +2398,7 @@ func TestRouterCopyObject(t *testing.T) {
 	t.Run("returns 404 when source key does not exist", func(t *testing.T) {
 		ro := setup(t)
 		req := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
-		req.Header.Set("x-amz-copy-source", "/src-bucket/missing.txt")
+		req.Header.Set(amzCopySource, "/src-bucket/missing.txt")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNotFound, w.Code)
@@ -2317,7 +2408,7 @@ func TestRouterCopyObject(t *testing.T) {
 	t.Run("returns 404 when destination bucket does not exist", func(t *testing.T) {
 		ro := setup(t)
 		req := httptest.NewRequest(http.MethodPut, "/no-bucket/copy.txt", nil)
-		req.Header.Set("x-amz-copy-source", "/src-bucket/orig.txt")
+		req.Header.Set(amzCopySource, "/src-bucket/orig.txt")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNotFound, w.Code)
@@ -2331,7 +2422,7 @@ func TestRouterCopyObject(t *testing.T) {
 			httptest.NewRequest(http.MethodPut, "/dst-bucket", nil),
 		)
 		req := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
-		req.Header.Set("x-amz-copy-source", "%ZZ")
+		req.Header.Set(amzCopySource, "%ZZ")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -2345,7 +2436,7 @@ func TestRouterCopyObject(t *testing.T) {
 			httptest.NewRequest(http.MethodPut, "/dst-bucket", nil),
 		)
 		req := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
-		req.Header.Set("x-amz-copy-source", "/only-bucket")
+		req.Header.Set(amzCopySource, "/only-bucket")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -2355,7 +2446,7 @@ func TestRouterCopyObject(t *testing.T) {
 	t.Run("returns 500 on unexpected storage error", func(t *testing.T) {
 		ro := newRouterWithMock(&mockStore{copyObjectErr: errors.New("disk failure")})
 		req := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
-		req.Header.Set("x-amz-copy-source", "/src-bucket/orig.txt")
+		req.Header.Set(amzCopySource, "/src-bucket/orig.txt")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
@@ -2384,7 +2475,7 @@ func TestRouterCopyObject(t *testing.T) {
 		ro.ServeHTTP(httptest.NewRecorder(), putReq)
 
 		copyReq := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
-		copyReq.Header.Set("x-amz-copy-source", "/src-bucket/meta-obj.txt")
+		copyReq.Header.Set(amzCopySource, "/src-bucket/meta-obj.txt")
 		ro.ServeHTTP(httptest.NewRecorder(), copyReq)
 
 		req := httptest.NewRequest(http.MethodHead, "/dst-bucket/copy.txt", nil)
@@ -2405,8 +2496,8 @@ func TestRouterCopyObject(t *testing.T) {
 		ro.ServeHTTP(httptest.NewRecorder(), putReq)
 
 		copyReq := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
-		copyReq.Header.Set("x-amz-copy-source", "/src-bucket/meta-obj.txt")
-		copyReq.Header.Set("x-amz-metadata-directive", "REPLACE")
+		copyReq.Header.Set(amzCopySource, "/src-bucket/meta-obj.txt")
+		copyReq.Header.Set(amzMetadataDirective, "REPLACE")
 		copyReq.Header.Set("x-amz-meta-author", "bob")
 		ro.ServeHTTP(httptest.NewRecorder(), copyReq)
 
@@ -2428,8 +2519,8 @@ func TestRouterCopyObject(t *testing.T) {
 		ro.ServeHTTP(httptest.NewRecorder(), putReq)
 
 		copyReq := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
-		copyReq.Header.Set("x-amz-copy-source", "/src-bucket/obj.txt")
-		copyReq.Header.Set("x-amz-metadata-directive", "REPLACE")
+		copyReq.Header.Set(amzCopySource, "/src-bucket/obj.txt")
+		copyReq.Header.Set(amzMetadataDirective, "REPLACE")
 		copyReq.Header.Set("Content-Type", "application/json")
 		ro.ServeHTTP(httptest.NewRecorder(), copyReq)
 
@@ -2451,8 +2542,8 @@ func TestRouterCopyObject(t *testing.T) {
 		ro.ServeHTTP(httptest.NewRecorder(), putReq)
 
 		copyReq := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
-		copyReq.Header.Set("x-amz-copy-source", "/src-bucket/obj.txt")
-		copyReq.Header.Set("x-amz-metadata-directive", "REPLACE")
+		copyReq.Header.Set(amzCopySource, "/src-bucket/obj.txt")
+		copyReq.Header.Set(amzMetadataDirective, "REPLACE")
 		ro.ServeHTTP(httptest.NewRecorder(), copyReq)
 
 		req := httptest.NewRequest(http.MethodHead, "/dst-bucket/copy.txt", nil)
@@ -2475,8 +2566,8 @@ func TestRouterCopyObject(t *testing.T) {
 			ro.ServeHTTP(httptest.NewRecorder(), putReq)
 
 			copyReq := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
-			copyReq.Header.Set("x-amz-copy-source", "/src-bucket/obj.txt")
-			copyReq.Header.Set("x-amz-metadata-directive", "REPLACE")
+			copyReq.Header.Set(amzCopySource, "/src-bucket/obj.txt")
+			copyReq.Header.Set(amzMetadataDirective, "REPLACE")
 			ro.ServeHTTP(httptest.NewRecorder(), copyReq)
 
 			req := httptest.NewRequest(http.MethodHead, "/dst-bucket/copy.txt", nil)
@@ -2503,7 +2594,7 @@ func TestRouterCopyObject(t *testing.T) {
 		)
 
 		copyReq := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
-		copyReq.Header.Set("X-Amz-Copy-Source", "/src-bucket/orig.txt")
+		copyReq.Header.Set(amzCopySource, "/src-bucket/orig.txt")
 		// Only mode without retain-until-date → parseObjectLockHeaders returns !ok.
 		copyReq.Header.Set(amzObjectLockMode, "GOVERNANCE")
 		w := httptest.NewRecorder()
@@ -2515,7 +2606,7 @@ func TestRouterCopyObject(t *testing.T) {
 		ro := newTestRouter(t)
 		// Create dst bucket with Object Lock enabled.
 		createReq := httptest.NewRequest(http.MethodPut, "/dst-bucket", nil)
-		createReq.Header.Set("x-amz-object-lock-enabled", "true")
+		createReq.Header.Set(amzObjectLockEnabled, "true")
 		ro.ServeHTTP(httptest.NewRecorder(), createReq)
 
 		// Create src bucket and put source object.
@@ -2529,7 +2620,7 @@ func TestRouterCopyObject(t *testing.T) {
 		)
 
 		copyReq := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
-		copyReq.Header.Set("X-Amz-Copy-Source", "/src-bucket/orig.txt")
+		copyReq.Header.Set(amzCopySource, "/src-bucket/orig.txt")
 		copyReq.Header.Set(amzObjectLockMode, "GOVERNANCE")
 		copyReq.Header.Set(amzObjectLockRetainUntilDate, "2099-01-01T00:00:00Z")
 		copyReq.Header.Set(amzObjectLockLegalHold, "ON")
@@ -2942,9 +3033,9 @@ func TestRouterMultipartUpload(t *testing.T) {
 			)
 			wrong := newChecksumHash(checksumCRC32)
 			_, _ = wrong.Write([]byte("wrong"))
-			req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "CRC32")
+			req.Header.Set(amzSdkChecksumAlgorithm, "CRC32")
 			req.Header.Set(
-				"X-Amz-Checksum-Crc32",
+				amzChecksumCRC32,
 				base64.StdEncoding.EncodeToString(wrong.Sum(nil)),
 			)
 			w := httptest.NewRecorder()
@@ -3001,8 +3092,8 @@ func TestRouterMultipartUpload(t *testing.T) {
 			path+"?partNumber=1&uploadId="+uploadID,
 			bytes.NewReader(data),
 		)
-		req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "CRC32")
-		req.Header.Set("X-Amz-Checksum-Crc32", base64.StdEncoding.EncodeToString(h.Sum(nil)))
+		req.Header.Set(amzSdkChecksumAlgorithm, "CRC32")
+		req.Header.Set(amzChecksumCRC32, base64.StdEncoding.EncodeToString(h.Sum(nil)))
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
@@ -3018,8 +3109,8 @@ func TestRouterMultipartUpload(t *testing.T) {
 		)
 		wrong := newChecksumHash(checksumCRC32)
 		_, _ = wrong.Write([]byte("wrong"))
-		req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "CRC32")
-		req.Header.Set("X-Amz-Checksum-Crc32", base64.StdEncoding.EncodeToString(wrong.Sum(nil)))
+		req.Header.Set(amzSdkChecksumAlgorithm, "CRC32")
+		req.Header.Set(amzChecksumCRC32, base64.StdEncoding.EncodeToString(wrong.Sum(nil)))
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -3036,8 +3127,8 @@ func TestRouterMultipartUpload(t *testing.T) {
 		)
 		wrong := newChecksumHash(checksumCRC32)
 		_, _ = wrong.Write([]byte("wrong"))
-		req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "CRC32")
-		req.Header.Set("X-Amz-Checksum-Crc32", base64.StdEncoding.EncodeToString(wrong.Sum(nil)))
+		req.Header.Set(amzSdkChecksumAlgorithm, "CRC32")
+		req.Header.Set(amzChecksumCRC32, base64.StdEncoding.EncodeToString(wrong.Sum(nil)))
 		ro.ServeHTTP(httptest.NewRecorder(), req)
 
 		// ListParts must return empty: if DeletePart failed silently, the part would
@@ -3062,8 +3153,8 @@ func TestRouterMultipartUpload(t *testing.T) {
 			path+"?partNumber=1&uploadId="+uploadID,
 			bytes.NewReader(data),
 		)
-		req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "CRC64NVME")
-		req.Header.Set("X-Amz-Checksum-Crc64nvme", base64.StdEncoding.EncodeToString(h.Sum(nil)))
+		req.Header.Set(amzSdkChecksumAlgorithm, "CRC64NVME")
+		req.Header.Set(amzChecksumCRC64NVME, base64.StdEncoding.EncodeToString(h.Sum(nil)))
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
@@ -3080,8 +3171,8 @@ func TestRouterMultipartUpload(t *testing.T) {
 			path+"?partNumber=1&uploadId="+uploadID,
 			bytes.NewReader(data),
 		)
-		req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "SHA1")
-		req.Header.Set("X-Amz-Checksum-Sha1", base64.StdEncoding.EncodeToString(h.Sum(nil)))
+		req.Header.Set(amzSdkChecksumAlgorithm, "SHA1")
+		req.Header.Set(amzChecksumSHA1, base64.StdEncoding.EncodeToString(h.Sum(nil)))
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
@@ -3097,8 +3188,8 @@ func TestRouterMultipartUpload(t *testing.T) {
 			path+"?partNumber=1&uploadId="+uploadID,
 			strings.NewReader("part data"),
 		)
-		req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "SHA1")
-		req.Header.Set("X-Amz-Checksum-Sha1", base64.StdEncoding.EncodeToString(wrong.Sum(nil)))
+		req.Header.Set(amzSdkChecksumAlgorithm, "SHA1")
+		req.Header.Set(amzChecksumSHA1, base64.StdEncoding.EncodeToString(wrong.Sum(nil)))
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -3116,8 +3207,8 @@ func TestRouterMultipartUpload(t *testing.T) {
 			path+"?partNumber=1&uploadId="+uploadID,
 			bytes.NewReader(data),
 		)
-		req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "CRC32C")
-		req.Header.Set("X-Amz-Checksum-Crc32c", base64.StdEncoding.EncodeToString(h.Sum(nil)))
+		req.Header.Set(amzSdkChecksumAlgorithm, "CRC32C")
+		req.Header.Set(amzChecksumCRC32C, base64.StdEncoding.EncodeToString(h.Sum(nil)))
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
@@ -3133,8 +3224,8 @@ func TestRouterMultipartUpload(t *testing.T) {
 			path+"?partNumber=1&uploadId="+uploadID,
 			strings.NewReader("part data"),
 		)
-		req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "CRC32C")
-		req.Header.Set("X-Amz-Checksum-Crc32c", base64.StdEncoding.EncodeToString(wrong.Sum(nil)))
+		req.Header.Set(amzSdkChecksumAlgorithm, "CRC32C")
+		req.Header.Set(amzChecksumCRC32C, base64.StdEncoding.EncodeToString(wrong.Sum(nil)))
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -3149,7 +3240,7 @@ func TestRouterMultipartUpload(t *testing.T) {
 			path+"?partNumber=1&uploadId="+uploadID,
 			strings.NewReader("part data"),
 		)
-		req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "MD5")
+		req.Header.Set(amzSdkChecksumAlgorithm, "MD5")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -3164,8 +3255,8 @@ func TestRouterMultipartUpload(t *testing.T) {
 			path+"?partNumber=1&uploadId="+uploadID,
 			strings.NewReader("part data"),
 		)
-		req.Header.Set("X-Amz-Sdk-Checksum-Algorithm", "CRC32")
-		req.Header.Set("X-Amz-Checksum-Crc32", "!!!not-base64!!!")
+		req.Header.Set(amzSdkChecksumAlgorithm, "CRC32")
+		req.Header.Set(amzChecksumCRC32, "!!!not-base64!!!")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -3699,6 +3790,103 @@ func TestRouterDeleteObjects(t *testing.T) {
 		assert.Contains(t, body, "<Error>")
 		assert.Contains(t, body, "AccessDenied")
 	})
+
+	t.Run("creates delete marker on versioning-enabled bucket", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/obj.txt", "data"))
+		enableVersioning(t, ro, "my-bucket")
+
+		req := httptest.NewRequest(
+			http.MethodPost,
+			"/my-bucket?delete",
+			strings.NewReader(`<Delete><Object><Key>obj.txt</Key></Object></Delete>`),
+		)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		body := w.Body.String()
+		assert.Contains(t, body, "<DeleteMarker>true</DeleteMarker>")
+		assert.Contains(t, body, "<DeleteMarkerVersionId>")
+		assert.NotContains(t, body, "<Error>")
+	})
+
+	t.Run("deletes specific version when VersionId specified", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		enableVersioning(t, ro, "my-bucket")
+
+		// Upload two versions.
+		w1 := httptest.NewRecorder()
+		ro.ServeHTTP(w1, putRequest("/my-bucket/obj.txt", "v1"))
+		vid1 := w1.Header().Get(amzVersionID)
+		require.NotEmpty(t, vid1)
+
+		ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/obj.txt", "v2"))
+
+		xmlBody := fmt.Sprintf(
+			`<Delete><Object><Key>obj.txt</Key><VersionId>%s</VersionId></Object></Delete>`,
+			vid1,
+		)
+		req := httptest.NewRequest(http.MethodPost, "/my-bucket?delete", strings.NewReader(xmlBody))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		body := w.Body.String()
+		assert.Contains(t, body, "<VersionId>"+vid1+"</VersionId>")
+		assert.NotContains(t, body, "<DeleteMarker>true</DeleteMarker>")
+		assert.NotContains(t, body, "<Error>")
+	})
+
+	t.Run("deletes a delete marker by VersionId and reports DeleteMarker true", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/obj.txt", "data"))
+		enableVersioning(t, ro, "my-bucket")
+
+		// Create a delete marker by deleting without VersionId.
+		dw := httptest.NewRecorder()
+		ro.ServeHTTP(dw, httptest.NewRequest(http.MethodDelete, "/my-bucket/obj.txt", nil))
+		markerVersionId := dw.Header().Get(amzVersionID)
+		require.NotEmpty(t, markerVersionId)
+
+		// Delete the delete marker itself via DeleteObjects with its VersionId.
+		xmlBody := fmt.Sprintf(
+			`<Delete><Object><Key>obj.txt</Key><VersionId>%s</VersionId></Object></Delete>`,
+			markerVersionId,
+		)
+		req := httptest.NewRequest(http.MethodPost, "/my-bucket?delete", strings.NewReader(xmlBody))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		body := w.Body.String()
+		assert.Contains(t, body, "<DeleteMarker>true</DeleteMarker>")
+		assert.Contains(
+			t,
+			body,
+			"<DeleteMarkerVersionId>"+markerVersionId+"</DeleteMarkerVersionId>",
+		)
+		assert.Contains(t, body, "<VersionId>"+markerVersionId+"</VersionId>")
+		assert.NotContains(t, body, "<Error>")
+	})
+}
+
+// enableVersioning is a helper that enables versioning on a bucket.
+func enableVersioning(t *testing.T, ro *Router, bucket string) {
+	t.Helper()
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/"+bucket+"?versioning",
+		strings.NewReader(
+			`<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`,
+		),
+	)
+	w := httptest.NewRecorder()
+	ro.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
 }
 
 // putRequest is a helper that creates a PUT request with a text/plain body.
@@ -4265,7 +4453,7 @@ func TestRouterUploadPartCopy(t *testing.T) {
 			path+"?partNumber=1&uploadId="+uploadID,
 			nil,
 		)
-		req.Header.Set("x-amz-copy-source", "/src-bucket/source.txt")
+		req.Header.Set(amzCopySource, "/src-bucket/source.txt")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 
@@ -4282,8 +4470,8 @@ func TestRouterUploadPartCopy(t *testing.T) {
 			path+"?partNumber=1&uploadId="+uploadID,
 			nil,
 		)
-		req.Header.Set("x-amz-copy-source", "/src-bucket/source.txt")
-		req.Header.Set("x-amz-copy-source-range", "bytes=0-4")
+		req.Header.Set(amzCopySource, "/src-bucket/source.txt")
+		req.Header.Set(amzCopySourceRange, "bytes=0-4")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 
@@ -4298,7 +4486,7 @@ func TestRouterUploadPartCopy(t *testing.T) {
 			path+"?partNumber=1&uploadId="+uploadID,
 			nil,
 		)
-		req.Header.Set("x-amz-copy-source", "/src-bucket/source.txt")
+		req.Header.Set(amzCopySource, "/src-bucket/source.txt")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		require.Equal(t, http.StatusOK, w.Code)
@@ -4346,7 +4534,7 @@ func TestRouterUploadPartCopy(t *testing.T) {
 			"/dst-bucket/dest.txt?partNumber=1&uploadId=nonexistent",
 			nil,
 		)
-		req.Header.Set("x-amz-copy-source", "/src-bucket/obj.txt")
+		req.Header.Set(amzCopySource, "/src-bucket/obj.txt")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNotFound, w.Code)
@@ -4360,7 +4548,7 @@ func TestRouterUploadPartCopy(t *testing.T) {
 			path+"?partNumber=1&uploadId="+uploadID,
 			nil,
 		)
-		req.Header.Set("x-amz-copy-source", "/src-bucket/nonexistent.txt")
+		req.Header.Set(amzCopySource, "/src-bucket/nonexistent.txt")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNotFound, w.Code)
@@ -4379,8 +4567,8 @@ func TestRouterUploadPartCopy(t *testing.T) {
 				path+"?partNumber=1&uploadId="+uploadID,
 				nil,
 			)
-			req.Header.Set("x-amz-copy-source", "/src-bucket/nonexistent.txt")
-			req.Header.Set("x-amz-copy-source-if-match", `"some-etag"`)
+			req.Header.Set(amzCopySource, "/src-bucket/nonexistent.txt")
+			req.Header.Set(amzCopySourceIfMatch, `"some-etag"`)
 			w := httptest.NewRecorder()
 			ro.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusNotFound, w.Code)
@@ -4391,7 +4579,7 @@ func TestRouterUploadPartCopy(t *testing.T) {
 	t.Run("returns 400 for invalid partNumber", func(t *testing.T) {
 		ro := newRouterWithMock(&mockStore{})
 		req := httptest.NewRequest(http.MethodPut, "/bucket/key?partNumber=0&uploadId=abc", nil)
-		req.Header.Set("x-amz-copy-source", "/src/obj.txt")
+		req.Header.Set(amzCopySource, "/src/obj.txt")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -4401,7 +4589,7 @@ func TestRouterUploadPartCopy(t *testing.T) {
 	t.Run("returns 400 for missing uploadId", func(t *testing.T) {
 		ro := newRouterWithMock(&mockStore{})
 		req := httptest.NewRequest(http.MethodPut, "/bucket/key?partNumber=1&uploadId=", nil)
-		req.Header.Set("x-amz-copy-source", "/src/obj.txt")
+		req.Header.Set(amzCopySource, "/src/obj.txt")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -4424,8 +4612,8 @@ func TestRouterUploadPartCopy(t *testing.T) {
 	t.Run("returns 400 for invalid x-amz-copy-source-range", func(t *testing.T) {
 		ro := newRouterWithMock(&mockStore{})
 		req := httptest.NewRequest(http.MethodPut, "/bucket/key?partNumber=1&uploadId=abc", nil)
-		req.Header.Set("x-amz-copy-source", "/src/obj.txt")
-		req.Header.Set("x-amz-copy-source-range", "invalid-range")
+		req.Header.Set(amzCopySource, "/src/obj.txt")
+		req.Header.Set(amzCopySourceRange, "invalid-range")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -4435,7 +4623,7 @@ func TestRouterUploadPartCopy(t *testing.T) {
 	t.Run("returns 400 for invalid x-amz-copy-source", func(t *testing.T) {
 		ro := newRouterWithMock(&mockStore{})
 		req := httptest.NewRequest(http.MethodPut, "/bucket/key?partNumber=1&uploadId=abc", nil)
-		req.Header.Set("x-amz-copy-source", "no-slash-no-key")
+		req.Header.Set(amzCopySource, "no-slash-no-key")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -4445,7 +4633,7 @@ func TestRouterUploadPartCopy(t *testing.T) {
 	t.Run("returns 404 when source bucket does not exist", func(t *testing.T) {
 		ro := newRouterWithMock(&mockStore{uploadPartCopyErr: ErrBucketNotFound})
 		req := httptest.NewRequest(http.MethodPut, "/bucket/key?partNumber=1&uploadId=abc", nil)
-		req.Header.Set("x-amz-copy-source", "/no-such-bucket/obj.txt")
+		req.Header.Set(amzCopySource, "/no-such-bucket/obj.txt")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNotFound, w.Code)
@@ -4455,7 +4643,7 @@ func TestRouterUploadPartCopy(t *testing.T) {
 	t.Run("returns 400 for invalid percent-encoding in copy source", func(t *testing.T) {
 		ro := newRouterWithMock(&mockStore{})
 		req := httptest.NewRequest(http.MethodPut, "/bucket/key?partNumber=1&uploadId=abc", nil)
-		req.Header.Set("x-amz-copy-source", "/bucket/%ZZ")
+		req.Header.Set(amzCopySource, "/bucket/%ZZ")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -4469,7 +4657,7 @@ func TestRouterUploadPartCopy(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPut, "/bucket/key?partNumber=1&uploadId=abc", nil)
 			// %25 decodes to '%' via PathUnescape, leaving '%ZZ' in the query string.
 			// url.ParseQuery then sees '%ZZ' as an invalid escape and returns an error.
-			req.Header.Set("x-amz-copy-source", "/bucket/key?versionId=%25ZZ")
+			req.Header.Set(amzCopySource, "/bucket/key?versionId=%25ZZ")
 			w := httptest.NewRecorder()
 			ro.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -4516,7 +4704,7 @@ func TestRouterUploadPartCopy(t *testing.T) {
 			path+"?partNumber=1&uploadId="+uploadID,
 			nil,
 		)
-		req.Header.Set("x-amz-copy-source", "/src-bucket/ver.txt?versionId="+v1ID)
+		req.Header.Set(amzCopySource, "/src-bucket/ver.txt?versionId="+v1ID)
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		require.Equal(t, http.StatusOK, w.Code)
@@ -4526,7 +4714,7 @@ func TestRouterUploadPartCopy(t *testing.T) {
 	t.Run("returns 500 on storage error", func(t *testing.T) {
 		ro := newRouterWithMock(&mockStore{uploadPartCopyErr: errors.New("disk failure")})
 		req := httptest.NewRequest(http.MethodPut, "/bucket/key?partNumber=1&uploadId=abc", nil)
-		req.Header.Set("x-amz-copy-source", "/src-bucket/obj.txt")
+		req.Header.Set(amzCopySource, "/src-bucket/obj.txt")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
@@ -4535,8 +4723,8 @@ func TestRouterUploadPartCopy(t *testing.T) {
 	t.Run("returns 500 when HeadObject fails during precondition check", func(t *testing.T) {
 		ro := newRouterWithMock(&mockStore{headObjectErr: errors.New("disk failure")})
 		req := httptest.NewRequest(http.MethodPut, "/bucket/key?partNumber=1&uploadId=abc", nil)
-		req.Header.Set("x-amz-copy-source", "/src-bucket/obj.txt")
-		req.Header.Set("x-amz-copy-source-if-match", `"some-etag"`)
+		req.Header.Set(amzCopySource, "/src-bucket/obj.txt")
+		req.Header.Set(amzCopySourceIfMatch, `"some-etag"`)
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
@@ -4572,7 +4760,7 @@ func TestRouterUploadPartCopy(t *testing.T) {
 			path+"?partNumber=1&uploadId="+uploadID,
 			nil,
 		)
-		req.Header.Set("x-amz-copy-source", "/src-bucket/ver.txt")
+		req.Header.Set(amzCopySource, "/src-bucket/ver.txt")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		require.Equal(t, http.StatusOK, w.Code)
@@ -4588,7 +4776,7 @@ func TestRouterUploadPartCopy(t *testing.T) {
 				path+"?partNumber=1&uploadId="+uploadID,
 				nil,
 			)
-			req.Header.Set("x-amz-copy-source", "/src-bucket/source.txt")
+			req.Header.Set(amzCopySource, "/src-bucket/source.txt")
 			w := httptest.NewRecorder()
 			ro.ServeHTTP(w, req)
 			require.Equal(t, http.StatusOK, w.Code)
@@ -4603,8 +4791,8 @@ func TestRouterUploadPartCopy(t *testing.T) {
 			path+"?partNumber=1&uploadId="+uploadID,
 			nil,
 		)
-		req.Header.Set("x-amz-copy-source", "/src-bucket/source.txt")
-		req.Header.Set("x-amz-copy-source-if-match", `"wrong-etag"`)
+		req.Header.Set(amzCopySource, "/src-bucket/source.txt")
+		req.Header.Set(amzCopySourceIfMatch, `"wrong-etag"`)
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusPreconditionFailed, w.Code)
@@ -4626,8 +4814,8 @@ func TestRouterUploadPartCopy(t *testing.T) {
 			path+"?partNumber=1&uploadId="+uploadID,
 			nil,
 		)
-		req.Header.Set("x-amz-copy-source", "/src-bucket/source.txt")
-		req.Header.Set("x-amz-copy-source-if-match", srcETag)
+		req.Header.Set(amzCopySource, "/src-bucket/source.txt")
+		req.Header.Set(amzCopySourceIfMatch, srcETag)
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
@@ -4646,8 +4834,8 @@ func TestRouterUploadPartCopy(t *testing.T) {
 			path+"?partNumber=1&uploadId="+uploadID,
 			nil,
 		)
-		req.Header.Set("x-amz-copy-source", "/src-bucket/source.txt")
-		req.Header.Set("x-amz-copy-source-if-none-match", srcETag)
+		req.Header.Set(amzCopySource, "/src-bucket/source.txt")
+		req.Header.Set(amzCopySourceIfNoneMatch, srcETag)
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusPreconditionFailed, w.Code)
@@ -4661,8 +4849,8 @@ func TestRouterUploadPartCopy(t *testing.T) {
 			path+"?partNumber=1&uploadId="+uploadID,
 			nil,
 		)
-		req.Header.Set("x-amz-copy-source", "/src-bucket/source.txt")
-		req.Header.Set("x-amz-copy-source-if-none-match", `"different-etag"`)
+		req.Header.Set(amzCopySource, "/src-bucket/source.txt")
+		req.Header.Set(amzCopySourceIfNoneMatch, `"different-etag"`)
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
@@ -4676,8 +4864,8 @@ func TestRouterUploadPartCopy(t *testing.T) {
 			path+"?partNumber=1&uploadId="+uploadID,
 			nil,
 		)
-		req.Header.Set("x-amz-copy-source", "/src-bucket/source.txt")
-		req.Header.Set("x-amz-copy-source-if-unmodified-since",
+		req.Header.Set(amzCopySource, "/src-bucket/source.txt")
+		req.Header.Set(amzCopySourceIfUnmodifiedSince,
 			time.Now().Add(-24*time.Hour).UTC().Format(http.TimeFormat))
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
@@ -4692,8 +4880,8 @@ func TestRouterUploadPartCopy(t *testing.T) {
 			path+"?partNumber=1&uploadId="+uploadID,
 			nil,
 		)
-		req.Header.Set("x-amz-copy-source", "/src-bucket/source.txt")
-		req.Header.Set("x-amz-copy-source-if-modified-since",
+		req.Header.Set(amzCopySource, "/src-bucket/source.txt")
+		req.Header.Set(amzCopySourceIfModifiedSince,
 			time.Now().Add(-24*time.Hour).UTC().Format(http.TimeFormat))
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
@@ -4708,8 +4896,8 @@ func TestRouterUploadPartCopy(t *testing.T) {
 			path+"?partNumber=1&uploadId="+uploadID,
 			nil,
 		)
-		req.Header.Set("x-amz-copy-source", "/src-bucket/source.txt")
-		req.Header.Set("x-amz-copy-source-if-modified-since",
+		req.Header.Set(amzCopySource, "/src-bucket/source.txt")
+		req.Header.Set(amzCopySourceIfModifiedSince,
 			time.Now().Add(24*time.Hour).UTC().Format(http.TimeFormat))
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
@@ -4725,8 +4913,8 @@ func TestRouterUploadPartCopy(t *testing.T) {
 			path+"?partNumber=1&uploadId="+uploadID,
 			nil,
 		)
-		req.Header.Set("x-amz-copy-source", "/src-bucket/source.txt")
-		req.Header.Set("x-amz-copy-source-if-unmodified-since",
+		req.Header.Set(amzCopySource, "/src-bucket/source.txt")
+		req.Header.Set(amzCopySourceIfUnmodifiedSince,
 			time.Now().Add(24*time.Hour).UTC().Format(http.TimeFormat))
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
@@ -4741,7 +4929,7 @@ func TestRouterUploadPartCopy(t *testing.T) {
 			nil,
 		)
 		// bucket/key format without leading slash — both forms are valid per AWS spec.
-		req.Header.Set("x-amz-copy-source", "src-bucket/source.txt")
+		req.Header.Set(amzCopySource, "src-bucket/source.txt")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
@@ -4793,8 +4981,8 @@ func TestRouterUploadPartCopy(t *testing.T) {
 				path+"?partNumber=1&uploadId="+uploadID,
 				nil,
 			)
-			req.Header.Set("x-amz-copy-source", "/src-bucket/versioned.txt?versionId="+vID)
-			req.Header.Set("x-amz-copy-source-if-match", srcETag)
+			req.Header.Set(amzCopySource, "/src-bucket/versioned.txt?versionId="+vID)
+			req.Header.Set(amzCopySourceIfMatch, srcETag)
 			w := httptest.NewRecorder()
 			ro.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusOK, w.Code)
@@ -6630,7 +6818,7 @@ func TestRouterCopyObjectVersionId(t *testing.T) {
 		ro.ServeHTTP(httptest.NewRecorder(), putRequest("/src-bucket/obj.txt", "v2"))
 
 		req := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
-		req.Header.Set("x-amz-copy-source", "/src-bucket/obj.txt?versionId="+vid1)
+		req.Header.Set(amzCopySource, "/src-bucket/obj.txt?versionId="+vid1)
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 
@@ -6657,7 +6845,7 @@ func TestRouterCopyObjectVersionId(t *testing.T) {
 		ro.ServeHTTP(httptest.NewRecorder(), putRequest("/src-bucket/obj.txt", "content"))
 
 		req := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
-		req.Header.Set("x-amz-copy-source", "/src-bucket/obj.txt")
+		req.Header.Set(amzCopySource, "/src-bucket/obj.txt")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 
@@ -8360,7 +8548,7 @@ func TestObjectLockDeleteEnforcement(t *testing.T) {
 			http.MethodPut, "/"+bucket+"/"+key+"?retention", strings.NewReader(futureRetention),
 		))
 		req := httptest.NewRequest(http.MethodDelete, "/"+bucket+"/"+key, nil)
-		req.Header.Set("x-amz-bypass-governance-retention", "true")
+		req.Header.Set(amzBypassGovernanceRetention, "true")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusForbidden, w.Code)
@@ -8384,7 +8572,7 @@ func TestObjectLockDeleteEnforcement(t *testing.T) {
 			http.MethodPut, "/"+bucket+"/"+key+"?retention", strings.NewReader(govRetention),
 		))
 		req := httptest.NewRequest(http.MethodDelete, "/"+bucket+"/"+key, nil)
-		req.Header.Set("x-amz-bypass-governance-retention", "true")
+		req.Header.Set(amzBypassGovernanceRetention, "true")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNoContent, w.Code)
@@ -8459,7 +8647,7 @@ func TestObjectLockDeleteEnforcement(t *testing.T) {
 		))
 
 		req := httptest.NewRequest(http.MethodDelete, "/"+bucket+"/"+key+"?versionId="+vid, nil)
-		req.Header.Set("x-amz-bypass-governance-retention", "true")
+		req.Header.Set(amzBypassGovernanceRetention, "true")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNoContent, w.Code)
@@ -8506,7 +8694,7 @@ func TestGetObjectAttributes(t *testing.T) {
 	t.Run("returns ETag when requested", func(t *testing.T) {
 		ro, bucket, key := setup(t)
 		req := httptest.NewRequest(http.MethodGet, "/"+bucket+"/"+key+"?attributes", nil)
-		req.Header.Set("x-amz-object-attributes", "ETag")
+		req.Header.Set(amzObjectAttributes, "ETag")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		require.Equal(t, http.StatusOK, w.Code)
@@ -8520,7 +8708,7 @@ func TestGetObjectAttributes(t *testing.T) {
 	t.Run("returns 400 when x-amz-object-attributes header is whitespace-only", func(t *testing.T) {
 		ro, bucket, key := setup(t)
 		req := httptest.NewRequest(http.MethodGet, "/"+bucket+"/"+key+"?attributes", nil)
-		req.Header.Set("x-amz-object-attributes", " , ")
+		req.Header.Set(amzObjectAttributes, " , ")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -8530,7 +8718,7 @@ func TestGetObjectAttributes(t *testing.T) {
 	t.Run("returns ObjectSize when requested", func(t *testing.T) {
 		ro, bucket, key := setup(t)
 		req := httptest.NewRequest(http.MethodGet, "/"+bucket+"/"+key+"?attributes", nil)
-		req.Header.Set("x-amz-object-attributes", "ObjectSize")
+		req.Header.Set(amzObjectAttributes, "ObjectSize")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		require.Equal(t, http.StatusOK, w.Code)
@@ -8540,7 +8728,7 @@ func TestGetObjectAttributes(t *testing.T) {
 	t.Run("returns StorageClass when requested", func(t *testing.T) {
 		ro, bucket, key := setup(t)
 		req := httptest.NewRequest(http.MethodGet, "/"+bucket+"/"+key+"?attributes", nil)
-		req.Header.Set("x-amz-object-attributes", "StorageClass")
+		req.Header.Set(amzObjectAttributes, "StorageClass")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		require.Equal(t, http.StatusOK, w.Code)
@@ -8563,7 +8751,7 @@ func TestGetObjectAttributes(t *testing.T) {
 		ro.ServeHTTP(httptest.NewRecorder(), putReq)
 
 		req := httptest.NewRequest(http.MethodGet, "/attr-bucket/glacier.txt?attributes", nil)
-		req.Header.Set("x-amz-object-attributes", "StorageClass")
+		req.Header.Set(amzObjectAttributes, "StorageClass")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		require.Equal(t, http.StatusOK, w.Code)
@@ -8573,7 +8761,7 @@ func TestGetObjectAttributes(t *testing.T) {
 	t.Run("returns multiple attributes when requested together", func(t *testing.T) {
 		ro, bucket, key := setup(t)
 		req := httptest.NewRequest(http.MethodGet, "/"+bucket+"/"+key+"?attributes", nil)
-		req.Header.Set("x-amz-object-attributes", "ETag, StorageClass, ObjectSize")
+		req.Header.Set(amzObjectAttributes, "ETag, StorageClass, ObjectSize")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		require.Equal(t, http.StatusOK, w.Code)
@@ -8586,7 +8774,7 @@ func TestGetObjectAttributes(t *testing.T) {
 	t.Run("omits unrequested attributes", func(t *testing.T) {
 		ro, bucket, key := setup(t)
 		req := httptest.NewRequest(http.MethodGet, "/"+bucket+"/"+key+"?attributes", nil)
-		req.Header.Set("x-amz-object-attributes", "ObjectSize")
+		req.Header.Set(amzObjectAttributes, "ObjectSize")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		require.Equal(t, http.StatusOK, w.Code)
@@ -8598,7 +8786,7 @@ func TestGetObjectAttributes(t *testing.T) {
 	t.Run("Checksum attribute returns empty response without error", func(t *testing.T) {
 		ro, bucket, key := setup(t)
 		req := httptest.NewRequest(http.MethodGet, "/"+bucket+"/"+key+"?attributes", nil)
-		req.Header.Set("x-amz-object-attributes", "Checksum")
+		req.Header.Set(amzObjectAttributes, "Checksum")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		require.Equal(t, http.StatusOK, w.Code)
@@ -8611,7 +8799,7 @@ func TestGetObjectAttributes(t *testing.T) {
 			httptest.NewRequest(http.MethodPut, "/attr-bucket", nil),
 		)
 		req := httptest.NewRequest(http.MethodGet, "/attr-bucket/missing.txt?attributes", nil)
-		req.Header.Set("x-amz-object-attributes", "ETag")
+		req.Header.Set(amzObjectAttributes, "ETag")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNotFound, w.Code)
@@ -8621,7 +8809,7 @@ func TestGetObjectAttributes(t *testing.T) {
 	t.Run("returns 404 when bucket does not exist", func(t *testing.T) {
 		ro := newTestRouter(t)
 		req := httptest.NewRequest(http.MethodGet, "/no-bucket/obj.txt?attributes", nil)
-		req.Header.Set("x-amz-object-attributes", "ETag")
+		req.Header.Set(amzObjectAttributes, "ETag")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNotFound, w.Code)
@@ -8640,7 +8828,7 @@ func TestGetObjectAttributes(t *testing.T) {
 	t.Run("returns 400 when attribute is unknown", func(t *testing.T) {
 		ro, bucket, key := setup(t)
 		req := httptest.NewRequest(http.MethodGet, "/"+bucket+"/"+key+"?attributes", nil)
-		req.Header.Set("x-amz-object-attributes", "UnknownAttr")
+		req.Header.Set(amzObjectAttributes, "UnknownAttr")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -8702,7 +8890,7 @@ func TestGetObjectAttributes(t *testing.T) {
 
 		// GetObjectAttributes
 		req := httptest.NewRequest(http.MethodGet, "/"+bucket+"/"+key+"?attributes", nil)
-		req.Header.Set("x-amz-object-attributes", "ObjectParts,ETag")
+		req.Header.Set(amzObjectAttributes, "ObjectParts,ETag")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		require.Equal(t, http.StatusOK, w.Code)
@@ -8713,7 +8901,7 @@ func TestGetObjectAttributes(t *testing.T) {
 	t.Run("ObjectParts is absent for single-part objects", func(t *testing.T) {
 		ro, bucket, key := setup(t)
 		req := httptest.NewRequest(http.MethodGet, "/"+bucket+"/"+key+"?attributes", nil)
-		req.Header.Set("x-amz-object-attributes", "ObjectParts")
+		req.Header.Set(amzObjectAttributes, "ObjectParts")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		require.Equal(t, http.StatusOK, w.Code)
@@ -8747,7 +8935,7 @@ func TestGetObjectAttributes(t *testing.T) {
 			"/"+bucket+"/"+key+"?attributes&versionId="+vid,
 			nil,
 		)
-		req.Header.Set("x-amz-object-attributes", "ETag,ObjectSize")
+		req.Header.Set(amzObjectAttributes, "ETag,ObjectSize")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		require.Equal(t, http.StatusOK, w.Code)
@@ -8777,7 +8965,7 @@ func TestGetObjectAttributes(t *testing.T) {
 		))
 
 		req := httptest.NewRequest(http.MethodGet, "/"+bucket+"/"+key+"?attributes", nil)
-		req.Header.Set("x-amz-object-attributes", "ETag")
+		req.Header.Set(amzObjectAttributes, "ETag")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
@@ -8789,7 +8977,7 @@ func TestGetObjectAttributes(t *testing.T) {
 			headObjectErr: errors.New("disk failure"),
 		})
 		req := httptest.NewRequest(http.MethodGet, "/any-bucket/any-key?attributes", nil)
-		req.Header.Set("x-amz-object-attributes", "ETag")
+		req.Header.Set(amzObjectAttributes, "ETag")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
