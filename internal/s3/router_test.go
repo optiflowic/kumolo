@@ -252,7 +252,7 @@ func TestHeadBucket(t *testing.T) {
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Equal(t, "us-west-2", w.Header().Get("x-amz-bucket-region"))
+		assert.Equal(t, "us-west-2", w.Header().Get(amzBucketRegion))
 	})
 
 	t.Run("returns us-east-1 when region is unset", func(t *testing.T) {
@@ -263,7 +263,7 @@ func TestHeadBucket(t *testing.T) {
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Equal(t, "us-east-1", w.Header().Get("x-amz-bucket-region"))
+		assert.Equal(t, "us-east-1", w.Header().Get(amzBucketRegion))
 	})
 
 	t.Run("returns 404 for nonexistent bucket", func(t *testing.T) {

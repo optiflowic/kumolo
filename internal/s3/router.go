@@ -34,6 +34,7 @@ const (
 	amzMetadataDirective           = "X-Amz-Metadata-Directive"
 	amzCopySourceRange             = "X-Amz-Copy-Source-Range"
 	amzBypassGovernanceRetention   = "X-Amz-Bypass-Governance-Retention" // #nosec G101 -- HTTP header name, not a credential
+	amzBucketRegion                = "X-Amz-Bucket-Region"
 	amzObjectLockEnabled           = "X-Amz-Object-Lock-Enabled"
 	amzObjectLockMode              = "X-Amz-Object-Lock-Mode"
 	amzObjectLockRetainUntilDate   = "X-Amz-Object-Lock-Retain-Until-Date"
@@ -1944,7 +1945,7 @@ func (ro *Router) handleHeadBucket(w http.ResponseWriter, r *http.Request, bucke
 	if region == "" {
 		region = "us-east-1"
 	}
-	w.Header().Set("x-amz-bucket-region", region)
+	w.Header().Set(amzBucketRegion, region)
 	w.WriteHeader(http.StatusOK)
 }
 
