@@ -24,7 +24,7 @@ Initial release of kumolo — a high-fidelity AWS emulator for local development
 - CORS: `PutBucketCors`, `GetBucketCors`, `DeleteBucketCors`; preflight `OPTIONS` enforcement
 - Bucket policy: `PutBucketPolicy`, `GetBucketPolicy`, `DeleteBucketPolicy`
 - Encryption config: `PutBucketEncryption`, `GetBucketEncryption`, `DeleteBucketEncryption`
-- Lifecycle: `PutBucketLifecycleConfiguration`, `GetBucketLifecycleConfiguration`, `DeleteBucketLifecycleConfiguration`; background rule enforcement
+- Lifecycle: `PutBucketLifecycleConfiguration`, `GetBucketLifecycleConfiguration`, `DeleteBucketLifecycle`; background rule enforcement
 - Website, logging, replication, ownership controls, request payment, accelerate, public access block config endpoints
 - ACL: `GetBucketAcl`, `PutBucketAcl`, `GetObjectAcl`, `PutObjectAcl` (stored; not enforced)
 - `GetObjectAttributes`, `RestoreObject`
