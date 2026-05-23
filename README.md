@@ -106,12 +106,11 @@ kumolo aims for high fidelity, but some behaviors differ from real AWS by design
 **S3**
 
 - Bucket Policy and ACL rules are stored and returned but not enforced — all requests are permitted regardless of policy content.
-- `Expiration.Date` and `ExpiredObjectDeleteMarker` Lifecycle rules are stored but never evaluated; only `Expiration.Days` and `NoncurrentVersionExpiration` rules are applied.
 - SigV4 request signatures are parsed but not cryptographically verified. This is intentional for local development.
 
 **DynamoDB**
 
-- `ReturnConsumedCapacity` is accepted without error but `ConsumedCapacity` is omitted from all responses.
+- `ConsumedCapacity` is returned when `ReturnConsumedCapacity` is `TOTAL` or `INDEXES`, but `CapacityUnits` is always `1.0` — actual RCU/WCU are not computed.
 - Number attribute comparisons use `float64` precision. Values with more than 15 significant digits may not compare correctly.
 
 **STS**

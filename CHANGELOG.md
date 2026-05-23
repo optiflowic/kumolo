@@ -37,6 +37,12 @@ Initial release of kumolo — a high-fidelity AWS emulator for local development
 - Presigned URL support
 - 5 MB minimum part size enforcement on `UploadPart`
 
+### Fixed
+
+- S3: `Expiration.Date` lifecycle rules now correctly expire all matching objects once `now >= Date`; previously these rules were stored but never evaluated
+- S3: `ExpiredObjectDeleteMarker` now removes delete markers that are the sole remaining version of a key
+- DynamoDB: `ConsumedCapacity` is now included in responses when `ReturnConsumedCapacity` is `TOTAL` or `INDEXES`; invalid enum values are rejected with `ValidationException`
+
 #### DynamoDB
 
 - Table operations: `CreateTable`, `DeleteTable`, `DescribeTable`, `ListTables`, `UpdateTable`
