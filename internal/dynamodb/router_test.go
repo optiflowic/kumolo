@@ -7306,4 +7306,54 @@ func TestHandleConsumedCapacity(t *testing.T) {
 			assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 		})
 	}
+
+	t.Run("Scan COUNT with TOTAL returns ConsumedCapacity", func(t *testing.T) {
+		w := dynamo(
+			t,
+			ro,
+			"Scan",
+			`{"TableName":"cc-table","Select":"COUNT","ReturnConsumedCapacity":"TOTAL"}`,
+		)
+		require.Equal(t, http.StatusOK, w.Code)
+		cc := parseCC(t, w.Body.Bytes())
+		assert.Equal(t, "cc-table", cc["TableName"])
+		assert.Equal(t, 1.0, cc["CapacityUnits"])
+	})
+
+	t.Run("Query COUNT with TOTAL returns ConsumedCapacity", func(t *testing.T) {
+		w := dynamo(t, ro, "Query", `{
+			"TableName":"cc-table",
+			"Select":"COUNT",
+			"KeyConditionExpression":"pk = :v",
+			"ExpressionAttributeValues":{":v":{"S":"k2"}},
+			"ReturnConsumedCapacity":"TOTAL"
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		cc := parseCC(t, w.Body.Bytes())
+		assert.Equal(t, "cc-table", cc["TableName"])
+		assert.Equal(t, 1.0, cc["CapacityUnits"])
+	})
+
+	t.Run(
+		"TransactWriteItems Delete Update ConditionCheck with TOTAL returns ConsumedCapacity",
+		func(t *testing.T) {
+			dynamo(t, ro, "PutItem", `{"TableName":"cc-table","Item":{"pk":{"S":"tx-del"}}}`)
+			dynamo(t, ro, "PutItem", `{"TableName":"cc-table","Item":{"pk":{"S":"tx-upd"}}}`)
+			dynamo(t, ro, "PutItem", `{"TableName":"cc-table","Item":{"pk":{"S":"tx-cond"}}}`)
+			w := dynamo(t, ro, "TransactWriteItems", `{
+			"TransactItems":[
+				{"Delete":{"TableName":"cc-table","Key":{"pk":{"S":"tx-del"}}}},
+				{"Update":{"TableName":"cc-table","Key":{"pk":{"S":"tx-upd"}},"UpdateExpression":"SET foo = :v","ExpressionAttributeValues":{":v":{"S":"bar"}}}},
+				{"ConditionCheck":{"TableName":"cc-table","Key":{"pk":{"S":"tx-cond"}},"ConditionExpression":"attribute_exists(pk)"}}
+			],
+			"ReturnConsumedCapacity":"TOTAL"
+		}`)
+			require.Equal(t, http.StatusOK, w.Code)
+			arr := parseCCArray(t, w.Body.Bytes())
+			require.Len(t, arr, 1)
+			cc := arr[0].(map[string]any)
+			assert.Equal(t, "cc-table", cc["TableName"])
+			assert.Equal(t, 1.0, cc["CapacityUnits"])
+		},
+	)
 }

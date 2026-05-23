@@ -442,7 +442,7 @@ func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 			case a.ConditionCheck != nil:
 				tableName = a.ConditionCheck.TableName
 			}
-			if tableName != "" {
+			if tableName != "" { // untestable: TransactWriteItems only succeeds with valid table names
 				if _, ok := seen[tableName]; !ok {
 					seen[tableName] = struct{}{}
 					ccs = append(ccs, buildConsumedCapacity(tableName, req.ReturnConsumedCapacity))
