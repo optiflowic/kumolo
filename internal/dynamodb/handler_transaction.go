@@ -19,6 +19,7 @@ func (ro *Router) handleTransactGetItems(w http.ResponseWriter, body []byte) {
 				ExpressionAttributeNames map[string]string `json:"ExpressionAttributeNames"`
 			} `json:"Get"`
 		} `json:"TransactItems"`
+		ReturnConsumedCapacity string `json:"ReturnConsumedCapacity"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(
@@ -48,6 +49,9 @@ func (ro *Router) handleTransactGetItems(w http.ResponseWriter, body []byte) {
 				len(req.TransactItems),
 			),
 		)
+		return
+	}
+	if !validateReturnConsumedCapacity(w, req.ReturnConsumedCapacity) {
 		return
 	}
 	gets := make([]TransactGetInput, len(req.TransactItems))
@@ -134,12 +138,25 @@ func (ro *Router) handleTransactGetItems(w http.ResponseWriter, body []byte) {
 		responses[i] = map[string]any{"Item": item}
 	}
 	slog.Debug("TransactGetItems", "count", len(items))
-	writeJSON(w, http.StatusOK, map[string]any{"Responses": responses})
+	txResp := map[string]any{"Responses": responses}
+	if req.ReturnConsumedCapacity != "" && req.ReturnConsumedCapacity != "NONE" {
+		seen := make(map[string]struct{})
+		var ccs []map[string]any
+		for _, g := range gets {
+			if _, ok := seen[g.TableName]; !ok {
+				seen[g.TableName] = struct{}{}
+				ccs = append(ccs, buildConsumedCapacity(g.TableName, req.ReturnConsumedCapacity))
+			}
+		}
+		txResp["ConsumedCapacity"] = ccs
+	}
+	writeJSON(w, http.StatusOK, txResp)
 }
 
 func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 	var req struct {
-		TransactItems []struct {
+		ReturnConsumedCapacity string `json:"ReturnConsumedCapacity"`
+		TransactItems          []struct {
 			Put *struct {
 				TableName                           string            `json:"TableName"`
 				Item                                map[string]any    `json:"Item"`
@@ -203,6 +220,9 @@ func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 				len(req.TransactItems),
 			),
 		)
+		return
+	}
+	if !validateReturnConsumedCapacity(w, req.ReturnConsumedCapacity) {
 		return
 	}
 
@@ -406,5 +426,30 @@ func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 		return
 	}
 	slog.Info("TransactWriteItems succeeded", "count", len(actions))
-	writeJSON(w, http.StatusOK, map[string]any{})
+	txResp := map[string]any{}
+	if req.ReturnConsumedCapacity != "" && req.ReturnConsumedCapacity != "NONE" {
+		seen := make(map[string]struct{})
+		var ccs []map[string]any
+		for _, a := range actions {
+			var tableName string
+			switch {
+			case a.Put != nil:
+				tableName = a.Put.TableName
+			case a.Delete != nil:
+				tableName = a.Delete.TableName
+			case a.Update != nil:
+				tableName = a.Update.TableName
+			case a.ConditionCheck != nil:
+				tableName = a.ConditionCheck.TableName
+			}
+			if tableName != "" {
+				if _, ok := seen[tableName]; !ok {
+					seen[tableName] = struct{}{}
+					ccs = append(ccs, buildConsumedCapacity(tableName, req.ReturnConsumedCapacity))
+				}
+			}
+		}
+		txResp["ConsumedCapacity"] = ccs
+	}
+	writeJSON(w, http.StatusOK, txResp)
 }

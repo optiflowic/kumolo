@@ -12,6 +12,7 @@ func (ro *Router) handlePutItem(w http.ResponseWriter, body []byte) {
 		TableName                 string            `json:"TableName"`
 		Item                      map[string]any    `json:"Item"`
 		ReturnValues              string            `json:"ReturnValues"`
+		ReturnConsumedCapacity    string            `json:"ReturnConsumedCapacity"`
 		ConditionExpression       string            `json:"ConditionExpression"`
 		ExpressionAttributeNames  map[string]string `json:"ExpressionAttributeNames"`
 		ExpressionAttributeValues map[string]any    `json:"ExpressionAttributeValues"`
@@ -43,6 +44,9 @@ func (ro *Router) handlePutItem(w http.ResponseWriter, body []byte) {
 			"com.amazonaws.dynamodb.v20120810#ValidationException",
 			"Value '"+req.ReturnValues+"' at 'returnValues' failed to satisfy constraint: Member must satisfy enum value set: [ALL_OLD, NONE]",
 		)
+		return
+	}
+	if !validateReturnConsumedCapacity(w, req.ReturnConsumedCapacity) {
 		return
 	}
 	if err := validateUnusedExprRefs(
@@ -107,6 +111,9 @@ func (ro *Router) handlePutItem(w http.ResponseWriter, body []byte) {
 	if req.ReturnValues == "ALL_OLD" && old != nil {
 		resp["Attributes"] = old
 	}
+	if cc := buildConsumedCapacity(req.TableName, req.ReturnConsumedCapacity); cc != nil {
+		resp["ConsumedCapacity"] = cc
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -116,6 +123,7 @@ func (ro *Router) handleGetItem(w http.ResponseWriter, body []byte) {
 		Key                      map[string]any    `json:"Key"`
 		ProjectionExpression     string            `json:"ProjectionExpression"`
 		ExpressionAttributeNames map[string]string `json:"ExpressionAttributeNames"`
+		ReturnConsumedCapacity   string            `json:"ReturnConsumedCapacity"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(
@@ -133,6 +141,9 @@ func (ro *Router) handleGetItem(w http.ResponseWriter, body []byte) {
 			"com.amazonaws.dynamodb.v20120810#ValidationException",
 			"TableName is required",
 		)
+		return
+	}
+	if !validateReturnConsumedCapacity(w, req.ReturnConsumedCapacity) {
 		return
 	}
 	if err := validateUnusedExprRefs(
@@ -203,6 +214,9 @@ func (ro *Router) handleGetItem(w http.ResponseWriter, body []byte) {
 	if item != nil {
 		resp["Item"] = item
 	}
+	if cc := buildConsumedCapacity(req.TableName, req.ReturnConsumedCapacity); cc != nil {
+		resp["ConsumedCapacity"] = cc
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -211,6 +225,7 @@ func (ro *Router) handleDeleteItem(w http.ResponseWriter, body []byte) {
 		TableName                 string            `json:"TableName"`
 		Key                       map[string]any    `json:"Key"`
 		ReturnValues              string            `json:"ReturnValues"`
+		ReturnConsumedCapacity    string            `json:"ReturnConsumedCapacity"`
 		ConditionExpression       string            `json:"ConditionExpression"`
 		ExpressionAttributeNames  map[string]string `json:"ExpressionAttributeNames"`
 		ExpressionAttributeValues map[string]any    `json:"ExpressionAttributeValues"`
@@ -242,6 +257,9 @@ func (ro *Router) handleDeleteItem(w http.ResponseWriter, body []byte) {
 			"com.amazonaws.dynamodb.v20120810#ValidationException",
 			"Value '"+req.ReturnValues+"' at 'returnValues' failed to satisfy constraint: Member must satisfy enum value set: [ALL_OLD, NONE]",
 		)
+		return
+	}
+	if !validateReturnConsumedCapacity(w, req.ReturnConsumedCapacity) {
 		return
 	}
 	if err := validateUnusedExprRefs(
@@ -306,6 +324,9 @@ func (ro *Router) handleDeleteItem(w http.ResponseWriter, body []byte) {
 	if req.ReturnValues == "ALL_OLD" && old != nil {
 		resp["Attributes"] = old
 	}
+	if cc := buildConsumedCapacity(req.TableName, req.ReturnConsumedCapacity); cc != nil {
+		resp["ConsumedCapacity"] = cc
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -318,6 +339,7 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 		ExpressionAttributeNames  map[string]string `json:"ExpressionAttributeNames"`
 		ExpressionAttributeValues map[string]any    `json:"ExpressionAttributeValues"`
 		ReturnValues              string            `json:"ReturnValues"`
+		ReturnConsumedCapacity    string            `json:"ReturnConsumedCapacity"`
 		AttributeUpdates          map[string]struct {
 			Action string `json:"Action"`
 			Value  any    `json:"Value"`
@@ -351,6 +373,9 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 			"com.amazonaws.dynamodb.v20120810#ValidationException",
 			"Value '"+req.ReturnValues+"' at 'returnValues' failed to satisfy constraint: Member must satisfy enum value set: [ALL_NEW, UPDATED_OLD, ALL_OLD, NONE, UPDATED_NEW]",
 		)
+		return
+	}
+	if !validateReturnConsumedCapacity(w, req.ReturnConsumedCapacity) {
 		return
 	}
 
@@ -454,6 +479,9 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 	}
 	slog.Info("updated DynamoDB item", "table", req.TableName)
 	resp := map[string]any{}
+	if cc := buildConsumedCapacity(req.TableName, req.ReturnConsumedCapacity); cc != nil {
+		resp["ConsumedCapacity"] = cc
+	}
 	switch req.ReturnValues {
 	case "ALL_NEW":
 		resp["Attributes"] = after

@@ -8,6 +8,39 @@ import (
 	"strings"
 )
 
+// buildConsumedCapacity returns a ConsumedCapacity object for a single table.
+// Returns nil when mode is NONE or empty (i.e. caller must omit the field).
+// kumolo always reports CapacityUnits as 1.0 rather than computing actual RCU/WCU.
+func buildConsumedCapacity(tableName, mode string) map[string]any {
+	if mode == "" || mode == "NONE" {
+		return nil
+	}
+	cc := map[string]any{
+		"TableName":     tableName,
+		"CapacityUnits": 1.0,
+	}
+	if mode == "INDEXES" {
+		cc["Table"] = map[string]any{"CapacityUnits": 1.0}
+	}
+	return cc
+}
+
+// validateReturnConsumedCapacity rejects invalid ReturnConsumedCapacity enum values.
+func validateReturnConsumedCapacity(w http.ResponseWriter, mode string) bool {
+	switch mode {
+	case "", "NONE", "TOTAL", "INDEXES":
+		return true
+	default:
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			"Value '"+mode+"' at 'returnConsumedCapacity' failed to satisfy constraint: Member must satisfy enum value set: [INDEXES, NONE, TOTAL]",
+		)
+		return false
+	}
+}
+
 // validateSelectCommon validates Select+ProjectionExpression for Scan/Query; caller handles ALL_PROJECTED_ATTRIBUTES.
 func validateSelectCommon(w http.ResponseWriter, selectVal, projExpr string) bool {
 	switch selectVal {

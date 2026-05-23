@@ -7076,3 +7076,284 @@ func TestNestedPathFilterExpression(t *testing.T) {
 		assert.Equal(t, "p3", items[0].(map[string]any)["pk"].(map[string]any)["S"])
 	})
 }
+
+func TestHandleConsumedCapacity(t *testing.T) {
+	ro := newTestRouter(t)
+	require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", `{
+		"TableName": "cc-table",
+		"KeySchema": [{"AttributeName": "pk", "KeyType": "HASH"}],
+		"AttributeDefinitions": [{"AttributeName": "pk", "AttributeType": "S"}],
+		"BillingMode": "PAY_PER_REQUEST"
+	}`).Code)
+
+	parseCC := func(t *testing.T, body []byte) map[string]any {
+		t.Helper()
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(body, &resp))
+		cc, ok := resp["ConsumedCapacity"]
+		require.True(t, ok, "ConsumedCapacity absent from response")
+		m, ok := cc.(map[string]any)
+		require.True(t, ok, "ConsumedCapacity is not an object")
+		return m
+	}
+	parseCCArray := func(t *testing.T, body []byte) []any {
+		t.Helper()
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(body, &resp))
+		cc, ok := resp["ConsumedCapacity"]
+		require.True(t, ok, "ConsumedCapacity absent from response")
+		arr, ok := cc.([]any)
+		require.True(t, ok, "ConsumedCapacity is not an array")
+		return arr
+	}
+
+	t.Run("PutItem NONE omits ConsumedCapacity", func(t *testing.T) {
+		w := dynamo(t, ro, "PutItem", `{"TableName":"cc-table","Item":{"pk":{"S":"k1"}}}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Nil(t, resp["ConsumedCapacity"])
+	})
+
+	t.Run("PutItem TOTAL returns ConsumedCapacity", func(t *testing.T) {
+		w := dynamo(
+			t,
+			ro,
+			"PutItem",
+			`{"TableName":"cc-table","Item":{"pk":{"S":"k2"}},"ReturnConsumedCapacity":"TOTAL"}`,
+		)
+		require.Equal(t, http.StatusOK, w.Code)
+		cc := parseCC(t, w.Body.Bytes())
+		assert.Equal(t, "cc-table", cc["TableName"])
+		assert.Equal(t, 1.0, cc["CapacityUnits"])
+		assert.Nil(t, cc["Table"])
+	})
+
+	t.Run("PutItem INDEXES returns ConsumedCapacity with Table breakdown", func(t *testing.T) {
+		w := dynamo(
+			t,
+			ro,
+			"PutItem",
+			`{"TableName":"cc-table","Item":{"pk":{"S":"k3"}},"ReturnConsumedCapacity":"INDEXES"}`,
+		)
+		require.Equal(t, http.StatusOK, w.Code)
+		cc := parseCC(t, w.Body.Bytes())
+		assert.Equal(t, "cc-table", cc["TableName"])
+		assert.Equal(t, 1.0, cc["CapacityUnits"])
+		tbl := cc["Table"].(map[string]any)
+		assert.Equal(t, 1.0, tbl["CapacityUnits"])
+	})
+
+	t.Run("GetItem TOTAL returns ConsumedCapacity", func(t *testing.T) {
+		w := dynamo(
+			t,
+			ro,
+			"GetItem",
+			`{"TableName":"cc-table","Key":{"pk":{"S":"k1"}},"ReturnConsumedCapacity":"TOTAL"}`,
+		)
+		require.Equal(t, http.StatusOK, w.Code)
+		cc := parseCC(t, w.Body.Bytes())
+		assert.Equal(t, "cc-table", cc["TableName"])
+		assert.Equal(t, 1.0, cc["CapacityUnits"])
+	})
+
+	t.Run("DeleteItem TOTAL returns ConsumedCapacity", func(t *testing.T) {
+		w := dynamo(
+			t,
+			ro,
+			"DeleteItem",
+			`{"TableName":"cc-table","Key":{"pk":{"S":"k1"}},"ReturnConsumedCapacity":"TOTAL"}`,
+		)
+		require.Equal(t, http.StatusOK, w.Code)
+		cc := parseCC(t, w.Body.Bytes())
+		assert.Equal(t, "cc-table", cc["TableName"])
+		assert.Equal(t, 1.0, cc["CapacityUnits"])
+	})
+
+	t.Run("UpdateItem TOTAL returns ConsumedCapacity", func(t *testing.T) {
+		w := dynamo(t, ro, "UpdateItem", `{
+			"TableName":"cc-table",
+			"Key":{"pk":{"S":"k2"}},
+			"UpdateExpression":"SET foo = :v",
+			"ExpressionAttributeValues":{":v":{"S":"bar"}},
+			"ReturnConsumedCapacity":"TOTAL"
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		cc := parseCC(t, w.Body.Bytes())
+		assert.Equal(t, "cc-table", cc["TableName"])
+		assert.Equal(t, 1.0, cc["CapacityUnits"])
+	})
+
+	t.Run("Query TOTAL returns ConsumedCapacity", func(t *testing.T) {
+		w := dynamo(t, ro, "Query", `{
+			"TableName":"cc-table",
+			"KeyConditionExpression":"pk = :v",
+			"ExpressionAttributeValues":{":v":{"S":"k2"}},
+			"ReturnConsumedCapacity":"TOTAL"
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		cc := parseCC(t, w.Body.Bytes())
+		assert.Equal(t, "cc-table", cc["TableName"])
+		assert.Equal(t, 1.0, cc["CapacityUnits"])
+	})
+
+	t.Run("Scan TOTAL returns ConsumedCapacity", func(t *testing.T) {
+		w := dynamo(t, ro, "Scan", `{"TableName":"cc-table","ReturnConsumedCapacity":"TOTAL"}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		cc := parseCC(t, w.Body.Bytes())
+		assert.Equal(t, "cc-table", cc["TableName"])
+		assert.Equal(t, 1.0, cc["CapacityUnits"])
+	})
+
+	t.Run("BatchGetItem TOTAL returns ConsumedCapacity array", func(t *testing.T) {
+		w := dynamo(t, ro, "BatchGetItem", `{
+			"RequestItems":{"cc-table":{"Keys":[{"pk":{"S":"k2"}}]}},
+			"ReturnConsumedCapacity":"TOTAL"
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		arr := parseCCArray(t, w.Body.Bytes())
+		require.Len(t, arr, 1)
+		cc := arr[0].(map[string]any)
+		assert.Equal(t, "cc-table", cc["TableName"])
+		assert.Equal(t, 1.0, cc["CapacityUnits"])
+	})
+
+	t.Run("BatchWriteItem TOTAL returns ConsumedCapacity array", func(t *testing.T) {
+		w := dynamo(t, ro, "BatchWriteItem", `{
+			"RequestItems":{"cc-table":[{"PutRequest":{"Item":{"pk":{"S":"k4"}}}}]},
+			"ReturnConsumedCapacity":"TOTAL"
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		arr := parseCCArray(t, w.Body.Bytes())
+		require.Len(t, arr, 1)
+		cc := arr[0].(map[string]any)
+		assert.Equal(t, "cc-table", cc["TableName"])
+		assert.Equal(t, 1.0, cc["CapacityUnits"])
+	})
+
+	t.Run("TransactGetItems TOTAL returns ConsumedCapacity array", func(t *testing.T) {
+		w := dynamo(t, ro, "TransactGetItems", `{
+			"TransactItems":[{"Get":{"TableName":"cc-table","Key":{"pk":{"S":"k2"}}}}],
+			"ReturnConsumedCapacity":"TOTAL"
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		arr := parseCCArray(t, w.Body.Bytes())
+		require.Len(t, arr, 1)
+		cc := arr[0].(map[string]any)
+		assert.Equal(t, "cc-table", cc["TableName"])
+		assert.Equal(t, 1.0, cc["CapacityUnits"])
+	})
+
+	t.Run("TransactWriteItems TOTAL returns ConsumedCapacity array", func(t *testing.T) {
+		w := dynamo(t, ro, "TransactWriteItems", `{
+			"TransactItems":[{"Put":{"TableName":"cc-table","Item":{"pk":{"S":"k5"}}}}],
+			"ReturnConsumedCapacity":"TOTAL"
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		arr := parseCCArray(t, w.Body.Bytes())
+		require.Len(t, arr, 1)
+		cc := arr[0].(map[string]any)
+		assert.Equal(t, "cc-table", cc["TableName"])
+		assert.Equal(t, 1.0, cc["CapacityUnits"])
+	})
+
+	invalidCCOps := []struct {
+		op   string
+		body string
+	}{
+		{
+			"PutItem",
+			`{"TableName":"cc-table","Item":{"pk":{"S":"x"}},"ReturnConsumedCapacity":"INVALID"}`,
+		},
+		{
+			"GetItem",
+			`{"TableName":"cc-table","Key":{"pk":{"S":"x"}},"ReturnConsumedCapacity":"INVALID"}`,
+		},
+		{
+			"DeleteItem",
+			`{"TableName":"cc-table","Key":{"pk":{"S":"x"}},"ReturnConsumedCapacity":"INVALID"}`,
+		},
+		{
+			"UpdateItem",
+			`{"TableName":"cc-table","Key":{"pk":{"S":"x"}},"ReturnConsumedCapacity":"INVALID"}`,
+		},
+		{
+			"Query",
+			`{"TableName":"cc-table","KeyConditionExpression":"pk = :v","ExpressionAttributeValues":{":v":{"S":"x"}},"ReturnConsumedCapacity":"INVALID"}`,
+		},
+		{"Scan", `{"TableName":"cc-table","ReturnConsumedCapacity":"INVALID"}`},
+		{
+			"BatchGetItem",
+			`{"RequestItems":{"cc-table":{"Keys":[{"pk":{"S":"x"}}]}},"ReturnConsumedCapacity":"INVALID"}`,
+		},
+		{
+			"BatchWriteItem",
+			`{"RequestItems":{"cc-table":[{"PutRequest":{"Item":{"pk":{"S":"x"}}}}]},"ReturnConsumedCapacity":"INVALID"}`,
+		},
+		{
+			"TransactGetItems",
+			`{"TransactItems":[{"Get":{"TableName":"cc-table","Key":{"pk":{"S":"x"}}}}],"ReturnConsumedCapacity":"INVALID"}`,
+		},
+		{
+			"TransactWriteItems",
+			`{"TransactItems":[{"Put":{"TableName":"cc-table","Item":{"pk":{"S":"x"}}}}],"ReturnConsumedCapacity":"INVALID"}`,
+		},
+	}
+	for _, tc := range invalidCCOps {
+		t.Run(tc.op+" invalid ReturnConsumedCapacity returns 400", func(t *testing.T) {
+			w := dynamo(t, ro, tc.op, tc.body)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+		})
+	}
+
+	t.Run("Scan COUNT with TOTAL returns ConsumedCapacity", func(t *testing.T) {
+		w := dynamo(
+			t,
+			ro,
+			"Scan",
+			`{"TableName":"cc-table","Select":"COUNT","ReturnConsumedCapacity":"TOTAL"}`,
+		)
+		require.Equal(t, http.StatusOK, w.Code)
+		cc := parseCC(t, w.Body.Bytes())
+		assert.Equal(t, "cc-table", cc["TableName"])
+		assert.Equal(t, 1.0, cc["CapacityUnits"])
+	})
+
+	t.Run("Query COUNT with TOTAL returns ConsumedCapacity", func(t *testing.T) {
+		w := dynamo(t, ro, "Query", `{
+			"TableName":"cc-table",
+			"Select":"COUNT",
+			"KeyConditionExpression":"pk = :v",
+			"ExpressionAttributeValues":{":v":{"S":"k2"}},
+			"ReturnConsumedCapacity":"TOTAL"
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		cc := parseCC(t, w.Body.Bytes())
+		assert.Equal(t, "cc-table", cc["TableName"])
+		assert.Equal(t, 1.0, cc["CapacityUnits"])
+	})
+
+	t.Run(
+		"TransactWriteItems Delete Update ConditionCheck with TOTAL returns ConsumedCapacity",
+		func(t *testing.T) {
+			dynamo(t, ro, "PutItem", `{"TableName":"cc-table","Item":{"pk":{"S":"tx-del"}}}`)
+			dynamo(t, ro, "PutItem", `{"TableName":"cc-table","Item":{"pk":{"S":"tx-upd"}}}`)
+			dynamo(t, ro, "PutItem", `{"TableName":"cc-table","Item":{"pk":{"S":"tx-cond"}}}`)
+			w := dynamo(t, ro, "TransactWriteItems", `{
+			"TransactItems":[
+				{"Delete":{"TableName":"cc-table","Key":{"pk":{"S":"tx-del"}}}},
+				{"Update":{"TableName":"cc-table","Key":{"pk":{"S":"tx-upd"}},"UpdateExpression":"SET foo = :v","ExpressionAttributeValues":{":v":{"S":"bar"}}}},
+				{"ConditionCheck":{"TableName":"cc-table","Key":{"pk":{"S":"tx-cond"}},"ConditionExpression":"attribute_exists(pk)"}}
+			],
+			"ReturnConsumedCapacity":"TOTAL"
+		}`)
+			require.Equal(t, http.StatusOK, w.Code)
+			arr := parseCCArray(t, w.Body.Bytes())
+			require.Len(t, arr, 1)
+			cc := arr[0].(map[string]any)
+			assert.Equal(t, "cc-table", cc["TableName"])
+			assert.Equal(t, 1.0, cc["CapacityUnits"])
+		},
+	)
+}
