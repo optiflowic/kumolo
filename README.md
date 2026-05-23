@@ -92,6 +92,25 @@ For the full list of supported operations, see the [documentation](https://optif
 | `KUMOLO_DATA_DIR`     | `./data`  | Persistent storage directory      |
 | `KUMOLO_LOG_LEVEL`    | `info`    | Log level (`debug`, `info`, `warn`, `error`) |
 
+## Known Limitations
+
+kumolo aims for high fidelity, but some behaviors differ from real AWS by design or as a known gap.
+
+**S3**
+
+- Bucket Policy and ACL rules are stored and returned but not enforced — all requests are permitted regardless of policy content.
+- `Expiration.Date` and `ExpiredObjectDeleteMarker` Lifecycle rules are stored but never evaluated; only `Expiration.Days` and `NoncurrentVersionExpiration` rules are applied.
+- SigV4 request signatures are parsed but not cryptographically verified. This is intentional for local development.
+
+**DynamoDB**
+
+- `ReturnConsumedCapacity` is accepted without error but `ConsumedCapacity` is omitted from all responses.
+- Number attribute comparisons use `float64` precision. Values with more than 15 significant digits may not compare correctly.
+
+**STS**
+
+- `AssumeRole` always returns the same fixed credentials regardless of which role ARN is specified. Multiple distinct roles are not simulated.
+
 ## Contributing
 
 See [CONTRIBUTING.md](.github/CONTRIBUTING.md).
