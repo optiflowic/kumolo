@@ -863,7 +863,9 @@ func TestEnforceBucket_ExpirationDate(t *testing.T) {
 }
 
 func TestEnforceBucket_ExpirationDate_ObjectCreatedAfterDate(t *testing.T) {
-	// An object created after the expiration date must not be deleted.
+	// AWS: date-based expiration is not relative to object creation time.
+	// All matching objects are expired when now >= Date, including objects
+	// created after the Date itself.
 	now := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
 	expDate := time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC)
 
@@ -885,7 +887,7 @@ func TestEnforceBucket_ExpirationDate_ObjectCreatedAfterDate(t *testing.T) {
 	e.now = func() time.Time { return now }
 	e.runOnce()
 
-	assert.NotContains(t, store.deletedObjects, "b/new.txt")
+	assert.Contains(t, store.deletedObjects, "b/new.txt")
 }
 
 // --- Expiration.ExpiredObjectDeleteMarker ---

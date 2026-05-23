@@ -111,7 +111,7 @@ func (e *LifecycleEnforcer) enforceBucket(bucket string) {
 				)
 			}
 			if !rule.Expiration.Date.IsZero() && !now.Before(rule.Expiration.Date) {
-				e.enforceExpiration(bucket, prefix, rule.Expiration.Date, versioned)
+				e.enforceExpiration(bucket, prefix, now, versioned)
 			}
 			if rule.Expiration.ExpiredObjectDeleteMarker {
 				e.enforceExpiredObjectDeleteMarker(bucket, prefix)

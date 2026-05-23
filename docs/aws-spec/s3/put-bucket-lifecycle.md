@@ -2,7 +2,7 @@
 
 **URL**: https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLifecycleConfiguration.html  
 **SDK struct**: `s3.PutBucketLifecycleConfigurationInput` / `s3.PutBucketLifecycleConfigurationOutput`  
-**Last verified**: 2026-05-21
+**Last verified**: 2026-05-23
 
 ## Request
 
@@ -23,7 +23,20 @@ Stores a `LifecycleConfiguration` XML document. Rules are parsed and stored; kum
 | `MalformedXML` | 400 | Request body is not valid XML |
 | `InternalError` | 500 | Storage failure |
 
+## Expiration semantics (implementation contract)
+
+### `Expiration.Days`
+Deletes objects (or places a delete marker in versioned buckets) where `LastModified < now − Days`.
+
+### `Expiration.Date`
+Once `now >= Date`, **all** qualified objects (matching filter/prefix) are expired — regardless of when each object was created. The action is continuous: objects added after the Date are also expired on subsequent enforcer runs. kumolo implements this by passing `now` as the cutoff to `enforceExpiration` so that every object with `LastModified < now` is deleted.
+
+### `Expiration.ExpiredObjectDeleteMarker`
+Removes a delete marker that is `IsLatest` with **no remaining non-marker versions** for the same key. Cannot be specified together with `Days` or `Date` in the same rule.
+
 ## Kumolo deviations
 
-- Lifecycle rule evaluation (transitions, expiration) is performed at object access time on a best-effort basis, not on a schedule. See `internal/s3/lifecycle.go`.
-- NoncurrentVersionTransition / NoncurrentVersionExpiration rules are stored but not evaluated.
+- Lifecycle rule evaluation runs on a background interval, not on every object access.
+- `Expiration.Days`, `Expiration.Date`, and `ExpiredObjectDeleteMarker` are evaluated.
+- `NoncurrentVersionTransition` / `NoncurrentVersionExpiration` rules are stored but not evaluated.
+- Mutual-exclusivity of `ExpiredObjectDeleteMarker` with `Days`/`Date` is not validated on PutBucketLifecycle (AWS returns `InvalidArgument` for this).
