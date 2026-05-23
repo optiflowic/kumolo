@@ -68,10 +68,4 @@ Initial release of kumolo — a high-fidelity AWS emulator for local development
 - AWS CLI and Terraform e2e verification suite (`e2e/`)
 - CI: build, vet, lint (golangci-lint), test with race detector, Docker image publish
 
-### Fixed
-
-- S3: `Expiration.Date` lifecycle rules now correctly expire all matching objects once `now >= Date`; previously these rules were stored but never evaluated
-- S3: `ExpiredObjectDeleteMarker` now removes delete markers that are the sole remaining version of a key
-- DynamoDB: `ConsumedCapacity` is now included in responses when `ReturnConsumedCapacity` is `TOTAL` or `INDEXES`; invalid enum values are rejected with `ValidationException`
-
 [0.1.0]: https://github.com/optiflowic/kumolo/releases/tag/v0.1.0
