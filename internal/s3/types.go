@@ -406,7 +406,9 @@ type lifecycleFilter struct {
 }
 
 type lifecycleExpiration struct {
-	Days int `xml:"Days"`
+	Days                      int       `xml:"Days"`
+	Date                      time.Time `xml:"Date"`
+	ExpiredObjectDeleteMarker bool      `xml:"ExpiredObjectDeleteMarker"`
 }
 
 type lifecycleNoncurrentVersionExpiration struct {
