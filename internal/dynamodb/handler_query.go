@@ -20,6 +20,7 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 		ExclusiveStartKey         map[string]any    `json:"ExclusiveStartKey"`
 		Segment                   *int              `json:"Segment"`
 		TotalSegments             *int              `json:"TotalSegments"`
+		ReturnConsumedCapacity    string            `json:"ReturnConsumedCapacity"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(
@@ -111,6 +112,9 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 			)
 			return
 		}
+	}
+	if !validateReturnConsumedCapacity(w, req.ReturnConsumedCapacity) {
+		return
 	}
 	if err := validateUnusedExprRefs(
 		req.ExpressionAttributeNames, req.ExpressionAttributeValues,
@@ -208,6 +212,9 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 		if lastEvaluatedKey != nil {
 			resp["LastEvaluatedKey"] = lastEvaluatedKey
 		}
+		if cc := buildConsumedCapacity(req.TableName, req.ReturnConsumedCapacity); cc != nil {
+			resp["ConsumedCapacity"] = cc
+		}
 		writeJSON(w, http.StatusOK, resp)
 		return
 	}
@@ -218,6 +225,9 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 	}
 	if lastEvaluatedKey != nil {
 		resp["LastEvaluatedKey"] = lastEvaluatedKey
+	}
+	if cc := buildConsumedCapacity(req.TableName, req.ReturnConsumedCapacity); cc != nil {
+		resp["ConsumedCapacity"] = cc
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -235,6 +245,7 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 		ScanIndexForward          *bool             `json:"ScanIndexForward"`
 		Limit                     *int              `json:"Limit"`
 		ExclusiveStartKey         map[string]any    `json:"ExclusiveStartKey"`
+		ReturnConsumedCapacity    string            `json:"ReturnConsumedCapacity"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(
@@ -264,6 +275,9 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 		return
 	}
 
+	if !validateReturnConsumedCapacity(w, req.ReturnConsumedCapacity) {
+		return
+	}
 	if err := validateUnusedExprRefs(
 		req.ExpressionAttributeNames, req.ExpressionAttributeValues,
 		req.KeyConditionExpression, req.FilterExpression, req.ProjectionExpression,
@@ -422,6 +436,9 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 		if lastEvaluatedKey != nil {
 			resp["LastEvaluatedKey"] = lastEvaluatedKey
 		}
+		if cc := buildConsumedCapacity(req.TableName, req.ReturnConsumedCapacity); cc != nil {
+			resp["ConsumedCapacity"] = cc
+		}
 		writeJSON(w, http.StatusOK, resp)
 		return
 	}
@@ -432,6 +449,9 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 	}
 	if lastEvaluatedKey != nil {
 		resp["LastEvaluatedKey"] = lastEvaluatedKey
+	}
+	if cc := buildConsumedCapacity(req.TableName, req.ReturnConsumedCapacity); cc != nil {
+		resp["ConsumedCapacity"] = cc
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

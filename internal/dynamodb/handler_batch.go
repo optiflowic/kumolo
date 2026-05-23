@@ -14,6 +14,7 @@ func (ro *Router) handleBatchGetItem(w http.ResponseWriter, body []byte) {
 			ProjectionExpression     string            `json:"ProjectionExpression"`
 			ExpressionAttributeNames map[string]string `json:"ExpressionAttributeNames"`
 		} `json:"RequestItems"`
+		ReturnConsumedCapacity string `json:"ReturnConsumedCapacity"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(
@@ -44,6 +45,9 @@ func (ro *Router) handleBatchGetItem(w http.ResponseWriter, body []byte) {
 			"com.amazonaws.dynamodb.v20120810#ValidationException",
 			"Too many items requested for the BatchGetItem call",
 		)
+		return
+	}
+	if !validateReturnConsumedCapacity(w, req.ReturnConsumedCapacity) {
 		return
 	}
 	responses := make(map[string][]map[string]any, len(req.RequestItems))
@@ -117,10 +121,18 @@ func (ro *Router) handleBatchGetItem(w http.ResponseWriter, body []byte) {
 		responses[tableName] = items
 	}
 	slog.Debug("batch got DynamoDB items", "tables", len(req.RequestItems))
-	writeJSON(w, http.StatusOK, map[string]any{
+	resp := map[string]any{
 		"Responses":       responses,
 		"UnprocessedKeys": map[string]any{},
-	})
+	}
+	if req.ReturnConsumedCapacity != "" && req.ReturnConsumedCapacity != "NONE" {
+		ccs := make([]map[string]any, 0, len(req.RequestItems))
+		for tableName := range req.RequestItems {
+			ccs = append(ccs, buildConsumedCapacity(tableName, req.ReturnConsumedCapacity))
+		}
+		resp["ConsumedCapacity"] = ccs
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (ro *Router) handleBatchWriteItem(w http.ResponseWriter, body []byte) {
@@ -133,6 +145,7 @@ func (ro *Router) handleBatchWriteItem(w http.ResponseWriter, body []byte) {
 				Key map[string]any `json:"Key"`
 			} `json:"DeleteRequest"`
 		} `json:"RequestItems"`
+		ReturnConsumedCapacity string `json:"ReturnConsumedCapacity"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(
@@ -163,6 +176,9 @@ func (ro *Router) handleBatchWriteItem(w http.ResponseWriter, body []byte) {
 			"com.amazonaws.dynamodb.v20120810#ValidationException",
 			"Too many items requested for the BatchWriteItem call",
 		)
+		return
+	}
+	if !validateReturnConsumedCapacity(w, req.ReturnConsumedCapacity) {
 		return
 	}
 	for tableName, writeReqs := range req.RequestItems {
@@ -207,7 +223,15 @@ func (ro *Router) handleBatchWriteItem(w http.ResponseWriter, body []byte) {
 		}
 	}
 	slog.Info("batch wrote DynamoDB items", "tables", len(req.RequestItems))
-	writeJSON(w, http.StatusOK, map[string]any{
+	resp := map[string]any{
 		"UnprocessedItems": map[string]any{},
-	})
+	}
+	if req.ReturnConsumedCapacity != "" && req.ReturnConsumedCapacity != "NONE" {
+		ccs := make([]map[string]any, 0, len(req.RequestItems))
+		for tableName := range req.RequestItems {
+			ccs = append(ccs, buildConsumedCapacity(tableName, req.ReturnConsumedCapacity))
+		}
+		resp["ConsumedCapacity"] = ccs
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
