@@ -218,7 +218,7 @@ func TestEnforceExpiration_NonVersioned(t *testing.T) {
 
 			e := NewLifecycleEnforcer(store, time.Minute)
 			e.now = func() time.Time { return now }
-			e.enforceExpiration("b", tc.prefix, tc.days, false, now)
+			e.enforceExpiration("b", tc.prefix, now.AddDate(0, 0, -tc.days), false)
 
 			for _, key := range tc.wantDeleted {
 				assert.Contains(t, store.deletedObjects, key)
@@ -243,7 +243,7 @@ func TestEnforceExpiration_Versioned(t *testing.T) {
 
 		e := NewLifecycleEnforcer(store, time.Minute)
 		e.now = func() time.Time { return now }
-		e.enforceExpiration("b", "", 30, true, now)
+		e.enforceExpiration("b", "", now.AddDate(0, 0, -30), true)
 
 		assert.Contains(t, store.deletedObjects, "b/obj.txt")
 	})
@@ -261,7 +261,7 @@ func TestEnforceExpiration_Versioned(t *testing.T) {
 
 		e := NewLifecycleEnforcer(store, time.Minute)
 		e.now = func() time.Time { return now }
-		e.enforceExpiration("b", "", 30, true, now)
+		e.enforceExpiration("b", "", now.AddDate(0, 0, -30), true)
 
 		assert.Empty(t, store.deletedObjects)
 	})
@@ -664,7 +664,7 @@ func TestEnforceExpiration_ListObjectsError(t *testing.T) {
 
 	e := NewLifecycleEnforcer(store, time.Minute)
 	e.now = func() time.Time { return now }
-	e.enforceExpiration("b", "", 30, false, now) // must not panic
+	e.enforceExpiration("b", "", now.AddDate(0, 0, -30), false) // must not panic
 }
 
 func TestEnforceExpiration_DeleteObjectError(t *testing.T) {
@@ -677,7 +677,7 @@ func TestEnforceExpiration_DeleteObjectError(t *testing.T) {
 
 	e := NewLifecycleEnforcer(store, time.Minute)
 	e.now = func() time.Time { return now }
-	e.enforceExpiration("b", "", 30, false, now) // must not panic
+	e.enforceExpiration("b", "", now.AddDate(0, 0, -30), false) // must not panic
 	assert.Empty(t, store.deletedObjects)
 }
 
@@ -688,7 +688,7 @@ func TestEnforceExpiration_ListObjectVersionsError(t *testing.T) {
 
 	e := NewLifecycleEnforcer(store, time.Minute)
 	e.now = func() time.Time { return now }
-	e.enforceExpiration("b", "", 30, true, now) // must not panic
+	e.enforceExpiration("b", "", now.AddDate(0, 0, -30), true) // must not panic
 }
 
 func TestEnforceExpiration_DeleteObjectVersionedError(t *testing.T) {
@@ -701,7 +701,7 @@ func TestEnforceExpiration_DeleteObjectVersionedError(t *testing.T) {
 
 	e := NewLifecycleEnforcer(store, time.Minute)
 	e.now = func() time.Time { return now }
-	e.enforceExpiration("b", "", 30, true, now) // must not panic
+	e.enforceExpiration("b", "", now.AddDate(0, 0, -30), true) // must not panic
 	assert.Empty(t, store.deletedObjects)
 }
 
@@ -804,4 +804,188 @@ func TestEnforceAbortIncomplete_AbortError(t *testing.T) {
 	e.now = func() time.Time { return now }
 	e.enforceAbortIncomplete("b", "", 7, now) // must not panic
 	assert.Empty(t, store.abortedUploads)
+}
+
+// --- Expiration.Date ---
+
+func TestEnforceBucket_ExpirationDate(t *testing.T) {
+	now := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	expDate := time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC) // past date
+
+	tests := []struct {
+		name           string
+		nowOverride    time.Time
+		wantDeleted    []string
+		wantNotDeleted []string
+	}{
+		{
+			name:        "expires objects when now is after expiration date",
+			nowOverride: now,
+			wantDeleted: []string{"b/old.txt"},
+		},
+		{
+			name:           "does not expire when now is before expiration date",
+			nowOverride:    time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC),
+			wantNotDeleted: []string{"b/old.txt"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newFakeLCStore()
+			store.buckets = []BucketInfo{{Name: "b"}}
+			store.objects["b"] = []ObjectInfo{
+				{
+					Key: "old.txt",
+					Metadata: ObjectMetadata{
+						LastModified: time.Date(2026, 4, 10, 0, 0, 0, 0, time.UTC),
+					},
+				},
+			}
+			store.lifecycle["b"] = buildLifecycleXML(t, lifecycleConfiguration{
+				Rules: []lifecycleRule{
+					{Status: "Enabled", Expiration: &lifecycleExpiration{Date: expDate}},
+				},
+			})
+
+			e := NewLifecycleEnforcer(store, time.Minute)
+			e.now = func() time.Time { return tc.nowOverride }
+			e.runOnce()
+
+			for _, key := range tc.wantDeleted {
+				assert.Contains(t, store.deletedObjects, key)
+			}
+			for _, key := range tc.wantNotDeleted {
+				assert.NotContains(t, store.deletedObjects, key)
+			}
+		})
+	}
+}
+
+func TestEnforceBucket_ExpirationDate_ObjectCreatedAfterDate(t *testing.T) {
+	// AWS: date-based expiration is not relative to object creation time.
+	// All matching objects are expired when now >= Date, including objects
+	// created after the Date itself.
+	now := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	expDate := time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC)
+
+	store := newFakeLCStore()
+	store.buckets = []BucketInfo{{Name: "b"}}
+	store.objects["b"] = []ObjectInfo{
+		{
+			Key:      "new.txt",
+			Metadata: ObjectMetadata{LastModified: time.Date(2026, 4, 20, 0, 0, 0, 0, time.UTC)},
+		},
+	}
+	store.lifecycle["b"] = buildLifecycleXML(t, lifecycleConfiguration{
+		Rules: []lifecycleRule{
+			{Status: "Enabled", Expiration: &lifecycleExpiration{Date: expDate}},
+		},
+	})
+
+	e := NewLifecycleEnforcer(store, time.Minute)
+	e.now = func() time.Time { return now }
+	e.runOnce()
+
+	assert.Contains(t, store.deletedObjects, "b/new.txt")
+}
+
+// --- Expiration.ExpiredObjectDeleteMarker ---
+
+func TestEnforceExpiredObjectDeleteMarker(t *testing.T) {
+	tests := []struct {
+		name            string
+		versions        []VersionInfo
+		markers         []DeleteMarkerInfo
+		wantDeletedVers []string
+		wantKeptVers    []string
+	}{
+		{
+			name: "removes lone latest delete marker",
+			markers: []DeleteMarkerInfo{
+				{Key: "obj.txt", VersionID: "dm1", IsLatest: true},
+			},
+			wantDeletedVers: []string{"b/obj.txt/dm1"},
+		},
+		{
+			name: "keeps delete marker when non-current version still exists",
+			versions: []VersionInfo{
+				{Key: "obj.txt", VersionID: "v1", IsLatest: false},
+			},
+			markers: []DeleteMarkerInfo{
+				{Key: "obj.txt", VersionID: "dm1", IsLatest: true},
+			},
+			wantKeptVers: []string{"b/obj.txt/dm1"},
+		},
+		{
+			name: "skips non-latest delete markers",
+			markers: []DeleteMarkerInfo{
+				{Key: "obj.txt", VersionID: "dm1", IsLatest: false},
+			},
+			wantKeptVers: []string{"b/obj.txt/dm1"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newFakeLCStore()
+			store.versions["b"] = tc.versions
+			store.markers["b"] = tc.markers
+
+			e := NewLifecycleEnforcer(store, time.Minute)
+			e.now = time.Now
+			e.enforceExpiredObjectDeleteMarker("b", "")
+
+			for _, v := range tc.wantDeletedVers {
+				assert.Contains(t, store.deletedVersions, v)
+			}
+			for _, v := range tc.wantKeptVers {
+				assert.NotContains(t, store.deletedVersions, v)
+			}
+		})
+	}
+}
+
+func TestEnforceBucket_ExpiredObjectDeleteMarkerRule(t *testing.T) {
+	store := newFakeLCStore()
+	store.buckets = []BucketInfo{{Name: "b"}}
+	store.markers["b"] = []DeleteMarkerInfo{
+		{Key: "gone.txt", VersionID: "dm1", IsLatest: true},
+	}
+	store.lifecycle["b"] = buildLifecycleXML(t, lifecycleConfiguration{
+		Rules: []lifecycleRule{
+			{
+				Status:     "Enabled",
+				Expiration: &lifecycleExpiration{ExpiredObjectDeleteMarker: true},
+			},
+		},
+	})
+
+	e := NewLifecycleEnforcer(store, time.Minute)
+	e.now = time.Now
+	e.runOnce()
+
+	assert.Contains(t, store.deletedVersions, "b/gone.txt/dm1")
+}
+
+func TestEnforceExpiredObjectDeleteMarker_ListVersionsError(t *testing.T) {
+	store := newFakeLCStore()
+	store.errListObjectVersions = errFake
+
+	e := NewLifecycleEnforcer(store, time.Minute)
+	e.now = time.Now
+	e.enforceExpiredObjectDeleteMarker("b", "") // must not panic
+}
+
+func TestEnforceExpiredObjectDeleteMarker_DeleteVersionError(t *testing.T) {
+	store := newFakeLCStore()
+	store.markers["b"] = []DeleteMarkerInfo{
+		{Key: "obj.txt", VersionID: "dm1", IsLatest: true},
+	}
+	store.errDeleteObjectVersion = errFake
+
+	e := NewLifecycleEnforcer(store, time.Minute)
+	e.now = time.Now
+	e.enforceExpiredObjectDeleteMarker("b", "") // must not panic
+	assert.Empty(t, store.deletedVersions)
 }

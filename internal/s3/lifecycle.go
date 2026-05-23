@@ -101,8 +101,21 @@ func (e *LifecycleEnforcer) enforceBucket(bucket string) {
 		}
 		prefix := rule.effectivePrefix()
 
-		if rule.Expiration != nil && rule.Expiration.Days > 0 {
-			e.enforceExpiration(bucket, prefix, rule.Expiration.Days, versioned, now)
+		if rule.Expiration != nil {
+			if rule.Expiration.Days > 0 {
+				e.enforceExpiration(
+					bucket,
+					prefix,
+					now.AddDate(0, 0, -rule.Expiration.Days),
+					versioned,
+				)
+			}
+			if !rule.Expiration.Date.IsZero() && !now.Before(rule.Expiration.Date) {
+				e.enforceExpiration(bucket, prefix, now, versioned)
+			}
+			if rule.Expiration.ExpiredObjectDeleteMarker {
+				e.enforceExpiredObjectDeleteMarker(bucket, prefix)
+			}
 		}
 		if rule.NoncurrentVersionExpiration != nil &&
 			rule.NoncurrentVersionExpiration.NoncurrentDays > 0 {
@@ -127,12 +140,9 @@ func (e *LifecycleEnforcer) enforceBucket(bucket string) {
 
 func (e *LifecycleEnforcer) enforceExpiration(
 	bucket, prefix string,
-	days int,
+	cutoff time.Time,
 	versioned bool,
-	now time.Time,
 ) {
-	cutoff := now.AddDate(0, 0, -days)
-
 	if !versioned {
 		objects, err := e.storage.ListObjects(bucket)
 		if err != nil {
@@ -291,6 +301,53 @@ func (e *LifecycleEnforcer) enforceAbortIncomplete(
 			u.Key,
 			"uploadId",
 			u.UploadID,
+		)
+	}
+}
+
+// enforceExpiredObjectDeleteMarker removes lone delete markers (IsLatest with no remaining
+// non-current non-marker versions for the same key) when ExpiredObjectDeleteMarker is true.
+func (e *LifecycleEnforcer) enforceExpiredObjectDeleteMarker(bucket, prefix string) {
+	versions, markers, err := e.storage.ListObjectVersions(bucket)
+	if err != nil {
+		slog.Error(
+			"lifecycle: list versions for delete-marker cleanup",
+			"bucket",
+			bucket,
+			"err",
+			err,
+		)
+		return
+	}
+
+	// Build a set of keys that still have at least one non-marker version.
+	keysWithVersions := make(map[string]struct{})
+	for _, v := range versions {
+		keysWithVersions[v.Key] = struct{}{}
+	}
+
+	for _, m := range markers {
+		if !m.IsLatest || !matchPrefix(m.Key, prefix) {
+			continue
+		}
+		if _, hasVersion := keysWithVersions[m.Key]; hasVersion {
+			continue
+		}
+		if _, err := e.storage.DeleteObjectVersion(bucket, m.Key, m.VersionID, false); err != nil {
+			slog.Error(
+				"lifecycle: delete expired object delete-marker",
+				"bucket", bucket,
+				"key", m.Key,
+				"versionId", m.VersionID,
+				"err", err,
+			)
+			continue
+		}
+		slog.Info(
+			"lifecycle: removed expired object delete-marker",
+			"bucket", bucket,
+			"key", m.Key,
+			"versionId", m.VersionID,
 		)
 	}
 }
