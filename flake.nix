@@ -41,8 +41,8 @@
               echo "kumolo dev env: $(go version)"
             '';
           };
-          # CI shell — no Terraform; keeps CI fast and avoids the unfree license issue.
-          ci = pkgs.mkShell {
+          # Core shell — no Terraform; used by CI and release workflows.
+          core = pkgs.mkShell {
             packages = commonPackages;
             shellHook = ''
               unset GOROOT
