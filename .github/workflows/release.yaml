@@ -39,6 +39,6 @@ jobs:
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
 
       - name: 🚢 Run GoReleaser
-        run: nix develop --command goreleaser release --clean
+        run: nix develop .#core --command goreleaser release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
