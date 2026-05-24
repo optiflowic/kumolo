@@ -13,7 +13,7 @@
 
 A high-fidelity AWS emulator for local development and testing.
 
-> **If it works on kumolo, it works on real AWS — and vice versa.**
+> **Goal: if it works on kumolo, it works on real AWS — and vice versa.**
 
 kumolo runs as a standalone server that accepts standard AWS SDK v2 requests. No mocking, no stubs — it behaves like real AWS.
 
