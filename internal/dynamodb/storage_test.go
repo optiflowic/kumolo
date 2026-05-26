@@ -3514,6 +3514,91 @@ func TestTransactWriteItems(t *testing.T) {
 	}
 }
 
+func TestTransactWriteItemsRollback(t *testing.T) {
+	t.Run("rolls back first Put when second Put fails with I/O error", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+
+		writeCount := 0
+		origOpen := s.openFile
+		s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+			// Count item writes only (paths contain "/" separator).
+			if strings.Contains(name, "/") {
+				writeCount++
+				if writeCount == 2 {
+					return nil, errors.New("injected I/O failure")
+				}
+			}
+			return origOpen(name, flag, perm)
+		}
+
+		err := s.TransactWriteItems([]TransactWriteAction{
+			{Put: &TransactPut{
+				TableName: "test-table",
+				Item:      map[string]any{"pk": map[string]any{"S": "item-1"}},
+			}},
+			{Put: &TransactPut{
+				TableName: "test-table",
+				Item:      map[string]any{"pk": map[string]any{"S": "item-2"}},
+			}},
+		})
+		require.Error(t, err)
+
+		s.openFile = origOpen
+
+		// item-1 was written then rolled back; it must not exist.
+		item1, err := s.GetItem("test-table", map[string]any{"pk": map[string]any{"S": "item-1"}})
+		assert.NoError(t, err)
+		assert.Nil(t, item1)
+	})
+
+	t.Run("rolls back Put and Update when Delete fails with I/O error", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		mustPutItem(t, s, "test-table", map[string]any{
+			"pk":  map[string]any{"S": "existing"},
+			"val": map[string]any{"S": "original"},
+		})
+
+		removeCount := 0
+		origRemove := s.removeFile
+		s.removeFile = func(name string) error {
+			removeCount++
+			if removeCount == 1 {
+				return errors.New("injected remove failure")
+			}
+			return origRemove(name)
+		}
+
+		err := s.TransactWriteItems([]TransactWriteAction{
+			{Put: &TransactPut{
+				TableName: "test-table",
+				Item:      map[string]any{"pk": map[string]any{"S": "new-item"}},
+			}},
+			{Delete: &TransactDelete{
+				TableName: "test-table",
+				Key:       map[string]any{"pk": map[string]any{"S": "existing"}},
+			}},
+		})
+		require.Error(t, err)
+
+		s.removeFile = origRemove
+
+		// new-item was written then rolled back.
+		newItem, err := s.GetItem(
+			"test-table",
+			map[string]any{"pk": map[string]any{"S": "new-item"}},
+		)
+		assert.NoError(t, err)
+		assert.Nil(t, newItem)
+
+		// existing item must be intact.
+		item, err := s.GetItem("test-table", map[string]any{"pk": map[string]any{"S": "existing"}})
+		require.NoError(t, err)
+		assert.Equal(t, "original", item["val"].(map[string]any)["S"])
+	})
+}
+
 func TestReadExistingItemLocked(t *testing.T) {
 	t.Run("returns error when key is missing required attribute", func(t *testing.T) {
 		s := newTestStorage(t)
