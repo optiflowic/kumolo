@@ -460,7 +460,7 @@ func (s *Storage) applyTransactActionLocked(action TransactWriteAction) error {
 		}
 		return s.writeJSON(itemPath, item)
 	}
-	return nil // ConditionCheck: no write needed
+	return nil // unreachable: Phase 2 only calls this when path != "", meaning Put/Delete/Update matched
 }
 
 // itemSnapshot holds the pre-write state of a single item file.
@@ -490,7 +490,7 @@ func (s *Storage) itemPathForTransactActionLocked(action TransactWriteAction) (s
 		return "", err
 	}
 	k, err := itemKey(keyMap, meta.KeySchema)
-	if err != nil {
+	if err != nil { // unreachable: Phase 0 validated all action keys
 		return "", err
 	}
 	return filepath.Join(tableName, k+".json"), nil
@@ -503,6 +503,7 @@ func (s *Storage) rollbackLocked(snaps []itemSnapshot) {
 	for i := len(snaps) - 1; i >= 0; i-- {
 		snap := snaps[i]
 		if snap.content == nil {
+			// double-failure (tx error + rollback error): best-effort, log and continue
 			if err := s.removeFile(snap.path); err != nil && !errors.Is(err, os.ErrNotExist) {
 				slog.Error(
 					"transaction rollback: failed to remove item",
@@ -513,6 +514,7 @@ func (s *Storage) rollbackLocked(snaps []itemSnapshot) {
 				)
 			}
 		} else {
+			// double-failure (tx error + rollback error): best-effort, log and continue
 			if err := s.writeJSON(snap.path, json.RawMessage(snap.content)); err != nil {
 				slog.Error("transaction rollback: failed to restore item", "path", snap.path, "err", err)
 			}

@@ -255,6 +255,29 @@ func TestListTables(t *testing.T) {
 		_, err := s.ListTables()
 		assert.Error(t, err)
 	})
+
+	t.Run("excludes orphan directory that has no metadata file", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(
+			t,
+			s.CreateTable(TableMetadata{Name: "real-table", KeySchema: testKeySchema}),
+		)
+
+		// Create an orphan directory (failed CreateTable + failed cleanup scenario).
+		s.openFile = func(string, int, os.FileMode) (io.WriteCloser, error) {
+			return nil, errors.New("write failed")
+		}
+		s.removeFile = func(string) error { return errors.New("remove also failed") }
+		require.Error(t, s.CreateTable(TableMetadata{Name: "orphan", KeySchema: testKeySchema}))
+		s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+			return s.root.OpenFile(name, flag, perm)
+		}
+		s.removeFile = s.root.Remove
+
+		names, err := s.ListTables()
+		require.NoError(t, err)
+		assert.ElementsMatch(t, []string{"real-table"}, names)
+	})
 }
 
 func TestPutItem(t *testing.T) {
@@ -3512,6 +3535,82 @@ func TestTransactWriteItems(t *testing.T) {
 			assert.Error(t, err)
 		})
 	}
+
+	// Phase 2 applyTransactActionLocked readTableMeta error:
+	// fail the 4th readAll so Phase 0 (1), Phase 1 meta (2), Phase 2 itemPath meta (3) succeed
+	// but Phase 2 applyTransactActionLocked meta read (4) encounters a disk error.
+	for _, tc := range []struct {
+		name   string
+		action func() TransactWriteAction
+	}{
+		{"Put arm", func() TransactWriteAction {
+			return TransactWriteAction{Put: &TransactPut{
+				TableName: "test-table",
+				Item:      map[string]any{"pk": map[string]any{"S": "x"}},
+			}}
+		}},
+		{"Delete arm", func() TransactWriteAction {
+			return TransactWriteAction{Delete: &TransactDelete{
+				TableName: "test-table",
+				Key:       map[string]any{"pk": map[string]any{"S": "x"}},
+			}}
+		}},
+		{"Update arm", func() TransactWriteAction {
+			return TransactWriteAction{Update: &TransactUpdate{
+				TableName: "test-table",
+				Key:       map[string]any{"pk": map[string]any{"S": "x"}},
+				Updates:   map[string]any{"v": map[string]any{"S": "y"}},
+			}}
+		}},
+	} {
+		tc := tc
+		t.Run(
+			"Phase 2 applyTransactActionLocked readTableMeta error for "+tc.name,
+			func(t *testing.T) {
+				s := newTestStorage(t)
+				require.NoError(t, s.CreateTable(testMeta))
+				orig := s.readAll
+				count := 0
+				s.readAll = func(r io.Reader) ([]byte, error) {
+					count++
+					if count == 4 { // 1: Phase 0 meta, 2: Phase 1 meta, 3: Phase 2 itemPath meta, 4: apply meta
+						return nil, errors.New("injected disk error")
+					}
+					return orig(r)
+				}
+				err := s.TransactWriteItems([]TransactWriteAction{tc.action()})
+				assert.Error(t, err)
+			},
+		)
+	}
+
+	t.Run(
+		"Phase 2 applyTransactActionLocked readJSON non-ErrNotExist error for Update arm",
+		func(t *testing.T) {
+			s := newTestStorage(t)
+			require.NoError(t, s.CreateTable(testMeta))
+			mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "x"}})
+			orig := s.readAll
+			count := 0
+			s.readAll = func(r io.Reader) ([]byte, error) {
+				count++
+				// 1: Phase 0 meta, 2: Phase 1 meta, 3: Phase 1 item, 4: Phase 2 itemPath meta,
+				// 5: Phase 2 snapshot item, 6: Phase 2 apply meta, 7: Phase 2 apply item read
+				if count == 7 {
+					return nil, errors.New("injected disk error")
+				}
+				return orig(r)
+			}
+			err := s.TransactWriteItems([]TransactWriteAction{
+				{Update: &TransactUpdate{
+					TableName: "test-table",
+					Key:       map[string]any{"pk": map[string]any{"S": "x"}},
+					Updates:   map[string]any{"v": map[string]any{"S": "y"}},
+				}},
+			})
+			assert.Error(t, err)
+		},
+	)
 }
 
 func TestTransactWriteItemsRollback(t *testing.T) {
@@ -3552,7 +3651,7 @@ func TestTransactWriteItemsRollback(t *testing.T) {
 		assert.Nil(t, item1)
 	})
 
-	t.Run("rolls back Put and Update when Delete fails with I/O error", func(t *testing.T) {
+	t.Run("rolls back Put when Delete fails with I/O error", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateTable(testMeta))
 		mustPutItem(t, s, "test-table", map[string]any{
@@ -3596,6 +3695,119 @@ func TestTransactWriteItemsRollback(t *testing.T) {
 		item, err := s.GetItem("test-table", map[string]any{"pk": map[string]any{"S": "existing"}})
 		require.NoError(t, err)
 		assert.Equal(t, "original", item["val"].(map[string]any)["S"])
+	})
+
+	t.Run(
+		"restores modified item to original value when subsequent action fails",
+		func(t *testing.T) {
+			s := newTestStorage(t)
+			require.NoError(t, s.CreateTable(testMeta))
+			mustPutItem(t, s, "test-table", map[string]any{
+				"pk":  map[string]any{"S": "item-a"},
+				"val": map[string]any{"S": "original"},
+			})
+
+			writeCount := 0
+			origOpen := s.openFile
+			s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+				if strings.Contains(name, "/") {
+					writeCount++
+					if writeCount == 2 {
+						return nil, errors.New("injected failure on second write")
+					}
+				}
+				return origOpen(name, flag, perm)
+			}
+
+			err := s.TransactWriteItems([]TransactWriteAction{
+				{Update: &TransactUpdate{
+					TableName: "test-table",
+					Key:       map[string]any{"pk": map[string]any{"S": "item-a"}},
+					Updates:   map[string]any{"val": map[string]any{"S": "modified"}},
+				}},
+				{Put: &TransactPut{
+					TableName: "test-table",
+					Item:      map[string]any{"pk": map[string]any{"S": "item-b"}},
+				}},
+			})
+			require.Error(t, err)
+
+			s.openFile = origOpen
+
+			// item-a must be restored to its original value.
+			item, err := s.GetItem(
+				"test-table",
+				map[string]any{"pk": map[string]any{"S": "item-a"}},
+			)
+			require.NoError(t, err)
+			assert.Equal(t, "original", item["val"].(map[string]any)["S"])
+		},
+	)
+
+	t.Run("logs error and continues when rollback removeFile fails", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+
+		writeCount := 0
+		origOpen := s.openFile
+		s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+			if strings.Contains(name, "/") {
+				writeCount++
+				if writeCount == 2 {
+					return nil, errors.New("injected write failure")
+				}
+			}
+			return origOpen(name, flag, perm)
+		}
+		s.removeFile = func(string) error { return errors.New("rollback remove also failed") }
+
+		err := s.TransactWriteItems([]TransactWriteAction{
+			{Put: &TransactPut{
+				TableName: "test-table",
+				Item:      map[string]any{"pk": map[string]any{"S": "item-1"}},
+			}},
+			{Put: &TransactPut{
+				TableName: "test-table",
+				Item:      map[string]any{"pk": map[string]any{"S": "item-2"}},
+			}},
+		})
+		assert.Error(t, err)
+	})
+
+	t.Run("logs error and continues when rollback writeJSON fails", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		mustPutItem(t, s, "test-table", map[string]any{
+			"pk":  map[string]any{"S": "item-a"},
+			"val": map[string]any{"S": "original"},
+		})
+
+		writeCount := 0
+		origOpen := s.openFile
+		// Fail on 2nd write (Phase 2: second action fails, triggering rollback)
+		// and on 3rd write (rollback: restore item-a fails → slog.Error path).
+		s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+			if strings.Contains(name, "/") {
+				writeCount++
+				if writeCount >= 2 {
+					return nil, errors.New("injected write failure")
+				}
+			}
+			return origOpen(name, flag, perm)
+		}
+
+		err := s.TransactWriteItems([]TransactWriteAction{
+			{Update: &TransactUpdate{
+				TableName: "test-table",
+				Key:       map[string]any{"pk": map[string]any{"S": "item-a"}},
+				Updates:   map[string]any{"val": map[string]any{"S": "modified"}},
+			}},
+			{Put: &TransactPut{
+				TableName: "test-table",
+				Item:      map[string]any{"pk": map[string]any{"S": "item-b"}},
+			}},
+		})
+		assert.Error(t, err)
 	})
 }
 
