@@ -16,7 +16,7 @@ func (s *Storage) CreateTable(meta TableMetadata) error {
 	}
 	meta.Status = "ACTIVE"
 	meta.CreatedAt = time.Now().UTC()
-	if err := s.mkdirFn(meta.Name, 0o750); err != nil {
+	if err := s.mkdirFn(meta.Name, 0o750); err != nil && !errors.Is(err, os.ErrExist) {
 		return err
 	}
 	if err := s.writeTableMeta(meta.Name, meta); err != nil {

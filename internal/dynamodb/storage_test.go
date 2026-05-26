@@ -129,6 +129,28 @@ func TestCreateTable(t *testing.T) {
 		err := s.CreateTable(testMeta)
 		assert.Error(t, err)
 	})
+
+	t.Run(
+		"succeeds on retry after orphan directory left from previous failure",
+		func(t *testing.T) {
+			s := newTestStorage(t)
+			s.openFile = func(string, int, os.FileMode) (io.WriteCloser, error) {
+				return nil, errors.New("write failed")
+			}
+			s.removeFile = func(string) error { return errors.New("remove also failed") }
+			require.Error(t, s.CreateTable(testMeta))
+
+			// Restore normal behaviour and retry — must not return ErrTableAlreadyExists.
+			s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+				return s.root.OpenFile(name, flag, perm)
+			}
+			s.removeFile = s.root.Remove
+			require.NoError(t, s.CreateTable(testMeta))
+			meta, err := s.DescribeTable("test-table")
+			require.NoError(t, err)
+			assert.Equal(t, "test-table", meta.Name)
+		},
+	)
 }
 
 func TestDeleteTable(t *testing.T) {

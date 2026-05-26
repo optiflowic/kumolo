@@ -112,8 +112,8 @@ func itemKey(item map[string]any, keySchema []KeySchemaElement) (string, error) 
 }
 
 func (s *Storage) tableExistsLocked(name string) bool {
-	info, err := s.root.Stat(name)
-	return err == nil && info.IsDir()
+	_, err := s.root.Stat(name + ".table.json")
+	return err == nil
 }
 
 func (s *Storage) readTableMeta(name string) (TableMetadata, error) {
