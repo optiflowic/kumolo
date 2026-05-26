@@ -75,9 +75,13 @@ func (s *Storage) ListTables() ([]string, error) {
 	}
 	var names []string
 	for _, e := range entries {
-		if e.IsDir() {
-			names = append(names, e.Name())
+		if !e.IsDir() {
+			continue
 		}
+		if _, err := s.root.Stat(e.Name() + ".table.json"); err != nil {
+			continue
+		}
+		names = append(names, e.Name())
 	}
 	return names, nil
 }
