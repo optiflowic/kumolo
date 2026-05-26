@@ -1,8 +1,10 @@
 package dynamodb
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 )
@@ -176,11 +178,31 @@ func (s *Storage) TransactWriteItems(actions []TransactWriteAction) error {
 		return &TransactionCanceledError{Reasons: reasons}
 	}
 
-	// Phase 2: apply writes
+	// Phase 2: apply writes; roll back on I/O failure to preserve atomicity.
+	var applied []itemSnapshot
 	for _, action := range actions {
-		if err := s.applyTransactActionLocked(action); err != nil {
+		path, err := s.itemPathForTransactActionLocked(action)
+		if err != nil {
+			s.rollbackLocked(applied)
 			return err
 		}
+		if path == "" {
+			continue // ConditionCheck or empty action: no write needed
+		}
+		snap := itemSnapshot{path: path}
+		raw, readErr := readJSON[json.RawMessage](s, path)
+		if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+			s.rollbackLocked(applied)
+			return readErr
+		}
+		if readErr == nil {
+			snap.content = []byte(raw)
+		}
+		if err := s.applyTransactActionLocked(action); err != nil {
+			s.rollbackLocked(applied)
+			return err
+		}
+		applied = append(applied, snap)
 	}
 	return nil
 }
@@ -438,5 +460,64 @@ func (s *Storage) applyTransactActionLocked(action TransactWriteAction) error {
 		}
 		return s.writeJSON(itemPath, item)
 	}
-	return nil // ConditionCheck: no write needed
+	return nil // unreachable: Phase 2 only calls this when path != "", meaning Put/Delete/Update matched
+}
+
+// itemSnapshot holds the pre-write state of a single item file.
+// content is nil when the item did not exist before the transaction.
+type itemSnapshot struct {
+	path    string
+	content []byte
+}
+
+// itemPathForTransactActionLocked returns the item file path for a write action.
+// Returns "" for ConditionCheck (no write needed). Must be called with mu held.
+func (s *Storage) itemPathForTransactActionLocked(action TransactWriteAction) (string, error) {
+	var tableName string
+	var keyMap map[string]any
+	switch {
+	case action.Put != nil:
+		tableName, keyMap = action.Put.TableName, action.Put.Item
+	case action.Delete != nil:
+		tableName, keyMap = action.Delete.TableName, action.Delete.Key
+	case action.Update != nil:
+		tableName, keyMap = action.Update.TableName, action.Update.Key
+	default:
+		return "", nil
+	}
+	meta, err := s.readTableMeta(tableName)
+	if err != nil {
+		return "", err
+	}
+	k, err := itemKey(keyMap, meta.KeySchema)
+	if err != nil { // unreachable: Phase 0 validated all action keys
+		return "", err
+	}
+	return filepath.Join(tableName, k+".json"), nil
+}
+
+// rollbackLocked restores item snapshots in reverse order.
+// Items that did not exist before the transaction are removed; items that existed are restored.
+// Must be called with mu held.
+func (s *Storage) rollbackLocked(snaps []itemSnapshot) {
+	for i := len(snaps) - 1; i >= 0; i-- {
+		snap := snaps[i]
+		if snap.content == nil {
+			// double-failure (tx error + rollback error): best-effort, log and continue
+			if err := s.removeFile(snap.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				slog.Error(
+					"transaction rollback: failed to remove item",
+					"path",
+					snap.path,
+					"err",
+					err,
+				)
+			}
+		} else {
+			// double-failure (tx error + rollback error): best-effort, log and continue
+			if err := s.writeJSON(snap.path, json.RawMessage(snap.content)); err != nil {
+				slog.Error("transaction rollback: failed to restore item", "path", snap.path, "err", err)
+			}
+		}
+	}
 }

@@ -2,6 +2,7 @@ package dynamodb
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -16,7 +17,7 @@ func (s *Storage) CreateTable(meta TableMetadata) error {
 	}
 	meta.Status = "ACTIVE"
 	meta.CreatedAt = time.Now().UTC()
-	if err := s.mkdirFn(meta.Name, 0o750); err != nil {
+	if err := s.mkdirFn(meta.Name, 0o750); err != nil && !errors.Is(err, os.ErrExist) {
 		return err
 	}
 	if err := s.writeTableMeta(meta.Name, meta); err != nil {
@@ -75,9 +76,16 @@ func (s *Storage) ListTables() ([]string, error) {
 	}
 	var names []string
 	for _, e := range entries {
-		if e.IsDir() {
-			names = append(names, e.Name())
+		if !e.IsDir() {
+			continue
 		}
+		if _, err := s.statFn(e.Name() + ".table.json"); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return nil, fmt.Errorf("stat table metadata %s: %w", e.Name()+".table.json", err)
+		}
+		names = append(names, e.Name())
 	}
 	return names, nil
 }
