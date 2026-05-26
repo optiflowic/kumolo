@@ -2,6 +2,7 @@ package dynamodb
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -82,7 +83,7 @@ func (s *Storage) ListTables() ([]string, error) {
 			if errors.Is(err, os.ErrNotExist) {
 				continue
 			}
-			return nil, err
+			return nil, fmt.Errorf("stat table metadata %s: %w", e.Name()+".table.json", err)
 		}
 		names = append(names, e.Name())
 	}
