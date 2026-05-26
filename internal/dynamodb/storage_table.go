@@ -78,8 +78,11 @@ func (s *Storage) ListTables() ([]string, error) {
 		if !e.IsDir() {
 			continue
 		}
-		if _, err := s.root.Stat(e.Name() + ".table.json"); err != nil {
-			continue
+		if _, err := s.statFn(e.Name() + ".table.json"); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return nil, err
 		}
 		names = append(names, e.Name())
 	}

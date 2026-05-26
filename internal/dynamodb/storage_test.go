@@ -256,6 +256,19 @@ func TestListTables(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run(
+		"returns error when stat of metadata file fails with non-ErrNotExist",
+		func(t *testing.T) {
+			s := newTestStorage(t)
+			require.NoError(t, s.CreateTable(TableMetadata{Name: "t1", KeySchema: testKeySchema}))
+			s.statFn = func(string) (os.FileInfo, error) {
+				return nil, errors.New("injected stat error")
+			}
+			_, err := s.ListTables()
+			assert.Error(t, err)
+		},
+	)
+
 	t.Run("excludes orphan directory that has no metadata file", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(
