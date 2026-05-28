@@ -157,7 +157,7 @@ func (sr *StreamsRouter) handleDescribeStream(w http.ResponseWriter, body []byte
 
 	ks := make([]keySchemaElem, len(desc.KeySchema))
 	for i, k := range desc.KeySchema {
-		ks[i] = keySchemaElem{AttributeName: k.AttributeName, KeyType: k.KeyType}
+		ks[i] = keySchemaElem(k)
 	}
 
 	if req.Limit != nil && *req.Limit < 1 {
