@@ -29,6 +29,7 @@ func NewMux(
 
 	s3Router := s3.NewRouter(s3Storage)
 	dynamoRouter := dynamodb.NewRouter(dynamoStorage)
+	dynamoStreamsRouter := dynamodb.NewStreamsRouter(dynamoStorage)
 	stsRouter := sts.NewRouter()
 
 	s3.NewLifecycleEnforcer(s3Storage, lifecycleInterval).Start(ctx)
@@ -38,6 +39,10 @@ func NewMux(
 		if r.Method == http.MethodPost &&
 			strings.Contains(r.Header.Get("Content-Type"), "application/x-www-form-urlencoded") {
 			stsRouter.ServeHTTP(w, r)
+			return
+		}
+		if strings.HasPrefix(r.Header.Get("X-Amz-Target"), "DynamoDBStreams_") {
+			dynamoStreamsRouter.ServeHTTP(w, r)
 			return
 		}
 		if strings.HasPrefix(r.Header.Get("X-Amz-Target"), "DynamoDB_") {

@@ -24,6 +24,9 @@ type Storage struct {
 	readAll    func(r io.Reader) ([]byte, error)
 	listDirFn  func(name string) ([]os.DirEntry, error)
 	statFn     func(name string) (os.FileInfo, error)
+
+	streamsMu sync.RWMutex
+	streams   map[string]*streamBuffer // tableName → in-memory stream buffer
 }
 
 // NewStorage roots the storage at dataDir/dynamodb, creating the directory if needed.
@@ -61,6 +64,7 @@ func newStorage(dataDir string, openRoot func(string) (*os.Root, error)) (*Stora
 		return f.ReadDir(-1)
 	}
 	s.statFn = s.root.Stat
+	s.streams = make(map[string]*streamBuffer)
 	return s, nil
 }
 

@@ -48,6 +48,14 @@ type store interface {
 	DisableKinesisStreamingDestination(tableName, streamARN string) (KinesisDestination, error)
 }
 
+// streamStore is the storage interface used by StreamsRouter.
+type streamStore interface {
+	ListStreamARNs(tableName string) ([]StreamEntry, error)
+	DescribeStream(arn string) (StreamDesc, error)
+	GetShardIterator(streamARN, shardID, iterType, seqNumInput string) (string, error)
+	GetStreamRecords(iterStr string, limit int) ([]streamRecord, string, error)
+}
+
 // billingModeSummary mirrors the AWS BillingModeSummary shape.
 type billingModeSummary struct {
 	BillingMode                       string  `json:"BillingMode"`
@@ -71,21 +79,30 @@ func newWarmThroughput(pt *ProvisionedThroughput) *warmThroughput {
 	return wt
 }
 
+// tableStreamSpecification is the API shape for StreamSpecification in a table description.
+type tableStreamSpecification struct {
+	StreamEnabled  bool   `json:"StreamEnabled"`
+	StreamViewType string `json:"StreamViewType,omitempty"`
+}
+
 // tableDescription is the DynamoDB API representation of a table.
 type tableDescription struct {
-	TableName              string                 `json:"TableName"`
-	TableStatus            string                 `json:"TableStatus"`
-	TableArn               string                 `json:"TableArn"`
-	CreationDateTime       float64                `json:"CreationDateTime"`
-	KeySchema              []KeySchemaElement     `json:"KeySchema"`
-	AttributeDefinitions   []AttributeDefinition  `json:"AttributeDefinitions"`
-	BillingModeSummary     *billingModeSummary    `json:"BillingModeSummary,omitempty"`
-	ProvisionedThroughput  *ProvisionedThroughput `json:"ProvisionedThroughput,omitempty"`
-	GlobalSecondaryIndexes []gsiDescription       `json:"GlobalSecondaryIndexes,omitempty"`
-	LocalSecondaryIndexes  []lsiDescription       `json:"LocalSecondaryIndexes,omitempty"`
-	WarmThroughput         *warmThroughput        `json:"WarmThroughput,omitempty"`
-	ItemCount              int64                  `json:"ItemCount"`
-	TableSizeBytes         int64                  `json:"TableSizeBytes"`
+	TableName              string                    `json:"TableName"`
+	TableStatus            string                    `json:"TableStatus"`
+	TableArn               string                    `json:"TableArn"`
+	CreationDateTime       float64                   `json:"CreationDateTime"`
+	KeySchema              []KeySchemaElement        `json:"KeySchema"`
+	AttributeDefinitions   []AttributeDefinition     `json:"AttributeDefinitions"`
+	BillingModeSummary     *billingModeSummary       `json:"BillingModeSummary,omitempty"`
+	ProvisionedThroughput  *ProvisionedThroughput    `json:"ProvisionedThroughput,omitempty"`
+	GlobalSecondaryIndexes []gsiDescription          `json:"GlobalSecondaryIndexes,omitempty"`
+	LocalSecondaryIndexes  []lsiDescription          `json:"LocalSecondaryIndexes,omitempty"`
+	WarmThroughput         *warmThroughput           `json:"WarmThroughput,omitempty"`
+	ItemCount              int64                     `json:"ItemCount"`
+	TableSizeBytes         int64                     `json:"TableSizeBytes"`
+	StreamSpecification    *tableStreamSpecification `json:"StreamSpecification,omitempty"`
+	LatestStreamArn        string                    `json:"LatestStreamArn,omitempty"`
+	LatestStreamLabel      string                    `json:"LatestStreamLabel,omitempty"`
 }
 
 type gsiDescription struct {
@@ -146,6 +163,16 @@ func toTableDescription(m TableMetadata) tableDescription {
 			Projection:            lsi.Projection,
 			ProvisionedThroughput: m.ProvisionedThroughput,
 		})
+	}
+	if m.StreamSpec != nil {
+		desc.StreamSpecification = &tableStreamSpecification{
+			StreamEnabled:  m.StreamSpec.StreamEnabled,
+			StreamViewType: m.StreamSpec.StreamViewType,
+		}
+		if m.StreamLabel != "" {
+			desc.LatestStreamLabel = m.StreamLabel
+			desc.LatestStreamArn = streamARN(m.Name, m.StreamLabel)
+		}
 	}
 	return desc
 }

@@ -68,6 +68,8 @@ type TableMetadata struct {
 	Tags                   map[string]string      `json:"tags,omitempty"`
 	PITR                   *PITRStatus            `json:"pitr,omitempty"`
 	KinesisDestinations    []KinesisDestination   `json:"kinesisDestinations,omitempty"`
+	StreamSpec             *StreamSpecification   `json:"streamSpec,omitempty"`
+	StreamLabel            string                 `json:"streamLabel,omitempty"`
 }
 
 // Sort key condition operators used in SortKeyCondition.Operator.
@@ -103,6 +105,12 @@ type ScanOptions struct {
 	ExclusiveStartKey map[string]any // resume from the item after this primary key
 	Segment           *int           // parallel scan: 0-based segment index
 	TotalSegments     *int           // parallel scan: total number of segments
+}
+
+// StreamSpecification holds DynamoDB Streams configuration for a table.
+type StreamSpecification struct {
+	StreamEnabled  bool   `json:"streamEnabled"`
+	StreamViewType string `json:"streamViewType,omitempty"`
 }
 
 // ConditionCheck holds a parsed ConditionExpression with its attribute maps.

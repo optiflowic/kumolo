@@ -192,7 +192,18 @@ func (s *Storage) PutItem(
 			return nil, ErrConditionalCheckFailed
 		}
 	}
-	return old, s.writeJSON(path, item)
+	if err := s.writeJSON(path, item); err != nil {
+		return nil, err
+	}
+	if meta.StreamSpec != nil && meta.StreamSpec.StreamEnabled {
+		eventName := "INSERT"
+		if old != nil {
+			eventName = "MODIFY"
+		}
+		keys := extractKeys(item, meta.KeySchema)
+		s.emitStreamRecord(tableName, eventName, meta.StreamSpec.StreamViewType, keys, old, item)
+	}
+	return old, nil
 }
 
 func (s *Storage) GetItem(tableName string, key map[string]any) (map[string]any, error) {
@@ -263,6 +274,10 @@ func (s *Storage) DeleteItem(
 			return nil, nil
 		}
 		return nil, err
+	}
+	if old != nil && meta.StreamSpec != nil && meta.StreamSpec.StreamEnabled {
+		keys := extractKeys(old, meta.KeySchema)
+		s.emitStreamRecord(tableName, "REMOVE", meta.StreamSpec.StreamViewType, keys, old, nil)
 	}
 	return old, nil
 }
@@ -377,6 +392,14 @@ func (s *Storage) UpdateItem(
 	}
 	if err := s.writeJSON(itemPath, item); err != nil {
 		return nil, nil, err
+	}
+	if meta.StreamSpec != nil && meta.StreamSpec.StreamEnabled {
+		eventName := "INSERT"
+		if before != nil {
+			eventName = "MODIFY"
+		}
+		keys := extractKeys(item, meta.KeySchema)
+		s.emitStreamRecord(tableName, eventName, meta.StreamSpec.StreamViewType, keys, before, item)
 	}
 	return before, item, nil
 }
