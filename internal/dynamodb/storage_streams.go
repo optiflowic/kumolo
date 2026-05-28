@@ -346,6 +346,7 @@ func (s *Storage) GetStreamRecords(iterStr string, limit int) ([]streamRecord, s
 func encodeIterator(tableName string, pos int) (string, error) {
 	data, err := json.Marshal(shardIterState{Table: tableName, Position: pos})
 	if err != nil {
+		// unreachable: json.Marshal on a struct with string+int fields always succeeds.
 		return "", err
 	}
 	return base64.StdEncoding.EncodeToString(data), nil
