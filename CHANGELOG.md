@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-05-28
+
+### Fixed
+
+#### DynamoDB
+
+- `CreateTable` returned `ResourceInUseException` when a previous failed attempt left an orphan directory — table existence is now determined by the presence of the `.table.json` metadata file, not the directory
+- `CreateTable` can now reuse an orphan directory left by a failed prior attempt instead of failing with a directory-exists error
+- `ListTables` included orphan directories (no `.table.json`) in its output, causing `DescribeTable` to return `ResourceNotFoundException` for the same name
+- `ListTables` silently swallowed non-`ErrNotExist` I/O errors from `stat`; these are now propagated to the caller
+- `TransactWriteItems` did not roll back writes already applied to disk when a later write in Phase 2 failed, violating atomicity; each item's pre-write state is now snapshotted and restored in reverse order on failure
+
 ## [0.1.0] - 2026-05-24
 
 Initial release of kumolo — a high-fidelity AWS emulator for local development and testing.
@@ -68,4 +80,5 @@ Initial release of kumolo — a high-fidelity AWS emulator for local development
 - AWS CLI and Terraform e2e verification suite (`e2e/`)
 - CI: build, vet, lint (golangci-lint), test with race detector, Docker image publish
 
+[0.1.1]: https://github.com/optiflowic/kumolo/releases/tag/v0.1.1
 [0.1.0]: https://github.com/optiflowic/kumolo/releases/tag/v0.1.0
