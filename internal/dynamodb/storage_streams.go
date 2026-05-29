@@ -9,19 +9,11 @@ import (
 	"fmt"
 	"os"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
 // ErrStreamNotFound is returned when a stream ARN does not match any known stream.
 var ErrStreamNotFound = errors.New("stream not found")
-
-// globalSeqNum is a monotonically increasing counter for stream record sequence numbers.
-var globalSeqNum atomic.Uint64
-
-func init() {
-	globalSeqNum.Store(uint64(time.Now().UnixNano() / 1e6))
-}
 
 // streamRecord holds one change event in-memory.
 type streamRecord struct {
@@ -132,7 +124,7 @@ func (s *Storage) emitStreamRecord(
 		return
 	}
 
-	seqNum := globalSeqNum.Add(1)
+	seqNum := s.seqNum.Add(1)
 	rec := streamRecord{
 		EventID:   fmt.Sprintf("%032x", seqNum),
 		EventName: eventName,
