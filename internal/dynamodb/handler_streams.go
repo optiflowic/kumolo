@@ -41,6 +41,12 @@ func (sr *StreamsRouter) handleListStreams(w http.ResponseWriter, body []byte) {
 
 	entries, err := sr.storage.ListStreamARNs(req.TableName)
 	if err != nil {
+		if errors.Is(err, ErrTableNotFound) {
+			writeError(w, http.StatusBadRequest,
+				streamsErrPrefix+"ResourceNotFoundException",
+				"Requested resource not found")
+			return
+		}
 		slog.Error("ListStreams failed", "err", err)
 		writeError(
 			w,
@@ -110,6 +116,11 @@ func (sr *StreamsRouter) handleDescribeStream(w http.ResponseWriter, body []byte
 		)
 		return
 	}
+	if req.Limit != nil && *req.Limit < 1 {
+		writeError(w, http.StatusBadRequest, streamsErrPrefix+"ValidationException",
+			"Limit must be >= 1")
+		return
+	}
 
 	desc, err := sr.storage.DescribeStream(req.StreamArn)
 	if err != nil {
@@ -158,12 +169,6 @@ func (sr *StreamsRouter) handleDescribeStream(w http.ResponseWriter, body []byte
 	ks := make([]keySchemaElem, len(desc.KeySchema))
 	for i, k := range desc.KeySchema {
 		ks[i] = keySchemaElem(k)
-	}
-
-	if req.Limit != nil && *req.Limit < 1 {
-		writeError(w, http.StatusBadRequest, streamsErrPrefix+"ValidationException",
-			"Limit must be >= 1")
-		return
 	}
 
 	shards := []shardDesc{}

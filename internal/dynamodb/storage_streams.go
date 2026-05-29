@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -179,6 +180,15 @@ func extractKeys(item map[string]any, keySchema []KeySchemaElement) map[string]a
 func (s *Storage) ListStreamARNs(tableName string) ([]StreamEntry, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
+	if tableName != "" {
+		if _, err := s.readTableMeta(tableName); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil, ErrTableNotFound
+			}
+			return nil, err
+		}
+	}
 
 	entries, err := s.readDir(".")
 	if err != nil {

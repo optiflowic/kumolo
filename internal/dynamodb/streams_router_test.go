@@ -154,6 +154,14 @@ func TestHandleListStreams(t *testing.T) {
 		assert.Len(t, page2.Streams, 1)
 		assert.Equal(t, all.Streams[1].StreamArn, page2.Streams[0].StreamArn)
 	})
+
+	t.Run("non-existent TableName returns ResourceNotFoundException", func(t *testing.T) {
+		w := streams(t, sr, "ListStreams", `{"TableName":"no-such-table"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		var resp map[string]string
+		require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+		assert.Contains(t, resp["__type"], "ResourceNotFoundException")
+	})
 }
 
 // ---- DescribeStream ----
@@ -259,6 +267,30 @@ func TestHandleDescribeStream(t *testing.T) {
 			resp.StreamDescription.Shards[0].SequenceNumberRange.StartingSequenceNumber,
 		)
 	})
+
+	t.Run("Limit=0 returns ValidationException before storage call", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{"StreamArn": arn, "Limit": 0})
+		w := streams(t, sr, "DescribeStream", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		var resp map[string]string
+		require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+		assert.Contains(t, resp["__type"], "ValidationException")
+	})
+
+	t.Run(
+		"Limit=0 with invalid StreamArn returns ValidationException not ResourceNotFoundException",
+		func(t *testing.T) {
+			body, _ := json.Marshal(map[string]any{
+				"StreamArn": "arn:aws:dynamodb:us-east-1:000000000000:table/no-table/stream/bad",
+				"Limit":     0,
+			})
+			w := streams(t, sr, "DescribeStream", string(body))
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			var resp map[string]string
+			require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+			assert.Contains(t, resp["__type"], "ValidationException")
+		},
+	)
 }
 
 // ---- GetShardIterator ----
