@@ -461,7 +461,10 @@ func (s *Storage) BatchWriteItems(
 		path := filepath.Join(tableName, key+".json")
 		var old map[string]any
 		if streamEnabled {
-			old, _ = readJSON[map[string]any](s, path)
+			old, err = readJSON[map[string]any](s, path)
+			if err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
 		}
 		if err := s.writeJSON(path, item); err != nil {
 			return err
@@ -490,7 +493,10 @@ func (s *Storage) BatchWriteItems(
 		path := filepath.Join(tableName, k+".json")
 		var old map[string]any
 		if streamEnabled {
-			old, _ = readJSON[map[string]any](s, path)
+			old, err = readJSON[map[string]any](s, path)
+			if err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
 		}
 		if err := s.removeFile(path); err != nil {
 			if errors.Is(err, os.ErrNotExist) {
