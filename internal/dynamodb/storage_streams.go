@@ -15,6 +15,17 @@ import (
 // ErrStreamNotFound is returned when a stream ARN does not match any known stream.
 var ErrStreamNotFound = errors.New("stream not found")
 
+func cloneMap(m map[string]any) map[string]any {
+	if m == nil {
+		return nil
+	}
+	cp := make(map[string]any, len(m))
+	for k, v := range m {
+		cp[k] = v
+	}
+	return cp
+}
+
 // streamRecord holds one change event in-memory.
 type streamRecord struct {
 	EventID   string
@@ -133,22 +144,22 @@ func (s *Storage) emitStreamRecord(
 		ViewType:  viewType,
 	}
 
-	// Keys are always included.
-	rec.Keys = keys
+	// Keys are always included; snapshot to avoid mutation after emit.
+	rec.Keys = cloneMap(keys)
 
 	switch viewType {
 	case "KEYS_ONLY":
 		// only keys; NewImage/OldImage stay nil
 	case "NEW_IMAGE":
-		rec.NewImage = newImage
+		rec.NewImage = cloneMap(newImage)
 	case "OLD_IMAGE":
-		rec.OldImage = oldImage
+		rec.OldImage = cloneMap(oldImage)
 	case "NEW_AND_OLD_IMAGES":
-		rec.NewImage = newImage
-		rec.OldImage = oldImage
+		rec.NewImage = cloneMap(newImage)
+		rec.OldImage = cloneMap(oldImage)
 	default:
-		rec.NewImage = newImage
-		rec.OldImage = oldImage
+		rec.NewImage = cloneMap(newImage)
+		rec.OldImage = cloneMap(oldImage)
 	}
 
 	buf.mu.Lock()
