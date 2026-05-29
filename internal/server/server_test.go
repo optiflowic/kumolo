@@ -62,7 +62,9 @@ func TestNewMux(t *testing.T) {
 		req.Header.Set("X-Amz-Target", "DynamoDBStreams_20120810.ListStreams")
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Equal(t, "application/x-amz-json-1.0", w.Header().Get("Content-Type"))
+		assert.Contains(t, w.Body.String(), `"Streams"`)
 	})
 
 	t.Run("routes STS requests via form-encoded body", func(t *testing.T) {
