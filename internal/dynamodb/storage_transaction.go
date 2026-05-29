@@ -533,7 +533,7 @@ func (s *Storage) emitTransactStreamEvents(records []transactWriteRecord) {
 		}
 		var old map[string]any
 		if r.snap.content != nil {
-			if err := json.Unmarshal(r.snap.content, &old); err != nil {
+			if err := json.Unmarshal(r.snap.content, &old); err != nil { // untestable: snap.content is written by this process; JSON corruption is not reachable in tests
 				slog.Error("emitTransactStreamEvents: corrupt pre-image snapshot", "err", err)
 			}
 		}

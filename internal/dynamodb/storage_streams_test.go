@@ -308,6 +308,35 @@ func TestListStreamARNs(t *testing.T) {
 	})
 }
 
+func TestDeepCloneAny(t *testing.T) {
+	t.Run("clones slice branch", func(t *testing.T) {
+		orig := map[string]any{
+			"L": []any{map[string]any{"S": "a"}, map[string]any{"S": "b"}},
+		}
+		got := cloneMap(orig)
+		// Mutating the original slice must not affect the clone.
+		orig["L"].([]any)[0].(map[string]any)["S"] = "mutated"
+		assert.Equal(t, "a", got["L"].([]any)[0].(map[string]any)["S"])
+	})
+
+	t.Run("clones default (scalar) branch", func(t *testing.T) {
+		orig := map[string]any{"S": "hello", "N": "42"}
+		got := cloneMap(orig)
+		orig["S"] = "changed"
+		assert.Equal(t, "hello", got["S"])
+	})
+}
+
+func TestListStreamARNs_ErrNotExistSkipped(t *testing.T) {
+	s := newTestStorage(t)
+	mustCreateStreamTable(t, s, "ghost", "KEYS_ONLY")
+	// Remove only the metadata file; the table directory remains.
+	require.NoError(t, s.root.Remove("ghost.table.json"))
+	entries, err := s.ListStreamARNs("")
+	require.NoError(t, err)
+	assert.Len(t, entries, 0)
+}
+
 func TestDescribeStream(t *testing.T) {
 	s := newTestStorage(t)
 	meta := mustCreateStreamTable(t, s, "ds-test", "NEW_AND_OLD_IMAGES")
