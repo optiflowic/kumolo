@@ -16,15 +16,30 @@ import (
 // ErrStreamNotFound is returned when a stream ARN does not match any known stream.
 var ErrStreamNotFound = errors.New("stream not found")
 
+func deepCloneAny(v any) any {
+	switch x := v.(type) {
+	case map[string]any:
+		cp := make(map[string]any, len(x))
+		for k, vv := range x {
+			cp[k] = deepCloneAny(vv)
+		}
+		return cp
+	case []any:
+		cp := make([]any, len(x))
+		for i, vv := range x {
+			cp[i] = deepCloneAny(vv)
+		}
+		return cp
+	default:
+		return v
+	}
+}
+
 func cloneMap(m map[string]any) map[string]any {
 	if m == nil {
 		return nil
 	}
-	cp := make(map[string]any, len(m))
-	for k, v := range m {
-		cp[k] = v
-	}
-	return cp
+	return deepCloneAny(m).(map[string]any)
 }
 
 // streamRecord holds one change event in-memory.
