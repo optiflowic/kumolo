@@ -1,6 +1,8 @@
 package dynamodb
 
 import (
+	"errors"
+	"os"
 	"testing"
 	"time"
 
@@ -262,6 +264,28 @@ func TestListStreamARNs(t *testing.T) {
 		entries, err := s.ListStreamARNs("t3-no-stream")
 		require.NoError(t, err)
 		assert.Len(t, entries, 0)
+	})
+
+	t.Run("readDir error propagates", func(t *testing.T) {
+		s2 := newTestStorage(t)
+		s2.listDirFn = func(string) ([]os.DirEntry, error) { return nil, errors.New("boom") }
+		_, err := s2.ListStreamARNs("")
+		require.Error(t, err)
+	})
+
+	t.Run("unreadable table meta is skipped", func(t *testing.T) {
+		s2 := newTestStorage(t)
+		mustCreateStreamTable(t, s2, "good", "KEYS_ONLY")
+		mustCreateStreamTable(t, s2, "bad", "NEW_IMAGE")
+		f, err := s2.root.OpenFile("bad.table.json", os.O_WRONLY|os.O_TRUNC, 0o600)
+		require.NoError(t, err)
+		_, err = f.Write([]byte("invalid json"))
+		require.NoError(t, err)
+		require.NoError(t, f.Close())
+		entries, err := s2.ListStreamARNs("")
+		require.NoError(t, err)
+		assert.Len(t, entries, 1)
+		assert.Equal(t, "good", entries[0].TableName)
 	})
 }
 
