@@ -6,10 +6,12 @@ Target: `DynamoDBStreams_20120810.GetRecords`
 Last verified: 2026-05-28
 
 ## Request
+
 - `ShardIterator` (string, required)
 - `Limit` (int, optional, 1–1000, default 1000)
 
 ## Response
+
 - `Records[]` — each record has:
   - `eventID` (string)
   - `eventName` (string): `INSERT` | `MODIFY` | `REMOVE`
@@ -26,11 +28,13 @@ Last verified: 2026-05-28
 - `NextShardIterator` — next position cursor; always present (shard never closes in kumolo)
 
 ## Implemented errors
+
 - `ResourceNotFoundException` 400 — iterator references unknown stream
 - `ExpiredIteratorException` 400 — not enforced; kumolo iterators do not expire
 - `LimitExceededException` 400 — Limit > 1000
 - `InternalServerError` 500
 
 ## kumolo deviations
+
 - Iterators never expire.
 - `SizeBytes` is the JSON-marshalled byte count of the record's `dynamodb` field — an approximation.
