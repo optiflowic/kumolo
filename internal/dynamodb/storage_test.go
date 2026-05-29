@@ -3677,6 +3677,90 @@ func TestTransactWriteItems(t *testing.T) {
 			assert.Error(t, err)
 		},
 	)
+
+	t.Run("emits INSERT stream event for Put on new item", func(t *testing.T) {
+		s := newTestStorage(t)
+		mustCreateStreamTable(t, s, "tx-stream", "NEW_IMAGE")
+		err := s.TransactWriteItems([]TransactWriteAction{
+			{Put: &TransactPut{
+				TableName: "tx-stream",
+				Item:      map[string]any{"pk": map[string]any{"S": "k1"}},
+			}},
+		})
+		require.NoError(t, err)
+		buf := s.getStreamBuffer("tx-stream")
+		require.NotNil(t, buf)
+		buf.mu.RLock()
+		defer buf.mu.RUnlock()
+		require.Len(t, buf.records, 1)
+		assert.Equal(t, "INSERT", buf.records[0].EventName)
+	})
+
+	t.Run("emits MODIFY stream event for Put over existing item", func(t *testing.T) {
+		s := newTestStorage(t)
+		mustCreateStreamTable(t, s, "tx-stream2", "NEW_AND_OLD_IMAGES")
+		item := map[string]any{"pk": map[string]any{"S": "k1"}, "v": map[string]any{"S": "old"}}
+		mustPutItem(t, s, "tx-stream2", item)
+		err := s.TransactWriteItems([]TransactWriteAction{
+			{Put: &TransactPut{
+				TableName: "tx-stream2",
+				Item: map[string]any{
+					"pk": map[string]any{"S": "k1"},
+					"v":  map[string]any{"S": "new"},
+				},
+			}},
+		})
+		require.NoError(t, err)
+		buf := s.getStreamBuffer("tx-stream2")
+		require.NotNil(t, buf)
+		buf.mu.RLock()
+		defer buf.mu.RUnlock()
+		require.Len(t, buf.records, 2) // first INSERT from mustPutItem, then MODIFY
+		assert.Equal(t, "MODIFY", buf.records[1].EventName)
+	})
+
+	t.Run("emits REMOVE stream event for Delete", func(t *testing.T) {
+		s := newTestStorage(t)
+		mustCreateStreamTable(t, s, "tx-stream3", "OLD_IMAGE")
+		item := map[string]any{"pk": map[string]any{"S": "k1"}}
+		mustPutItem(t, s, "tx-stream3", item)
+		err := s.TransactWriteItems([]TransactWriteAction{
+			{Delete: &TransactDelete{
+				TableName: "tx-stream3",
+				Key:       map[string]any{"pk": map[string]any{"S": "k1"}},
+			}},
+		})
+		require.NoError(t, err)
+		buf := s.getStreamBuffer("tx-stream3")
+		require.NotNil(t, buf)
+		buf.mu.RLock()
+		defer buf.mu.RUnlock()
+		require.Len(t, buf.records, 2) // INSERT from mustPutItem, then REMOVE
+		assert.Equal(t, "REMOVE", buf.records[1].EventName)
+	})
+
+	t.Run("emits MODIFY stream event for Update on existing item", func(t *testing.T) {
+		s := newTestStorage(t)
+		mustCreateStreamTable(t, s, "tx-stream4", "NEW_IMAGE")
+		mustPutItem(t, s, "tx-stream4", map[string]any{
+			"pk": map[string]any{"S": "k1"},
+			"v":  map[string]any{"S": "before"},
+		})
+		err := s.TransactWriteItems([]TransactWriteAction{
+			{Update: &TransactUpdate{
+				TableName: "tx-stream4",
+				Key:       map[string]any{"pk": map[string]any{"S": "k1"}},
+				Updates:   map[string]any{"v": map[string]any{"S": "after"}},
+			}},
+		})
+		require.NoError(t, err)
+		buf := s.getStreamBuffer("tx-stream4")
+		require.NotNil(t, buf)
+		buf.mu.RLock()
+		defer buf.mu.RUnlock()
+		require.Len(t, buf.records, 2) // INSERT from mustPutItem, then MODIFY
+		assert.Equal(t, "MODIFY", buf.records[1].EventName)
+	})
 }
 
 func TestTransactWriteItemsRollback(t *testing.T) {
