@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -209,7 +210,10 @@ func (s *Storage) ListStreamARNs(tableName string) ([]StreamEntry, error) {
 		}
 		meta, err := s.readTableMeta(name)
 		if err != nil {
-			continue
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return nil, fmt.Errorf("read table metadata for %s: %w", name, err)
 		}
 		if meta.StreamSpec == nil || !meta.StreamSpec.StreamEnabled || meta.StreamLabel == "" {
 			continue
@@ -413,11 +417,7 @@ func seqNumStr(n uint64) string {
 }
 
 func parseSeqNum(s string) (uint64, error) {
-	var n uint64
-	if _, err := fmt.Sscanf(s, "%d", &n); err != nil {
-		return 0, err
-	}
-	return n, nil
+	return strconv.ParseUint(s, 10, 64)
 }
 
 // findSeqPos returns the index of the first record at or after seq.

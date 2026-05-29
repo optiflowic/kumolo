@@ -533,7 +533,9 @@ func (s *Storage) emitTransactStreamEvents(records []transactWriteRecord) {
 		}
 		var old map[string]any
 		if r.snap.content != nil {
-			_ = json.Unmarshal(r.snap.content, &old)
+			if err := json.Unmarshal(r.snap.content, &old); err != nil {
+				slog.Error("emitTransactStreamEvents: corrupt pre-image snapshot", "err", err)
+			}
 		}
 		switch {
 		case r.action.Put != nil:
