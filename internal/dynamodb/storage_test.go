@@ -380,6 +380,16 @@ func TestPutItem(t *testing.T) {
 		require.NoError(t, err)
 		assert.Nil(t, old)
 	})
+
+	t.Run("returns error when writeJSON fails", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		s.openFile = func(string, int, os.FileMode) (io.WriteCloser, error) {
+			return nil, errors.New("write error")
+		}
+		_, err := s.PutItem("test-table", item, nil)
+		assert.Error(t, err)
+	})
 }
 
 func TestIsTTLExpired(t *testing.T) {

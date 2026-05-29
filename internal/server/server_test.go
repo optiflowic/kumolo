@@ -57,6 +57,14 @@ func TestNewMux(t *testing.T) {
 		assert.Equal(t, "application/x-amz-json-1.0", w.Header().Get("Content-Type"))
 	})
 
+	t.Run("routes DynamoDBStreams requests via X-Amz-Target", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{}`))
+		req.Header.Set("X-Amz-Target", "DynamoDBStreams_20120810.ListStreams")
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		assert.Equal(t, "application/x-amz-json-1.0", w.Header().Get("Content-Type"))
+	})
+
 	t.Run("routes STS requests via form-encoded body", func(t *testing.T) {
 		req := httptest.NewRequest(
 			http.MethodPost,
