@@ -463,3 +463,66 @@ func TestStreamLabelFormat(t *testing.T) {
 	_, err := time.Parse("2006-01-02T15:04:05.000000000", label)
 	require.NoError(t, err, "stream label should be valid ISO8601 with nanoseconds: %s", label)
 }
+
+func TestGetStreamRecordsNegativePosition(t *testing.T) {
+	s := newTestStorage(t)
+	mustCreateStreamTable(t, s, "neg-pos", "NEW_IMAGE")
+	item := map[string]any{"pk": map[string]any{"S": "k1"}}
+	_, err := s.PutItem("neg-pos", item, nil)
+	require.NoError(t, err)
+
+	// Craft an iterator with a negative position to exercise the start < 0 guard.
+	iter, err := encodeIterator("neg-pos", -5)
+	require.NoError(t, err)
+
+	recs, _, err := s.GetStreamRecords(iter, 1000)
+	require.NoError(t, err)
+	// Should return all records starting from position 0, not panic.
+	assert.Len(t, recs, 1)
+}
+
+func TestBatchWriteItemsPutPreimageReadError(t *testing.T) {
+	s := newTestStorage(t)
+	mustCreateStreamTable(t, s, "batch-put-err", "NEW_AND_OLD_IMAGES")
+
+	item := map[string]any{"pk": map[string]any{"S": "k1"}}
+	_, err := s.PutItem("batch-put-err", item, nil)
+	require.NoError(t, err)
+
+	// Inject a readAll that fails on the 2nd call: 1st is readTableMeta inside
+	// BatchWriteItems, 2nd is the pre-image read for the existing item.
+	callCount := 0
+	s.readAll = func(r io.Reader) ([]byte, error) {
+		callCount++
+		if callCount >= 2 {
+			return nil, errors.New("simulated I/O error")
+		}
+		return io.ReadAll(r)
+	}
+
+	err = s.BatchWriteItems("batch-put-err", []map[string]any{item}, nil)
+	require.Error(t, err)
+}
+
+func TestBatchWriteItemsDeletePreimageReadError(t *testing.T) {
+	s := newTestStorage(t)
+	mustCreateStreamTable(t, s, "batch-del-err", "NEW_AND_OLD_IMAGES")
+
+	item := map[string]any{"pk": map[string]any{"S": "k1"}}
+	_, err := s.PutItem("batch-del-err", item, nil)
+	require.NoError(t, err)
+
+	// Inject a readAll that fails on the 2nd call: 1st is readTableMeta inside
+	// BatchWriteItems, 2nd is the pre-image read for the existing item.
+	callCount := 0
+	s.readAll = func(r io.Reader) ([]byte, error) {
+		callCount++
+		if callCount >= 2 {
+			return nil, errors.New("simulated I/O error")
+		}
+		return io.ReadAll(r)
+	}
+
+	err = s.BatchWriteItems("batch-del-err", nil, []map[string]any{item})
+	require.Error(t, err)
+}
