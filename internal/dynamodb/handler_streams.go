@@ -25,18 +25,16 @@ func (sr *StreamsRouter) handleListStreams(w http.ResponseWriter, body []byte) {
 
 	limit := 100
 	if req.Limit != nil {
-		if *req.Limit < 1 {
+		if *req.Limit < 1 || *req.Limit > 100 {
 			writeError(
 				w,
 				http.StatusBadRequest,
 				streamsErrPrefix+"ValidationException",
-				"Limit must be >= 1",
+				"Limit must be between 1 and 100",
 			)
 			return
 		}
-		if *req.Limit < limit {
-			limit = *req.Limit
-		}
+		limit = *req.Limit
 	}
 
 	entries, err := sr.storage.ListStreamARNs(req.TableName)
@@ -116,9 +114,9 @@ func (sr *StreamsRouter) handleDescribeStream(w http.ResponseWriter, body []byte
 		)
 		return
 	}
-	if req.Limit != nil && *req.Limit < 1 {
+	if req.Limit != nil && (*req.Limit < 1 || *req.Limit > 100) {
 		writeError(w, http.StatusBadRequest, streamsErrPrefix+"ValidationException",
-			"Limit must be >= 1")
+			"Limit must be between 1 and 100")
 		return
 	}
 
