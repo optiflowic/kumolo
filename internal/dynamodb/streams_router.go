@@ -24,7 +24,7 @@ func (sr *StreamsRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		// Defensive: io.ReadAll on an in-process httptest request body never errors.
+		// unreachable: io.ReadAll on an in-process httptest request body never errors.
 		writeError(
 			w,
 			http.StatusBadRequest,
