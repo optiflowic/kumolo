@@ -294,7 +294,7 @@ func TestListStreamARNs(t *testing.T) {
 		},
 	)
 
-	t.Run("unreadable table meta is skipped", func(t *testing.T) {
+	t.Run("corrupt table meta returns error", func(t *testing.T) {
 		s2 := newTestStorage(t)
 		mustCreateStreamTable(t, s2, "good", "KEYS_ONLY")
 		mustCreateStreamTable(t, s2, "bad", "NEW_IMAGE")
@@ -303,10 +303,8 @@ func TestListStreamARNs(t *testing.T) {
 		_, err = f.Write([]byte("invalid json"))
 		require.NoError(t, err)
 		require.NoError(t, f.Close())
-		entries, err := s2.ListStreamARNs("")
-		require.NoError(t, err)
-		assert.Len(t, entries, 1)
-		assert.Equal(t, "good", entries[0].TableName)
+		_, err = s2.ListStreamARNs("")
+		require.Error(t, err)
 	})
 }
 
