@@ -52,3 +52,28 @@ resource "aws_dynamodb_table_item" "alice" {
     name       = { S = "Alice" }
   })
 }
+
+resource "aws_dynamodb_table" "stream_test" {
+  name         = "kumolo-tf-streams-test"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "pk"
+  range_key    = "sk"
+
+  attribute {
+    name = "pk"
+    type = "S"
+  }
+
+  attribute {
+    name = "sk"
+    type = "N"
+  }
+
+  stream_enabled   = true
+  stream_view_type = "NEW_AND_OLD_IMAGES"
+
+  tags = {
+    Environment = "local"
+    ManagedBy   = "terraform"
+  }
+}

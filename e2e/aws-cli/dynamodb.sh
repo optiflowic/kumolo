@@ -198,6 +198,185 @@ run "UpdateTable (add GSI)" \
 $AWS delete-table --table-name "$TABLE" > /dev/null 2>&1 || true
 
 # ---------------------------------------------------------------------------
+# DynamoDB Streams
+# ---------------------------------------------------------------------------
+STREAM_TABLE="kumolo-cli-ddb-streams-verify"
+DDBSTREAMS="aws --endpoint-url $ENDPOINT dynamodbstreams"
+
+$AWS delete-table --table-name "$STREAM_TABLE" > /dev/null 2>&1 || true
+
+echo ""
+echo "=== DynamoDB Streams ==="
+
+run "CreateTable (stream-enabled, NEW_AND_OLD_IMAGES)" \
+  $AWS create-table \
+    --table-name "$STREAM_TABLE" \
+    --attribute-definitions \
+      AttributeName=pk,AttributeType=S \
+      AttributeName=sk,AttributeType=N \
+    --key-schema \
+      AttributeName=pk,KeyType=HASH \
+      AttributeName=sk,KeyType=RANGE \
+    --billing-mode PAY_PER_REQUEST \
+    --stream-specification StreamEnabled=true,StreamViewType=NEW_AND_OLD_IMAGES
+
+# Write items to generate INSERT events.
+run "PutItem (INSERT event 1)" \
+  $AWS put-item \
+    --table-name "$STREAM_TABLE" \
+    --item '{"pk":{"S":"item-001"},"sk":{"N":"1"},"value":{"S":"initial"}}'
+
+run "PutItem (INSERT event 2)" \
+  $AWS put-item \
+    --table-name "$STREAM_TABLE" \
+    --item '{"pk":{"S":"item-002"},"sk":{"N":"2"},"value":{"S":"hello"}}'
+
+# Update to generate a MODIFY event.
+run "UpdateItem (MODIFY event)" \
+  $AWS update-item \
+    --table-name "$STREAM_TABLE" \
+    --key '{"pk":{"S":"item-001"},"sk":{"N":"1"}}' \
+    --update-expression "SET #v = :v" \
+    --expression-attribute-names '{"#v":"value"}' \
+    --expression-attribute-values '{":v":{"S":"updated"}}'
+
+# Delete to generate a REMOVE event.
+run "DeleteItem (REMOVE event)" \
+  $AWS delete-item \
+    --table-name "$STREAM_TABLE" \
+    --key '{"pk":{"S":"item-002"},"sk":{"N":"2"}}'
+
+# ListStreams — capture stream ARN for subsequent calls.
+STREAM_LIST=$($DDBSTREAMS list-streams --table-name "$STREAM_TABLE" 2>/dev/null || true)
+STREAM_ARN=$(echo "$STREAM_LIST" | jq -r '.Streams[0].StreamArn // empty' 2>/dev/null || true)
+if [[ -n "$STREAM_ARN" ]]; then
+  ok "ListStreams (stream ARN present)"
+else
+  fail "ListStreams (no stream ARN returned)"
+fi
+
+run "ListStreams (no table filter)" $DDBSTREAMS list-streams
+
+# DescribeStream — capture shard ID and verify metadata.
+SHARD_ID=""
+if [[ -n "$STREAM_ARN" ]]; then
+  STREAM_DESC=$($DDBSTREAMS describe-stream --stream-arn "$STREAM_ARN" 2>/dev/null || true)
+  SHARD_ID=$(echo "$STREAM_DESC" | jq -r '.StreamDescription.Shards[0].ShardId // empty' 2>/dev/null || true)
+  STREAM_STATUS=$(echo "$STREAM_DESC" | jq -r '.StreamDescription.StreamStatus // empty' 2>/dev/null || true)
+  STREAM_VIEW_TYPE=$(echo "$STREAM_DESC" | jq -r '.StreamDescription.StreamViewType // empty' 2>/dev/null || true)
+
+  if [[ -n "$SHARD_ID" ]]; then
+    ok "DescribeStream (ShardId present)"
+  else
+    fail "DescribeStream (no ShardId)"
+  fi
+  if [[ "$STREAM_STATUS" == "ENABLED" ]]; then
+    ok "DescribeStream (StreamStatus=ENABLED)"
+  else
+    fail "DescribeStream (StreamStatus expected ENABLED, got '$STREAM_STATUS')"
+  fi
+  if [[ "$STREAM_VIEW_TYPE" == "NEW_AND_OLD_IMAGES" ]]; then
+    ok "DescribeStream (StreamViewType=NEW_AND_OLD_IMAGES)"
+  else
+    fail "DescribeStream (StreamViewType expected NEW_AND_OLD_IMAGES, got '$STREAM_VIEW_TYPE')"
+  fi
+else
+  fail "DescribeStream (skipped: no stream ARN)"
+fi
+
+# GetShardIterator (TRIM_HORIZON) — read from the beginning of the shard.
+SHARD_ITER=""
+if [[ -n "$STREAM_ARN" && -n "$SHARD_ID" ]]; then
+  ITER_RESP=$($DDBSTREAMS get-shard-iterator \
+    --stream-arn "$STREAM_ARN" \
+    --shard-id "$SHARD_ID" \
+    --shard-iterator-type TRIM_HORIZON 2>/dev/null || true)
+  SHARD_ITER=$(echo "$ITER_RESP" | jq -r '.ShardIterator // empty' 2>/dev/null || true)
+  if [[ -n "$SHARD_ITER" ]]; then
+    ok "GetShardIterator (TRIM_HORIZON)"
+  else
+    fail "GetShardIterator (TRIM_HORIZON returned no iterator)"
+  fi
+else
+  fail "GetShardIterator (skipped: no stream ARN or shard ID)"
+fi
+
+# GetRecords — verify event names and image fields.
+if [[ -n "$SHARD_ITER" ]]; then
+  RECORDS_RESP=$($DDBSTREAMS get-records --shard-iterator "$SHARD_ITER" 2>/dev/null || true)
+  RECORD_COUNT=$(echo "$RECORDS_RESP" | jq '.Records | length' 2>/dev/null || echo 0)
+
+  if [[ "$RECORD_COUNT" -ge 4 ]]; then
+    ok "GetRecords (record count: $RECORD_COUNT)"
+  else
+    fail "GetRecords (expected >=4 records, got $RECORD_COUNT)"
+  fi
+
+  INSERT_COUNT=$(echo "$RECORDS_RESP" | jq '[.Records[] | select(.eventName=="INSERT")] | length' 2>/dev/null || echo 0)
+  MODIFY_COUNT=$(echo "$RECORDS_RESP" | jq '[.Records[] | select(.eventName=="MODIFY")] | length' 2>/dev/null || echo 0)
+  REMOVE_COUNT=$(echo "$RECORDS_RESP" | jq '[.Records[] | select(.eventName=="REMOVE")] | length' 2>/dev/null || echo 0)
+
+  if [[ "$INSERT_COUNT" -ge 2 ]]; then
+    ok "GetRecords (INSERT events: $INSERT_COUNT)"
+  else
+    fail "GetRecords (expected >=2 INSERT events, got $INSERT_COUNT)"
+  fi
+  if [[ "$MODIFY_COUNT" -ge 1 ]]; then
+    ok "GetRecords (MODIFY events: $MODIFY_COUNT)"
+  else
+    fail "GetRecords (expected >=1 MODIFY event, got $MODIFY_COUNT)"
+  fi
+  if [[ "$REMOVE_COUNT" -ge 1 ]]; then
+    ok "GetRecords (REMOVE events: $REMOVE_COUNT)"
+  else
+    fail "GetRecords (expected >=1 REMOVE event, got $REMOVE_COUNT)"
+  fi
+
+  # Verify NewImage / OldImage on MODIFY records (NEW_AND_OLD_IMAGES view type).
+  HAS_NEW=$(echo "$RECORDS_RESP" | jq '[.Records[] | select(.eventName=="MODIFY" and .dynamodb.NewImage!=null)] | length' 2>/dev/null || echo 0)
+  HAS_OLD=$(echo "$RECORDS_RESP" | jq '[.Records[] | select(.eventName=="MODIFY" and .dynamodb.OldImage!=null)] | length' 2>/dev/null || echo 0)
+  if [[ "$HAS_NEW" -ge 1 ]]; then
+    ok "GetRecords (MODIFY record has NewImage)"
+  else
+    fail "GetRecords (MODIFY record missing NewImage)"
+  fi
+  if [[ "$HAS_OLD" -ge 1 ]]; then
+    ok "GetRecords (MODIFY record has OldImage)"
+  else
+    fail "GetRecords (MODIFY record missing OldImage)"
+  fi
+else
+  fail "GetRecords (skipped: no shard iterator)"
+fi
+
+# GetShardIterator (LATEST) — should yield an empty page.
+if [[ -n "$STREAM_ARN" && -n "$SHARD_ID" ]]; then
+  ITER_LATEST_RESP=$($DDBSTREAMS get-shard-iterator \
+    --stream-arn "$STREAM_ARN" \
+    --shard-id "$SHARD_ID" \
+    --shard-iterator-type LATEST 2>/dev/null || true)
+  SHARD_ITER_LATEST=$(echo "$ITER_LATEST_RESP" | jq -r '.ShardIterator // empty' 2>/dev/null || true)
+  if [[ -n "$SHARD_ITER_LATEST" ]]; then
+    ok "GetShardIterator (LATEST)"
+  else
+    fail "GetShardIterator (LATEST returned no iterator)"
+  fi
+
+  if [[ -n "$SHARD_ITER_LATEST" ]]; then
+    LATEST_COUNT=$($DDBSTREAMS get-records --shard-iterator "$SHARD_ITER_LATEST" 2>/dev/null \
+      | jq '.Records | length' 2>/dev/null || echo -1)
+    if [[ "$LATEST_COUNT" -eq 0 ]]; then
+      ok "GetRecords (LATEST returns empty page)"
+    else
+      fail "GetRecords (LATEST expected 0 records, got $LATEST_COUNT)"
+    fi
+  fi
+fi
+
+# Cleanup stream table.
+$AWS delete-table --table-name "$STREAM_TABLE" > /dev/null 2>&1 || true
+
+# ---------------------------------------------------------------------------
 echo ""
 echo "DynamoDB results: ${PASS} passed, ${FAIL} failed"
 [[ $FAIL -eq 0 ]]
