@@ -343,6 +343,9 @@ func (s *Storage) GetStreamRecords(iterStr string, limit int) ([]streamRecord, s
 	defer buf.mu.RUnlock()
 
 	start := state.Position
+	if start < 0 {
+		start = 0
+	}
 	if start > len(buf.records) {
 		start = len(buf.records)
 	}
