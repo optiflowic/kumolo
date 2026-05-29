@@ -17,7 +17,7 @@ func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 		BillingMode           string                 `json:"BillingMode"`
 		ProvisionedThroughput *ProvisionedThroughput `json:"ProvisionedThroughput,omitempty"`
 		StreamSpecification   *struct {
-			StreamEnabled  bool   `json:"StreamEnabled"`
+			StreamEnabled  *bool  `json:"StreamEnabled"`
 			StreamViewType string `json:"StreamViewType"`
 		} `json:"StreamSpecification"`
 		GlobalSecondaryIndexes []struct {
@@ -58,7 +58,13 @@ func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 		ProvisionedThroughput: req.ProvisionedThroughput,
 	}
 	if req.StreamSpecification != nil {
-		if req.StreamSpecification.StreamEnabled {
+		if req.StreamSpecification.StreamEnabled == nil {
+			writeError(w, http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				"StreamEnabled is required in StreamSpecification")
+			return
+		}
+		if *req.StreamSpecification.StreamEnabled {
 			if err := validateStreamViewType(req.StreamSpecification.StreamViewType); err != nil {
 				writeError(w, http.StatusBadRequest,
 					"com.amazonaws.dynamodb.v20120810#ValidationException", err.Error())
@@ -66,7 +72,7 @@ func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 			}
 		}
 		meta.StreamSpec = &StreamSpecification{
-			StreamEnabled:  req.StreamSpecification.StreamEnabled,
+			StreamEnabled:  *req.StreamSpecification.StreamEnabled,
 			StreamViewType: req.StreamSpecification.StreamViewType,
 		}
 	}
@@ -317,7 +323,7 @@ func (ro *Router) handleUpdateTable(w http.ResponseWriter, body []byte) {
 			WriteCapacityUnits int64 `json:"WriteCapacityUnits"`
 		} `json:"ProvisionedThroughput"`
 		StreamSpecification *struct {
-			StreamEnabled  bool   `json:"StreamEnabled"`
+			StreamEnabled  *bool  `json:"StreamEnabled"`
 			StreamViewType string `json:"StreamViewType"`
 		} `json:"StreamSpecification"`
 		GlobalSecondaryIndexUpdates []struct {
@@ -366,7 +372,13 @@ func (ro *Router) handleUpdateTable(w http.ResponseWriter, body []byte) {
 		AttributeDefinitions: req.AttributeDefinitions,
 	}
 	if req.StreamSpecification != nil {
-		if req.StreamSpecification.StreamEnabled {
+		if req.StreamSpecification.StreamEnabled == nil {
+			writeError(w, http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				"StreamEnabled is required in StreamSpecification")
+			return
+		}
+		if *req.StreamSpecification.StreamEnabled {
 			if err := validateStreamViewType(req.StreamSpecification.StreamViewType); err != nil {
 				writeError(w, http.StatusBadRequest,
 					"com.amazonaws.dynamodb.v20120810#ValidationException", err.Error())
@@ -374,7 +386,7 @@ func (ro *Router) handleUpdateTable(w http.ResponseWriter, body []byte) {
 			}
 		}
 		in.StreamSpec = &StreamSpecification{
-			StreamEnabled:  req.StreamSpecification.StreamEnabled,
+			StreamEnabled:  *req.StreamSpecification.StreamEnabled,
 			StreamViewType: req.StreamSpecification.StreamViewType,
 		}
 	}
