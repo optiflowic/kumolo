@@ -2622,6 +2622,49 @@ func TestBatchWriteItems(t *testing.T) {
 		err := s.BatchWriteItems("test-table", nil, deletes)
 		assert.Error(t, err)
 	})
+
+	t.Run("emits INSERT stream event for put on stream-enabled table", func(t *testing.T) {
+		s := newTestStorage(t)
+		mustCreateStreamTable(t, s, "stream-batch", "NEW_IMAGE")
+		puts := []map[string]any{{"pk": map[string]any{"S": "k1"}}}
+		require.NoError(t, s.BatchWriteItems("stream-batch", puts, nil))
+		buf := s.getStreamBuffer("stream-batch")
+		require.NotNil(t, buf)
+		buf.mu.RLock()
+		defer buf.mu.RUnlock()
+		require.Len(t, buf.records, 1)
+		assert.Equal(t, "INSERT", buf.records[0].EventName)
+	})
+
+	t.Run("emits MODIFY when put overwrites existing item", func(t *testing.T) {
+		s := newTestStorage(t)
+		mustCreateStreamTable(t, s, "stream-batch2", "NEW_IMAGE")
+		item := map[string]any{"pk": map[string]any{"S": "k1"}}
+		mustPutItem(t, s, "stream-batch2", item)
+		// BatchWrite over the same key
+		require.NoError(t, s.BatchWriteItems("stream-batch2", []map[string]any{item}, nil))
+		buf := s.getStreamBuffer("stream-batch2")
+		require.NotNil(t, buf)
+		buf.mu.RLock()
+		defer buf.mu.RUnlock()
+		require.Len(t, buf.records, 2) // first INSERT from PutItem, then MODIFY from BatchWrite
+		assert.Equal(t, "MODIFY", buf.records[1].EventName)
+	})
+
+	t.Run("emits REMOVE stream event for delete on stream-enabled table", func(t *testing.T) {
+		s := newTestStorage(t)
+		mustCreateStreamTable(t, s, "stream-batch3", "OLD_IMAGE")
+		item := map[string]any{"pk": map[string]any{"S": "k1"}}
+		mustPutItem(t, s, "stream-batch3", item)
+		deletes := []map[string]any{{"pk": map[string]any{"S": "k1"}}}
+		require.NoError(t, s.BatchWriteItems("stream-batch3", nil, deletes))
+		buf := s.getStreamBuffer("stream-batch3")
+		require.NotNil(t, buf)
+		buf.mu.RLock()
+		defer buf.mu.RUnlock()
+		require.Len(t, buf.records, 2)
+		assert.Equal(t, "REMOVE", buf.records[1].EventName)
+	})
 }
 
 func TestUpdateTable(t *testing.T) {

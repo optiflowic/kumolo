@@ -452,13 +452,34 @@ func (s *Storage) BatchWriteItems(
 		}
 		return err
 	}
+	streamEnabled := meta.StreamSpec != nil && meta.StreamSpec.StreamEnabled
 	for _, item := range puts {
 		key, err := itemKey(item, meta.KeySchema)
 		if err != nil {
 			return err
 		}
-		if err := s.writeJSON(filepath.Join(tableName, key+".json"), item); err != nil {
+		path := filepath.Join(tableName, key+".json")
+		var old map[string]any
+		if streamEnabled {
+			old, _ = readJSON[map[string]any](s, path)
+		}
+		if err := s.writeJSON(path, item); err != nil {
 			return err
+		}
+		if streamEnabled {
+			eventName := "INSERT"
+			if old != nil {
+				eventName = "MODIFY"
+			}
+			keys := extractKeys(item, meta.KeySchema)
+			s.emitStreamRecord(
+				tableName,
+				eventName,
+				meta.StreamSpec.StreamViewType,
+				keys,
+				old,
+				item,
+			)
 		}
 	}
 	for _, key := range deletes {
@@ -466,11 +487,20 @@ func (s *Storage) BatchWriteItems(
 		if err != nil {
 			return err
 		}
-		if err := s.removeFile(filepath.Join(tableName, k+".json")); err != nil {
+		path := filepath.Join(tableName, k+".json")
+		var old map[string]any
+		if streamEnabled {
+			old, _ = readJSON[map[string]any](s, path)
+		}
+		if err := s.removeFile(path); err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				continue
 			}
 			return err
+		}
+		if streamEnabled && old != nil {
+			keys := extractKeys(old, meta.KeySchema)
+			s.emitStreamRecord(tableName, "REMOVE", meta.StreamSpec.StreamViewType, keys, old, nil)
 		}
 	}
 	return nil
