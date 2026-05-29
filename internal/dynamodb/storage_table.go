@@ -163,9 +163,14 @@ func (s *Storage) UpdateTable(tableName string, in UpdateTableInput) (TableMetad
 
 	if in.StreamSpec != nil {
 		wasEnabled := meta.StreamSpec != nil && meta.StreamSpec.StreamEnabled
+		prevViewType := ""
+		if meta.StreamSpec != nil {
+			prevViewType = meta.StreamSpec.StreamViewType
+		}
 		nowEnabled := in.StreamSpec.StreamEnabled
-		if nowEnabled && !wasEnabled {
-			// Enabling streaming: assign a new stream label.
+		if nowEnabled && (!wasEnabled || in.StreamSpec.StreamViewType != prevViewType) {
+			// Enabling streaming or changing StreamViewType: rotate the stream label
+			// so clients see a new stream identity, matching AWS behaviour.
 			meta.StreamLabel = newStreamLabel()
 		}
 		meta.StreamSpec = in.StreamSpec
