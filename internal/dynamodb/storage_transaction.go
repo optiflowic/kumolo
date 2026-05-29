@@ -525,7 +525,7 @@ func (s *Storage) emitTransactStreamEvents(records []transactWriteRecord) {
 		case r.action.Update != nil:
 			tableName = r.action.Update.TableName
 		default:
-			continue
+			continue // unreachable: Phase 2 only enqueues Put/Delete/Update records
 		}
 		meta, err := s.readTableMeta(tableName)
 		if err != nil || meta.StreamSpec == nil || !meta.StreamSpec.StreamEnabled {
@@ -559,8 +559,8 @@ func (s *Storage) emitTransactStreamEvents(records []transactWriteRecord) {
 			s.emitStreamRecord(tableName, "REMOVE", meta.StreamSpec.StreamViewType, keys, old, nil)
 		case r.action.Update != nil:
 			newItem, err := readJSON[map[string]any](s, r.snap.path)
-			if err != nil {
-				continue // best-effort: item vanished between write and read
+			if err != nil { // untestable: file cannot vanish between writeJSON and readJSON while s.mu is held
+				continue
 			}
 			eventName := "INSERT"
 			if old != nil {

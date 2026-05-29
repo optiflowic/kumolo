@@ -3761,6 +3761,23 @@ func TestTransactWriteItems(t *testing.T) {
 		require.Len(t, buf.records, 2) // INSERT from mustPutItem, then MODIFY
 		assert.Equal(t, "MODIFY", buf.records[1].EventName)
 	})
+
+	t.Run("Delete on non-existent item emits no stream event", func(t *testing.T) {
+		s := newTestStorage(t)
+		mustCreateStreamTable(t, s, "tx-stream5", "OLD_IMAGE")
+		err := s.TransactWriteItems([]TransactWriteAction{
+			{Delete: &TransactDelete{
+				TableName: "tx-stream5",
+				Key:       map[string]any{"pk": map[string]any{"S": "ghost"}},
+			}},
+		})
+		require.NoError(t, err)
+		buf := s.getStreamBuffer("tx-stream5")
+		require.NotNil(t, buf)
+		buf.mu.RLock()
+		defer buf.mu.RUnlock()
+		assert.Empty(t, buf.records)
+	})
 }
 
 func TestTransactWriteItemsRollback(t *testing.T) {

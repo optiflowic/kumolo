@@ -2,6 +2,7 @@ package dynamodb
 
 import (
 	"errors"
+	"io"
 	"os"
 	"testing"
 	"time"
@@ -272,6 +273,26 @@ func TestListStreamARNs(t *testing.T) {
 		_, err := s2.ListStreamARNs("")
 		require.Error(t, err)
 	})
+
+	t.Run(
+		"non-ErrNotExist readTableMeta error propagates when tableName is set",
+		func(t *testing.T) {
+			s2 := newTestStorage(t)
+			mustCreateStreamTable(t, s2, "my-table", "NEW_IMAGE")
+			orig := s2.readAll
+			called := false
+			s2.readAll = func(r io.Reader) ([]byte, error) {
+				if !called {
+					called = true
+					return nil, errors.New("disk error")
+				}
+				return orig(r)
+			}
+			_, err := s2.ListStreamARNs("my-table")
+			require.Error(t, err)
+			assert.NotErrorIs(t, err, ErrTableNotFound)
+		},
+	)
 
 	t.Run("unreadable table meta is skipped", func(t *testing.T) {
 		s2 := newTestStorage(t)
