@@ -22,25 +22,33 @@ func (e *excludeList) String() string     { return strings.Join(*e, ",") }
 func (e *excludeList) Set(v string) error { *e = append(*e, v); return nil }
 
 func main() {
+	profile, excludes := parseFlags()
+	module := modulePrefix()
+	if err := processCoverage(profile, module, excludes); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+func parseFlags() (string, excludeList) {
 	var excludes excludeList
 	flag.Var(&excludes, "exclude", "file path to exclude (repeatable)")
 	flag.Parse()
-
 	profile := "coverage.out"
 	if flag.NArg() > 0 {
 		profile = flag.Arg(0)
 	}
+	return profile, excludes
+}
 
-	module := modulePrefix()
-	seen := map[string]bool{}
-
+func processCoverage(profile, module string, excludes excludeList) error {
 	f, err := os.Open(profile)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return err
 	}
 	defer f.Close()
 
+	seen := map[string]bool{}
 	s := bufio.NewScanner(f)
 	for s.Scan() {
 		line := s.Text()
@@ -108,6 +116,7 @@ func main() {
 			fmt.Println(key)
 		}
 	}
+	return s.Err()
 }
 
 func isExcluded(path string, excludes []string) bool {
@@ -139,6 +148,9 @@ func modulePrefix() string {
 		if line := s.Text(); strings.HasPrefix(line, "module ") {
 			return strings.Fields(line)[1]
 		}
+	}
+	if err := s.Err(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 	}
 	return ""
 }
