@@ -46,7 +46,7 @@ func (e *LifecycleEnforcer) Start(ctx context.Context) {
 		defer ticker.Stop()
 		for {
 			select {
-			case <-ticker.C: // untestable without real-time coupling; tested via TestStart_TickerFiresRunOnce
+			case <-ticker.C: // untestable: real-time ticker coupling; exercised indirectly by TestStart_TickerFiresRunOnce
 				e.runOnce()
 			case <-ctx.Done():
 				return

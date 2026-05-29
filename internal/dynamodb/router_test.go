@@ -77,6 +77,19 @@ func TestHandleCreateTable(t *testing.T) {
 		w := dynamo(t, ro, "CreateTable", `{bad json}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
+
+	t.Run("400 when StreamSpecification omits StreamEnabled", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "CreateTable", `{
+			"TableName": "t",
+			"KeySchema": [{"AttributeName":"pk","KeyType":"HASH"}],
+			"AttributeDefinitions": [{"AttributeName":"pk","AttributeType":"S"}],
+			"BillingMode": "PAY_PER_REQUEST",
+			"StreamSpecification": {"StreamViewType": "NEW_IMAGE"}
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
 }
 
 func TestHandleCreateTable_IndexValidation(t *testing.T) {
@@ -3194,6 +3207,17 @@ func TestHandleUpdateTable(t *testing.T) {
 		}}
 		w := dynamo(t, ro, "UpdateTable", `{"TableName": "t"}`)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+
+	t.Run("400 when StreamSpecification omits StreamEnabled", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "UpdateTable", `{
+			"TableName": "test-table",
+			"StreamSpecification": {"StreamViewType": "NEW_IMAGE"}
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
 	})
 }
 

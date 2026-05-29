@@ -8,6 +8,21 @@ import (
 	"strings"
 )
 
+// validateStreamViewType returns an error if vt is not a valid DynamoDB StreamViewType.
+func validateStreamViewType(vt string) error {
+	switch vt {
+	case "KEYS_ONLY", "NEW_IMAGE", "OLD_IMAGE", "NEW_AND_OLD_IMAGES":
+		return nil
+	default:
+		return fmt.Errorf(
+			"1 validation error detected: Value '%s' at 'streamSpecification.streamViewType' "+
+				"failed to satisfy constraint: Member must satisfy enum value set: "+
+				"[KEYS_ONLY, NEW_IMAGE, OLD_IMAGE, NEW_AND_OLD_IMAGES]",
+			vt,
+		)
+	}
+}
+
 // buildConsumedCapacity returns a ConsumedCapacity object for a single table.
 // Returns nil when mode is NONE or empty (i.e. caller must omit the field).
 // kumolo always reports CapacityUnits as 1.0 rather than computing actual RCU/WCU.

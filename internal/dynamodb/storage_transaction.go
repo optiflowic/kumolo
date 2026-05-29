@@ -179,11 +179,11 @@ func (s *Storage) TransactWriteItems(actions []TransactWriteAction) error {
 	}
 
 	// Phase 2: apply writes; roll back on I/O failure to preserve atomicity.
-	var applied []itemSnapshot
+	var applied []transactWriteRecord
 	for _, action := range actions {
 		path, err := s.itemPathForTransactActionLocked(action)
 		if err != nil {
-			s.rollbackLocked(applied)
+			s.rollbackLocked(transactSnaps(applied))
 			return err
 		}
 		if path == "" {
@@ -192,18 +192,19 @@ func (s *Storage) TransactWriteItems(actions []TransactWriteAction) error {
 		snap := itemSnapshot{path: path}
 		raw, readErr := readJSON[json.RawMessage](s, path)
 		if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
-			s.rollbackLocked(applied)
+			s.rollbackLocked(transactSnaps(applied))
 			return readErr
 		}
 		if readErr == nil {
 			snap.content = []byte(raw)
 		}
 		if err := s.applyTransactActionLocked(action); err != nil {
-			s.rollbackLocked(applied)
+			s.rollbackLocked(transactSnaps(applied))
 			return err
 		}
-		applied = append(applied, snap)
+		applied = append(applied, transactWriteRecord{action: action, snap: snap})
 	}
+	s.emitTransactStreamEvents(applied)
 	return nil
 }
 
@@ -470,6 +471,21 @@ type itemSnapshot struct {
 	content []byte
 }
 
+// transactWriteRecord pairs an applied write action with its pre-write snapshot.
+type transactWriteRecord struct {
+	action TransactWriteAction
+	snap   itemSnapshot
+}
+
+// transactSnaps extracts the itemSnapshot slice from a []transactWriteRecord for rollback.
+func transactSnaps(records []transactWriteRecord) []itemSnapshot {
+	snaps := make([]itemSnapshot, len(records))
+	for i, r := range records {
+		snaps[i] = r.snap
+	}
+	return snaps
+}
+
 // itemPathForTransactActionLocked returns the item file path for a write action.
 // Returns "" for ConditionCheck (no write needed). Must be called with mu held.
 func (s *Storage) itemPathForTransactActionLocked(action TransactWriteAction) (string, error) {
@@ -494,6 +510,75 @@ func (s *Storage) itemPathForTransactActionLocked(action TransactWriteAction) (s
 		return "", err
 	}
 	return filepath.Join(tableName, k+".json"), nil
+}
+
+// emitTransactStreamEvents fires stream records for all successfully applied write actions.
+// Called after Phase 2 completes without rollback, still under mu.
+func (s *Storage) emitTransactStreamEvents(records []transactWriteRecord) {
+	for _, r := range records {
+		var tableName string
+		switch {
+		case r.action.Put != nil:
+			tableName = r.action.Put.TableName
+		case r.action.Delete != nil:
+			tableName = r.action.Delete.TableName
+		case r.action.Update != nil:
+			tableName = r.action.Update.TableName
+		default:
+			continue // unreachable: Phase 2 only enqueues Put/Delete/Update records
+		}
+		meta, err := s.readTableMeta(tableName)
+		if err != nil || meta.StreamSpec == nil || !meta.StreamSpec.StreamEnabled {
+			continue
+		}
+		var old map[string]any
+		if r.snap.content != nil {
+			if err := json.Unmarshal(r.snap.content, &old); err != nil { // untestable: snap.content is written by this process; JSON corruption is not reachable in tests
+				slog.Error("emitTransactStreamEvents: corrupt pre-image snapshot", "err", err)
+			}
+		}
+		switch {
+		case r.action.Put != nil:
+			newItem := r.action.Put.Item
+			eventName := "INSERT"
+			if old != nil {
+				eventName = "MODIFY"
+			}
+			keys := extractKeys(newItem, meta.KeySchema)
+			s.emitStreamRecord(
+				tableName,
+				eventName,
+				meta.StreamSpec.StreamViewType,
+				keys,
+				old,
+				newItem,
+			)
+		case r.action.Delete != nil:
+			if old == nil {
+				continue // deleting a non-existent item produces no stream record
+			}
+			keys := extractKeys(old, meta.KeySchema)
+			s.emitStreamRecord(tableName, "REMOVE", meta.StreamSpec.StreamViewType, keys, old, nil)
+		case r.action.Update != nil:
+			newItem, err := readJSON[map[string]any](s, r.snap.path)
+			if err != nil { // untestable: file cannot vanish between writeJSON and readJSON while s.mu is held
+				continue
+			}
+			eventName := "INSERT"
+			if old != nil {
+				eventName = "MODIFY"
+			}
+			keys := extractKeys(newItem, meta.KeySchema)
+			s.emitStreamRecord(
+				tableName,
+				eventName,
+				meta.StreamSpec.StreamViewType,
+				keys,
+				old,
+				newItem,
+			)
+		}
+	}
 }
 
 // rollbackLocked restores item snapshots in reverse order.

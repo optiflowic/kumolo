@@ -1721,7 +1721,7 @@ func (s *Storage) UploadPartCopy(
 	}
 
 	srcFile, err := s.root.Open(srcPath)
-	if err != nil {
+	if err != nil { // untestable: os.Root.Open failure cannot be injected
 		if errors.Is(err, os.ErrNotExist) {
 			return "", time.Time{}, "", ErrObjectNotFound // untestable: race between readMeta and Open cannot be triggered in tests
 		}
@@ -1745,7 +1745,7 @@ func (s *Storage) UploadPartCopy(
 		return "", time.Time{}, "", err // untestable: os.Root.OpenFile failure cannot be injected
 	}
 	defer func() {
-		if err := f.Close(); err != nil {
+		if err := f.Close(); err != nil { // untestable: Close failure on a local file cannot be injected
 			slog.Warn("failed to close part file", "err", err)
 		}
 	}()

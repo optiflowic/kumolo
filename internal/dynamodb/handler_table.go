@@ -11,11 +11,15 @@ import (
 
 func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 	var req struct {
-		TableName              string                 `json:"TableName"`
-		KeySchema              []KeySchemaElement     `json:"KeySchema"`
-		AttributeDefinitions   []AttributeDefinition  `json:"AttributeDefinitions"`
-		BillingMode            string                 `json:"BillingMode"`
-		ProvisionedThroughput  *ProvisionedThroughput `json:"ProvisionedThroughput,omitempty"`
+		TableName             string                 `json:"TableName"`
+		KeySchema             []KeySchemaElement     `json:"KeySchema"`
+		AttributeDefinitions  []AttributeDefinition  `json:"AttributeDefinitions"`
+		BillingMode           string                 `json:"BillingMode"`
+		ProvisionedThroughput *ProvisionedThroughput `json:"ProvisionedThroughput,omitempty"`
+		StreamSpecification   *struct {
+			StreamEnabled  *bool  `json:"StreamEnabled"`
+			StreamViewType string `json:"StreamViewType"`
+		} `json:"StreamSpecification"`
 		GlobalSecondaryIndexes []struct {
 			IndexName             string                 `json:"IndexName"`
 			KeySchema             []KeySchemaElement     `json:"KeySchema"`
@@ -52,6 +56,25 @@ func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 		AttributeDefinitions:  req.AttributeDefinitions,
 		BillingMode:           req.BillingMode,
 		ProvisionedThroughput: req.ProvisionedThroughput,
+	}
+	if req.StreamSpecification != nil {
+		if req.StreamSpecification.StreamEnabled == nil {
+			writeError(w, http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				"StreamEnabled is required in StreamSpecification")
+			return
+		}
+		if *req.StreamSpecification.StreamEnabled {
+			if err := validateStreamViewType(req.StreamSpecification.StreamViewType); err != nil {
+				writeError(w, http.StatusBadRequest,
+					"com.amazonaws.dynamodb.v20120810#ValidationException", err.Error())
+				return
+			}
+		}
+		meta.StreamSpec = &StreamSpecification{
+			StreamEnabled:  *req.StreamSpecification.StreamEnabled,
+			StreamViewType: req.StreamSpecification.StreamViewType,
+		}
 	}
 	for _, g := range req.GlobalSecondaryIndexes {
 		meta.GlobalSecondaryIndexes = append(meta.GlobalSecondaryIndexes, GlobalSecondaryIndex{
@@ -299,6 +322,10 @@ func (ro *Router) handleUpdateTable(w http.ResponseWriter, body []byte) {
 			ReadCapacityUnits  int64 `json:"ReadCapacityUnits"`
 			WriteCapacityUnits int64 `json:"WriteCapacityUnits"`
 		} `json:"ProvisionedThroughput"`
+		StreamSpecification *struct {
+			StreamEnabled  *bool  `json:"StreamEnabled"`
+			StreamViewType string `json:"StreamViewType"`
+		} `json:"StreamSpecification"`
 		GlobalSecondaryIndexUpdates []struct {
 			Create *struct {
 				IndexName             string             `json:"IndexName"`
@@ -343,6 +370,25 @@ func (ro *Router) handleUpdateTable(w http.ResponseWriter, body []byte) {
 	in := UpdateTableInput{
 		BillingMode:          req.BillingMode,
 		AttributeDefinitions: req.AttributeDefinitions,
+	}
+	if req.StreamSpecification != nil {
+		if req.StreamSpecification.StreamEnabled == nil {
+			writeError(w, http.StatusBadRequest,
+				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				"StreamEnabled is required in StreamSpecification")
+			return
+		}
+		if *req.StreamSpecification.StreamEnabled {
+			if err := validateStreamViewType(req.StreamSpecification.StreamViewType); err != nil {
+				writeError(w, http.StatusBadRequest,
+					"com.amazonaws.dynamodb.v20120810#ValidationException", err.Error())
+				return
+			}
+		}
+		in.StreamSpec = &StreamSpecification{
+			StreamEnabled:  *req.StreamSpecification.StreamEnabled,
+			StreamViewType: req.StreamSpecification.StreamViewType,
+		}
 	}
 	if req.ProvisionedThroughput != nil {
 		in.ProvisionedThroughput = &ProvisionedThroughput{

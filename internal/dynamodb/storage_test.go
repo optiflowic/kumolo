@@ -380,6 +380,16 @@ func TestPutItem(t *testing.T) {
 		require.NoError(t, err)
 		assert.Nil(t, old)
 	})
+
+	t.Run("returns error when writeJSON fails", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		s.openFile = func(string, int, os.FileMode) (io.WriteCloser, error) {
+			return nil, errors.New("write error")
+		}
+		_, err := s.PutItem("test-table", item, nil)
+		assert.Error(t, err)
+	})
 }
 
 func TestIsTTLExpired(t *testing.T) {
@@ -2612,6 +2622,49 @@ func TestBatchWriteItems(t *testing.T) {
 		err := s.BatchWriteItems("test-table", nil, deletes)
 		assert.Error(t, err)
 	})
+
+	t.Run("emits INSERT stream event for put on stream-enabled table", func(t *testing.T) {
+		s := newTestStorage(t)
+		mustCreateStreamTable(t, s, "stream-batch", "NEW_IMAGE")
+		puts := []map[string]any{{"pk": map[string]any{"S": "k1"}}}
+		require.NoError(t, s.BatchWriteItems("stream-batch", puts, nil))
+		buf := s.getStreamBuffer("stream-batch")
+		require.NotNil(t, buf)
+		buf.mu.RLock()
+		defer buf.mu.RUnlock()
+		require.Len(t, buf.records, 1)
+		assert.Equal(t, "INSERT", buf.records[0].EventName)
+	})
+
+	t.Run("emits MODIFY when put overwrites existing item", func(t *testing.T) {
+		s := newTestStorage(t)
+		mustCreateStreamTable(t, s, "stream-batch2", "NEW_IMAGE")
+		item := map[string]any{"pk": map[string]any{"S": "k1"}}
+		mustPutItem(t, s, "stream-batch2", item)
+		// BatchWrite over the same key
+		require.NoError(t, s.BatchWriteItems("stream-batch2", []map[string]any{item}, nil))
+		buf := s.getStreamBuffer("stream-batch2")
+		require.NotNil(t, buf)
+		buf.mu.RLock()
+		defer buf.mu.RUnlock()
+		require.Len(t, buf.records, 2) // first INSERT from PutItem, then MODIFY from BatchWrite
+		assert.Equal(t, "MODIFY", buf.records[1].EventName)
+	})
+
+	t.Run("emits REMOVE stream event for delete on stream-enabled table", func(t *testing.T) {
+		s := newTestStorage(t)
+		mustCreateStreamTable(t, s, "stream-batch3", "OLD_IMAGE")
+		item := map[string]any{"pk": map[string]any{"S": "k1"}}
+		mustPutItem(t, s, "stream-batch3", item)
+		deletes := []map[string]any{{"pk": map[string]any{"S": "k1"}}}
+		require.NoError(t, s.BatchWriteItems("stream-batch3", nil, deletes))
+		buf := s.getStreamBuffer("stream-batch3")
+		require.NotNil(t, buf)
+		buf.mu.RLock()
+		defer buf.mu.RUnlock()
+		require.Len(t, buf.records, 2)
+		assert.Equal(t, "REMOVE", buf.records[1].EventName)
+	})
 }
 
 func TestUpdateTable(t *testing.T) {
@@ -3624,6 +3677,107 @@ func TestTransactWriteItems(t *testing.T) {
 			assert.Error(t, err)
 		},
 	)
+
+	t.Run("emits INSERT stream event for Put on new item", func(t *testing.T) {
+		s := newTestStorage(t)
+		mustCreateStreamTable(t, s, "tx-stream", "NEW_IMAGE")
+		err := s.TransactWriteItems([]TransactWriteAction{
+			{Put: &TransactPut{
+				TableName: "tx-stream",
+				Item:      map[string]any{"pk": map[string]any{"S": "k1"}},
+			}},
+		})
+		require.NoError(t, err)
+		buf := s.getStreamBuffer("tx-stream")
+		require.NotNil(t, buf)
+		buf.mu.RLock()
+		defer buf.mu.RUnlock()
+		require.Len(t, buf.records, 1)
+		assert.Equal(t, "INSERT", buf.records[0].EventName)
+	})
+
+	t.Run("emits MODIFY stream event for Put over existing item", func(t *testing.T) {
+		s := newTestStorage(t)
+		mustCreateStreamTable(t, s, "tx-stream2", "NEW_AND_OLD_IMAGES")
+		item := map[string]any{"pk": map[string]any{"S": "k1"}, "v": map[string]any{"S": "old"}}
+		mustPutItem(t, s, "tx-stream2", item)
+		err := s.TransactWriteItems([]TransactWriteAction{
+			{Put: &TransactPut{
+				TableName: "tx-stream2",
+				Item: map[string]any{
+					"pk": map[string]any{"S": "k1"},
+					"v":  map[string]any{"S": "new"},
+				},
+			}},
+		})
+		require.NoError(t, err)
+		buf := s.getStreamBuffer("tx-stream2")
+		require.NotNil(t, buf)
+		buf.mu.RLock()
+		defer buf.mu.RUnlock()
+		require.Len(t, buf.records, 2) // first INSERT from mustPutItem, then MODIFY
+		assert.Equal(t, "MODIFY", buf.records[1].EventName)
+	})
+
+	t.Run("emits REMOVE stream event for Delete", func(t *testing.T) {
+		s := newTestStorage(t)
+		mustCreateStreamTable(t, s, "tx-stream3", "OLD_IMAGE")
+		item := map[string]any{"pk": map[string]any{"S": "k1"}}
+		mustPutItem(t, s, "tx-stream3", item)
+		err := s.TransactWriteItems([]TransactWriteAction{
+			{Delete: &TransactDelete{
+				TableName: "tx-stream3",
+				Key:       map[string]any{"pk": map[string]any{"S": "k1"}},
+			}},
+		})
+		require.NoError(t, err)
+		buf := s.getStreamBuffer("tx-stream3")
+		require.NotNil(t, buf)
+		buf.mu.RLock()
+		defer buf.mu.RUnlock()
+		require.Len(t, buf.records, 2) // INSERT from mustPutItem, then REMOVE
+		assert.Equal(t, "REMOVE", buf.records[1].EventName)
+	})
+
+	t.Run("emits MODIFY stream event for Update on existing item", func(t *testing.T) {
+		s := newTestStorage(t)
+		mustCreateStreamTable(t, s, "tx-stream4", "NEW_IMAGE")
+		mustPutItem(t, s, "tx-stream4", map[string]any{
+			"pk": map[string]any{"S": "k1"},
+			"v":  map[string]any{"S": "before"},
+		})
+		err := s.TransactWriteItems([]TransactWriteAction{
+			{Update: &TransactUpdate{
+				TableName: "tx-stream4",
+				Key:       map[string]any{"pk": map[string]any{"S": "k1"}},
+				Updates:   map[string]any{"v": map[string]any{"S": "after"}},
+			}},
+		})
+		require.NoError(t, err)
+		buf := s.getStreamBuffer("tx-stream4")
+		require.NotNil(t, buf)
+		buf.mu.RLock()
+		defer buf.mu.RUnlock()
+		require.Len(t, buf.records, 2) // INSERT from mustPutItem, then MODIFY
+		assert.Equal(t, "MODIFY", buf.records[1].EventName)
+	})
+
+	t.Run("Delete on non-existent item emits no stream event", func(t *testing.T) {
+		s := newTestStorage(t)
+		mustCreateStreamTable(t, s, "tx-stream5", "OLD_IMAGE")
+		err := s.TransactWriteItems([]TransactWriteAction{
+			{Delete: &TransactDelete{
+				TableName: "tx-stream5",
+				Key:       map[string]any{"pk": map[string]any{"S": "ghost"}},
+			}},
+		})
+		require.NoError(t, err)
+		buf := s.getStreamBuffer("tx-stream5")
+		require.NotNil(t, buf)
+		buf.mu.RLock()
+		defer buf.mu.RUnlock()
+		assert.Empty(t, buf.records)
+	})
 }
 
 func TestTransactWriteItemsRollback(t *testing.T) {

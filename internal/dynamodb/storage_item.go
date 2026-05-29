@@ -192,7 +192,18 @@ func (s *Storage) PutItem(
 			return nil, ErrConditionalCheckFailed
 		}
 	}
-	return old, s.writeJSON(path, item)
+	if err := s.writeJSON(path, item); err != nil {
+		return nil, err
+	}
+	if meta.StreamSpec != nil && meta.StreamSpec.StreamEnabled {
+		eventName := "INSERT"
+		if old != nil {
+			eventName = "MODIFY"
+		}
+		keys := extractKeys(item, meta.KeySchema)
+		s.emitStreamRecord(tableName, eventName, meta.StreamSpec.StreamViewType, keys, old, item)
+	}
+	return old, nil
 }
 
 func (s *Storage) GetItem(tableName string, key map[string]any) (map[string]any, error) {
@@ -263,6 +274,10 @@ func (s *Storage) DeleteItem(
 			return nil, nil
 		}
 		return nil, err
+	}
+	if old != nil && meta.StreamSpec != nil && meta.StreamSpec.StreamEnabled {
+		keys := extractKeys(old, meta.KeySchema)
+		s.emitStreamRecord(tableName, "REMOVE", meta.StreamSpec.StreamViewType, keys, old, nil)
 	}
 	return old, nil
 }
@@ -378,6 +393,14 @@ func (s *Storage) UpdateItem(
 	if err := s.writeJSON(itemPath, item); err != nil {
 		return nil, nil, err
 	}
+	if meta.StreamSpec != nil && meta.StreamSpec.StreamEnabled {
+		eventName := "INSERT"
+		if before != nil {
+			eventName = "MODIFY"
+		}
+		keys := extractKeys(item, meta.KeySchema)
+		s.emitStreamRecord(tableName, eventName, meta.StreamSpec.StreamViewType, keys, before, item)
+	}
 	return before, item, nil
 }
 
@@ -429,13 +452,37 @@ func (s *Storage) BatchWriteItems(
 		}
 		return err
 	}
+	streamEnabled := meta.StreamSpec != nil && meta.StreamSpec.StreamEnabled
 	for _, item := range puts {
 		key, err := itemKey(item, meta.KeySchema)
 		if err != nil {
 			return err
 		}
-		if err := s.writeJSON(filepath.Join(tableName, key+".json"), item); err != nil {
+		path := filepath.Join(tableName, key+".json")
+		var old map[string]any
+		if streamEnabled {
+			old, err = readJSON[map[string]any](s, path)
+			if err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+		}
+		if err := s.writeJSON(path, item); err != nil {
 			return err
+		}
+		if streamEnabled {
+			eventName := "INSERT"
+			if old != nil {
+				eventName = "MODIFY"
+			}
+			keys := extractKeys(item, meta.KeySchema)
+			s.emitStreamRecord(
+				tableName,
+				eventName,
+				meta.StreamSpec.StreamViewType,
+				keys,
+				old,
+				item,
+			)
 		}
 	}
 	for _, key := range deletes {
@@ -443,11 +490,23 @@ func (s *Storage) BatchWriteItems(
 		if err != nil {
 			return err
 		}
-		if err := s.removeFile(filepath.Join(tableName, k+".json")); err != nil {
+		path := filepath.Join(tableName, k+".json")
+		var old map[string]any
+		if streamEnabled {
+			old, err = readJSON[map[string]any](s, path)
+			if err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+		}
+		if err := s.removeFile(path); err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				continue
 			}
 			return err
+		}
+		if streamEnabled && old != nil {
+			keys := extractKeys(old, meta.KeySchema)
+			s.emitStreamRecord(tableName, "REMOVE", meta.StreamSpec.StreamViewType, keys, old, nil)
 		}
 	}
 	return nil

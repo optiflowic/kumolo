@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 )
 
 // Storage is a filesystem-backed DynamoDB backend. os.Root scopes all access to
@@ -24,6 +26,10 @@ type Storage struct {
 	readAll    func(r io.Reader) ([]byte, error)
 	listDirFn  func(name string) ([]os.DirEntry, error)
 	statFn     func(name string) (os.FileInfo, error)
+
+	streamsMu sync.RWMutex
+	streams   map[string]*streamBuffer // tableName → in-memory stream buffer
+	seqNum    atomic.Uint64
 }
 
 // NewStorage roots the storage at dataDir/dynamodb, creating the directory if needed.
@@ -61,6 +67,8 @@ func newStorage(dataDir string, openRoot func(string) (*os.Root, error)) (*Stora
 		return f.ReadDir(-1)
 	}
 	s.statFn = s.root.Stat
+	s.streams = make(map[string]*streamBuffer)
+	s.seqNum.Store(uint64(time.Now().UnixNano() / 1e6))
 	return s, nil
 }
 

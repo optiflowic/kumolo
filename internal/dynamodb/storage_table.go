@@ -9,6 +9,10 @@ import (
 	"time"
 )
 
+func newStreamLabel() string {
+	return time.Now().UTC().Format("2006-01-02T15:04:05.000000000")
+}
+
 func (s *Storage) CreateTable(meta TableMetadata) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -17,6 +21,9 @@ func (s *Storage) CreateTable(meta TableMetadata) error {
 	}
 	meta.Status = "ACTIVE"
 	meta.CreatedAt = time.Now().UTC()
+	if meta.StreamSpec != nil && meta.StreamSpec.StreamEnabled && meta.StreamLabel == "" {
+		meta.StreamLabel = newStreamLabel()
+	}
 	if err := s.mkdirFn(meta.Name, 0o750); err != nil && !errors.Is(err, os.ErrExist) {
 		return err
 	}
@@ -29,6 +36,9 @@ func (s *Storage) CreateTable(meta TableMetadata) error {
 			)
 		}
 		return err
+	}
+	if meta.StreamSpec != nil && meta.StreamSpec.StreamEnabled {
+		s.ensureStreamBuffer(meta.Name, meta.StreamLabel)
 	}
 	return nil
 }
@@ -55,6 +65,7 @@ func (s *Storage) DeleteTable(name string) error {
 	if err := s.removeFile(name + ".table.json"); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+	s.deleteStreamBuffer(name)
 	return nil
 }
 
@@ -98,6 +109,7 @@ type UpdateTableInput struct {
 	GSICreates            []GlobalSecondaryIndex
 	GSIUpdates            map[string]*ProvisionedThroughput // indexName → new throughput
 	GSIDeletes            []string                          // indexNames to remove
+	StreamSpec            *StreamSpecification
 }
 
 func (s *Storage) UpdateTable(tableName string, in UpdateTableInput) (TableMetadata, error) {
@@ -148,8 +160,29 @@ func (s *Storage) UpdateTable(tableName string, in UpdateTableInput) (TableMetad
 	// GSI creates
 	filtered = append(filtered, in.GSICreates...)
 	meta.GlobalSecondaryIndexes = filtered
+
+	if in.StreamSpec != nil {
+		wasEnabled := meta.StreamSpec != nil && meta.StreamSpec.StreamEnabled
+		prevViewType := ""
+		if meta.StreamSpec != nil {
+			prevViewType = meta.StreamSpec.StreamViewType
+		}
+		nowEnabled := in.StreamSpec.StreamEnabled
+		if nowEnabled && (!wasEnabled || in.StreamSpec.StreamViewType != prevViewType) {
+			// Enabling streaming or changing StreamViewType: rotate the stream label
+			// so clients see a new stream identity, matching AWS behaviour.
+			meta.StreamLabel = newStreamLabel()
+		}
+		meta.StreamSpec = in.StreamSpec
+	}
+
 	if err := s.writeTableMeta(tableName, meta); err != nil {
 		return TableMetadata{}, err
+	}
+	if meta.StreamSpec != nil && meta.StreamSpec.StreamEnabled {
+		s.ensureStreamBuffer(tableName, meta.StreamLabel)
+	} else {
+		s.deleteStreamBuffer(tableName)
 	}
 	return meta, nil
 }
