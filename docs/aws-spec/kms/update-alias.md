@@ -26,6 +26,7 @@
 
 | Code | HTTP | Condition |
 |---|---|---|
+| `InvalidAliasNameException` | 400 | alias name begins with `alias/aws/` |
 | `NotFoundException` | 400 | alias or target key not found |
 | `KMSInvalidStateException` | 400 | current or new key has incompatible type/usage |
 | `KMSInternalException` | 500 | storage failure |
