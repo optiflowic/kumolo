@@ -18,7 +18,7 @@ All fields are optional.
 | `MultiRegion` | bool | stored as-is; kumolo does not replicate |
 | `Origin` | string | only `AWS_KMS` accepted; others return `UnsupportedOperationException` |
 | `Policy` | string | JSON policy document; default policy applied if omitted |
-| `Tags` | array | stored but not enforced |
+| `Tags` | array | accepted but not persisted |
 | `BypassPolicyLockoutSafetyCheck` | bool | accepted, not enforced |
 
 ## Supported KeySpec values and default KeyUsage
