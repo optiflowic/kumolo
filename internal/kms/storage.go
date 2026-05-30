@@ -114,7 +114,16 @@ func (s *Storage) CreateKey(in CreateKeyInput) (KeyMetadata, error) {
 	}
 
 	if err := s.writeJSON(filepath.Join(keyDir, "meta.json"), meta); err != nil {
-		_ = s.removeFile(filepath.Join(keyDir, "meta.json"))
+		if rmErr := s.removeFile(filepath.Join(keyDir, "meta.json")); rmErr != nil &&
+			!errors.Is(rmErr, os.ErrNotExist) {
+			slog.Warn(
+				"failed to clean up meta.json after meta write failure",
+				"keyID",
+				keyID,
+				"err",
+				rmErr,
+			)
+		}
 		if rmErr := s.removeFile(keyDir); rmErr != nil {
 			slog.Warn(
 				"failed to clean up key dir after meta write failure",

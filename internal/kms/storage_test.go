@@ -79,9 +79,16 @@ func TestCreateKey_metaWriteFailure_cleanupFailure(t *testing.T) {
 		}
 		return orig(name, flag, perm)
 	}
-	s.removeFile = func(string) error { return errors.New("remove failed") }
+	var removedPaths []string
+	s.removeFile = func(name string) error {
+		removedPaths = append(removedPaths, name)
+		return errors.New("remove failed")
+	}
 	_, err := s.CreateKey(CreateKeyInput{KeySpec: "SYMMETRIC_DEFAULT", KeyUsage: "ENCRYPT_DECRYPT"})
 	require.ErrorIs(t, err, wantErr)
+	require.Len(t, removedPaths, 2)
+	assert.Contains(t, removedPaths[0], "meta.json")
+	assert.NotContains(t, removedPaths[1], "meta.json")
 }
 
 func TestCreateKey_policyWriteFailure(t *testing.T) {
