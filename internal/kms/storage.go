@@ -544,6 +544,152 @@ func (s *Storage) countAliasesForKeyLocked(targetKeyID string) (int, error) {
 	return count, nil
 }
 
+func (s *Storage) EnableKey(keyID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	meta, err := s.readKeyMeta(keyID)
+	if err != nil {
+		return err
+	}
+	if meta.KeyState == "PendingDeletion" {
+		return ErrInvalidKeyState
+	}
+	if meta.KeyState == "Enabled" {
+		return nil
+	}
+	meta.KeyState = "Enabled"
+	meta.Enabled = true
+	return s.writeJSON(filepath.Join("keys", keyID, "meta.json"), meta)
+}
+
+func (s *Storage) DisableKey(keyID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	meta, err := s.readKeyMeta(keyID)
+	if err != nil {
+		return err
+	}
+	if meta.KeyState == "PendingDeletion" {
+		return ErrInvalidKeyState
+	}
+	if meta.KeyState == "Disabled" {
+		return nil
+	}
+	meta.KeyState = "Disabled"
+	meta.Enabled = false
+	return s.writeJSON(filepath.Join("keys", keyID, "meta.json"), meta)
+}
+
+func (s *Storage) ScheduleKeyDeletion(keyID string, pendingWindowInDays int) (KeyMetadata, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	meta, err := s.readKeyMeta(keyID)
+	if err != nil {
+		return KeyMetadata{}, err
+	}
+	if meta.KeyState == "PendingDeletion" {
+		return KeyMetadata{}, ErrInvalidKeyState
+	}
+	deletionDate := nowUnix() + float64(pendingWindowInDays*86400)
+	meta.KeyState = "PendingDeletion"
+	meta.Enabled = false
+	meta.DeletionDate = &deletionDate
+	return meta, s.writeJSON(filepath.Join("keys", keyID, "meta.json"), meta)
+}
+
+func (s *Storage) CancelKeyDeletion(keyID string) (KeyMetadata, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	meta, err := s.readKeyMeta(keyID)
+	if err != nil {
+		return KeyMetadata{}, err
+	}
+	if meta.KeyState != "PendingDeletion" {
+		return KeyMetadata{}, ErrInvalidKeyState
+	}
+	meta.KeyState = "Disabled"
+	meta.Enabled = false
+	meta.DeletionDate = nil
+	return meta, s.writeJSON(filepath.Join("keys", keyID, "meta.json"), meta)
+}
+
+func (s *Storage) EnableKeyRotation(keyID string, rotationPeriodInDays int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	meta, err := s.readKeyMeta(keyID)
+	if err != nil {
+		return err
+	}
+	if meta.KeyState == "PendingDeletion" {
+		return ErrInvalidKeyState
+	}
+	if meta.KeyState != "Enabled" {
+		return ErrKeyDisabled
+	}
+	if meta.KeySpec != "SYMMETRIC_DEFAULT" {
+		return ErrUnsupportedOp
+	}
+	cfg := KeyRotationConfig{
+		Enabled:              true,
+		RotationPeriodInDays: rotationPeriodInDays,
+		NextRotationDate:     nowUnix() + float64(rotationPeriodInDays*86400),
+	}
+	return s.writeJSON(filepath.Join("keys", keyID, "rotation.json"), cfg)
+}
+
+func (s *Storage) DisableKeyRotation(keyID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	meta, err := s.readKeyMeta(keyID)
+	if err != nil {
+		return err
+	}
+	if meta.KeyState == "PendingDeletion" {
+		return ErrInvalidKeyState
+	}
+	if meta.KeyState != "Enabled" {
+		return ErrKeyDisabled
+	}
+	if meta.KeySpec != "SYMMETRIC_DEFAULT" {
+		return ErrUnsupportedOp
+	}
+	return s.writeJSON(
+		filepath.Join("keys", keyID, "rotation.json"),
+		KeyRotationConfig{Enabled: false},
+	)
+}
+
+func (s *Storage) GetKeyRotationStatus(keyID string) (KeyMetadata, KeyRotationConfig, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	meta, err := s.readKeyMeta(keyID)
+	if err != nil {
+		return KeyMetadata{}, KeyRotationConfig{}, err
+	}
+	if meta.KeyState == "PendingDeletion" {
+		return KeyMetadata{}, KeyRotationConfig{}, ErrInvalidKeyState
+	}
+	if meta.KeySpec != "SYMMETRIC_DEFAULT" {
+		return KeyMetadata{}, KeyRotationConfig{}, ErrUnsupportedOp
+	}
+
+	cfg, err := readJSON[KeyRotationConfig](s, filepath.Join("keys", keyID, "rotation.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return meta, KeyRotationConfig{}, nil
+	}
+	if err != nil {
+		return KeyMetadata{}, KeyRotationConfig{}, fmt.Errorf("read rotation config: %w", err)
+	}
+	return meta, cfg, nil
+}
+
 func (s *Storage) newKeyID() (string, error) {
 	var b [16]byte
 	if _, err := s.randRead(b[:]); err != nil {

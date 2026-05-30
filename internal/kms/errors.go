@@ -13,6 +13,9 @@ var (
 	ErrAliasNotFound       = errors.New("alias not found")
 	ErrAliasAlreadyExists  = errors.New("alias already exists")
 	ErrAliasLimitExceeded  = errors.New("alias limit exceeded")
+	ErrKeyDisabled         = errors.New("key is disabled")
+	ErrInvalidKeyState     = errors.New("invalid key state for this operation")
+	ErrUnsupportedOp       = errors.New("unsupported operation for this key type")
 )
 
 type errResponse struct {
@@ -34,4 +37,9 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		slog.Warn("failed to encode KMS response", "err", err)
 	}
+}
+
+func writeEmpty(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/x-amz-json-1.1")
+	w.WriteHeader(http.StatusOK)
 }

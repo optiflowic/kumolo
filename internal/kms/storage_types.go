@@ -27,10 +27,19 @@ type KeyMetadata struct {
 	Origin                 string   `json:"Origin"`
 	MultiRegion            bool     `json:"MultiRegion"`
 	CreationDate           float64  `json:"CreationDate"`
+	DeletionDate           *float64 `json:"DeletionDate,omitempty"`
 	EncryptionAlgorithms   []string `json:"EncryptionAlgorithms,omitempty"`
 	SigningAlgorithms      []string `json:"SigningAlgorithms,omitempty"`
 	KeyAgreementAlgorithms []string `json:"KeyAgreementAlgorithms,omitempty"`
 	MacAlgorithms          []string `json:"MacAlgorithms,omitempty"`
+}
+
+// KeyRotationConfig holds automatic rotation settings for a KMS key.
+// Stored in keys/{id}/rotation.json; omitted when rotation has never been configured.
+type KeyRotationConfig struct {
+	Enabled              bool    `json:"Enabled"`
+	RotationPeriodInDays int     `json:"RotationPeriodInDays,omitempty"`
+	NextRotationDate     float64 `json:"NextRotationDate,omitempty"`
 }
 
 func keyARN(keyID string) string {

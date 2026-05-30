@@ -534,6 +534,30 @@ func (a *alwaysFailStore) ListAliases(string) ([]AliasEntry, error) {
 func (a *alwaysFailStore) ResolveAlias(string) (string, error) {
 	return "", errors.New("storage error")
 }
+func (a *alwaysFailStore) EnableKey(string) error  { return errors.New("storage error") }
+func (a *alwaysFailStore) DisableKey(string) error { return errors.New("storage error") }
+func (a *alwaysFailStore) ScheduleKeyDeletion(string, int) (KeyMetadata, error) {
+	return KeyMetadata{}, errors.New("storage error")
+}
+func (a *alwaysFailStore) CancelKeyDeletion(string) (KeyMetadata, error) {
+	return KeyMetadata{}, errors.New("storage error")
+}
+
+func (a *alwaysFailStore) EnableKeyRotation(
+	string,
+	int,
+) error {
+	return errors.New("storage error")
+}
+
+func (a *alwaysFailStore) DisableKeyRotation(
+	string,
+) error {
+	return errors.New("storage error")
+}
+func (a *alwaysFailStore) GetKeyRotationStatus(string) (KeyMetadata, KeyRotationConfig, error) {
+	return KeyMetadata{}, KeyRotationConfig{}, errors.New("storage error")
+}
 
 func newFailRouter() *Router {
 	return &Router{storage: &alwaysFailStore{}, randRead: func(b []byte) (int, error) {
@@ -1458,6 +1482,26 @@ func (p *partialFailStore) ListAliases(filterKeyID string) ([]AliasEntry, error)
 func (p *partialFailStore) ResolveAlias(aliasName string) (string, error) {
 	return p.inner.ResolveAlias(aliasName)
 }
+func (p *partialFailStore) EnableKey(keyID string) error  { return p.inner.EnableKey(keyID) }
+func (p *partialFailStore) DisableKey(keyID string) error { return p.inner.DisableKey(keyID) }
+func (p *partialFailStore) ScheduleKeyDeletion(keyID string, days int) (KeyMetadata, error) {
+	return p.inner.ScheduleKeyDeletion(keyID, days)
+}
+func (p *partialFailStore) CancelKeyDeletion(keyID string) (KeyMetadata, error) {
+	return p.inner.CancelKeyDeletion(keyID)
+}
+func (p *partialFailStore) EnableKeyRotation(keyID string, days int) error {
+	return p.inner.EnableKeyRotation(keyID, days)
+}
+func (p *partialFailStore) DisableKeyRotation(keyID string) error {
+	return p.inner.DisableKeyRotation(keyID)
+}
+
+func (p *partialFailStore) GetKeyRotationStatus(
+	keyID string,
+) (KeyMetadata, KeyRotationConfig, error) {
+	return p.inner.GetKeyRotationStatus(keyID)
+}
 
 func TestLoadSymmetricMaterial_storageError(t *testing.T) {
 	dir := t.TempDir()
@@ -1598,6 +1642,26 @@ func (a *aliasFailStore) ResolveAlias(aliasName string) (string, error) {
 		return a.resolveAlias(aliasName)
 	}
 	return a.inner.ResolveAlias(aliasName)
+}
+func (a *aliasFailStore) EnableKey(keyID string) error  { return a.inner.EnableKey(keyID) }
+func (a *aliasFailStore) DisableKey(keyID string) error { return a.inner.DisableKey(keyID) }
+func (a *aliasFailStore) ScheduleKeyDeletion(keyID string, days int) (KeyMetadata, error) {
+	return a.inner.ScheduleKeyDeletion(keyID, days)
+}
+func (a *aliasFailStore) CancelKeyDeletion(keyID string) (KeyMetadata, error) {
+	return a.inner.CancelKeyDeletion(keyID)
+}
+func (a *aliasFailStore) EnableKeyRotation(keyID string, days int) error {
+	return a.inner.EnableKeyRotation(keyID, days)
+}
+func (a *aliasFailStore) DisableKeyRotation(keyID string) error {
+	return a.inner.DisableKeyRotation(keyID)
+}
+
+func (a *aliasFailStore) GetKeyRotationStatus(
+	keyID string,
+) (KeyMetadata, KeyRotationConfig, error) {
+	return a.inner.GetKeyRotationStatus(keyID)
 }
 
 // makeAliasRouter creates a Router backed by aliasFailStore with a real storage as inner.
