@@ -212,6 +212,18 @@ func TestGetKeyMaterial_materialMissing(t *testing.T) {
 	require.ErrorIs(t, err, ErrKeyMaterialNotFound)
 }
 
+func TestGetKeyMaterial_statFailure(t *testing.T) {
+	s, _ := newTestStorage(t)
+	meta, err := s.CreateKey(
+		CreateKeyInput{KeySpec: "SYMMETRIC_DEFAULT", KeyUsage: "ENCRYPT_DECRYPT"},
+	)
+	require.NoError(t, err)
+	statErr := errors.New("stat failed")
+	s.statFn = func(string) (os.FileInfo, error) { return nil, statErr }
+	_, err = s.GetKeyMaterial(meta.KeyID)
+	require.ErrorIs(t, err, statErr)
+}
+
 func TestGetKeyMaterial_readAllFailure(t *testing.T) {
 	s, _ := newTestStorage(t)
 	meta, err := s.CreateKey(
