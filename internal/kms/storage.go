@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -30,6 +31,8 @@ type Storage struct {
 	randRead   func(b []byte) (int, error)
 }
 
+const maxAliasesPerKey = 256
+
 // NewStorage roots the storage at dataDir/kms, creating the directory if needed.
 func NewStorage(dataDir string) (*Storage, error) {
 	return newStorage(dataDir, os.OpenRoot)
@@ -44,6 +47,9 @@ func newStorage(dataDir string, openRoot func(string) (*os.Root, error)) (*Stora
 	rootPath := filepath.Join(dataDir, "kms")
 	if err := os.MkdirAll(filepath.Join(rootPath, "keys"), 0o750); err != nil {
 		return nil, fmt.Errorf("create kms storage root: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Join(rootPath, "aliases"), 0o750); err != nil {
+		return nil, fmt.Errorf("create kms aliases dir: %w", err)
 	}
 	root, err := openRoot(rootPath)
 	if err != nil {
@@ -377,6 +383,164 @@ func readJSON[T any](s *Storage, path string) (T, error) {
 		return zero, err
 	}
 	return v, nil
+}
+
+// aliasFilename encodes an alias name (e.g. "alias/foo") into a flat filename
+// by URL-escaping the slashes: "alias%2Ffoo.json".
+func aliasFilename(aliasName string) string {
+	return url.PathEscape(aliasName) + ".json"
+}
+
+// aliasPath returns the path within the storage root for the given alias.
+func aliasPath(aliasName string) string {
+	return filepath.Join("aliases", aliasFilename(aliasName))
+}
+
+func (s *Storage) CreateAlias(aliasName, targetKeyID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.keyExistsLocked(targetKeyID); err != nil {
+		return fmt.Errorf("target key: %w", err)
+	}
+
+	// Check per-key alias limit.
+	count, err := s.countAliasesForKeyLocked(targetKeyID)
+	if err != nil {
+		return fmt.Errorf("count aliases: %w", err)
+	}
+	if count >= maxAliasesPerKey {
+		// untestable: requires creating maxAliasesPerKey (256) real aliases
+		return fmt.Errorf("alias limit exceeded: %w", ErrAliasLimitExceeded)
+	}
+
+	// Fail if alias already exists.
+	if _, err := s.statFn(aliasPath(aliasName)); err == nil {
+		return ErrAliasAlreadyExists
+	}
+
+	now := nowUnix()
+	entry := AliasEntry{
+		AliasName:       aliasName,
+		AliasArn:        aliasARN(aliasName),
+		TargetKeyId:     targetKeyID,
+		CreationDate:    now,
+		LastUpdatedDate: now,
+	}
+	return s.writeJSON(aliasPath(aliasName), entry)
+}
+
+func (s *Storage) DeleteAlias(aliasName string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, err := s.statFn(aliasPath(aliasName)); errors.Is(err, os.ErrNotExist) {
+		return ErrAliasNotFound
+	}
+	if err := s.removeFile(aliasPath(aliasName)); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return ErrAliasNotFound
+		}
+		return fmt.Errorf("remove alias: %w", err)
+	}
+	return nil
+}
+
+func (s *Storage) UpdateAlias(aliasName, targetKeyID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Alias must exist.
+	existing, err := readJSON[AliasEntry](s, aliasPath(aliasName))
+	if errors.Is(err, os.ErrNotExist) {
+		return ErrAliasNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("read alias: %w", err)
+	}
+
+	// Target key must exist.
+	if err := s.keyExistsLocked(targetKeyID); err != nil {
+		return fmt.Errorf("target key: %w", err)
+	}
+
+	updated := existing
+	updated.TargetKeyId = targetKeyID
+	updated.LastUpdatedDate = nowUnix()
+	return s.writeJSON(aliasPath(aliasName), updated)
+}
+
+func (s *Storage) ListAliases(filterKeyID string) ([]AliasEntry, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	entries, err := s.listDirFn("aliases")
+	if err != nil {
+		return nil, fmt.Errorf("list aliases dir: %w", err)
+	}
+
+	var aliases []AliasEntry
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if len(name) < 5 || name[len(name)-5:] != ".json" {
+			continue
+		}
+		alias, err := readJSON[AliasEntry](s, filepath.Join("aliases", name))
+		if err != nil {
+			slog.Warn("kms: skipping unreadable alias file", "file", name, "err", err)
+			continue
+		}
+		if filterKeyID != "" && alias.TargetKeyId != filterKeyID {
+			continue
+		}
+		aliases = append(aliases, alias)
+	}
+	sort.Slice(aliases, func(i, j int) bool {
+		return aliases[i].AliasName < aliases[j].AliasName
+	})
+	return aliases, nil
+}
+
+func (s *Storage) ResolveAlias(aliasName string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	entry, err := readJSON[AliasEntry](s, aliasPath(aliasName))
+	if errors.Is(err, os.ErrNotExist) {
+		return "", ErrAliasNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("read alias: %w", err)
+	}
+	return entry.TargetKeyId, nil
+}
+
+func (s *Storage) countAliasesForKeyLocked(targetKeyID string) (int, error) {
+	entries, err := s.listDirFn("aliases")
+	if err != nil {
+		return 0, fmt.Errorf("list aliases: %w", err)
+	}
+	count := 0
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if len(name) < 5 || name[len(name)-5:] != ".json" {
+			continue
+		}
+		alias, err := readJSON[AliasEntry](s, filepath.Join("aliases", name))
+		if err != nil {
+			continue
+		}
+		if alias.TargetKeyId == targetKeyID {
+			count++
+		}
+	}
+	return count, nil
 }
 
 func (s *Storage) newKeyID() (string, error) {

@@ -37,6 +37,37 @@ func keyARN(keyID string) string {
 	return fmt.Sprintf("arn:aws:kms:%s:%s:key/%s", fixedRegion, fixedAccount, keyID)
 }
 
+func aliasARN(aliasName string) string {
+	return fmt.Sprintf("arn:aws:kms:%s:%s:%s", fixedRegion, fixedAccount, aliasName)
+}
+
+// normalizeAliasRef extracts the canonical alias name from an alias name or alias ARN.
+// "alias/foo" → ("alias/foo", true)
+// "arn:aws:kms:...:alias/foo" → ("alias/foo", true)
+// anything else → ("", false)
+func normalizeAliasRef(ref string) (string, bool) {
+	if strings.HasPrefix(ref, "alias/") {
+		return ref, true
+	}
+	if strings.HasPrefix(ref, "arn:") {
+		parts := strings.SplitN(ref, ":alias/", 2)
+		if len(parts) == 2 && parts[1] != "" {
+			return "alias/" + parts[1], true
+		}
+		return "", false
+	}
+	return "", false // unreachable: only called via resolveKeyRef after isAliasRef confirms "alias/" or "arn:" prefix
+}
+
+// AliasEntry is the stored and returned metadata for a KMS alias.
+type AliasEntry struct {
+	AliasName       string  `json:"AliasName"`
+	AliasArn        string  `json:"AliasArn"`
+	TargetKeyId     string  `json:"TargetKeyId"`
+	CreationDate    float64 `json:"CreationDate"`
+	LastUpdatedDate float64 `json:"LastUpdatedDate"`
+}
+
 // resolveKeyID extracts the plain key UUID from a key ID or key ARN.
 // Returns ("", false) for alias names, alias ARNs, or malformed ARNs.
 func resolveKeyID(keyID string) (string, bool) {

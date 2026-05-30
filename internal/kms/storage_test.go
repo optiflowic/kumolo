@@ -385,3 +385,280 @@ func TestWriteJSON_closeFailure(t *testing.T) {
 	_, err := s.CreateKey(CreateKeyInput{KeySpec: "SYMMETRIC_DEFAULT", KeyUsage: "ENCRYPT_DECRYPT"})
 	require.ErrorIs(t, err, closeErr)
 }
+
+// ---- alias storage ----------------------------------------------------------
+
+func TestCreateAlias_and_basic_operations(t *testing.T) {
+	s, _ := newTestStorage(t)
+	meta, err := s.CreateKey(
+		CreateKeyInput{KeySpec: "SYMMETRIC_DEFAULT", KeyUsage: "ENCRYPT_DECRYPT"},
+	)
+	require.NoError(t, err)
+
+	require.NoError(t, s.CreateAlias("alias/my-key", meta.KeyID))
+
+	// ResolveAlias returns the key ID.
+	resolved, err := s.ResolveAlias("alias/my-key")
+	require.NoError(t, err)
+	assert.Equal(t, meta.KeyID, resolved)
+
+	// ListAliases returns the alias.
+	aliases, err := s.ListAliases("")
+	require.NoError(t, err)
+	require.Len(t, aliases, 1)
+	assert.Equal(t, "alias/my-key", aliases[0].AliasName)
+
+	// UpdateAlias changes the target.
+	meta2, err := s.CreateKey(
+		CreateKeyInput{KeySpec: "SYMMETRIC_DEFAULT", KeyUsage: "ENCRYPT_DECRYPT"},
+	)
+	require.NoError(t, err)
+	require.NoError(t, s.UpdateAlias("alias/my-key", meta2.KeyID))
+
+	resolved, err = s.ResolveAlias("alias/my-key")
+	require.NoError(t, err)
+	assert.Equal(t, meta2.KeyID, resolved)
+
+	// DeleteAlias removes the alias.
+	require.NoError(t, s.DeleteAlias("alias/my-key"))
+	_, err = s.ResolveAlias("alias/my-key")
+	require.ErrorIs(t, err, ErrAliasNotFound)
+}
+
+func TestListAliases_filterByKeyID(t *testing.T) {
+	s, _ := newTestStorage(t)
+	key1, err := s.CreateKey(
+		CreateKeyInput{KeySpec: "SYMMETRIC_DEFAULT", KeyUsage: "ENCRYPT_DECRYPT"},
+	)
+	require.NoError(t, err)
+	key2, err := s.CreateKey(
+		CreateKeyInput{KeySpec: "SYMMETRIC_DEFAULT", KeyUsage: "ENCRYPT_DECRYPT"},
+	)
+	require.NoError(t, err)
+	require.NoError(t, s.CreateAlias("alias/for-key1", key1.KeyID))
+	require.NoError(t, s.CreateAlias("alias/for-key2", key2.KeyID))
+
+	aliases, err := s.ListAliases(key1.KeyID)
+	require.NoError(t, err)
+	require.Len(t, aliases, 1)
+	assert.Equal(t, "alias/for-key1", aliases[0].AliasName)
+}
+
+func TestCreateAlias_countAliasesListFailure(t *testing.T) {
+	s, _ := newTestStorage(t)
+	meta, err := s.CreateKey(
+		CreateKeyInput{KeySpec: "SYMMETRIC_DEFAULT", KeyUsage: "ENCRYPT_DECRYPT"},
+	)
+	require.NoError(t, err)
+
+	listErr := errors.New("list failed")
+	s.listDirFn = func(string) ([]os.DirEntry, error) { return nil, listErr }
+	err = s.CreateAlias("alias/my-key", meta.KeyID)
+	require.ErrorIs(t, err, listErr)
+}
+
+func TestListAliases_listDirFailure(t *testing.T) {
+	s, _ := newTestStorage(t)
+	listErr := errors.New("list failed")
+	s.listDirFn = func(string) ([]os.DirEntry, error) { return nil, listErr }
+	_, err := s.ListAliases("")
+	require.ErrorIs(t, err, listErr)
+}
+
+func TestListAliases_nonJsonFileSkipped(t *testing.T) {
+	s, dir := newTestStorage(t)
+	// A file without .json extension in aliases/ must be silently skipped.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "kms", "aliases", "notjson"), nil, 0o600))
+	aliases, err := s.ListAliases("")
+	require.NoError(t, err)
+	assert.Empty(t, aliases)
+}
+
+func TestListAliases_unreadableFileSkipped(t *testing.T) {
+	s, _ := newTestStorage(t)
+	meta, err := s.CreateKey(
+		CreateKeyInput{KeySpec: "SYMMETRIC_DEFAULT", KeyUsage: "ENCRYPT_DECRYPT"},
+	)
+	require.NoError(t, err)
+	require.NoError(t, s.CreateAlias("alias/my-key", meta.KeyID))
+
+	// Inject a readAll failure so the alias file is unreadable.
+	s.readAll = func(io.Reader) ([]byte, error) { return nil, errors.New("read failed") }
+	aliases, err := s.ListAliases("")
+	require.NoError(t, err)
+	assert.Empty(t, aliases) // skipped with a warning
+}
+
+func TestResolveAlias_notFound(t *testing.T) {
+	s, _ := newTestStorage(t)
+	_, err := s.ResolveAlias("alias/nonexistent")
+	require.ErrorIs(t, err, ErrAliasNotFound)
+}
+
+func TestResolveAlias_readFailure(t *testing.T) {
+	s, _ := newTestStorage(t)
+	meta, err := s.CreateKey(
+		CreateKeyInput{KeySpec: "SYMMETRIC_DEFAULT", KeyUsage: "ENCRYPT_DECRYPT"},
+	)
+	require.NoError(t, err)
+	require.NoError(t, s.CreateAlias("alias/my-key", meta.KeyID))
+
+	s.readAll = func(io.Reader) ([]byte, error) { return nil, errors.New("read failed") }
+	_, err = s.ResolveAlias("alias/my-key")
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrAliasNotFound)
+}
+
+func TestUpdateAlias_notFound(t *testing.T) {
+	s, _ := newTestStorage(t)
+	meta, err := s.CreateKey(
+		CreateKeyInput{KeySpec: "SYMMETRIC_DEFAULT", KeyUsage: "ENCRYPT_DECRYPT"},
+	)
+	require.NoError(t, err)
+	err = s.UpdateAlias("alias/nonexistent", meta.KeyID)
+	require.ErrorIs(t, err, ErrAliasNotFound)
+}
+
+func TestUpdateAlias_readFailure(t *testing.T) {
+	s, _ := newTestStorage(t)
+	meta, err := s.CreateKey(
+		CreateKeyInput{KeySpec: "SYMMETRIC_DEFAULT", KeyUsage: "ENCRYPT_DECRYPT"},
+	)
+	require.NoError(t, err)
+	require.NoError(t, s.CreateAlias("alias/my-key", meta.KeyID))
+
+	s.readAll = func(io.Reader) ([]byte, error) { return nil, errors.New("read failed") }
+	err = s.UpdateAlias("alias/my-key", meta.KeyID)
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrAliasNotFound)
+}
+
+func TestDeleteAlias_notFound(t *testing.T) {
+	s, _ := newTestStorage(t)
+	err := s.DeleteAlias("alias/nonexistent")
+	require.ErrorIs(t, err, ErrAliasNotFound)
+}
+
+func TestCreateAlias_alreadyExists(t *testing.T) {
+	s, _ := newTestStorage(t)
+	meta, err := s.CreateKey(
+		CreateKeyInput{KeySpec: "SYMMETRIC_DEFAULT", KeyUsage: "ENCRYPT_DECRYPT"},
+	)
+	require.NoError(t, err)
+	require.NoError(t, s.CreateAlias("alias/my-key", meta.KeyID))
+	err = s.CreateAlias("alias/my-key", meta.KeyID)
+	require.ErrorIs(t, err, ErrAliasAlreadyExists)
+}
+
+func TestCreateAlias_targetKeyNotFound(t *testing.T) {
+	s, _ := newTestStorage(t)
+	err := s.CreateAlias("alias/my-key", "00000000-0000-0000-0000-000000000000")
+	require.ErrorIs(t, err, ErrKeyNotFound)
+}
+
+func TestUpdateAlias_targetKeyNotFound(t *testing.T) {
+	s, _ := newTestStorage(t)
+	meta, err := s.CreateKey(
+		CreateKeyInput{KeySpec: "SYMMETRIC_DEFAULT", KeyUsage: "ENCRYPT_DECRYPT"},
+	)
+	require.NoError(t, err)
+	require.NoError(t, s.CreateAlias("alias/my-key", meta.KeyID))
+	err = s.UpdateAlias("alias/my-key", "00000000-0000-0000-0000-000000000000")
+	require.ErrorIs(t, err, ErrKeyNotFound)
+}
+
+func TestAliasFilename_encoding(t *testing.T) {
+	// aliasFilename must be reversible — slashes encoded so the result is a flat filename.
+	name := "alias/my/nested/key"
+	fn := aliasFilename(name)
+	assert.NotContains(t, fn, "/", "slash must be percent-encoded")
+	assert.Contains(t, fn, ".json")
+}
+
+func TestDeleteAlias_removeFileRaceCondition(t *testing.T) {
+	s, _ := newTestStorage(t)
+	meta, err := s.CreateKey(
+		CreateKeyInput{KeySpec: "SYMMETRIC_DEFAULT", KeyUsage: "ENCRYPT_DECRYPT"},
+	)
+	require.NoError(t, err)
+	require.NoError(t, s.CreateAlias("alias/my-key", meta.KeyID))
+
+	// Simulate a race: stat sees the alias but removeFile gets os.ErrNotExist.
+	s.removeFile = func(string) error { return os.ErrNotExist }
+	err = s.DeleteAlias("alias/my-key")
+	require.ErrorIs(t, err, ErrAliasNotFound)
+}
+
+func TestDeleteAlias_removeFileFailure(t *testing.T) {
+	s, _ := newTestStorage(t)
+	meta, err := s.CreateKey(
+		CreateKeyInput{KeySpec: "SYMMETRIC_DEFAULT", KeyUsage: "ENCRYPT_DECRYPT"},
+	)
+	require.NoError(t, err)
+	require.NoError(t, s.CreateAlias("alias/my-key", meta.KeyID))
+
+	wantErr := errors.New("remove failed")
+	s.removeFile = func(string) error { return wantErr }
+	err = s.DeleteAlias("alias/my-key")
+	require.ErrorIs(t, err, wantErr)
+}
+
+func TestListAliases_dirEntrySkipped(t *testing.T) {
+	s, dir := newTestStorage(t)
+	// A subdirectory inside aliases/ must be silently skipped.
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "kms", "aliases", "subdir"), 0o750))
+	aliases, err := s.ListAliases("")
+	require.NoError(t, err)
+	assert.Empty(t, aliases)
+}
+
+func TestCountAliases_dirEntrySkipped(t *testing.T) {
+	s, dir := newTestStorage(t)
+	meta, err := s.CreateKey(
+		CreateKeyInput{KeySpec: "SYMMETRIC_DEFAULT", KeyUsage: "ENCRYPT_DECRYPT"},
+	)
+	require.NoError(t, err)
+
+	// A subdirectory inside aliases/ must be silently skipped when counting.
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "kms", "aliases", "subdir"), 0o750))
+	// CreateAlias must still succeed (subdir doesn't count).
+	require.NoError(t, s.CreateAlias("alias/my-key", meta.KeyID))
+}
+
+func TestCountAliases_nonJsonFileSkipped(t *testing.T) {
+	s, dir := newTestStorage(t)
+	meta, err := s.CreateKey(
+		CreateKeyInput{KeySpec: "SYMMETRIC_DEFAULT", KeyUsage: "ENCRYPT_DECRYPT"},
+	)
+	require.NoError(t, err)
+
+	// A non-.json file in aliases/ must be silently skipped when counting.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "kms", "aliases", "not.txt"), nil, 0o600))
+	require.NoError(t, s.CreateAlias("alias/my-key", meta.KeyID))
+}
+
+func TestCountAliases_corruptFileSkipped(t *testing.T) {
+	s, dir := newTestStorage(t)
+	meta, err := s.CreateKey(
+		CreateKeyInput{KeySpec: "SYMMETRIC_DEFAULT", KeyUsage: "ENCRYPT_DECRYPT"},
+	)
+	require.NoError(t, err)
+
+	// A corrupt alias file must be silently skipped when counting.
+	require.NoError(
+		t,
+		os.WriteFile(filepath.Join(dir, "kms", "aliases", "bad.json"), []byte("not json"), 0o600),
+	)
+	// CreateAlias must still succeed (corrupt file doesn't count).
+	require.NoError(t, s.CreateAlias("alias/my-key", meta.KeyID))
+}
+
+func TestNewStorage_aliasesDirFailure(t *testing.T) {
+	dir := t.TempDir()
+	kmsDir := filepath.Join(dir, "kms")
+	require.NoError(t, os.MkdirAll(filepath.Join(kmsDir, "keys"), 0o750))
+	// Block MkdirAll for aliases by placing a regular file there.
+	require.NoError(t, os.WriteFile(filepath.Join(kmsDir, "aliases"), nil, 0o600))
+	_, err := newStorage(dir, os.OpenRoot)
+	require.Error(t, err)
+}

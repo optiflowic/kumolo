@@ -80,6 +80,42 @@ func (ro *Router) handleCreateKey(w http.ResponseWriter, body []byte) {
 	writeJSON(w, http.StatusOK, map[string]any{"KeyMetadata": meta})
 }
 
+// resolveKeyRef resolves a key reference (key ID, key ARN, alias name, or alias ARN)
+// to a plain key UUID. Writes an HTTP error response and returns ("", false) on failure.
+func (ro *Router) resolveKeyRef(w http.ResponseWriter, keyRef string) (string, bool) {
+	if id, ok := resolveKeyID(keyRef); ok {
+		return id, true
+	}
+	if isAliasRef(keyRef) {
+		aliasName, nameOK := normalizeAliasRef(keyRef)
+		if !nameOK {
+			writeError(w, http.StatusBadRequest, "InvalidArnException",
+				fmt.Sprintf("Invalid alias ARN: %s", keyRef))
+			return "", false
+		}
+		id, err := ro.storage.ResolveAlias(aliasName)
+		if errors.Is(err, ErrAliasNotFound) {
+			writeError(w, http.StatusBadRequest, "NotFoundException",
+				fmt.Sprintf("Invalid keyId %s", keyRef))
+			return "", false
+		}
+		if err != nil {
+			slog.Error("KMS: ResolveAlias failure", "err", err)
+			writeError(
+				w,
+				http.StatusInternalServerError,
+				"KMSInternalException",
+				"internal server error",
+			)
+			return "", false
+		}
+		return id, true
+	}
+	writeError(w, http.StatusBadRequest, "InvalidArnException",
+		fmt.Sprintf("Invalid key ARN: %s", keyRef))
+	return "", false
+}
+
 func (ro *Router) handleDescribeKey(w http.ResponseWriter, body []byte) {
 	var req struct {
 		KeyId string `json:"KeyId"`
@@ -94,15 +130,8 @@ func (ro *Router) handleDescribeKey(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	keyID, ok := resolveKeyID(req.KeyId)
+	keyID, ok := ro.resolveKeyRef(w, req.KeyId)
 	if !ok {
-		if isAliasRef(req.KeyId) {
-			writeError(w, http.StatusBadRequest, "NotFoundException",
-				"Alias key lookup is not supported; use a key ID or key ARN")
-			return
-		}
-		writeError(w, http.StatusBadRequest, "InvalidArnException",
-			fmt.Sprintf("Invalid key ARN: %s", req.KeyId))
 		return
 	}
 
@@ -236,15 +265,8 @@ func (ro *Router) handleGetKeyPolicy(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	keyID, ok := resolveKeyID(req.KeyId)
+	keyID, ok := ro.resolveKeyRef(w, req.KeyId)
 	if !ok {
-		if isAliasRef(req.KeyId) {
-			writeError(w, http.StatusBadRequest, "NotFoundException",
-				"Alias key lookup is not supported; use a key ID or key ARN")
-			return
-		}
-		writeError(w, http.StatusBadRequest, "InvalidArnException",
-			fmt.Sprintf("Invalid key ARN: %s", req.KeyId))
 		return
 	}
 
@@ -303,15 +325,8 @@ func (ro *Router) handlePutKeyPolicy(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	keyID, ok := resolveKeyID(req.KeyId)
+	keyID, ok := ro.resolveKeyRef(w, req.KeyId)
 	if !ok {
-		if isAliasRef(req.KeyId) {
-			writeError(w, http.StatusBadRequest, "NotFoundException",
-				"Alias key lookup is not supported; use a key ID or key ARN")
-			return
-		}
-		writeError(w, http.StatusBadRequest, "InvalidArnException",
-			fmt.Sprintf("Invalid key ARN: %s", req.KeyId))
 		return
 	}
 

@@ -10,6 +10,9 @@ import (
 var (
 	ErrKeyNotFound         = errors.New("key not found")
 	ErrKeyMaterialNotFound = errors.New("key material not found")
+	ErrAliasNotFound       = errors.New("alias not found")
+	ErrAliasAlreadyExists  = errors.New("alias already exists")
+	ErrAliasLimitExceeded  = errors.New("alias limit exceeded")
 )
 
 type errResponse struct {
