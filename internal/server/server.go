@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/optiflowic/kumolo/internal/dynamodb"
+	"github.com/optiflowic/kumolo/internal/kms"
 	"github.com/optiflowic/kumolo/internal/logging"
 	"github.com/optiflowic/kumolo/internal/s3"
 	"github.com/optiflowic/kumolo/internal/sts"
@@ -26,11 +27,18 @@ func NewMux(
 		_ = s3Storage.Close()
 		return nil, nil, err
 	}
+	kmsStorage, err := kms.NewStorage(dataDir)
+	if err != nil {
+		_ = s3Storage.Close()
+		_ = dynamoStorage.Close()
+		return nil, nil, err
+	}
 
 	s3Router := s3.NewRouter(s3Storage)
 	dynamoRouter := dynamodb.NewRouter(dynamoStorage)
 	dynamoStreamsRouter := dynamodb.NewStreamsRouter(dynamoStorage)
 	stsRouter := sts.NewRouter()
+	kmsRouter := kms.NewRouter(kmsStorage)
 
 	s3.NewLifecycleEnforcer(s3Storage, lifecycleInterval).Start(ctx)
 
@@ -49,12 +57,17 @@ func NewMux(
 			dynamoRouter.ServeHTTP(w, r)
 			return
 		}
+		if strings.HasPrefix(r.Header.Get("X-Amz-Target"), "TrentService.") {
+			kmsRouter.ServeHTTP(w, r)
+			return
+		}
 		s3Router.ServeHTTP(w, r)
 	}))
 
 	cleanup := func() {
 		_ = s3Storage.Close()
 		_ = dynamoStorage.Close()
+		_ = kmsStorage.Close()
 	}
 	return logging.Middleware(mux), cleanup, nil
 }

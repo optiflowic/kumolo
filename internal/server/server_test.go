@@ -32,6 +32,15 @@ func TestNewMuxError(t *testing.T) {
 		assert.Nil(t, mux)
 		assert.Nil(t, cleanup)
 	})
+
+	t.Run("error when kms storage fails to init", func(t *testing.T) {
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "kms"), []byte{}, 0o600))
+		mux, cleanup, err := NewMux(context.Background(), dir, time.Minute)
+		assert.Error(t, err)
+		assert.Nil(t, mux)
+		assert.Nil(t, cleanup)
+	})
 }
 
 func TestNewMux(t *testing.T) {
@@ -77,6 +86,15 @@ func TestNewMux(t *testing.T) {
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, req)
 		assert.Contains(t, w.Header().Get("Content-Type"), "text/xml")
+	})
+
+	t.Run("routes KMS requests via X-Amz-Target", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{}`))
+		req.Header.Set("X-Amz-Target", "TrentService.ListKeys")
+		req.Header.Set("Content-Type", "application/x-amz-json-1.1")
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		assert.Equal(t, "application/x-amz-json-1.1", w.Header().Get("Content-Type"))
 	})
 
 	t.Run("does not route non-POST form-encoded to STS", func(t *testing.T) {

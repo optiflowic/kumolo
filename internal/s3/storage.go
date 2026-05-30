@@ -871,13 +871,7 @@ func (s *Storage) ListObjectVersions(bucket string) ([]VersionInfo, []DeleteMark
 		if c := cmp.Compare(a.key, b.key); c != 0 {
 			return c
 		}
-		if a.meta.LastModified.After(b.meta.LastModified) {
-			return -1 // newest first
-		}
-		if b.meta.LastModified.After(a.meta.LastModified) {
-			return 1
-		}
-		return 0 // untestable: requires two versions of the same key with identical timestamps
+		return b.meta.LastModified.Compare(a.meta.LastModified) // DESC: newest first
 	})
 
 	var versions []VersionInfo
