@@ -303,7 +303,7 @@ func TestHandleGetKeyPolicy(t *testing.T) {
 		keyID := mustCreateKey(t, ro, `{}`)
 		w := kmsReq(t, ro, "GetKeyPolicy", `{"KeyId":"`+keyID+`","PolicyName":"custom"}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrType(t, w, "UnsupportedOperationException")
+		assertErrType(t, w, "ValidationException")
 	})
 }
 
@@ -364,7 +364,7 @@ func TestHandlePutKeyPolicy(t *testing.T) {
 		w := kmsReq(t, ro, "PutKeyPolicy",
 			`{"KeyId":"`+keyID+`","Policy":"{}","PolicyName":"custom"}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrType(t, w, "UnsupportedOperationException")
+		assertErrType(t, w, "ValidationException")
 	})
 }
 

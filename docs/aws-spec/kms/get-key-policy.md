@@ -43,5 +43,6 @@ When a key is created without a policy, kumolo stores this default:
 |---|---|---|
 | `NotFoundException` | 400 | key not found |
 | `InvalidArnException` | 400 | malformed ARN |
+| `ValidationException` | 400 | `PolicyName` is provided but is not `"default"` |
 | `KMSInvalidStateException` | 400 | key not in a state that allows this operation |
 | `KMSInternalException` | 500 | storage failure |

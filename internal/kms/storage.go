@@ -131,6 +131,24 @@ func (s *Storage) CreateKey(in CreateKeyInput) (KeyMetadata, error) {
 		policy = defaultPolicy
 	}
 	if err := s.writeJSON(filepath.Join(keyDir, "policy.json"), policy); err != nil {
+		if rmErr := s.removeFile(filepath.Join(keyDir, "meta.json")); rmErr != nil {
+			slog.Warn(
+				"failed to clean up meta.json after policy write failure",
+				"keyID",
+				keyID,
+				"err",
+				rmErr,
+			)
+		}
+		if rmErr := s.removeFile(keyDir); rmErr != nil {
+			slog.Warn(
+				"failed to clean up key dir after policy write failure",
+				"keyID",
+				keyID,
+				"err",
+				rmErr,
+			)
+		}
 		return KeyMetadata{}, fmt.Errorf("write key policy: %w", err)
 	}
 

@@ -7,11 +7,7 @@ import (
 	"net/http"
 )
 
-var (
-	ErrKeyNotFound         = errors.New("key not found")
-	ErrKeyAlreadyExists    = errors.New("key already exists")
-	ErrValidationException = errors.New("validation error")
-)
+var ErrKeyNotFound = errors.New("key not found")
 
 type errResponse struct {
 	Type    string `json:"__type"`

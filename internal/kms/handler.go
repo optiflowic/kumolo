@@ -174,18 +174,17 @@ func (ro *Router) handleListKeys(w http.ResponseWriter, body []byte) {
 	if ids == nil {
 		ids = []string{}
 	}
-	sort.Strings(ids)
 
 	// Apply Marker pagination cursor.
 	if req.Marker != "" {
-		start := len(ids)
+		start := -1
 		for i, id := range ids {
 			if id == req.Marker {
 				start = i + 1
 				break
 			}
 		}
-		if start > len(ids) {
+		if start == -1 {
 			// Marker not found — use position based on binary search.
 			start = sort.SearchStrings(ids, req.Marker)
 			if start < len(ids) && ids[start] < req.Marker {
@@ -231,7 +230,7 @@ func (ro *Router) handleGetKeyPolicy(w http.ResponseWriter, body []byte) {
 		return
 	}
 	if req.PolicyName != "" && req.PolicyName != "default" {
-		writeError(w, http.StatusBadRequest, "UnsupportedOperationException",
+		writeError(w, http.StatusBadRequest, "ValidationException",
 			fmt.Sprintf("PolicyName %s is not supported; only 'default' is valid", req.PolicyName))
 		return
 	}
@@ -293,7 +292,7 @@ func (ro *Router) handlePutKeyPolicy(w http.ResponseWriter, body []byte) {
 		return
 	}
 	if req.PolicyName != "" && req.PolicyName != "default" {
-		writeError(w, http.StatusBadRequest, "UnsupportedOperationException",
+		writeError(w, http.StatusBadRequest, "ValidationException",
 			fmt.Sprintf("PolicyName %s is not supported; only 'default' is valid", req.PolicyName))
 		return
 	}
