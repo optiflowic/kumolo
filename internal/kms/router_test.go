@@ -475,6 +475,12 @@ func TestHandlePutKeyPolicy(t *testing.T) {
 		w := kmsReq(t, ro, "PutKeyPolicy",
 			`{"KeyId":"alias/put-key","Policy":"`+escapeJSON(newPolicy)+`"}`)
 		assert.Equal(t, http.StatusOK, w.Code)
+
+		w2 := kmsReq(t, ro, "GetKeyPolicy", `{"KeyId":"alias/put-key"}`)
+		assert.Equal(t, http.StatusOK, w2.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &resp))
+		assert.Equal(t, newPolicy, resp["Policy"])
 	})
 
 	t.Run("200 via alias ARN", func(t *testing.T) {
@@ -486,6 +492,12 @@ func TestHandlePutKeyPolicy(t *testing.T) {
 		w := kmsReq(t, ro, "PutKeyPolicy",
 			`{"KeyId":"`+arn+`","Policy":"`+escapeJSON(newPolicy)+`"}`)
 		assert.Equal(t, http.StatusOK, w.Code)
+
+		w2 := kmsReq(t, ro, "GetKeyPolicy", `{"KeyId":"`+arn+`"}`)
+		assert.Equal(t, http.StatusOK, w2.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &resp))
+		assert.Equal(t, newPolicy, resp["Policy"])
 	})
 }
 
