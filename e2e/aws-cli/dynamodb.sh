@@ -220,6 +220,18 @@ run "CreateTable (stream-enabled, NEW_AND_OLD_IMAGES)" \
     --billing-mode PAY_PER_REQUEST \
     --stream-specification StreamEnabled=true,StreamViewType=NEW_AND_OLD_IMAGES
 
+run "WaitTableExists (stream table)" \
+  $AWS wait table-exists --table-name "$STREAM_TABLE"
+
+# Stream metadata may appear slightly after the table becomes ACTIVE; poll until StreamArn is present.
+STREAM_ARN=""
+for _ in {1..10}; do
+  STREAM_LIST=$($DDBSTREAMS list-streams --table-name "$STREAM_TABLE" 2>/dev/null || true)
+  STREAM_ARN=$(echo "$STREAM_LIST" | jq -r '.Streams[0].StreamArn // empty' 2>/dev/null || true)
+  [[ -n "$STREAM_ARN" ]] && break
+  sleep 1
+done
+
 # Write items to generate INSERT events.
 run "PutItem (INSERT event 1)" \
   $AWS put-item \
@@ -303,8 +315,14 @@ fi
 
 # GetRecords — verify event names and image fields.
 if [[ -n "$SHARD_ITER" ]]; then
-  RECORDS_RESP=$($DDBSTREAMS get-records --shard-iterator "$SHARD_ITER" 2>/dev/null || true)
-  RECORD_COUNT=$(echo "$RECORDS_RESP" | jq '.Records | length' 2>/dev/null || echo 0)
+  RECORDS_RESP=""
+  RECORD_COUNT=0
+  for _ in {1..10}; do
+    RECORDS_RESP=$($DDBSTREAMS get-records --shard-iterator "$SHARD_ITER" 2>/dev/null || true)
+    RECORD_COUNT=$(echo "$RECORDS_RESP" | jq '.Records | length' 2>/dev/null || echo 0)
+    [[ "$RECORD_COUNT" -ge 4 ]] && break
+    sleep 1
+  done
 
   if [[ "$RECORD_COUNT" -ge 4 ]]; then
     ok "GetRecords (record count: $RECORD_COUNT)"
@@ -363,7 +381,7 @@ fi
 
 # GetShardIterator (AT_SEQUENCE_NUMBER / AFTER_SEQUENCE_NUMBER) — requires a known SeqNum.
 if [[ -n "$STREAM_ARN" && -n "$SHARD_ID" && -n "$SHARD_ITER" ]]; then
-  FIRST_SEQ=$(echo "$RECORDS_RESP" | jq -r '.Records[0].dynamodb.SequenceNumber // empty' 2>/dev/null || true)
+  FIRST_SEQ=$(echo "${RECORDS_RESP:-}" | jq -r '.Records[0].dynamodb.SequenceNumber // empty' 2>/dev/null || true)
   if [[ -n "$FIRST_SEQ" ]]; then
     ITER_AT_RESP=$($DDBSTREAMS get-shard-iterator \
       --stream-arn "$STREAM_ARN" \
@@ -399,7 +417,7 @@ if [[ -n "$STREAM_ARN" && -n "$SHARD_ID" && -n "$SHARD_ITER" ]]; then
         fail "GetRecords (AT_SEQUENCE_NUMBER expected >=1 record, got $AT_COUNT)"
       fi
     fi
-    if [[ -n "$SHARD_ITER_AFTER" ]]; then
+    if [[ -n "$SHARD_ITER_AFTER" && -n "$RECORDS_RESP" ]]; then
       AFTER_COUNT=$($DDBSTREAMS get-records --shard-iterator "$SHARD_ITER_AFTER" 2>/dev/null \
         | jq '.Records | length' 2>/dev/null || echo -1)
       TOTAL_COUNT=$(echo "$RECORDS_RESP" | jq '.Records | length' 2>/dev/null || echo 0)
