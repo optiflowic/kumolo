@@ -67,6 +67,23 @@ func TestCreateKey_metaWriteFailure(t *testing.T) {
 	require.ErrorIs(t, err, wantErr)
 }
 
+func TestCreateKey_metaWriteFailure_cleanupFailure(t *testing.T) {
+	s, _ := newTestStorage(t)
+	wantErr := errors.New("open failed")
+	calls := 0
+	orig := s.openFile
+	s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+		calls++
+		if calls == 1 {
+			return nil, wantErr
+		}
+		return orig(name, flag, perm)
+	}
+	s.removeFile = func(string) error { return errors.New("remove failed") }
+	_, err := s.CreateKey(CreateKeyInput{KeySpec: "SYMMETRIC_DEFAULT", KeyUsage: "ENCRYPT_DECRYPT"})
+	require.ErrorIs(t, err, wantErr)
+}
+
 func TestCreateKey_policyWriteFailure(t *testing.T) {
 	s, _ := newTestStorage(t)
 	wantErr := errors.New("open failed")

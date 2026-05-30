@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-var nowUnix = func() float64 { return float64(time.Now().Unix()) }
+func nowUnix() float64 { return float64(time.Now().Unix()) }
 
 // Storage is a filesystem-backed KMS backend. os.Root scopes all access to
 // the storage root, preventing path traversal attacks.
@@ -99,7 +99,7 @@ func (s *Storage) CreateKey(in CreateKeyInput) (KeyMetadata, error) {
 		KeyState:               "Enabled",
 		Enabled:                true,
 		KeyManager:             "CUSTOMER",
-		Origin:                 "AWS_KMS",
+		Origin:                 in.Origin,
 		MultiRegion:            in.MultiRegion,
 		CreationDate:           now,
 		EncryptionAlgorithms:   encryptionAlgorithmsForKey(in.KeySpec, in.KeyUsage),
@@ -114,6 +114,7 @@ func (s *Storage) CreateKey(in CreateKeyInput) (KeyMetadata, error) {
 	}
 
 	if err := s.writeJSON(filepath.Join(keyDir, "meta.json"), meta); err != nil {
+		_ = s.removeFile(filepath.Join(keyDir, "meta.json"))
 		if rmErr := s.removeFile(keyDir); rmErr != nil {
 			slog.Warn(
 				"failed to clean up key dir after meta write failure",
@@ -222,7 +223,11 @@ func (s *Storage) readKeyMeta(keyID string) (KeyMetadata, error) {
 }
 
 func (s *Storage) writeJSON(path string, v any) (retErr error) {
-	data, _ := json.Marshal(v)
+	data, err := json.Marshal(v)
+	if err != nil {
+		// untestable: KeyMetadata and string always marshal without error
+		return fmt.Errorf("marshal %s: %w", path, err)
+	}
 	f, err := s.openFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
