@@ -53,6 +53,9 @@
 | Code | HTTP | Condition |
 |---|---|---|
 | `InvalidArnException` | 400 | malformed KeyId ARN |
-| `InvalidMarkerException` | 400 | marker not found in sorted alias list |
 | `NotFoundException` | 400 | KeyId filter key not found |
 | `KMSInternalException` | 500 | storage failure |
+
+## kumolo deviations
+
+- `InvalidMarkerException` is not returned. When a stale marker is passed (alias deleted between pages), kumolo silently advances to the next alias name lexicographically rather than erroring.

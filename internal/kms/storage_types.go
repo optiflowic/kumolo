@@ -84,7 +84,7 @@ func resolveKeyID(keyID string) (string, bool) {
 	return keyID, true
 }
 
-// isAliasRef reports whether keyID looks like an alias reference (not supported yet).
+// isAliasRef reports whether keyID is an alias name or alias ARN.
 func isAliasRef(keyID string) bool {
 	return strings.HasPrefix(keyID, "alias/") ||
 		(strings.HasPrefix(keyID, "arn:") && strings.Contains(keyID, ":alias/"))

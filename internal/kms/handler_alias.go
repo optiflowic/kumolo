@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
+	"strings"
 )
 
 var (
@@ -40,8 +41,7 @@ func (ro *Router) handleCreateAlias(w http.ResponseWriter, body []byte) {
 		return
 	}
 	// alias/aws/ prefix is reserved for AWS managed keys
-	if len(req.AliasName) >= len("alias/aws/") &&
-		req.AliasName[:len("alias/aws/")] == "alias/aws/" {
+	if strings.HasPrefix(req.AliasName, "alias/aws/") {
 		writeError(w, http.StatusBadRequest, "InvalidAliasNameException",
 			"alias names beginning with alias/aws/ are reserved for AWS managed keys")
 		return
@@ -140,6 +140,11 @@ func (ro *Router) handleUpdateAlias(w http.ResponseWriter, body []byte) {
 
 	if err := validateAliasName(req.AliasName); err != nil {
 		writeError(w, http.StatusBadRequest, "ValidationException", err.Error())
+		return
+	}
+	if strings.HasPrefix(req.AliasName, "alias/aws/") {
+		writeError(w, http.StatusBadRequest, "InvalidAliasNameException",
+			"alias names beginning with alias/aws/ are reserved for AWS managed keys")
 		return
 	}
 	if req.TargetKeyId == "" {
@@ -321,20 +326,12 @@ func (ro *Router) handleListAliases(w http.ResponseWriter, body []byte) {
 			}
 		}
 		if start == -1 {
-			// Marker not found by exact match — fall back to binary search position.
+			// Marker not found by exact match — position to the next alias lexicographically.
+			// kumolo deviation: stale markers (e.g. alias deleted between pages) silently advance
+			// rather than returning InvalidMarkerException.
 			start = sort.Search(len(aliases), func(i int) bool {
 				return aliases[i].AliasName >= req.Marker
 			})
-			// unreachable: sort.Search guarantees aliases[start].AliasName >= req.Marker when start < len(aliases)
-			if start < len(aliases) && aliases[start].AliasName < req.Marker {
-				start++
-			}
-			// unreachable: sort.Search returns at most len(aliases); start++ above can only reach len(aliases)
-			if start > len(aliases) {
-				writeError(w, http.StatusBadRequest, "InvalidMarkerException",
-					"The marker is not valid for this request")
-				return
-			}
 		}
 		aliases = aliases[start:]
 	}
