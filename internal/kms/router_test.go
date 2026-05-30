@@ -1246,6 +1246,27 @@ func TestGenerateDataKey_dataKeyRandReadFailure(t *testing.T) {
 	assertErrType(t, w, "KMSInternalException")
 }
 
+func TestHandleEncrypt_shortRandRead(t *testing.T) {
+	ro := newTestRouter(t)
+	keyID := mustCreateKey(t, ro, `{}`)
+	// Return fewer bytes than requested with no error — readFullRand must reject this.
+	ro.randRead = func(b []byte) (int, error) { return 0, nil }
+	body, _ := json.Marshal(map[string]any{"KeyId": keyID, "Plaintext": []byte("x")})
+	w := kmsReq(t, ro, "Encrypt", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, "KMSInternalException")
+}
+
+func TestGenerateDataKey_shortRandRead(t *testing.T) {
+	ro := newTestRouter(t)
+	keyID := mustCreateKey(t, ro, `{}`)
+	ro.randRead = func(b []byte) (int, error) { return 0, nil }
+	body, _ := json.Marshal(map[string]any{"KeyId": keyID, "KeySpec": "AES_256"})
+	w := kmsReq(t, ro, "GenerateDataKey", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, "KMSInternalException")
+}
+
 // ---- ciphertext with unknown algorithm byte ---------------------------------
 
 func TestHandleDecrypt_unknownAlgo(t *testing.T) {

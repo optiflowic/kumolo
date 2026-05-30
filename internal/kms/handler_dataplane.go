@@ -126,6 +126,19 @@ func marshalContext(ctx map[string]string) []byte {
 	return b
 }
 
+// readFullRand fills dst with random bytes using ro.randRead, treating both an
+// error and a short read (n < len(dst)) as failures.
+func (ro *Router) readFullRand(dst []byte) error {
+	n, err := ro.randRead(dst)
+	if err != nil {
+		return err
+	}
+	if n != len(dst) {
+		return fmt.Errorf("short random read: got %d bytes, want %d", n, len(dst))
+	}
+	return nil
+}
+
 // looksLikeUUID reports whether s has the 8-4-4-4-12 lowercase-hex UUID shape
 // produced by newKeyID. Used to distinguish a malformed ciphertext envelope from
 // a legitimately missing key before calling GetKeyMetadata.
@@ -295,7 +308,7 @@ func (ro *Router) handleEncrypt(w http.ResponseWriter, body []byte) {
 	}
 
 	var nonce [envelopeNonceLen]byte
-	if _, err := ro.randRead(nonce[:]); err != nil {
+	if err := ro.readFullRand(nonce[:]); err != nil {
 		slog.Error("KMS Encrypt: seal failure", "err", err)
 		writeError(
 			w,
@@ -530,7 +543,7 @@ func (ro *Router) generateDataKeyCommon(
 	// Generate data key bytes and envelope nonce in a single randRead call so
 	// both derive from the same PRNG invocation, avoiding two-call ordering risks.
 	combined := make([]byte, numBytes+envelopeNonceLen)
-	if _, err := ro.randRead(combined); err != nil {
+	if err := ro.readFullRand(combined); err != nil {
 		slog.Error("KMS GenerateDataKey: rand read failure", "err", err)
 		writeError(
 			w,
