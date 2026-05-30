@@ -2,6 +2,7 @@ package kms
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -193,6 +194,13 @@ func TestHandleDescribeKey(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assertErrType(t, w, "InvalidArnException")
 	})
+
+	t.Run("400 for invalid JSON", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "DescribeKey", `{bad json}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
 }
 
 func TestHandleListKeys(t *testing.T) {
@@ -260,6 +268,25 @@ func TestHandleListKeys(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assertErrType(t, w, "ValidationException")
 	})
+
+	t.Run("400 for invalid JSON", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "ListKeys", `{bad json}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("stale marker triggers binary search", func(t *testing.T) {
+		ro := newTestRouter(t)
+		mustCreateKey(t, ro, `{}`)
+		mustCreateKey(t, ro, `{}`)
+		// Marker "0" sorts before all UUIDs; binary search sets start=0 and all keys are returned.
+		w := kmsReq(t, ro, "ListKeys", `{"Marker":"0"}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Len(t, resp["Keys"].([]any), 2)
+	})
 }
 
 func TestHandleGetKeyPolicy(t *testing.T) {
@@ -304,6 +331,27 @@ func TestHandleGetKeyPolicy(t *testing.T) {
 		w := kmsReq(t, ro, "GetKeyPolicy", `{"KeyId":"`+keyID+`","PolicyName":"custom"}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 for invalid JSON", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "GetKeyPolicy", `{bad json}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 for alias ref KeyId", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "GetKeyPolicy", `{"KeyId":"alias/my-key"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "NotFoundException")
+	})
+
+	t.Run("400 for malformed ARN KeyId", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "GetKeyPolicy", `{"KeyId":"arn:aws:kms:us-east-1:123456789012:garbage"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "InvalidArnException")
 	})
 }
 
@@ -366,6 +414,32 @@ func TestHandlePutKeyPolicy(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assertErrType(t, w, "ValidationException")
 	})
+
+	t.Run("400 for invalid JSON", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "PutKeyPolicy", `{bad json}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 for alias ref KeyId", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "PutKeyPolicy", `{"KeyId":"alias/my-key","Policy":"{}"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "NotFoundException")
+	})
+
+	t.Run("400 for malformed ARN KeyId", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(
+			t,
+			ro,
+			"PutKeyPolicy",
+			`{"KeyId":"arn:aws:kms:us-east-1:123456789012:garbage","Policy":"{}"}`,
+		)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "InvalidArnException")
+	})
 }
 
 func TestUnknownOperation(t *testing.T) {
@@ -373,6 +447,125 @@ func TestUnknownOperation(t *testing.T) {
 	w := kmsReq(t, ro, "UnknownOp", `{}`)
 	assert.Equal(t, http.StatusNotImplemented, w.Code)
 	assertErrType(t, w, "UnsupportedOperationException")
+}
+
+// alwaysFailStore is a store implementation that returns errors for every operation.
+type alwaysFailStore struct{}
+
+func (a *alwaysFailStore) CreateKey(CreateKeyInput) (KeyMetadata, error) {
+	return KeyMetadata{}, errors.New("storage error")
+}
+func (a *alwaysFailStore) GetKeyMetadata(string) (KeyMetadata, error) {
+	return KeyMetadata{}, errors.New("storage error")
+}
+func (a *alwaysFailStore) ListKeyIDs() ([]string, error) { return nil, errors.New("storage error") }
+func (a *alwaysFailStore) GetKeyPolicy(string) (string, error) {
+	return "", errors.New("storage error")
+}
+func (a *alwaysFailStore) PutKeyPolicy(string, string) error { return errors.New("storage error") }
+
+func newFailRouter() *Router { return &Router{storage: &alwaysFailStore{}} }
+
+func TestHandleCreateKey_storageFailure(t *testing.T) {
+	ro := newFailRouter()
+	w := kmsReq(t, ro, "CreateKey", `{}`)
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, "KMSInternalException")
+}
+
+func TestHandleDescribeKey_storageFailure(t *testing.T) {
+	ro := newFailRouter()
+	w := kmsReq(t, ro, "DescribeKey", `{"KeyId":"00000000-0000-0000-0000-000000000001"}`)
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, "KMSInternalException")
+}
+
+func TestHandleListKeys_storageFailure(t *testing.T) {
+	ro := newFailRouter()
+	w := kmsReq(t, ro, "ListKeys", `{}`)
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, "KMSInternalException")
+}
+
+func TestHandleGetKeyPolicy_storageFailure(t *testing.T) {
+	ro := newFailRouter()
+	w := kmsReq(t, ro, "GetKeyPolicy", `{"KeyId":"00000000-0000-0000-0000-000000000001"}`)
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, "KMSInternalException")
+}
+
+func TestHandlePutKeyPolicy_storageFailure(t *testing.T) {
+	ro := newFailRouter()
+	w := kmsReq(
+		t,
+		ro,
+		"PutKeyPolicy",
+		`{"KeyId":"00000000-0000-0000-0000-000000000001","Policy":"{}"}`,
+	)
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, "KMSInternalException")
+}
+
+// brokenReader always errors on Read to trigger the body-read failure path in ServeHTTP.
+type brokenReader struct{}
+
+func (brokenReader) Read([]byte) (int, error) { return 0, errors.New("broken") }
+
+func TestRouter_brokenBody(t *testing.T) {
+	ro := newTestRouter(t)
+	req := httptest.NewRequest(http.MethodPost, "/", brokenReader{})
+	req.Header.Set("X-Amz-Target", "TrentService.CreateKey")
+	req.Header.Set("Content-Type", "application/x-amz-json-1.1")
+	w := httptest.NewRecorder()
+	ro.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, "ValidationException")
+}
+
+func TestCreateKey_algorithmBranches(t *testing.T) {
+	tests := []struct {
+		spec  string
+		usage string
+	}{
+		{"ECC_NIST_P256", "SIGN_VERIFY"},
+		{"ECC_NIST_P384", "SIGN_VERIFY"},
+		{"ECC_NIST_P521", "SIGN_VERIFY"},
+		{"ECC_SECG_P256K1", "SIGN_VERIFY"},
+		{"ECC_NIST_EDWARDS25519", "SIGN_VERIFY"},
+		{"ML_DSA_44", "SIGN_VERIFY"},
+		{"ML_DSA_65", "SIGN_VERIFY"},
+		{"ML_DSA_87", "SIGN_VERIFY"},
+		{"SM2", "SIGN_VERIFY"},
+		{"SM2", "ENCRYPT_DECRYPT"},
+		{"SM2", "KEY_AGREEMENT"},
+		{"ECC_NIST_P256", "KEY_AGREEMENT"},
+		{"HMAC_224", "GENERATE_VERIFY_MAC"},
+		{"HMAC_384", "GENERATE_VERIFY_MAC"},
+		{"HMAC_512", "GENERATE_VERIFY_MAC"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.spec+"/"+tc.usage, func(t *testing.T) {
+			ro := newTestRouter(t)
+			w := kmsReq(t, ro, "CreateKey",
+				`{"KeySpec":"`+tc.spec+`","KeyUsage":"`+tc.usage+`"}`)
+			assert.Equal(t, http.StatusOK, w.Code)
+		})
+	}
+}
+
+// failWriter overrides Write to always fail, triggering the defensive slog.Warn paths.
+type failWriter struct {
+	http.ResponseWriter
+}
+
+func (failWriter) Write([]byte) (int, error) { return 0, errors.New("write failed") }
+
+func TestWriteError_writeFails(t *testing.T) {
+	writeError(failWriter{httptest.NewRecorder()}, http.StatusBadRequest, "TestError", "msg")
+}
+
+func TestWriteJSON_writeFails(t *testing.T) {
+	writeJSON(failWriter{httptest.NewRecorder()}, http.StatusOK, map[string]string{"k": "v"})
 }
 
 // escapeJSON escapes a JSON string for embedding inside another JSON string.

@@ -141,7 +141,7 @@ func encryptionAlgorithmsForKey(spec, usage string) []string {
 	case "SM2":
 		return []string{"SM2PKE"}
 	}
-	return nil
+	return nil // unreachable: handler validates spec/usage before calling
 }
 
 func signingAlgorithmsForKey(spec, usage string) []string {
@@ -171,7 +171,7 @@ func signingAlgorithmsForKey(spec, usage string) []string {
 	case "SM2":
 		return []string{"SM2DSA"}
 	}
-	return nil
+	return nil // unreachable: handler validates spec/usage before calling
 }
 
 func keyAgreementAlgorithmsForKey(spec, usage string) []string {
@@ -184,7 +184,7 @@ func keyAgreementAlgorithmsForKey(spec, usage string) []string {
 	case "SM2":
 		return []string{"SM2KE"}
 	}
-	return nil
+	return nil // unreachable: handler validates spec/usage before calling
 }
 
 func macAlgorithmsForKey(spec string) []string {

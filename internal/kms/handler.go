@@ -188,6 +188,7 @@ func (ro *Router) handleListKeys(w http.ResponseWriter, body []byte) {
 			// Marker not found — use position based on binary search.
 			start = sort.SearchStrings(ids, req.Marker)
 			if start < len(ids) && ids[start] < req.Marker {
+				// unreachable: sort.SearchStrings guarantees ids[start] >= marker
 				start++
 			}
 		}
