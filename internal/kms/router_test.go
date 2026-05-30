@@ -341,7 +341,7 @@ func TestHandleGetKeyPolicy(t *testing.T) {
 		assertErrType(t, w, "ValidationException")
 	})
 
-	t.Run("400 for alias ref KeyId", func(t *testing.T) {
+	t.Run("400 for alias ref KeyId not found", func(t *testing.T) {
 		ro := newTestRouter(t)
 		w := kmsReq(t, ro, "GetKeyPolicy", `{"KeyId":"alias/my-key"}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -353,6 +353,31 @@ func TestHandleGetKeyPolicy(t *testing.T) {
 		w := kmsReq(t, ro, "GetKeyPolicy", `{"KeyId":"arn:aws:kms:us-east-1:123456789012:garbage"}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assertErrType(t, w, "InvalidArnException")
+	})
+
+	t.Run("200 via alias name", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustCreateAlias(t, ro, "alias/my-key", keyID)
+		w := kmsReq(t, ro, "GetKeyPolicy", `{"KeyId":"alias/my-key"}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, "default", resp["PolicyName"])
+		assert.NotEmpty(t, resp["Policy"])
+	})
+
+	t.Run("200 via alias ARN", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustCreateAlias(t, ro, "alias/my-key", keyID)
+		arn := aliasARN("alias/my-key")
+		w := kmsReq(t, ro, "GetKeyPolicy", `{"KeyId":"`+arn+`"}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, "default", resp["PolicyName"])
+		assert.NotEmpty(t, resp["Policy"])
 	})
 }
 
@@ -423,7 +448,7 @@ func TestHandlePutKeyPolicy(t *testing.T) {
 		assertErrType(t, w, "ValidationException")
 	})
 
-	t.Run("400 for alias ref KeyId", func(t *testing.T) {
+	t.Run("400 for alias ref KeyId not found", func(t *testing.T) {
 		ro := newTestRouter(t)
 		w := kmsReq(t, ro, "PutKeyPolicy", `{"KeyId":"alias/my-key","Policy":"{}"}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -440,6 +465,27 @@ func TestHandlePutKeyPolicy(t *testing.T) {
 		)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assertErrType(t, w, "InvalidArnException")
+	})
+
+	t.Run("200 via alias name", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustCreateAlias(t, ro, "alias/put-key", keyID)
+		newPolicy := `{"Version":"2012-10-17","Statement":[]}`
+		w := kmsReq(t, ro, "PutKeyPolicy",
+			`{"KeyId":"alias/put-key","Policy":"`+escapeJSON(newPolicy)+`"}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("200 via alias ARN", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustCreateAlias(t, ro, "alias/put-key", keyID)
+		arn := aliasARN("alias/put-key")
+		newPolicy := `{"Version":"2012-10-17","Statement":[]}`
+		w := kmsReq(t, ro, "PutKeyPolicy",
+			`{"KeyId":"`+arn+`","Policy":"`+escapeJSON(newPolicy)+`"}`)
+		assert.Equal(t, http.StatusOK, w.Code)
 	})
 }
 
@@ -1775,7 +1821,7 @@ func TestHandleUpdateAlias(t *testing.T) {
 		)
 		w := kmsReq(t, ro, "UpdateAlias", string(body))
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrType(t, w, "ValidationException")
+		assertErrType(t, w, "InvalidAliasNameException")
 	})
 
 	t.Run("400 alias/aws/ prefix rejected", func(t *testing.T) {

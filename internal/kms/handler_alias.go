@@ -139,7 +139,7 @@ func (ro *Router) handleUpdateAlias(w http.ResponseWriter, body []byte) {
 	}
 
 	if err := validateAliasName(req.AliasName); err != nil {
-		writeError(w, http.StatusBadRequest, "ValidationException", err.Error())
+		writeError(w, http.StatusBadRequest, "InvalidAliasNameException", err.Error())
 		return
 	}
 	if strings.HasPrefix(req.AliasName, "alias/aws/") {
