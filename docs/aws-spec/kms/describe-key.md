@@ -29,6 +29,6 @@ Returns `{"KeyMetadata": {...}}`. See create-key.md for field list.
 
 | Code | HTTP | Condition |
 |---|---|---|
-| `NotFoundException` | 400 | key not found or alias used |
+| `NotFoundException` | 400 | key not found or alias not found |
 | `InvalidArnException` | 400 | malformed ARN |
 | `KMSInternalException` | 500 | storage failure |
