@@ -1372,3 +1372,48 @@ func TestLoadSymmetricMaterial_materialNotFound(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assertErrType(t, w, "KMSInvalidStateException")
 }
+
+// ---- looksLikeUUID ----------------------------------------------------------
+
+func TestLooksLikeUUID(t *testing.T) {
+	assert.True(t, looksLikeUUID("12345678-1234-1234-1234-123456789abc"))
+	assert.False(t, looksLikeUUID("short"))                                // len != 36
+	assert.False(t, looksLikeUUID("12345678x1234-1234-1234-123456789abc")) // wrong hyphen pos
+	assert.False(t, looksLikeUUID("1234567g-1234-1234-1234-123456789abc")) // non-hex char
+	assert.False(t, looksLikeUUID("12345678-1234-1234-1234-123456789ABC")) // uppercase rejected
+}
+
+// ---- Decrypt: garbage embedded key ID (looksLikeUUID gate) ------------------
+
+func TestHandleDecrypt_garbageEmbeddedKeyID(t *testing.T) {
+	ro := newTestRouter(t)
+	// Build a blob with valid length and version byte but all-zero key ID bytes
+	// (NUL bytes are not valid UUID hex chars, so looksLikeUUID returns false).
+	blob := make([]byte, envelopeSealedOffset+1)
+	blob[0] = envelopeVersion
+	body, _ := json.Marshal(map[string]any{"CiphertextBlob": blob})
+	w := kmsReq(t, ro, "Decrypt", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, "InvalidCiphertextException")
+}
+
+// ---- Decrypt: loadSymmetricMaterial failure path ----------------------------
+
+func TestHandleDecrypt_loadMaterialFailure(t *testing.T) {
+	dir := t.TempDir()
+	s, err := newStorage(dir, os.OpenRoot)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	ro := NewRouter(s)
+
+	keyID := mustCreateKey(t, ro, `{}`)
+	cipherBlob := mustEncrypt(t, ro, keyID, []byte("data"))
+
+	// Remove material.json so loadSymmetricMaterial returns ErrKeyMaterialNotFound.
+	require.NoError(t, os.Remove(filepath.Join(dir, "kms", "keys", keyID, "material.json")))
+
+	body, _ := json.Marshal(map[string]any{"CiphertextBlob": cipherBlob})
+	w := kmsReq(t, ro, "Decrypt", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, "KMSInvalidStateException")
+}

@@ -305,6 +305,48 @@ func (f *failCloseWriter) Close() error {
 	return f.closeErr
 }
 
+// ---- GetKeyMaterial: key not found -----------------------------------------
+
+func TestGetKeyMaterial_keyNotFound(t *testing.T) {
+	s, _ := newTestStorage(t)
+	_, err := s.GetKeyMaterial("00000000-0000-0000-0000-000000000000")
+	require.ErrorIs(t, err, ErrKeyNotFound)
+}
+
+// ---- CreateKey material rand failure + removeFile failure ------------------
+
+func TestCreateKey_materialKeyRandReadFailure_cleanupFailure(t *testing.T) {
+	s, _ := newTestStorage(t)
+	calls := 0
+	orig := s.randRead
+	s.randRead = func(b []byte) (int, error) {
+		calls++
+		if calls == 2 { // key bytes generation
+			return 0, errors.New("rand failed")
+		}
+		return orig(b)
+	}
+	s.removeFile = func(string) error { return errors.New("remove failed") }
+	_, err := s.CreateKey(CreateKeyInput{KeySpec: "SYMMETRIC_DEFAULT", KeyUsage: "ENCRYPT_DECRYPT"})
+	require.Error(t, err)
+}
+
+func TestCreateKey_materialIDRandReadFailure_cleanupFailure(t *testing.T) {
+	s, _ := newTestStorage(t)
+	calls := 0
+	orig := s.randRead
+	s.randRead = func(b []byte) (int, error) {
+		calls++
+		if calls == 3 { // material ID bytes generation
+			return 0, errors.New("rand failed")
+		}
+		return orig(b)
+	}
+	s.removeFile = func(string) error { return errors.New("remove failed") }
+	_, err := s.CreateKey(CreateKeyInput{KeySpec: "SYMMETRIC_DEFAULT", KeyUsage: "ENCRYPT_DECRYPT"})
+	require.Error(t, err)
+}
+
 func TestWriteJSON_closeFailure(t *testing.T) {
 	s, _ := newTestStorage(t)
 	closeErr := errors.New("close failed")

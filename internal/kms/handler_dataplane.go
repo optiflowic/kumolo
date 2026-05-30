@@ -41,6 +41,7 @@ func sealEnvelope(
 ) ([]byte, error) {
 	block, err := aes.NewCipher(material.KeyBytes)
 	if err != nil {
+		// untestable: KeyBytes is always 32 bytes (AES-256); wrong-length keys cannot be stored
 		return nil, fmt.Errorf("new AES cipher: %w", err)
 	}
 	gcm, err := cipher.NewGCM(block)
@@ -74,9 +75,11 @@ func openEnvelope(
 	context map[string]string,
 ) (embeddedKeyID string, plaintext []byte, err error) {
 	if len(blob) < envelopeSealedOffset+1 {
+		// unreachable: handleDecrypt validates length before calling openEnvelope
 		return "", nil, fmt.Errorf("ciphertext too short")
 	}
 	if blob[0] != envelopeVersion {
+		// unreachable: handleDecrypt validates version byte before calling openEnvelope
 		return "", nil, fmt.Errorf("unknown envelope version %d", blob[0])
 	}
 	embeddedKeyID = string(blob[envelopeKeyIDOffset : envelopeKeyIDOffset+envelopeKeyIDLen])
@@ -89,6 +92,7 @@ func openEnvelope(
 
 	block, err := aes.NewCipher(material.KeyBytes)
 	if err != nil {
+		// untestable: KeyBytes is always 32 bytes (AES-256); wrong-length keys cannot be stored
 		return "", nil, fmt.Errorf("new AES cipher: %w", err)
 	}
 	gcm, err := cipher.NewGCM(block)
@@ -127,6 +131,28 @@ func marshalContext(ctx map[string]string) []byte {
 		sb.WriteString(ctx[k])
 	}
 	return []byte(sb.String())
+}
+
+// looksLikeUUID reports whether s has the 8-4-4-4-12 lowercase-hex UUID shape
+// produced by newKeyID. Used to distinguish a malformed ciphertext envelope from
+// a legitimately missing key before calling GetKeyMetadata.
+func looksLikeUUID(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i, c := range s {
+		switch i {
+		case 8, 13, 18, 23:
+			if c != '-' {
+				return false
+			}
+		default:
+			if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // resolveAndValidateKey resolves keyID, reads its metadata, and validates that it
@@ -347,6 +373,18 @@ func (ro *Router) handleDecrypt(w http.ResponseWriter, body []byte) {
 	embeddedKeyID := string(
 		req.CiphertextBlob[envelopeKeyIDOffset : envelopeKeyIDOffset+envelopeKeyIDLen],
 	)
+	// Guard against garbage bytes in the key ID slot: without this check,
+	// resolveAndValidateKey would return NotFoundException instead of
+	// InvalidCiphertextException for malformed ciphertexts.
+	if !looksLikeUUID(embeddedKeyID) {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"InvalidCiphertextException",
+			"ciphertext is malformed",
+		)
+		return
+	}
 
 	// If the caller provided a KeyId, verify it matches the embedded key ID.
 	if req.KeyID != "" {
