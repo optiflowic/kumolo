@@ -637,20 +637,36 @@ func TestCountAliases_nonJsonFileSkipped(t *testing.T) {
 	require.NoError(t, s.CreateAlias("alias/my-key", meta.KeyID))
 }
 
-func TestCountAliases_corruptFileSkipped(t *testing.T) {
+func TestCountAliases_corruptFileErrors(t *testing.T) {
 	s, dir := newTestStorage(t)
 	meta, err := s.CreateKey(
 		CreateKeyInput{KeySpec: "SYMMETRIC_DEFAULT", KeyUsage: "ENCRYPT_DECRYPT"},
 	)
 	require.NoError(t, err)
 
-	// A corrupt alias file must be silently skipped when counting.
+	// A corrupt alias file must cause CreateAlias to fail so we don't undercount.
 	require.NoError(
 		t,
 		os.WriteFile(filepath.Join(dir, "kms", "aliases", "bad.json"), []byte("not json"), 0o600),
 	)
-	// CreateAlias must still succeed (corrupt file doesn't count).
-	require.NoError(t, s.CreateAlias("alias/my-key", meta.KeyID))
+	err = s.CreateAlias("alias/my-key", meta.KeyID)
+	require.Error(t, err)
+}
+
+func TestCreateAlias_limitExceeded(t *testing.T) {
+	s, _ := newTestStorage(t)
+	meta, err := s.CreateKey(
+		CreateKeyInput{KeySpec: "SYMMETRIC_DEFAULT", KeyUsage: "ENCRYPT_DECRYPT"},
+	)
+	require.NoError(t, err)
+
+	orig := maxAliasesPerKey
+	maxAliasesPerKey = 1
+	t.Cleanup(func() { maxAliasesPerKey = orig })
+
+	require.NoError(t, s.CreateAlias("alias/first", meta.KeyID))
+	err = s.CreateAlias("alias/second", meta.KeyID)
+	require.ErrorIs(t, err, ErrAliasLimitExceeded)
 }
 
 func TestNewStorage_aliasesDirFailure(t *testing.T) {

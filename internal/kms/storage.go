@@ -31,7 +31,7 @@ type Storage struct {
 	randRead   func(b []byte) (int, error)
 }
 
-const maxAliasesPerKey = 256
+var maxAliasesPerKey = 256
 
 // NewStorage roots the storage at dataDir/kms, creating the directory if needed.
 func NewStorage(dataDir string) (*Storage, error) {
@@ -410,7 +410,6 @@ func (s *Storage) CreateAlias(aliasName, targetKeyID string) error {
 		return fmt.Errorf("count aliases: %w", err)
 	}
 	if count >= maxAliasesPerKey {
-		// untestable: requires creating maxAliasesPerKey (256) real aliases
 		return fmt.Errorf("alias limit exceeded: %w", ErrAliasLimitExceeded)
 	}
 
@@ -534,7 +533,7 @@ func (s *Storage) countAliasesForKeyLocked(targetKeyID string) (int, error) {
 		}
 		alias, err := readJSON[AliasEntry](s, filepath.Join("aliases", name))
 		if err != nil {
-			continue
+			return 0, fmt.Errorf("read alias %s: %w", name, err)
 		}
 		if alias.TargetKeyId == targetKeyID {
 			count++
