@@ -44,6 +44,36 @@ func TestCreateKey_randReadFailure(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestCreateKey_materialKeyRandReadFailure(t *testing.T) {
+	s, _ := newTestStorage(t)
+	calls := 0
+	orig := s.randRead
+	s.randRead = func(b []byte) (int, error) {
+		calls++
+		if calls == 2 { // second call: key bytes generation inside the SYMMETRIC_DEFAULT block
+			return 0, errors.New("rand failed")
+		}
+		return orig(b)
+	}
+	_, err := s.CreateKey(CreateKeyInput{KeySpec: "SYMMETRIC_DEFAULT", KeyUsage: "ENCRYPT_DECRYPT"})
+	require.Error(t, err)
+}
+
+func TestCreateKey_materialIDRandReadFailure(t *testing.T) {
+	s, _ := newTestStorage(t)
+	calls := 0
+	orig := s.randRead
+	s.randRead = func(b []byte) (int, error) {
+		calls++
+		if calls == 3 { // third call: material ID bytes generation
+			return 0, errors.New("rand failed")
+		}
+		return orig(b)
+	}
+	_, err := s.CreateKey(CreateKeyInput{KeySpec: "SYMMETRIC_DEFAULT", KeyUsage: "ENCRYPT_DECRYPT"})
+	require.Error(t, err)
+}
+
 func TestCreateKey_mkdirFailure(t *testing.T) {
 	s, _ := newTestStorage(t)
 	s.mkdirFn = func(string, os.FileMode) error { return errors.New("mkdir failed") }
@@ -91,6 +121,22 @@ func TestCreateKey_metaWriteFailure_cleanupFailure(t *testing.T) {
 	assert.NotContains(t, removedPaths[1], "meta.json")
 }
 
+func TestCreateKey_materialWriteFailure(t *testing.T) {
+	s, _ := newTestStorage(t)
+	wantErr := errors.New("open failed")
+	calls := 0
+	orig := s.openFile
+	s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+		calls++
+		if calls == 2 { // material.json is the second write for SYMMETRIC_DEFAULT keys
+			return nil, wantErr
+		}
+		return orig(name, flag, perm)
+	}
+	_, err := s.CreateKey(CreateKeyInput{KeySpec: "SYMMETRIC_DEFAULT", KeyUsage: "ENCRYPT_DECRYPT"})
+	require.ErrorIs(t, err, wantErr)
+}
+
 func TestCreateKey_policyWriteFailure(t *testing.T) {
 	s, _ := newTestStorage(t)
 	wantErr := errors.New("open failed")
@@ -98,7 +144,7 @@ func TestCreateKey_policyWriteFailure(t *testing.T) {
 	orig := s.openFile
 	s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
 		calls++
-		if calls == 2 {
+		if calls == 3 { // policy.json is the third write for SYMMETRIC_DEFAULT keys
 			return nil, wantErr
 		}
 		return orig(name, flag, perm)
@@ -154,6 +200,18 @@ func TestListKeyIDs_statFailure(t *testing.T) {
 	require.ErrorIs(t, err, statErr)
 }
 
+func TestGetKeyMaterial_readAllFailure(t *testing.T) {
+	s, _ := newTestStorage(t)
+	meta, err := s.CreateKey(
+		CreateKeyInput{KeySpec: "SYMMETRIC_DEFAULT", KeyUsage: "ENCRYPT_DECRYPT"},
+	)
+	require.NoError(t, err)
+	// Corrupt the material.json on disk so readJSON returns a non-ErrNotExist error.
+	s.readAll = func(io.Reader) ([]byte, error) { return nil, errors.New("read failed") }
+	_, err = s.GetKeyMaterial(meta.KeyID)
+	require.Error(t, err)
+}
+
 func TestGetKeyMetadata_readAllFailure(t *testing.T) {
 	s, _ := newTestStorage(t)
 	meta, err := s.CreateKey(
@@ -183,6 +241,32 @@ func TestNewStorage(t *testing.T) {
 	require.NoError(t, s.Close())
 }
 
+func TestCreateKey_materialWriteFailure_cleanupFailure(t *testing.T) {
+	s, _ := newTestStorage(t)
+	wantErr := errors.New("open failed")
+	calls := 0
+	orig := s.openFile
+	s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+		calls++
+		if calls == 2 { // material.json
+			return nil, wantErr
+		}
+		return orig(name, flag, perm)
+	}
+	var removedPaths []string
+	s.removeFile = func(name string) error {
+		removedPaths = append(removedPaths, name)
+		return errors.New("remove failed")
+	}
+	_, err := s.CreateKey(CreateKeyInput{KeySpec: "SYMMETRIC_DEFAULT", KeyUsage: "ENCRYPT_DECRYPT"})
+	require.ErrorIs(t, err, wantErr)
+	// meta.json, material.json, keyDir
+	require.Len(t, removedPaths, 3)
+	assert.Contains(t, removedPaths[0], "meta.json")
+	assert.Contains(t, removedPaths[1], "material.json")
+	assert.NotContains(t, removedPaths[2], ".json")
+}
+
 func TestCreateKey_policyWriteFailure_cleanupFailure(t *testing.T) {
 	s, _ := newTestStorage(t)
 	wantErr := errors.New("open failed")
@@ -190,14 +274,24 @@ func TestCreateKey_policyWriteFailure_cleanupFailure(t *testing.T) {
 	orig := s.openFile
 	s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
 		calls++
-		if calls == 2 {
+		if calls == 3 { // policy.json is the third write for SYMMETRIC_DEFAULT keys
 			return nil, wantErr
 		}
 		return orig(name, flag, perm)
 	}
-	s.removeFile = func(string) error { return errors.New("remove failed") }
+	var removedPaths []string
+	s.removeFile = func(name string) error {
+		removedPaths = append(removedPaths, name)
+		return errors.New("remove failed")
+	}
 	_, err := s.CreateKey(CreateKeyInput{KeySpec: "SYMMETRIC_DEFAULT", KeyUsage: "ENCRYPT_DECRYPT"})
 	require.ErrorIs(t, err, wantErr)
+	// meta.json, material.json (ErrNotExist skipped via non-error remove), keyDir
+	// removeFile always returns "remove failed" (not ErrNotExist), so material.json is also logged.
+	require.Len(t, removedPaths, 3)
+	assert.Contains(t, removedPaths[0], "meta.json")
+	assert.Contains(t, removedPaths[1], "material.json")
+	assert.NotContains(t, removedPaths[2], ".json")
 }
 
 // failCloseWriter wraps a WriteCloser and returns an error on Close.

@@ -187,6 +187,13 @@ func keyAgreementAlgorithmsForKey(spec, usage string) []string {
 	return nil // unreachable: handler validates spec/usage before calling
 }
 
+// KeyMaterial holds the cryptographic key bytes for a KMS key.
+// Only generated for SYMMETRIC_DEFAULT keys; other key types have no material file.
+type KeyMaterial struct {
+	KeyBytes      []byte `json:"KeyBytes"`      // 32 bytes for AES-256 (SYMMETRIC_DEFAULT)
+	KeyMaterialID string `json:"KeyMaterialId"` // 64-char hex, identifies this key material
+}
+
 func macAlgorithmsForKey(spec string) []string {
 	switch spec {
 	case "HMAC_224":

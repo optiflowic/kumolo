@@ -136,6 +136,88 @@ func (s *Storage) CreateKey(in CreateKeyInput) (KeyMetadata, error) {
 		return KeyMetadata{}, fmt.Errorf("write key metadata: %w", err)
 	}
 
+	if in.KeySpec == "SYMMETRIC_DEFAULT" {
+		var keyBytes [32]byte
+		if _, err := s.randRead(keyBytes[:]); err != nil {
+			if rmErr := s.removeFile(filepath.Join(keyDir, "meta.json")); rmErr != nil {
+				slog.Warn(
+					"failed to clean up meta.json after material rand failure",
+					"keyID",
+					keyID,
+					"err",
+					rmErr,
+				)
+			}
+			if rmErr := s.removeFile(keyDir); rmErr != nil {
+				slog.Warn(
+					"failed to clean up key dir after material rand failure",
+					"keyID",
+					keyID,
+					"err",
+					rmErr,
+				)
+			}
+			return KeyMetadata{}, fmt.Errorf("generate key material: %w", err)
+		}
+		var matIDBytes [32]byte
+		if _, err := s.randRead(matIDBytes[:]); err != nil {
+			if rmErr := s.removeFile(filepath.Join(keyDir, "meta.json")); rmErr != nil {
+				slog.Warn(
+					"failed to clean up meta.json after material ID rand failure",
+					"keyID",
+					keyID,
+					"err",
+					rmErr,
+				)
+			}
+			if rmErr := s.removeFile(keyDir); rmErr != nil {
+				slog.Warn(
+					"failed to clean up key dir after material ID rand failure",
+					"keyID",
+					keyID,
+					"err",
+					rmErr,
+				)
+			}
+			return KeyMetadata{}, fmt.Errorf("generate key material ID: %w", err)
+		}
+		material := KeyMaterial{
+			KeyBytes:      keyBytes[:],
+			KeyMaterialID: fmt.Sprintf("%x", matIDBytes),
+		}
+		if err := s.writeJSON(filepath.Join(keyDir, "material.json"), material); err != nil {
+			if rmErr := s.removeFile(filepath.Join(keyDir, "meta.json")); rmErr != nil {
+				slog.Warn(
+					"failed to clean up meta.json after material write failure",
+					"keyID",
+					keyID,
+					"err",
+					rmErr,
+				)
+			}
+			if rmErr := s.removeFile(filepath.Join(keyDir, "material.json")); rmErr != nil &&
+				!errors.Is(rmErr, os.ErrNotExist) {
+				slog.Warn(
+					"failed to clean up material.json after material write failure",
+					"keyID",
+					keyID,
+					"err",
+					rmErr,
+				)
+			}
+			if rmErr := s.removeFile(keyDir); rmErr != nil {
+				slog.Warn(
+					"failed to clean up key dir after material write failure",
+					"keyID",
+					keyID,
+					"err",
+					rmErr,
+				)
+			}
+			return KeyMetadata{}, fmt.Errorf("write key material: %w", err)
+		}
+	}
+
 	policy := in.Policy
 	if policy == "" {
 		policy = defaultPolicy
@@ -144,6 +226,16 @@ func (s *Storage) CreateKey(in CreateKeyInput) (KeyMetadata, error) {
 		if rmErr := s.removeFile(filepath.Join(keyDir, "meta.json")); rmErr != nil {
 			slog.Warn(
 				"failed to clean up meta.json after policy write failure",
+				"keyID",
+				keyID,
+				"err",
+				rmErr,
+			)
+		}
+		if rmErr := s.removeFile(filepath.Join(keyDir, "material.json")); rmErr != nil &&
+			!errors.Is(rmErr, os.ErrNotExist) {
+			slog.Warn(
+				"failed to clean up material.json after policy write failure",
 				"keyID",
 				keyID,
 				"err",
@@ -213,6 +305,19 @@ func (s *Storage) PutKeyPolicy(keyID, policy string) error {
 		return err
 	}
 	return s.writeJSON(filepath.Join("keys", keyID, "policy.json"), policy)
+}
+
+func (s *Storage) GetKeyMaterial(keyID string) (KeyMaterial, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if err := s.keyExistsLocked(keyID); err != nil {
+		return KeyMaterial{}, err
+	}
+	mat, err := readJSON[KeyMaterial](s, filepath.Join("keys", keyID, "material.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return KeyMaterial{}, ErrKeyMaterialNotFound
+	}
+	return mat, err
 }
 
 func (s *Storage) keyExistsLocked(keyID string) error {

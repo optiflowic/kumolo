@@ -7,7 +7,10 @@ import (
 	"net/http"
 )
 
-var ErrKeyNotFound = errors.New("key not found")
+var (
+	ErrKeyNotFound         = errors.New("key not found")
+	ErrKeyMaterialNotFound = errors.New("key material not found")
+)
 
 type errResponse struct {
 	Type    string `json:"__type"`
