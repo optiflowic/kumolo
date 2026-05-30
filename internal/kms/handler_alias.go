@@ -71,7 +71,7 @@ func (ro *Router) handleCreateAlias(w http.ResponseWriter, body []byte) {
 				fmt.Sprintf(
 					"Key %s already has the maximum number of aliases (%d)",
 					targetKeyID,
-					maxAliasesPerKey,
+					aliasLimitPerKey,
 				),
 			)
 		case errors.Is(err, ErrKeyNotFound):

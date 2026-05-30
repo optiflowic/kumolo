@@ -20,18 +20,20 @@ func nowUnix() float64 { return float64(time.Now().Unix()) }
 // Storage is a filesystem-backed KMS backend. os.Root scopes all access to
 // the storage root, preventing path traversal attacks.
 type Storage struct {
-	mu         sync.RWMutex
-	root       *os.Root
-	mkdirFn    func(name string, perm os.FileMode) error
-	removeFile func(name string) error
-	openFile   func(name string, flag int, perm os.FileMode) (io.WriteCloser, error)
-	readAll    func(r io.Reader) ([]byte, error)
-	listDirFn  func(name string) ([]os.DirEntry, error)
-	statFn     func(name string) (os.FileInfo, error)
-	randRead   func(b []byte) (int, error)
+	mu               sync.RWMutex
+	root             *os.Root
+	maxAliasesPerKey int
+	mkdirFn          func(name string, perm os.FileMode) error
+	removeFile       func(name string) error
+	openFile         func(name string, flag int, perm os.FileMode) (io.WriteCloser, error)
+	readAll          func(r io.Reader) ([]byte, error)
+	listDirFn        func(name string) ([]os.DirEntry, error)
+	statFn           func(name string) (os.FileInfo, error)
+	randRead         func(b []byte) (int, error)
 }
 
-var maxAliasesPerKey = 256
+// aliasLimitPerKey is the AWS-spec maximum number of aliases per key.
+const aliasLimitPerKey = 256
 
 // NewStorage roots the storage at dataDir/kms, creating the directory if needed.
 func NewStorage(dataDir string) (*Storage, error) {
@@ -55,7 +57,7 @@ func newStorage(dataDir string, openRoot func(string) (*os.Root, error)) (*Stora
 	if err != nil {
 		return nil, fmt.Errorf("open kms storage root: %w", err)
 	}
-	s := &Storage{root: root}
+	s := &Storage{root: root, maxAliasesPerKey: aliasLimitPerKey}
 	s.mkdirFn = s.root.Mkdir
 	s.removeFile = s.root.Remove
 	s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
@@ -409,7 +411,7 @@ func (s *Storage) CreateAlias(aliasName, targetKeyID string) error {
 	if err != nil {
 		return fmt.Errorf("count aliases: %w", err)
 	}
-	if count >= maxAliasesPerKey {
+	if count >= s.maxAliasesPerKey {
 		return fmt.Errorf("alias limit exceeded: %w", ErrAliasLimitExceeded)
 	}
 

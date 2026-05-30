@@ -660,9 +660,7 @@ func TestCreateAlias_limitExceeded(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	orig := maxAliasesPerKey
-	maxAliasesPerKey = 1
-	t.Cleanup(func() { maxAliasesPerKey = orig })
+	s.maxAliasesPerKey = 1
 
 	require.NoError(t, s.CreateAlias("alias/first", meta.KeyID))
 	err = s.CreateAlias("alias/second", meta.KeyID)
