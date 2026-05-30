@@ -333,7 +333,11 @@ func (ro *Router) handleListAliases(w http.ResponseWriter, body []byte) {
 				return aliases[i].AliasName >= req.Marker
 			})
 		}
-		aliases = aliases[start:]
+		if start < len(aliases) {
+			aliases = aliases[start:]
+		} else {
+			aliases = []AliasEntry{}
+		}
 	}
 
 	truncated := len(aliases) > limit
