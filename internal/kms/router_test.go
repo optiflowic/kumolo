@@ -1778,6 +1778,17 @@ func TestHandleUpdateAlias(t *testing.T) {
 		assertErrType(t, w, "ValidationException")
 	})
 
+	t.Run("400 alias/aws/ prefix rejected", func(t *testing.T) {
+		ro := newTestRouter(t)
+		body, _ := json.Marshal(map[string]any{
+			"AliasName":   "alias/aws/s3",
+			"TargetKeyId": "00000000-0000-0000-0000-000000000001",
+		})
+		w := kmsReq(t, ro, "UpdateAlias", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "InvalidAliasNameException")
+	})
+
 	t.Run("400 empty TargetKeyId", func(t *testing.T) {
 		ro := newTestRouter(t)
 		body, _ := json.Marshal(map[string]any{"AliasName": "alias/my-key", "TargetKeyId": ""})
