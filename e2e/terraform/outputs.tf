@@ -16,3 +16,11 @@ output "dynamodb_table" {
 output "dynamodb_table_arn" {
   value = aws_dynamodb_table.users.arn
 }
+
+output "dynamodb_stream_table" {
+  value = aws_dynamodb_table.stream_test.name
+}
+
+output "dynamodb_stream_arn" {
+  value = aws_dynamodb_table.stream_test.stream_arn
+}

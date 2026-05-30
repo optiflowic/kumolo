@@ -28,14 +28,13 @@
           gnumake
           govulncheck
           goreleaser
-          awscli2
         ];
       in
       {
         devShells = {
-          # Local development shell — includes Terraform for make e2e-terraform.
+          # Local development shell — includes Terraform and AWS CLI for e2e tests.
           default = pkgsWithUnfree.mkShell {
-            packages = commonPackages ++ [ pkgsWithUnfree.terraform ];
+            packages = commonPackages ++ [ pkgsWithUnfree.terraform pkgs.awscli2 ];
             shellHook = ''
               unset GOROOT
               echo "kumolo dev env: $(go version)"
