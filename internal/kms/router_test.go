@@ -341,7 +341,7 @@ func TestHandleGetKeyPolicy(t *testing.T) {
 		assertErrType(t, w, "ValidationException")
 	})
 
-	t.Run("400 for alias ref KeyId", func(t *testing.T) {
+	t.Run("400 for alias ref KeyId not found", func(t *testing.T) {
 		ro := newTestRouter(t)
 		w := kmsReq(t, ro, "GetKeyPolicy", `{"KeyId":"alias/my-key"}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -353,6 +353,31 @@ func TestHandleGetKeyPolicy(t *testing.T) {
 		w := kmsReq(t, ro, "GetKeyPolicy", `{"KeyId":"arn:aws:kms:us-east-1:123456789012:garbage"}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assertErrType(t, w, "InvalidArnException")
+	})
+
+	t.Run("200 via alias name", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustCreateAlias(t, ro, "alias/my-key", keyID)
+		w := kmsReq(t, ro, "GetKeyPolicy", `{"KeyId":"alias/my-key"}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, "default", resp["PolicyName"])
+		assert.NotEmpty(t, resp["Policy"])
+	})
+
+	t.Run("200 via alias ARN", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustCreateAlias(t, ro, "alias/my-key", keyID)
+		arn := aliasARN("alias/my-key")
+		w := kmsReq(t, ro, "GetKeyPolicy", `{"KeyId":"`+arn+`"}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, "default", resp["PolicyName"])
+		assert.NotEmpty(t, resp["Policy"])
 	})
 }
 
@@ -423,7 +448,7 @@ func TestHandlePutKeyPolicy(t *testing.T) {
 		assertErrType(t, w, "ValidationException")
 	})
 
-	t.Run("400 for alias ref KeyId", func(t *testing.T) {
+	t.Run("400 for alias ref KeyId not found", func(t *testing.T) {
 		ro := newTestRouter(t)
 		w := kmsReq(t, ro, "PutKeyPolicy", `{"KeyId":"alias/my-key","Policy":"{}"}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -440,6 +465,39 @@ func TestHandlePutKeyPolicy(t *testing.T) {
 		)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assertErrType(t, w, "InvalidArnException")
+	})
+
+	t.Run("200 via alias name", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustCreateAlias(t, ro, "alias/put-key", keyID)
+		newPolicy := `{"Version":"2012-10-17","Statement":[]}`
+		w := kmsReq(t, ro, "PutKeyPolicy",
+			`{"KeyId":"alias/put-key","Policy":"`+escapeJSON(newPolicy)+`"}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		w2 := kmsReq(t, ro, "GetKeyPolicy", `{"KeyId":"alias/put-key"}`)
+		assert.Equal(t, http.StatusOK, w2.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &resp))
+		assert.Equal(t, newPolicy, resp["Policy"])
+	})
+
+	t.Run("200 via alias ARN", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustCreateAlias(t, ro, "alias/put-key", keyID)
+		arn := aliasARN("alias/put-key")
+		newPolicy := `{"Version":"2012-10-17","Statement":[]}`
+		w := kmsReq(t, ro, "PutKeyPolicy",
+			`{"KeyId":"`+arn+`","Policy":"`+escapeJSON(newPolicy)+`"}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		w2 := kmsReq(t, ro, "GetKeyPolicy", `{"KeyId":"`+arn+`"}`)
+		assert.Equal(t, http.StatusOK, w2.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &resp))
+		assert.Equal(t, newPolicy, resp["Policy"])
 	})
 }
 
@@ -466,6 +524,15 @@ func (a *alwaysFailStore) GetKeyPolicy(string) (string, error) {
 func (a *alwaysFailStore) PutKeyPolicy(string, string) error { return errors.New("storage error") }
 func (a *alwaysFailStore) GetKeyMaterial(string) (KeyMaterial, error) {
 	return KeyMaterial{}, errors.New("storage error")
+}
+func (a *alwaysFailStore) CreateAlias(string, string) error { return errors.New("storage error") }
+func (a *alwaysFailStore) DeleteAlias(string) error         { return errors.New("storage error") }
+func (a *alwaysFailStore) UpdateAlias(string, string) error { return errors.New("storage error") }
+func (a *alwaysFailStore) ListAliases(string) ([]AliasEntry, error) {
+	return nil, errors.New("storage error")
+}
+func (a *alwaysFailStore) ResolveAlias(string) (string, error) {
+	return "", errors.New("storage error")
 }
 
 func newFailRouter() *Router {
@@ -1196,7 +1263,7 @@ func TestDataPlane_aliasAndARNErrors(t *testing.T) {
 		}},
 	}
 	for _, c := range cases {
-		t.Run(c.op+"/alias", func(t *testing.T) {
+		t.Run(c.op+"/alias not found", func(t *testing.T) {
 			ro := newTestRouter(t)
 			w := kmsReq(t, ro, c.op, c.bodyF("alias/my-key"))
 			assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -1208,7 +1275,49 @@ func TestDataPlane_aliasAndARNErrors(t *testing.T) {
 			assert.Equal(t, http.StatusBadRequest, w.Code)
 			assertErrType(t, w, "InvalidArnException")
 		})
+		t.Run(c.op+"/alias name success", func(t *testing.T) {
+			ro := newTestRouter(t)
+			keyID := mustCreateKey(t, ro, `{}`)
+			mustCreateAlias(t, ro, "alias/my-key", keyID)
+			w := kmsReq(t, ro, c.op, c.bodyF("alias/my-key"))
+			assert.Equal(t, http.StatusOK, w.Code)
+		})
+		t.Run(c.op+"/alias ARN success", func(t *testing.T) {
+			ro := newTestRouter(t)
+			keyID := mustCreateKey(t, ro, `{}`)
+			mustCreateAlias(t, ro, "alias/my-key", keyID)
+			w := kmsReq(t, ro, c.op, c.bodyF(aliasARN("alias/my-key")))
+			assert.Equal(t, http.StatusOK, w.Code)
+		})
 	}
+}
+
+func TestDataPlane_Decrypt_aliasResolution(t *testing.T) {
+	t.Run("200 via alias name", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustCreateAlias(t, ro, "alias/my-key", keyID)
+		cipherBlob := mustEncrypt(t, ro, keyID, []byte("hello"))
+		body, _ := json.Marshal(map[string]any{
+			"CiphertextBlob": cipherBlob,
+			"KeyId":          "alias/my-key",
+		})
+		w := kmsReq(t, ro, "Decrypt", string(body))
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("200 via alias ARN", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustCreateAlias(t, ro, "alias/my-key", keyID)
+		cipherBlob := mustEncrypt(t, ro, keyID, []byte("hello"))
+		body, _ := json.Marshal(map[string]any{
+			"CiphertextBlob": cipherBlob,
+			"KeyId":          aliasARN("alias/my-key"),
+		})
+		w := kmsReq(t, ro, "Decrypt", string(body))
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
 }
 
 // ---- nonce randRead failure in sealEnvelope ---------------------------------
@@ -1334,6 +1443,21 @@ func (p *partialFailStore) PutKeyPolicy(keyID, policy string) error {
 func (p *partialFailStore) GetKeyMaterial(string) (KeyMaterial, error) {
 	return KeyMaterial{}, errors.New("storage error")
 }
+func (p *partialFailStore) CreateAlias(aliasName, targetKeyID string) error {
+	return p.inner.CreateAlias(aliasName, targetKeyID)
+}
+func (p *partialFailStore) DeleteAlias(aliasName string) error {
+	return p.inner.DeleteAlias(aliasName)
+}
+func (p *partialFailStore) UpdateAlias(aliasName, targetKeyID string) error {
+	return p.inner.UpdateAlias(aliasName, targetKeyID)
+}
+func (p *partialFailStore) ListAliases(filterKeyID string) ([]AliasEntry, error) {
+	return p.inner.ListAliases(filterKeyID)
+}
+func (p *partialFailStore) ResolveAlias(aliasName string) (string, error) {
+	return p.inner.ResolveAlias(aliasName)
+}
 
 func TestLoadSymmetricMaterial_storageError(t *testing.T) {
 	dir := t.TempDir()
@@ -1411,4 +1535,727 @@ func TestHandleDecrypt_loadMaterialFailure(t *testing.T) {
 	w := kmsReq(t, ro, "Decrypt", string(body))
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assertErrType(t, w, "KMSInvalidStateException")
+}
+
+// ---- alias operations -------------------------------------------------------
+
+// aliasFailStore wraps a store with overridable alias and key-metadata methods.
+type aliasFailStore struct {
+	inner          store
+	createAlias    func(string, string) error
+	deleteAlias    func(string) error
+	updateAlias    func(string, string) error
+	listAliases    func(string) ([]AliasEntry, error)
+	resolveAlias   func(string) (string, error)
+	getKeyMetadata func(string) (KeyMetadata, error)
+}
+
+func (a *aliasFailStore) CreateKey(in CreateKeyInput) (KeyMetadata, error) {
+	return a.inner.CreateKey(in)
+}
+func (a *aliasFailStore) GetKeyMetadata(keyID string) (KeyMetadata, error) {
+	if a.getKeyMetadata != nil {
+		return a.getKeyMetadata(keyID)
+	}
+	return a.inner.GetKeyMetadata(keyID)
+}
+func (a *aliasFailStore) ListKeyIDs() ([]string, error) { return a.inner.ListKeyIDs() }
+func (a *aliasFailStore) GetKeyPolicy(keyID string) (string, error) {
+	return a.inner.GetKeyPolicy(keyID)
+}
+func (a *aliasFailStore) PutKeyPolicy(keyID, policy string) error {
+	return a.inner.PutKeyPolicy(keyID, policy)
+}
+func (a *aliasFailStore) GetKeyMaterial(keyID string) (KeyMaterial, error) {
+	return a.inner.GetKeyMaterial(keyID)
+}
+func (a *aliasFailStore) CreateAlias(aliasName, targetKeyID string) error {
+	if a.createAlias != nil {
+		return a.createAlias(aliasName, targetKeyID)
+	}
+	return a.inner.CreateAlias(aliasName, targetKeyID)
+}
+func (a *aliasFailStore) DeleteAlias(aliasName string) error {
+	if a.deleteAlias != nil {
+		return a.deleteAlias(aliasName)
+	}
+	return a.inner.DeleteAlias(aliasName)
+}
+func (a *aliasFailStore) UpdateAlias(aliasName, targetKeyID string) error {
+	if a.updateAlias != nil {
+		return a.updateAlias(aliasName, targetKeyID)
+	}
+	return a.inner.UpdateAlias(aliasName, targetKeyID)
+}
+func (a *aliasFailStore) ListAliases(filterKeyID string) ([]AliasEntry, error) {
+	if a.listAliases != nil {
+		return a.listAliases(filterKeyID)
+	}
+	return a.inner.ListAliases(filterKeyID)
+}
+func (a *aliasFailStore) ResolveAlias(aliasName string) (string, error) {
+	if a.resolveAlias != nil {
+		return a.resolveAlias(aliasName)
+	}
+	return a.inner.ResolveAlias(aliasName)
+}
+
+// makeAliasRouter creates a Router backed by aliasFailStore with a real storage as inner.
+func makeAliasRouter(t *testing.T, fs *aliasFailStore) (*Router, *Storage) {
+	t.Helper()
+	dir := t.TempDir()
+	s, err := newStorage(dir, os.OpenRoot)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	if fs.inner == nil {
+		fs.inner = s
+	}
+	return NewRouter(fs), s
+}
+
+func mustCreateAlias(t *testing.T, ro *Router, aliasName, targetKeyID string) {
+	t.Helper()
+	body, _ := json.Marshal(map[string]any{"AliasName": aliasName, "TargetKeyId": targetKeyID})
+	w := kmsReq(t, ro, "CreateAlias", string(body))
+	require.Equal(t, http.StatusOK, w.Code, "CreateAlias should succeed")
+}
+
+// ---- resolveKeyRef ----------------------------------------------------------
+
+func TestResolveKeyRef_aliasResolution(t *testing.T) {
+	t.Run("200 DescribeKey via alias name", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustCreateAlias(t, ro, "alias/my-key", keyID)
+		w := kmsReq(t, ro, "DescribeKey", `{"KeyId":"alias/my-key"}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, keyID, resp["KeyMetadata"].(map[string]any)["KeyId"])
+	})
+
+	t.Run("200 DescribeKey via alias ARN", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustCreateAlias(t, ro, "alias/my-key", keyID)
+		aliasArn := aliasARN("alias/my-key")
+		w := kmsReq(t, ro, "DescribeKey", `{"KeyId":"`+aliasArn+`"}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, keyID, resp["KeyMetadata"].(map[string]any)["KeyId"])
+	})
+
+	t.Run("400 invalid alias ARN empty name", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "DescribeKey", `{"KeyId":"arn:aws:kms:us-east-1:123456789:alias/"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "InvalidArnException")
+	})
+
+	t.Run("500 ResolveAlias storage error", func(t *testing.T) {
+		fs := &aliasFailStore{
+			resolveAlias: func(string) (string, error) { return "", errors.New("storage failure") },
+		}
+		ro, _ := makeAliasRouter(t, fs)
+		w := kmsReq(t, ro, "DescribeKey", `{"KeyId":"alias/my-key"}`)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assertErrType(t, w, "KMSInternalException")
+	})
+}
+
+// ---- CreateAlias ------------------------------------------------------------
+
+func TestHandleCreateAlias(t *testing.T) {
+	t.Run("200 valid", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustCreateAlias(t, ro, "alias/my-key", keyID)
+	})
+
+	t.Run("200 accepts key ARN as TargetKeyId", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{
+			"AliasName":   "alias/by-arn",
+			"TargetKeyId": keyARN(keyID),
+		})
+		w := kmsReq(t, ro, "CreateAlias", string(body))
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("400 invalid JSON", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "CreateAlias", `{bad`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 empty AliasName", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{"AliasName": "", "TargetKeyId": keyID})
+		w := kmsReq(t, ro, "CreateAlias", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "InvalidAliasNameException")
+	})
+
+	t.Run("400 invalid alias name no prefix", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{"AliasName": "noprefix", "TargetKeyId": keyID})
+		w := kmsReq(t, ro, "CreateAlias", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "InvalidAliasNameException")
+	})
+
+	t.Run("400 alias/aws/ prefix reserved", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{"AliasName": "alias/aws/s3", "TargetKeyId": keyID})
+		w := kmsReq(t, ro, "CreateAlias", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "InvalidAliasNameException")
+	})
+
+	t.Run("400 empty TargetKeyId", func(t *testing.T) {
+		ro := newTestRouter(t)
+		body, _ := json.Marshal(map[string]any{"AliasName": "alias/my-key", "TargetKeyId": ""})
+		w := kmsReq(t, ro, "CreateAlias", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 alias ref as TargetKeyId", func(t *testing.T) {
+		ro := newTestRouter(t)
+		body, _ := json.Marshal(map[string]any{
+			"AliasName":   "alias/my-key",
+			"TargetKeyId": "alias/other",
+		})
+		w := kmsReq(t, ro, "CreateAlias", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "InvalidArnException")
+	})
+
+	t.Run("400 malformed ARN TargetKeyId", func(t *testing.T) {
+		ro := newTestRouter(t)
+		body, _ := json.Marshal(map[string]any{
+			"AliasName":   "alias/my-key",
+			"TargetKeyId": "arn:aws:kms:us-east-1:123:garbage",
+		})
+		w := kmsReq(t, ro, "CreateAlias", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "InvalidArnException")
+	})
+
+	t.Run("400 target key not found", func(t *testing.T) {
+		ro := newTestRouter(t)
+		body, _ := json.Marshal(map[string]any{
+			"AliasName":   "alias/my-key",
+			"TargetKeyId": "00000000-0000-0000-0000-000000000000",
+		})
+		w := kmsReq(t, ro, "CreateAlias", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "NotFoundException")
+	})
+
+	t.Run("400 alias already exists", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustCreateAlias(t, ro, "alias/my-key", keyID)
+		body, _ := json.Marshal(map[string]any{"AliasName": "alias/my-key", "TargetKeyId": keyID})
+		w := kmsReq(t, ro, "CreateAlias", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "AlreadyExistsException")
+	})
+
+	t.Run("400 alias limit exceeded", func(t *testing.T) {
+		fs := &aliasFailStore{
+			createAlias: func(_, _ string) error { return ErrAliasLimitExceeded },
+		}
+		ro, _ := makeAliasRouter(t, fs)
+		body, _ := json.Marshal(map[string]any{
+			"AliasName":   "alias/my-key",
+			"TargetKeyId": "00000000-0000-0000-0000-000000000001",
+		})
+		w := kmsReq(t, ro, "CreateAlias", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "LimitExceededException")
+	})
+
+	t.Run("500 storage error", func(t *testing.T) {
+		fs := &aliasFailStore{
+			createAlias: func(_, _ string) error { return errors.New("storage failure") },
+		}
+		ro, _ := makeAliasRouter(t, fs)
+		body, _ := json.Marshal(map[string]any{
+			"AliasName":   "alias/my-key",
+			"TargetKeyId": "00000000-0000-0000-0000-000000000001",
+		})
+		w := kmsReq(t, ro, "CreateAlias", string(body))
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assertErrType(t, w, "KMSInternalException")
+	})
+}
+
+// ---- DeleteAlias ------------------------------------------------------------
+
+func TestHandleDeleteAlias(t *testing.T) {
+	t.Run("200 valid", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustCreateAlias(t, ro, "alias/my-key", keyID)
+		body, _ := json.Marshal(map[string]any{"AliasName": "alias/my-key"})
+		w := kmsReq(t, ro, "DeleteAlias", string(body))
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("400 invalid JSON", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "DeleteAlias", `{bad`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 empty AliasName", func(t *testing.T) {
+		ro := newTestRouter(t)
+		body, _ := json.Marshal(map[string]any{"AliasName": ""})
+		w := kmsReq(t, ro, "DeleteAlias", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 alias not found", func(t *testing.T) {
+		ro := newTestRouter(t)
+		body, _ := json.Marshal(map[string]any{"AliasName": "alias/nonexistent"})
+		w := kmsReq(t, ro, "DeleteAlias", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "NotFoundException")
+	})
+
+	t.Run("500 storage error", func(t *testing.T) {
+		fs := &aliasFailStore{
+			deleteAlias: func(string) error { return errors.New("storage failure") },
+		}
+		ro, _ := makeAliasRouter(t, fs)
+		body, _ := json.Marshal(map[string]any{"AliasName": "alias/my-key"})
+		w := kmsReq(t, ro, "DeleteAlias", string(body))
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assertErrType(t, w, "KMSInternalException")
+	})
+}
+
+// ---- UpdateAlias ------------------------------------------------------------
+
+func TestHandleUpdateAlias(t *testing.T) {
+	t.Run("200 valid same spec and usage", func(t *testing.T) {
+		ro := newTestRouter(t)
+		key1 := mustCreateKey(t, ro, `{}`)
+		key2 := mustCreateKey(t, ro, `{}`)
+		mustCreateAlias(t, ro, "alias/my-key", key1)
+		body, _ := json.Marshal(map[string]any{"AliasName": "alias/my-key", "TargetKeyId": key2})
+		w := kmsReq(t, ro, "UpdateAlias", string(body))
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("400 invalid JSON", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "UpdateAlias", `{bad`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 invalid AliasName", func(t *testing.T) {
+		ro := newTestRouter(t)
+		body, _ := json.Marshal(
+			map[string]any{
+				"AliasName":   "noprefix",
+				"TargetKeyId": "00000000-0000-0000-0000-000000000001",
+			},
+		)
+		w := kmsReq(t, ro, "UpdateAlias", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "InvalidAliasNameException")
+	})
+
+	t.Run("400 alias/aws/ prefix rejected", func(t *testing.T) {
+		ro := newTestRouter(t)
+		body, _ := json.Marshal(map[string]any{
+			"AliasName":   "alias/aws/s3",
+			"TargetKeyId": "00000000-0000-0000-0000-000000000001",
+		})
+		w := kmsReq(t, ro, "UpdateAlias", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "InvalidAliasNameException")
+	})
+
+	t.Run("400 empty TargetKeyId", func(t *testing.T) {
+		ro := newTestRouter(t)
+		body, _ := json.Marshal(map[string]any{"AliasName": "alias/my-key", "TargetKeyId": ""})
+		w := kmsReq(t, ro, "UpdateAlias", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 malformed ARN TargetKeyId", func(t *testing.T) {
+		ro := newTestRouter(t)
+		body, _ := json.Marshal(map[string]any{
+			"AliasName":   "alias/my-key",
+			"TargetKeyId": "arn:aws:kms:us-east-1:123:garbage",
+		})
+		w := kmsReq(t, ro, "UpdateAlias", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "InvalidArnException")
+	})
+
+	t.Run("400 alias not found", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{
+			"AliasName":   "alias/nonexistent",
+			"TargetKeyId": keyID,
+		})
+		w := kmsReq(t, ro, "UpdateAlias", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "NotFoundException")
+	})
+
+	t.Run("500 ResolveAlias storage error", func(t *testing.T) {
+		fs := &aliasFailStore{
+			resolveAlias: func(string) (string, error) { return "", errors.New("storage failure") },
+		}
+		ro, _ := makeAliasRouter(t, fs)
+		body, _ := json.Marshal(map[string]any{
+			"AliasName":   "alias/my-key",
+			"TargetKeyId": "00000000-0000-0000-0000-000000000001",
+		})
+		w := kmsReq(t, ro, "UpdateAlias", string(body))
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assertErrType(t, w, "KMSInternalException")
+	})
+
+	t.Run("400 old key not found", func(t *testing.T) {
+		dir := t.TempDir()
+		s, err := newStorage(dir, os.OpenRoot)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = s.Close() })
+		realRo := NewRouter(s)
+		key1 := mustCreateKey(t, realRo, `{}`)
+		mustCreateAlias(t, realRo, "alias/my-key", key1)
+
+		fs := &aliasFailStore{
+			inner:          s,
+			getKeyMetadata: func(string) (KeyMetadata, error) { return KeyMetadata{}, ErrKeyNotFound },
+		}
+		ro := NewRouter(fs)
+		body, _ := json.Marshal(map[string]any{"AliasName": "alias/my-key", "TargetKeyId": key1})
+		w := kmsReq(t, ro, "UpdateAlias", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "NotFoundException")
+	})
+
+	t.Run("500 old key metadata storage error", func(t *testing.T) {
+		dir := t.TempDir()
+		s, err := newStorage(dir, os.OpenRoot)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = s.Close() })
+		realRo := NewRouter(s)
+		key1 := mustCreateKey(t, realRo, `{}`)
+		mustCreateAlias(t, realRo, "alias/my-key", key1)
+
+		fs := &aliasFailStore{
+			inner:          s,
+			getKeyMetadata: func(string) (KeyMetadata, error) { return KeyMetadata{}, errors.New("storage failure") },
+		}
+		ro := NewRouter(fs)
+		body, _ := json.Marshal(map[string]any{"AliasName": "alias/my-key", "TargetKeyId": key1})
+		w := kmsReq(t, ro, "UpdateAlias", string(body))
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assertErrType(t, w, "KMSInternalException")
+	})
+
+	t.Run("400 new key not found", func(t *testing.T) {
+		dir := t.TempDir()
+		s, err := newStorage(dir, os.OpenRoot)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = s.Close() })
+		realRo := NewRouter(s)
+		key1 := mustCreateKey(t, realRo, `{}`)
+		mustCreateAlias(t, realRo, "alias/my-key", key1)
+
+		calls := 0
+		fs := &aliasFailStore{
+			inner: s,
+			getKeyMetadata: func(keyID string) (KeyMetadata, error) {
+				calls++
+				if calls == 2 {
+					return KeyMetadata{}, ErrKeyNotFound
+				}
+				return s.GetKeyMetadata(keyID)
+			},
+		}
+		ro := NewRouter(fs)
+		body, _ := json.Marshal(map[string]any{"AliasName": "alias/my-key", "TargetKeyId": key1})
+		w := kmsReq(t, ro, "UpdateAlias", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "NotFoundException")
+	})
+
+	t.Run("500 new key metadata storage error", func(t *testing.T) {
+		dir := t.TempDir()
+		s, err := newStorage(dir, os.OpenRoot)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = s.Close() })
+		realRo := NewRouter(s)
+		key1 := mustCreateKey(t, realRo, `{}`)
+		mustCreateAlias(t, realRo, "alias/my-key", key1)
+
+		calls := 0
+		fs := &aliasFailStore{
+			inner: s,
+			getKeyMetadata: func(keyID string) (KeyMetadata, error) {
+				calls++
+				if calls == 2 {
+					return KeyMetadata{}, errors.New("storage failure")
+				}
+				return s.GetKeyMetadata(keyID)
+			},
+		}
+		ro := NewRouter(fs)
+		body, _ := json.Marshal(map[string]any{"AliasName": "alias/my-key", "TargetKeyId": key1})
+		w := kmsReq(t, ro, "UpdateAlias", string(body))
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assertErrType(t, w, "KMSInternalException")
+	})
+
+	t.Run("400 incompatible KeySpec and KeyUsage", func(t *testing.T) {
+		ro := newTestRouter(t)
+		sym := mustCreateKey(t, ro, `{}`)
+		rsa := mustCreateKey(t, ro, `{"KeySpec":"RSA_2048","KeyUsage":"SIGN_VERIFY"}`)
+		mustCreateAlias(t, ro, "alias/my-key", sym)
+		body, _ := json.Marshal(map[string]any{"AliasName": "alias/my-key", "TargetKeyId": rsa})
+		w := kmsReq(t, ro, "UpdateAlias", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "KMSInvalidStateException")
+	})
+
+	t.Run("400 UpdateAlias returns alias not found", func(t *testing.T) {
+		dir := t.TempDir()
+		s, err := newStorage(dir, os.OpenRoot)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = s.Close() })
+		realRo := NewRouter(s)
+		key1 := mustCreateKey(t, realRo, `{}`)
+		mustCreateAlias(t, realRo, "alias/my-key", key1)
+
+		fs := &aliasFailStore{
+			inner:       s,
+			updateAlias: func(_, _ string) error { return ErrAliasNotFound },
+		}
+		ro := NewRouter(fs)
+		body, _ := json.Marshal(map[string]any{"AliasName": "alias/my-key", "TargetKeyId": key1})
+		w := kmsReq(t, ro, "UpdateAlias", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "NotFoundException")
+	})
+
+	t.Run("400 UpdateAlias returns key not found", func(t *testing.T) {
+		dir := t.TempDir()
+		s, err := newStorage(dir, os.OpenRoot)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = s.Close() })
+		realRo := NewRouter(s)
+		key1 := mustCreateKey(t, realRo, `{}`)
+		mustCreateAlias(t, realRo, "alias/my-key", key1)
+
+		fs := &aliasFailStore{
+			inner:       s,
+			updateAlias: func(_, _ string) error { return ErrKeyNotFound },
+		}
+		ro := NewRouter(fs)
+		body, _ := json.Marshal(map[string]any{"AliasName": "alias/my-key", "TargetKeyId": key1})
+		w := kmsReq(t, ro, "UpdateAlias", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "NotFoundException")
+	})
+
+	t.Run("500 UpdateAlias storage error", func(t *testing.T) {
+		dir := t.TempDir()
+		s, err := newStorage(dir, os.OpenRoot)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = s.Close() })
+		realRo := NewRouter(s)
+		key1 := mustCreateKey(t, realRo, `{}`)
+		mustCreateAlias(t, realRo, "alias/my-key", key1)
+
+		fs := &aliasFailStore{
+			inner:       s,
+			updateAlias: func(_, _ string) error { return errors.New("storage failure") },
+		}
+		ro := NewRouter(fs)
+		body, _ := json.Marshal(map[string]any{"AliasName": "alias/my-key", "TargetKeyId": key1})
+		w := kmsReq(t, ro, "UpdateAlias", string(body))
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assertErrType(t, w, "KMSInternalException")
+	})
+}
+
+// ---- ListAliases ------------------------------------------------------------
+
+func TestHandleListAliases(t *testing.T) {
+	t.Run("200 empty list", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "ListAliases", `{}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Empty(t, resp["Aliases"].([]any))
+		assert.Equal(t, false, resp["Truncated"])
+	})
+
+	t.Run("200 with aliases", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustCreateAlias(t, ro, "alias/a", keyID)
+		mustCreateAlias(t, ro, "alias/b", keyID)
+		w := kmsReq(t, ro, "ListAliases", `{}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Len(t, resp["Aliases"].([]any), 2)
+	})
+
+	t.Run("200 with KeyId filter", func(t *testing.T) {
+		ro := newTestRouter(t)
+		key1 := mustCreateKey(t, ro, `{}`)
+		key2 := mustCreateKey(t, ro, `{}`)
+		mustCreateAlias(t, ro, "alias/for-key1", key1)
+		mustCreateAlias(t, ro, "alias/for-key2", key2)
+		body, _ := json.Marshal(map[string]any{"KeyId": key1})
+		w := kmsReq(t, ro, "ListAliases", string(body))
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		aliases := resp["Aliases"].([]any)
+		require.Len(t, aliases, 1)
+		assert.Equal(t, "alias/for-key1", aliases[0].(map[string]any)["AliasName"])
+	})
+
+	t.Run("400 invalid JSON", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "ListAliases", `{bad`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 Limit too small", func(t *testing.T) {
+		ro := newTestRouter(t)
+		body, _ := json.Marshal(map[string]any{"Limit": 0})
+		w := kmsReq(t, ro, "ListAliases", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 Limit too large", func(t *testing.T) {
+		ro := newTestRouter(t)
+		body, _ := json.Marshal(map[string]any{"Limit": 101})
+		w := kmsReq(t, ro, "ListAliases", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 invalid ARN for KeyId filter", func(t *testing.T) {
+		ro := newTestRouter(t)
+		body, _ := json.Marshal(map[string]any{"KeyId": "arn:aws:kms:us-east-1:123:garbage"})
+		w := kmsReq(t, ro, "ListAliases", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "InvalidArnException")
+	})
+
+	t.Run("400 key not found for KeyId filter", func(t *testing.T) {
+		ro := newTestRouter(t)
+		body, _ := json.Marshal(map[string]any{"KeyId": "00000000-0000-0000-0000-000000000000"})
+		w := kmsReq(t, ro, "ListAliases", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "NotFoundException")
+	})
+
+	t.Run("500 GetKeyMetadata storage error", func(t *testing.T) {
+		fs := &aliasFailStore{
+			getKeyMetadata: func(string) (KeyMetadata, error) { return KeyMetadata{}, errors.New("storage failure") },
+		}
+		ro, _ := makeAliasRouter(t, fs)
+		body, _ := json.Marshal(map[string]any{"KeyId": "00000000-0000-0000-0000-000000000000"})
+		w := kmsReq(t, ro, "ListAliases", string(body))
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assertErrType(t, w, "KMSInternalException")
+	})
+
+	t.Run("500 ListAliases storage error", func(t *testing.T) {
+		fs := &aliasFailStore{
+			listAliases: func(string) ([]AliasEntry, error) { return nil, errors.New("storage failure") },
+		}
+		ro, _ := makeAliasRouter(t, fs)
+		w := kmsReq(t, ro, "ListAliases", `{}`)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assertErrType(t, w, "KMSInternalException")
+	})
+
+	t.Run("200 pagination with Limit and NextMarker", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		for _, name := range []string{"alias/a", "alias/b", "alias/c"} {
+			mustCreateAlias(t, ro, name, keyID)
+		}
+
+		// First page: limit=2.
+		body, _ := json.Marshal(map[string]any{"Limit": 2})
+		w := kmsReq(t, ro, "ListAliases", string(body))
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, true, resp["Truncated"])
+		nextMarker := resp["NextMarker"].(string)
+		assert.Equal(t, "alias/b", nextMarker)
+
+		// Second page: use NextMarker.
+		body, _ = json.Marshal(map[string]any{"Marker": nextMarker})
+		w = kmsReq(t, ro, "ListAliases", string(body))
+		require.Equal(t, http.StatusOK, w.Code)
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, false, resp["Truncated"])
+		aliases := resp["Aliases"].([]any)
+		require.Len(t, aliases, 1)
+		assert.Equal(t, "alias/c", aliases[0].(map[string]any)["AliasName"])
+	})
+
+	t.Run("200 Marker binary search fallback", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustCreateAlias(t, ro, "alias/a", keyID)
+		mustCreateAlias(t, ro, "alias/c", keyID)
+
+		// "alias/b" doesn't exist; binary search positions to "alias/c".
+		body, _ := json.Marshal(map[string]any{"Marker": "alias/b"})
+		w := kmsReq(t, ro, "ListAliases", string(body))
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		aliases := resp["Aliases"].([]any)
+		require.Len(t, aliases, 1)
+		assert.Equal(t, "alias/c", aliases[0].(map[string]any)["AliasName"])
+	})
+
+	t.Run("200 Marker beyond all aliases returns empty", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustCreateAlias(t, ro, "alias/a", keyID)
+
+		body, _ := json.Marshal(map[string]any{"Marker": "zzz"})
+		w := kmsReq(t, ro, "ListAliases", string(body))
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Empty(t, resp["Aliases"].([]any))
+	})
 }

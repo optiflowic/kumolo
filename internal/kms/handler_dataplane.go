@@ -172,15 +172,8 @@ func (ro *Router) resolveAndValidateKey(
 		writeError(w, http.StatusBadRequest, "ValidationException", "KeyId is required")
 		return KeyMetadata{}, "", false
 	}
-	keyID, ok := resolveKeyID(keyIDParam)
+	keyID, ok := ro.resolveKeyRef(w, keyIDParam)
 	if !ok {
-		if isAliasRef(keyIDParam) {
-			writeError(w, http.StatusBadRequest, "NotFoundException",
-				"Alias key lookup is not supported; use a key ID or key ARN")
-			return KeyMetadata{}, "", false
-		}
-		writeError(w, http.StatusBadRequest, "InvalidArnException",
-			fmt.Sprintf("Invalid key ARN: %s", keyIDParam))
 		return KeyMetadata{}, "", false
 	}
 
@@ -406,15 +399,8 @@ func (ro *Router) handleDecrypt(w http.ResponseWriter, body []byte) {
 
 	// If the caller provided a KeyId, verify it matches the embedded key ID.
 	if req.KeyID != "" {
-		resolvedID, ok := resolveKeyID(req.KeyID)
+		resolvedID, ok := ro.resolveKeyRef(w, req.KeyID)
 		if !ok {
-			if isAliasRef(req.KeyID) {
-				writeError(w, http.StatusBadRequest, "NotFoundException",
-					"Alias key lookup is not supported; use a key ID or key ARN")
-				return
-			}
-			writeError(w, http.StatusBadRequest, "InvalidArnException",
-				fmt.Sprintf("Invalid key ARN: %s", req.KeyID))
 			return
 		}
 		if resolvedID != embeddedKeyID {

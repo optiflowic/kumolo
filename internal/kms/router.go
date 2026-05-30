@@ -16,6 +16,11 @@ type store interface {
 	GetKeyPolicy(keyID string) (string, error)
 	PutKeyPolicy(keyID, policy string) error
 	GetKeyMaterial(keyID string) (KeyMaterial, error)
+	CreateAlias(aliasName, targetKeyID string) error
+	DeleteAlias(aliasName string) error
+	UpdateAlias(aliasName, targetKeyID string) error
+	ListAliases(filterKeyID string) ([]AliasEntry, error)
+	ResolveAlias(aliasName string) (string, error)
 }
 
 // Router handles KMS API requests dispatched via the X-Amz-Target header.
@@ -61,6 +66,14 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ro.handleGenerateDataKey(w, body)
 	case "GenerateDataKeyWithoutPlaintext":
 		ro.handleGenerateDataKeyWithoutPlaintext(w, body)
+	case "CreateAlias":
+		ro.handleCreateAlias(w, body)
+	case "DeleteAlias":
+		ro.handleDeleteAlias(w, body)
+	case "UpdateAlias":
+		ro.handleUpdateAlias(w, body)
+	case "ListAliases":
+		ro.handleListAliases(w, body)
 	default:
 		slog.Debug( // #nosec G706 -- target comes from the X-Amz-Target header; log injection risk accepted for a local dev emulator
 			"KMS operation not implemented",
