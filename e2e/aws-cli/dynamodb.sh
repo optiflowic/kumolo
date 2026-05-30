@@ -332,21 +332,87 @@ if [[ -n "$SHARD_ITER" ]]; then
     fail "GetRecords (expected >=1 REMOVE event, got $REMOVE_COUNT)"
   fi
 
-  # Verify NewImage / OldImage on MODIFY records (NEW_AND_OLD_IMAGES view type).
-  HAS_NEW=$(echo "$RECORDS_RESP" | jq '[.Records[] | select(.eventName=="MODIFY" and .dynamodb.NewImage!=null)] | length' 2>/dev/null || echo 0)
-  HAS_OLD=$(echo "$RECORDS_RESP" | jq '[.Records[] | select(.eventName=="MODIFY" and .dynamodb.OldImage!=null)] | length' 2>/dev/null || echo 0)
-  if [[ "$HAS_NEW" -ge 1 ]]; then
+  # Verify NewImage / OldImage per event type (NEW_AND_OLD_IMAGES view type).
+  HAS_INSERT_NEW=$(echo "$RECORDS_RESP" | jq '[.Records[] | select(.eventName=="INSERT" and .dynamodb.NewImage!=null)] | length' 2>/dev/null || echo 0)
+  HAS_MODIFY_NEW=$(echo "$RECORDS_RESP" | jq '[.Records[] | select(.eventName=="MODIFY" and .dynamodb.NewImage!=null)] | length' 2>/dev/null || echo 0)
+  HAS_MODIFY_OLD=$(echo "$RECORDS_RESP" | jq '[.Records[] | select(.eventName=="MODIFY" and .dynamodb.OldImage!=null)] | length' 2>/dev/null || echo 0)
+  HAS_REMOVE_OLD=$(echo "$RECORDS_RESP" | jq '[.Records[] | select(.eventName=="REMOVE" and .dynamodb.OldImage!=null)] | length' 2>/dev/null || echo 0)
+  if [[ "$HAS_INSERT_NEW" -ge 1 ]]; then
+    ok "GetRecords (INSERT record has NewImage)"
+  else
+    fail "GetRecords (INSERT record missing NewImage)"
+  fi
+  if [[ "$HAS_MODIFY_NEW" -ge 1 ]]; then
     ok "GetRecords (MODIFY record has NewImage)"
   else
     fail "GetRecords (MODIFY record missing NewImage)"
   fi
-  if [[ "$HAS_OLD" -ge 1 ]]; then
+  if [[ "$HAS_MODIFY_OLD" -ge 1 ]]; then
     ok "GetRecords (MODIFY record has OldImage)"
   else
     fail "GetRecords (MODIFY record missing OldImage)"
   fi
+  if [[ "$HAS_REMOVE_OLD" -ge 1 ]]; then
+    ok "GetRecords (REMOVE record has OldImage)"
+  else
+    fail "GetRecords (REMOVE record missing OldImage)"
+  fi
 else
   fail "GetRecords (skipped: no shard iterator)"
+fi
+
+# GetShardIterator (AT_SEQUENCE_NUMBER / AFTER_SEQUENCE_NUMBER) — requires a known SeqNum.
+if [[ -n "$STREAM_ARN" && -n "$SHARD_ID" && -n "$SHARD_ITER" ]]; then
+  FIRST_SEQ=$(echo "$RECORDS_RESP" | jq -r '.Records[0].dynamodb.SequenceNumber // empty' 2>/dev/null || true)
+  if [[ -n "$FIRST_SEQ" ]]; then
+    ITER_AT_RESP=$($DDBSTREAMS get-shard-iterator \
+      --stream-arn "$STREAM_ARN" \
+      --shard-id "$SHARD_ID" \
+      --shard-iterator-type AT_SEQUENCE_NUMBER \
+      --sequence-number "$FIRST_SEQ" 2>/dev/null || true)
+    SHARD_ITER_AT=$(echo "$ITER_AT_RESP" | jq -r '.ShardIterator // empty' 2>/dev/null || true)
+    if [[ -n "$SHARD_ITER_AT" ]]; then
+      ok "GetShardIterator (AT_SEQUENCE_NUMBER)"
+    else
+      fail "GetShardIterator (AT_SEQUENCE_NUMBER returned no iterator)"
+    fi
+
+    ITER_AFTER_RESP=$($DDBSTREAMS get-shard-iterator \
+      --stream-arn "$STREAM_ARN" \
+      --shard-id "$SHARD_ID" \
+      --shard-iterator-type AFTER_SEQUENCE_NUMBER \
+      --sequence-number "$FIRST_SEQ" 2>/dev/null || true)
+    SHARD_ITER_AFTER=$(echo "$ITER_AFTER_RESP" | jq -r '.ShardIterator // empty' 2>/dev/null || true)
+    if [[ -n "$SHARD_ITER_AFTER" ]]; then
+      ok "GetShardIterator (AFTER_SEQUENCE_NUMBER)"
+    else
+      fail "GetShardIterator (AFTER_SEQUENCE_NUMBER returned no iterator)"
+    fi
+
+    # AT_SEQUENCE_NUMBER should include the first record; AFTER_SEQUENCE_NUMBER should skip it.
+    if [[ -n "$SHARD_ITER_AT" ]]; then
+      AT_COUNT=$($DDBSTREAMS get-records --shard-iterator "$SHARD_ITER_AT" 2>/dev/null \
+        | jq '.Records | length' 2>/dev/null || echo -1)
+      if [[ "$AT_COUNT" -ge 1 ]]; then
+        ok "GetRecords (AT_SEQUENCE_NUMBER includes target record)"
+      else
+        fail "GetRecords (AT_SEQUENCE_NUMBER expected >=1 record, got $AT_COUNT)"
+      fi
+    fi
+    if [[ -n "$SHARD_ITER_AFTER" ]]; then
+      AFTER_COUNT=$($DDBSTREAMS get-records --shard-iterator "$SHARD_ITER_AFTER" 2>/dev/null \
+        | jq '.Records | length' 2>/dev/null || echo -1)
+      TOTAL_COUNT=$(echo "$RECORDS_RESP" | jq '.Records | length' 2>/dev/null || echo 0)
+      EXPECTED_AFTER=$((TOTAL_COUNT - 1))
+      if [[ "$AFTER_COUNT" -eq "$EXPECTED_AFTER" ]]; then
+        ok "GetRecords (AFTER_SEQUENCE_NUMBER skips target record)"
+      else
+        fail "GetRecords (AFTER_SEQUENCE_NUMBER expected $EXPECTED_AFTER records, got $AFTER_COUNT)"
+      fi
+    fi
+  else
+    fail "GetShardIterator (AT/AFTER_SEQUENCE_NUMBER skipped: no SequenceNumber in records)"
+  fi
 fi
 
 # GetShardIterator (LATEST) — should yield an empty page.
