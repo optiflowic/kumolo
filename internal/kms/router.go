@@ -1,6 +1,7 @@
 package kms
 
 import (
+	"crypto/rand"
 	"io"
 	"log/slog"
 	"net/http"
@@ -23,8 +24,12 @@ type Router struct {
 	randRead func([]byte) (int, error)
 }
 
-func NewRouter(storage *Storage) *Router {
-	return &Router{storage: storage, randRead: storage.randRead}
+func NewRouter(s store) *Router {
+	return newRouterWithRand(s, rand.Read)
+}
+
+func newRouterWithRand(s store, randRead func([]byte) (int, error)) *Router {
+	return &Router{storage: s, randRead: randRead}
 }
 
 func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {

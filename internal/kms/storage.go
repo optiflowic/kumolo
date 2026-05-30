@@ -311,13 +311,19 @@ func (s *Storage) GetKeyMaterial(keyID string) (KeyMaterial, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if err := s.keyExistsLocked(keyID); err != nil {
+		if !errors.Is(err, ErrKeyNotFound) {
+			return KeyMaterial{}, fmt.Errorf("key %s existence check failed: %w", keyID, err)
+		}
 		return KeyMaterial{}, err
 	}
 	mat, err := readJSON[KeyMaterial](s, filepath.Join("keys", keyID, "material.json"))
-	if errors.Is(err, os.ErrNotExist) {
-		return KeyMaterial{}, ErrKeyMaterialNotFound
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return KeyMaterial{}, ErrKeyMaterialNotFound
+		}
+		return KeyMaterial{}, fmt.Errorf("failed to read key material for %s: %w", keyID, err)
 	}
-	return mat, err
+	return mat, nil
 }
 
 func (s *Storage) keyExistsLocked(keyID string) error {

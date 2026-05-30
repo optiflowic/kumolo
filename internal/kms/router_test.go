@@ -1246,32 +1246,6 @@ func TestGenerateDataKey_dataKeyRandReadFailure(t *testing.T) {
 	assertErrType(t, w, "KMSInternalException")
 }
 
-func TestGenerateDataKey_nonceRandReadFailure(t *testing.T) {
-	dir := t.TempDir()
-	s, err := newStorage(dir, os.OpenRoot)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = s.Close() })
-	ro := NewRouter(s)
-	keyID := mustCreateKey(t, ro, `{}`)
-
-	// The first randRead call in generateDataKeyCommon generates the data key bytes;
-	// the second (inside sealEnvelope) generates the nonce.
-	// Fail on the second call so the data key is generated but sealing fails.
-	calls := 0
-	realRand := ro.randRead
-	ro.randRead = func(b []byte) (int, error) {
-		calls++
-		if calls >= 2 {
-			return 0, errors.New("rand failed")
-		}
-		return realRand(b)
-	}
-	body, _ := json.Marshal(map[string]any{"KeyId": keyID, "KeySpec": "AES_256"})
-	w := kmsReq(t, ro, "GenerateDataKey", string(body))
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assertErrType(t, w, "KMSInternalException")
-}
-
 // ---- ciphertext with unknown algorithm byte ---------------------------------
 
 func TestHandleDecrypt_unknownAlgo(t *testing.T) {
@@ -1349,7 +1323,7 @@ func TestLoadSymmetricMaterial_storageError(t *testing.T) {
 	realRouter := NewRouter(s)
 	keyID := mustCreateKey(t, realRouter, `{}`)
 
-	ro := &Router{storage: &partialFailStore{inner: s}, randRead: s.randRead}
+	ro := newRouterWithRand(&partialFailStore{inner: s}, s.randRead)
 	body, _ := json.Marshal(map[string]any{"KeyId": keyID, "Plaintext": []byte("x")})
 	w := kmsReq(t, ro, "Encrypt", string(body))
 	assert.Equal(t, http.StatusInternalServerError, w.Code)

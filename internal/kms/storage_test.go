@@ -200,6 +200,18 @@ func TestListKeyIDs_statFailure(t *testing.T) {
 	require.ErrorIs(t, err, statErr)
 }
 
+func TestGetKeyMaterial_materialMissing(t *testing.T) {
+	s, _ := newTestStorage(t)
+	meta, err := s.CreateKey(
+		CreateKeyInput{KeySpec: "SYMMETRIC_DEFAULT", KeyUsage: "ENCRYPT_DECRYPT"},
+	)
+	require.NoError(t, err)
+	// Simulate material.json missing by returning os.ErrNotExist from readAll.
+	s.readAll = func(io.Reader) ([]byte, error) { return nil, os.ErrNotExist }
+	_, err = s.GetKeyMaterial(meta.KeyID)
+	require.ErrorIs(t, err, ErrKeyMaterialNotFound)
+}
+
 func TestGetKeyMaterial_readAllFailure(t *testing.T) {
 	s, _ := newTestStorage(t)
 	meta, err := s.CreateKey(
