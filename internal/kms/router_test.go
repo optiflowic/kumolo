@@ -1263,7 +1263,7 @@ func TestDataPlane_aliasAndARNErrors(t *testing.T) {
 		}},
 	}
 	for _, c := range cases {
-		t.Run(c.op+"/alias", func(t *testing.T) {
+		t.Run(c.op+"/alias not found", func(t *testing.T) {
 			ro := newTestRouter(t)
 			w := kmsReq(t, ro, c.op, c.bodyF("alias/my-key"))
 			assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -1275,7 +1275,49 @@ func TestDataPlane_aliasAndARNErrors(t *testing.T) {
 			assert.Equal(t, http.StatusBadRequest, w.Code)
 			assertErrType(t, w, "InvalidArnException")
 		})
+		t.Run(c.op+"/alias name success", func(t *testing.T) {
+			ro := newTestRouter(t)
+			keyID := mustCreateKey(t, ro, `{}`)
+			mustCreateAlias(t, ro, "alias/my-key", keyID)
+			w := kmsReq(t, ro, c.op, c.bodyF("alias/my-key"))
+			assert.Equal(t, http.StatusOK, w.Code)
+		})
+		t.Run(c.op+"/alias ARN success", func(t *testing.T) {
+			ro := newTestRouter(t)
+			keyID := mustCreateKey(t, ro, `{}`)
+			mustCreateAlias(t, ro, "alias/my-key", keyID)
+			w := kmsReq(t, ro, c.op, c.bodyF(aliasARN("alias/my-key")))
+			assert.Equal(t, http.StatusOK, w.Code)
+		})
 	}
+}
+
+func TestDataPlane_Decrypt_aliasResolution(t *testing.T) {
+	t.Run("200 via alias name", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustCreateAlias(t, ro, "alias/my-key", keyID)
+		cipherBlob := mustEncrypt(t, ro, keyID, []byte("hello"))
+		body, _ := json.Marshal(map[string]any{
+			"CiphertextBlob": cipherBlob,
+			"KeyId":          "alias/my-key",
+		})
+		w := kmsReq(t, ro, "Decrypt", string(body))
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("200 via alias ARN", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustCreateAlias(t, ro, "alias/my-key", keyID)
+		cipherBlob := mustEncrypt(t, ro, keyID, []byte("hello"))
+		body, _ := json.Marshal(map[string]any{
+			"CiphertextBlob": cipherBlob,
+			"KeyId":          aliasARN("alias/my-key"),
+		})
+		w := kmsReq(t, ro, "Decrypt", string(body))
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
 }
 
 // ---- nonce randRead failure in sealEnvelope ---------------------------------
