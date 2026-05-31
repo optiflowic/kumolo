@@ -16,11 +16,12 @@
 
 - Returns an empty HTTP 200 body on success.
 - Does not affect the underlying KMS key.
-- Key state of the associated key must not be `PendingDeletion` (deferred to #257).
+- Key state of the associated key must not be `PendingDeletion`.
 
 ## Errors
 
 | Code | HTTP | Condition |
 |---|---|---|
+| `KMSInvalidStateException` | 400 | associated key is in `PendingDeletion` state |
 | `NotFoundException` | 400 | alias not found |
 | `KMSInternalException` | 500 | storage failure |
