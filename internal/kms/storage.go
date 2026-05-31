@@ -35,6 +35,15 @@ type Storage struct {
 // aliasLimitPerKey is the AWS-spec maximum number of aliases per key.
 const aliasLimitPerKey = 256
 
+const secondsPerDay = 86400
+
+const (
+	keyStateEnabled         = "Enabled"
+	keyStateDisabled        = "Disabled"
+	keyStatePendingDeletion = "PendingDeletion"
+	keySpecSymmetricDefault = "SYMMETRIC_DEFAULT"
+)
+
 // NewStorage roots the storage at dataDir/kms, creating the directory if needed.
 func NewStorage(dataDir string) (*Storage, error) {
 	return newStorage(dataDir, os.OpenRoot)
@@ -104,7 +113,7 @@ func (s *Storage) CreateKey(in CreateKeyInput) (KeyMetadata, error) {
 		KeySpec:                in.KeySpec,
 		CustomerMasterKeySpec:  in.KeySpec,
 		KeyUsage:               in.KeyUsage,
-		KeyState:               "Enabled",
+		KeyState:               keyStateEnabled,
 		Enabled:                true,
 		KeyManager:             "CUSTOMER",
 		Origin:                 in.Origin,
@@ -144,7 +153,7 @@ func (s *Storage) CreateKey(in CreateKeyInput) (KeyMetadata, error) {
 		return KeyMetadata{}, fmt.Errorf("write key metadata: %w", err)
 	}
 
-	if in.KeySpec == "SYMMETRIC_DEFAULT" {
+	if in.KeySpec == keySpecSymmetricDefault {
 		var keyBytes [32]byte
 		if _, err := s.randRead(keyBytes[:]); err != nil {
 			if rmErr := s.removeFile(filepath.Join(keyDir, "meta.json")); rmErr != nil {
@@ -552,13 +561,13 @@ func (s *Storage) EnableKey(keyID string) error {
 	if err != nil {
 		return err
 	}
-	if meta.KeyState == "PendingDeletion" {
+	if meta.KeyState == keyStatePendingDeletion {
 		return ErrInvalidKeyState
 	}
-	if meta.KeyState == "Enabled" {
+	if meta.KeyState == keyStateEnabled {
 		return nil
 	}
-	meta.KeyState = "Enabled"
+	meta.KeyState = keyStateEnabled
 	meta.Enabled = true
 	return s.writeJSON(filepath.Join("keys", keyID, "meta.json"), meta)
 }
@@ -571,13 +580,13 @@ func (s *Storage) DisableKey(keyID string) error {
 	if err != nil {
 		return err
 	}
-	if meta.KeyState == "PendingDeletion" {
+	if meta.KeyState == keyStatePendingDeletion {
 		return ErrInvalidKeyState
 	}
-	if meta.KeyState == "Disabled" {
+	if meta.KeyState == keyStateDisabled {
 		return nil
 	}
-	meta.KeyState = "Disabled"
+	meta.KeyState = keyStateDisabled
 	meta.Enabled = false
 	return s.writeJSON(filepath.Join("keys", keyID, "meta.json"), meta)
 }
@@ -590,11 +599,11 @@ func (s *Storage) ScheduleKeyDeletion(keyID string, pendingWindowInDays int) (Ke
 	if err != nil {
 		return KeyMetadata{}, err
 	}
-	if meta.KeyState == "PendingDeletion" {
+	if meta.KeyState == keyStatePendingDeletion {
 		return KeyMetadata{}, ErrInvalidKeyState
 	}
-	deletionDate := nowUnix() + float64(pendingWindowInDays*86400)
-	meta.KeyState = "PendingDeletion"
+	deletionDate := nowUnix() + float64(pendingWindowInDays*secondsPerDay)
+	meta.KeyState = keyStatePendingDeletion
 	meta.Enabled = false
 	meta.DeletionDate = &deletionDate
 	return meta, s.writeJSON(filepath.Join("keys", keyID, "meta.json"), meta)
@@ -608,10 +617,10 @@ func (s *Storage) CancelKeyDeletion(keyID string) (KeyMetadata, error) {
 	if err != nil {
 		return KeyMetadata{}, err
 	}
-	if meta.KeyState != "PendingDeletion" {
+	if meta.KeyState != keyStatePendingDeletion {
 		return KeyMetadata{}, ErrInvalidKeyState
 	}
-	meta.KeyState = "Disabled"
+	meta.KeyState = keyStateDisabled
 	meta.Enabled = false
 	meta.DeletionDate = nil
 	return meta, s.writeJSON(filepath.Join("keys", keyID, "meta.json"), meta)
@@ -625,19 +634,19 @@ func (s *Storage) EnableKeyRotation(keyID string, rotationPeriodInDays int) erro
 	if err != nil {
 		return err
 	}
-	if meta.KeyState == "PendingDeletion" {
+	if meta.KeyState == keyStatePendingDeletion {
 		return ErrInvalidKeyState
 	}
-	if meta.KeyState != "Enabled" {
+	if meta.KeyState != keyStateEnabled {
 		return ErrKeyDisabled
 	}
-	if meta.KeySpec != "SYMMETRIC_DEFAULT" {
+	if meta.KeySpec != keySpecSymmetricDefault {
 		return ErrUnsupportedOp
 	}
 	cfg := KeyRotationConfig{
 		Enabled:              true,
 		RotationPeriodInDays: rotationPeriodInDays,
-		NextRotationDate:     nowUnix() + float64(rotationPeriodInDays*86400),
+		NextRotationDate:     nowUnix() + float64(rotationPeriodInDays*secondsPerDay),
 	}
 	return s.writeJSON(filepath.Join("keys", keyID, "rotation.json"), cfg)
 }
@@ -650,13 +659,13 @@ func (s *Storage) DisableKeyRotation(keyID string) error {
 	if err != nil {
 		return err
 	}
-	if meta.KeyState == "PendingDeletion" {
+	if meta.KeyState == keyStatePendingDeletion {
 		return ErrInvalidKeyState
 	}
-	if meta.KeyState != "Enabled" {
+	if meta.KeyState != keyStateEnabled {
 		return ErrKeyDisabled
 	}
-	if meta.KeySpec != "SYMMETRIC_DEFAULT" {
+	if meta.KeySpec != keySpecSymmetricDefault {
 		return ErrUnsupportedOp
 	}
 	return s.writeJSON(
@@ -673,10 +682,10 @@ func (s *Storage) GetKeyRotationStatus(keyID string) (KeyMetadata, KeyRotationCo
 	if err != nil {
 		return KeyMetadata{}, KeyRotationConfig{}, err
 	}
-	if meta.KeyState == "PendingDeletion" {
+	if meta.KeyState == keyStatePendingDeletion {
 		return KeyMetadata{}, KeyRotationConfig{}, ErrInvalidKeyState
 	}
-	if meta.KeySpec != "SYMMETRIC_DEFAULT" {
+	if meta.KeySpec != keySpecSymmetricDefault {
 		return KeyMetadata{}, KeyRotationConfig{}, ErrUnsupportedOp
 	}
 

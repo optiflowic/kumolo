@@ -8,6 +8,15 @@ import (
 	"net/http"
 )
 
+const (
+	defaultPendingWindowDays  = 30
+	minPendingWindowDays      = 7
+	maxPendingWindowDays      = 30
+	defaultRotationPeriodDays = 365
+	minRotationPeriodDays     = 90
+	maxRotationPeriodDays     = 2560
+)
+
 func (ro *Router) handleEnableKey(w http.ResponseWriter, body []byte) {
 	var req struct {
 		KeyId string `json:"KeyId"`
@@ -76,12 +85,13 @@ func (ro *Router) handleScheduleKeyDeletion(w http.ResponseWriter, body []byte) 
 		return
 	}
 
-	pendingDays := 30
+	pendingDays := defaultPendingWindowDays
 	if req.PendingWindowInDays != nil {
 		pendingDays = *req.PendingWindowInDays
-		if pendingDays < 7 || pendingDays > 30 {
+		if pendingDays < minPendingWindowDays || pendingDays > maxPendingWindowDays {
 			writeError(w, http.StatusBadRequest, "ValidationException",
-				fmt.Sprintf("PendingWindowInDays must be between 7 and 30, got %d", pendingDays))
+				fmt.Sprintf("PendingWindowInDays must be between %d and %d, got %d",
+					minPendingWindowDays, maxPendingWindowDays, pendingDays))
 			return
 		}
 	}
@@ -150,17 +160,17 @@ func (ro *Router) handleEnableKeyRotation(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	rotationDays := 365
+	rotationDays := defaultRotationPeriodDays
 	if req.RotationPeriodInDays != nil {
 		rotationDays = *req.RotationPeriodInDays
-		if rotationDays < 90 || rotationDays > 2560 {
+		if rotationDays < minRotationPeriodDays || rotationDays > maxRotationPeriodDays {
 			writeError(
 				w,
 				http.StatusBadRequest,
 				"ValidationException",
 				fmt.Sprintf(
-					"RotationPeriodInDays must be between 90 and 2560, got %d",
-					rotationDays,
+					"RotationPeriodInDays must be between %d and %d, got %d",
+					minRotationPeriodDays, maxRotationPeriodDays, rotationDays,
 				),
 			)
 			return
@@ -254,6 +264,7 @@ func writeLifecycleError(w http.ResponseWriter, keyID, op string, err error) {
 		writeError(w, http.StatusBadRequest, "NotFoundException",
 			fmt.Sprintf("Invalid keyId %s", keyID))
 	case errors.Is(err, ErrInvalidKeyState):
+		slog.Debug("KMS "+op+": invalid key state", "keyID", keyID)
 		writeError(
 			w,
 			http.StatusBadRequest,
@@ -283,9 +294,11 @@ func writeRotationError(w http.ResponseWriter, keyID, op string, err error) {
 		writeError(w, http.StatusBadRequest, "NotFoundException",
 			fmt.Sprintf("Invalid keyId %s", keyID))
 	case errors.Is(err, ErrKeyDisabled):
+		slog.Debug("KMS "+op+": key disabled", "keyID", keyID)
 		writeError(w, http.StatusBadRequest, "DisabledException",
 			fmt.Sprintf("KMS key %s is disabled", keyID))
 	case errors.Is(err, ErrInvalidKeyState):
+		slog.Debug("KMS "+op+": invalid key state", "keyID", keyID)
 		writeError(
 			w,
 			http.StatusBadRequest,
@@ -296,6 +309,7 @@ func writeRotationError(w http.ResponseWriter, keyID, op string, err error) {
 			),
 		)
 	case errors.Is(err, ErrUnsupportedOp):
+		slog.Debug("KMS "+op+": unsupported operation", "keyID", keyID)
 		writeError(
 			w,
 			http.StatusBadRequest,
