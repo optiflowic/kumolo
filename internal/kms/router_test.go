@@ -277,6 +277,13 @@ func TestHandleListKeys(t *testing.T) {
 		assertErrType(t, w, "ValidationException")
 	})
 
+	t.Run("400 invalid marker format", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "ListKeys", `{"Marker":"not-a-uuid"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "InvalidMarkerException")
+	})
+
 	t.Run("stale marker triggers binary search", func(t *testing.T) {
 		ro := newTestRouter(t)
 		mustCreateKey(t, ro, `{}`)
@@ -2384,6 +2391,14 @@ func TestHandleListAliases(t *testing.T) {
 		w := kmsReq(t, ro, "ListAliases", string(body))
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 invalid marker format", func(t *testing.T) {
+		ro := newTestRouter(t)
+		body, _ := json.Marshal(map[string]any{"Marker": "not-an-alias"})
+		w := kmsReq(t, ro, "ListAliases", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "InvalidMarkerException")
 	})
 
 	t.Run("400 invalid ARN for KeyId filter", func(t *testing.T) {
