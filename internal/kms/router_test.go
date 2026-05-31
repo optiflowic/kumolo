@@ -1894,9 +1894,10 @@ func TestHandleCreateAlias(t *testing.T) {
 			createAlias: func(_, _ string) error { return ErrAliasLimitExceeded },
 		}
 		ro, _ := makeAliasRouter(t, fs)
+		keyID := mustCreateKey(t, ro, `{}`)
 		body, _ := json.Marshal(map[string]any{
 			"AliasName":   "alias/my-key",
-			"TargetKeyId": "00000000-0000-0000-0000-000000000001",
+			"TargetKeyId": keyID,
 		})
 		w := kmsReq(t, ro, "CreateAlias", string(body))
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -1908,9 +1909,10 @@ func TestHandleCreateAlias(t *testing.T) {
 			createAlias: func(_, _ string) error { return errors.New("storage failure") },
 		}
 		ro, _ := makeAliasRouter(t, fs)
+		keyID := mustCreateKey(t, ro, `{}`)
 		body, _ := json.Marshal(map[string]any{
 			"AliasName":   "alias/my-key",
-			"TargetKeyId": "00000000-0000-0000-0000-000000000001",
+			"TargetKeyId": keyID,
 		})
 		w := kmsReq(t, ro, "CreateAlias", string(body))
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
@@ -1958,6 +1960,8 @@ func TestHandleDeleteAlias(t *testing.T) {
 			deleteAlias: func(string) error { return errors.New("storage failure") },
 		}
 		ro, _ := makeAliasRouter(t, fs)
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustCreateAlias(t, ro, "alias/my-key", keyID)
 		body, _ := json.Marshal(map[string]any{"AliasName": "alias/my-key"})
 		w := kmsReq(t, ro, "DeleteAlias", string(body))
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
