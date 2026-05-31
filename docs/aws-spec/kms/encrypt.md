@@ -18,7 +18,7 @@ the SDK handles this automatically.
 | KeyId | string | yes | key ID, ARN, alias name, alias ARN; max 2048 chars |
 | Plaintext | blob | yes | 1–4096 bytes |
 | EncryptionAlgorithm | string | no | default `SYMMETRIC_DEFAULT`; must match key spec |
-| EncryptionContext | map[string]string | no | AEAD additional data; same context required for Decrypt |
+| EncryptionContext | map[string]string | no | AEAD additional data; same context required for Decrypt; each key ≤ 2048 bytes, each value ≤ 2048 bytes, total serialised size ≤ 8192 bytes |
 | GrantTokens | []string | no | ignored in kumolo |
 | DryRun | boolean | no | ignored in kumolo |
 
@@ -34,7 +34,7 @@ the SDK handles this automatically.
 
 | Error | HTTP | Condition |
 |---|---|---|
-| ValidationException | 400 | missing KeyId/Plaintext; Plaintext > 4096 bytes |
+| ValidationException | 400 | missing KeyId/Plaintext; Plaintext > 4096 bytes; EncryptionContext key/value > 2048 bytes or total > 8192 bytes |
 | NotFoundException | 400 | key not found |
 | DisabledException | 400 | key is disabled |
 | InvalidKeyUsageException | 400 | key KeyUsage is not ENCRYPT_DECRYPT |

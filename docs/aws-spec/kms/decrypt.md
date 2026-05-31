@@ -18,7 +18,7 @@ kumolo envelope format; if provided it is verified to match.
 | CiphertextBlob | blob | yes | kumolo envelope ciphertext |
 | KeyId | string | no | if provided, must match embedded key ID; 1–2048 chars |
 | EncryptionAlgorithm | string | no | default `SYMMETRIC_DEFAULT` |
-| EncryptionContext | map[string]string | no | must match exactly what was used at encrypt time |
+| EncryptionContext | map[string]string | no | must match exactly what was used at encrypt time; each key ≤ 2048 bytes, each value ≤ 2048 bytes, total serialised size ≤ 8192 bytes |
 | GrantTokens | []string | no | ignored in kumolo |
 | DryRun | boolean | no | ignored in kumolo |
 | DryRunModifiers | []string | no | ignored in kumolo |
@@ -37,7 +37,7 @@ kumolo envelope format; if provided it is verified to match.
 
 | Error | HTTP | Condition |
 |---|---|---|
-| ValidationException | 400 | missing CiphertextBlob |
+| ValidationException | 400 | missing CiphertextBlob; EncryptionContext key/value > 2048 bytes or total > 8192 bytes |
 | NotFoundException | 400 | key embedded in ciphertext not found |
 | DisabledException | 400 | key is disabled |
 | InvalidKeyUsageException | 400 | key KeyUsage is not ENCRYPT_DECRYPT |
