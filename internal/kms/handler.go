@@ -25,6 +25,16 @@ func (ro *Router) handleCreateKey(w http.ResponseWriter, body []byte) {
 		return
 	}
 
+	if len(req.Description) > 8192 {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"ValidationException",
+			"Value at 'description' failed to satisfy constraint: Member must have length less than or equal to 8192",
+		)
+		return
+	}
+
 	// CustomerMasterKeySpec is a deprecated alias for KeySpec.
 	if req.KeySpec == "" && req.CustomerMasterKeySpec != "" {
 		req.KeySpec = req.CustomerMasterKeySpec
@@ -83,6 +93,15 @@ func (ro *Router) handleCreateKey(w http.ResponseWriter, body []byte) {
 // resolveKeyRef resolves a key reference (key ID, key ARN, alias name, or alias ARN)
 // to a plain key UUID. Writes an HTTP error response and returns ("", false) on failure.
 func (ro *Router) resolveKeyRef(w http.ResponseWriter, keyRef string) (string, bool) {
+	if len(keyRef) > 2048 {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"ValidationException",
+			"Value at 'keyId' failed to satisfy constraint: Member must have length less than or equal to 2048",
+		)
+		return "", false
+	}
 	if id, ok := resolveKeyID(keyRef); ok {
 		return id, true
 	}
