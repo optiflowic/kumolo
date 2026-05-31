@@ -326,6 +326,11 @@ func (ro *Router) handleListAliases(w http.ResponseWriter, body []byte) {
 
 	// Apply Marker pagination.
 	if req.Marker != "" {
+		if !strings.HasPrefix(req.Marker, "alias/") {
+			writeError(w, http.StatusBadRequest, "InvalidMarkerException",
+				fmt.Sprintf("The marker %s is not valid", req.Marker))
+			return
+		}
 		start := -1
 		for i, a := range aliases {
 			if a.AliasName == req.Marker {
@@ -334,9 +339,7 @@ func (ro *Router) handleListAliases(w http.ResponseWriter, body []byte) {
 			}
 		}
 		if start == -1 {
-			// Marker not found by exact match — position to the next alias lexicographically.
-			// kumolo deviation: stale markers (e.g. alias deleted between pages) silently advance
-			// rather than returning InvalidMarkerException.
+			// Stale marker (valid alias/ prefix but alias was deleted) — advance silently.
 			start = sort.Search(len(aliases), func(i int) bool {
 				return aliases[i].AliasName >= req.Marker
 			})

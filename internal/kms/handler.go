@@ -206,6 +206,11 @@ func (ro *Router) handleListKeys(w http.ResponseWriter, body []byte) {
 
 	// Apply Marker pagination cursor.
 	if req.Marker != "" {
+		if !looksLikeUUID(req.Marker) {
+			writeError(w, http.StatusBadRequest, "InvalidMarkerException",
+				fmt.Sprintf("The marker %s is not valid", req.Marker))
+			return
+		}
 		start := -1
 		for i, id := range ids {
 			if id == req.Marker {
@@ -214,7 +219,7 @@ func (ro *Router) handleListKeys(w http.ResponseWriter, body []byte) {
 			}
 		}
 		if start == -1 {
-			// Marker not found — use position based on binary search.
+			// Stale marker (valid UUID but key was deleted) — advance silently.
 			start = sort.SearchStrings(ids, req.Marker)
 			if start < len(ids) && ids[start] < req.Marker {
 				// unreachable: sort.SearchStrings guarantees ids[start] >= marker

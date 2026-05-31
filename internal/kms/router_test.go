@@ -277,12 +277,20 @@ func TestHandleListKeys(t *testing.T) {
 		assertErrType(t, w, "ValidationException")
 	})
 
+	t.Run("400 invalid marker format", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "ListKeys", `{"Marker":"not-a-uuid"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "InvalidMarkerException")
+	})
+
 	t.Run("stale marker triggers binary search", func(t *testing.T) {
 		ro := newTestRouter(t)
 		mustCreateKey(t, ro, `{}`)
 		mustCreateKey(t, ro, `{}`)
-		// Marker "0" sorts before all UUIDs; binary search sets start=0 and all keys are returned.
-		w := kmsReq(t, ro, "ListKeys", `{"Marker":"0"}`)
+		// All-zeros UUID is a valid UUID format but will never exist; it sorts before random UUIDs,
+		// so binary search sets start=0 and all keys are returned.
+		w := kmsReq(t, ro, "ListKeys", `{"Marker":"00000000-0000-0000-0000-000000000000"}`)
 		require.Equal(t, http.StatusOK, w.Code)
 		var resp map[string]any
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
@@ -2385,6 +2393,14 @@ func TestHandleListAliases(t *testing.T) {
 		assertErrType(t, w, "ValidationException")
 	})
 
+	t.Run("400 invalid marker format", func(t *testing.T) {
+		ro := newTestRouter(t)
+		body, _ := json.Marshal(map[string]any{"Marker": "not-an-alias"})
+		w := kmsReq(t, ro, "ListAliases", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "InvalidMarkerException")
+	})
+
 	t.Run("400 invalid ARN for KeyId filter", func(t *testing.T) {
 		ro := newTestRouter(t)
 		body, _ := json.Marshal(map[string]any{"KeyId": "arn:aws:kms:us-east-1:123:garbage"})
@@ -2472,7 +2488,7 @@ func TestHandleListAliases(t *testing.T) {
 		keyID := mustCreateKey(t, ro, `{}`)
 		mustCreateAlias(t, ro, "alias/a", keyID)
 
-		body, _ := json.Marshal(map[string]any{"Marker": "zzz"})
+		body, _ := json.Marshal(map[string]any{"Marker": "alias/zzz"})
 		w := kmsReq(t, ro, "ListAliases", string(body))
 		require.Equal(t, http.StatusOK, w.Code)
 		var resp map[string]any
