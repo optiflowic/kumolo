@@ -270,9 +270,33 @@ func (ro *Router) handleGetKeyPolicy(w http.ResponseWriter, body []byte) {
 		return
 	}
 
+	meta, err := ro.storage.GetKeyMetadata(keyID)
+	if err != nil {
+		if errors.Is(err, ErrKeyNotFound) {
+			slog.Debug("KMS GetKeyPolicy: key not found", "keyID", keyID)
+			writeError(w, http.StatusBadRequest, "NotFoundException",
+				fmt.Sprintf("Invalid keyId %s", keyID))
+			return
+		}
+		slog.Error("GetKeyPolicy: GetKeyMetadata failure", "err", err)
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			"KMSInternalException",
+			"internal server error",
+		)
+		return
+	}
+	if meta.KeyState == "PendingDeletion" {
+		writeError(w, http.StatusBadRequest, "KMSInvalidStateException",
+			fmt.Sprintf("KMS key %s is pending deletion", keyID))
+		return
+	}
+
 	policy, err := ro.storage.GetKeyPolicy(keyID)
 	if err != nil {
 		if errors.Is(err, ErrKeyNotFound) {
+			// unreachable: GetKeyMetadata succeeded above
 			slog.Debug("KMS GetKeyPolicy: key not found", "keyID", keyID)
 			writeError(w, http.StatusBadRequest, "NotFoundException",
 				fmt.Sprintf("Invalid keyId %s", keyID))
@@ -330,8 +354,32 @@ func (ro *Router) handlePutKeyPolicy(w http.ResponseWriter, body []byte) {
 		return
 	}
 
+	meta, err := ro.storage.GetKeyMetadata(keyID)
+	if err != nil {
+		if errors.Is(err, ErrKeyNotFound) {
+			slog.Debug("KMS PutKeyPolicy: key not found", "keyID", keyID)
+			writeError(w, http.StatusBadRequest, "NotFoundException",
+				fmt.Sprintf("Invalid keyId %s", keyID))
+			return
+		}
+		slog.Error("PutKeyPolicy: GetKeyMetadata failure", "err", err)
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			"KMSInternalException",
+			"internal server error",
+		)
+		return
+	}
+	if meta.KeyState == "PendingDeletion" {
+		writeError(w, http.StatusBadRequest, "KMSInvalidStateException",
+			fmt.Sprintf("KMS key %s is pending deletion", keyID))
+		return
+	}
+
 	if err := ro.storage.PutKeyPolicy(keyID, req.Policy); err != nil {
 		if errors.Is(err, ErrKeyNotFound) {
+			// unreachable: GetKeyMetadata succeeded above
 			slog.Debug("KMS PutKeyPolicy: key not found", "keyID", keyID)
 			writeError(w, http.StatusBadRequest, "NotFoundException",
 				fmt.Sprintf("Invalid keyId %s", keyID))
