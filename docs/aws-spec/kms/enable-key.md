@@ -5,6 +5,8 @@ sdk_output: kms.EnableKeyOutput
 last_verified: 2026-05-31
 ---
 
+# Enable Key
+
 ## Request
 
 | Field | Type | Required | Notes |

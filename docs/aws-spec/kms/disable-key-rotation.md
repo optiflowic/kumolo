@@ -5,6 +5,8 @@ sdk_output: kms.DisableKeyRotationOutput
 last_verified: 2026-05-31
 ---
 
+# Disable Key Rotation
+
 ## Request
 
 | Field | Type | Required | Notes |

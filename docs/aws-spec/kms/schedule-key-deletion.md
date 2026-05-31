@@ -5,6 +5,8 @@ sdk_output: kms.ScheduleKeyDeletionOutput
 last_verified: 2026-05-31
 ---
 
+# Schedule Key Deletion
+
 ## Request
 
 | Field | Type | Required | Notes |

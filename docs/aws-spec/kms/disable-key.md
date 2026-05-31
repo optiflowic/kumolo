@@ -5,6 +5,8 @@ sdk_output: kms.DisableKeyOutput
 last_verified: 2026-05-31
 ---
 
+# Disable Key
+
 ## Request
 
 | Field | Type | Required | Notes |

@@ -5,6 +5,8 @@ sdk_output: kms.GetKeyRotationStatusOutput
 last_verified: 2026-05-31
 ---
 
+# Get Key Rotation Status
+
 ## Request
 
 | Field | Type | Required | Notes |
