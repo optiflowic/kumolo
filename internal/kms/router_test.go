@@ -2165,7 +2165,7 @@ func TestHandleDeleteAlias(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{"AliasName": ""})
 		w := kmsReq(t, ro, "DeleteAlias", string(body))
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrType(t, w, "ValidationException")
+		assertErrType(t, w, "InvalidAliasNameException")
 	})
 
 	t.Run("400 alias not found", func(t *testing.T) {

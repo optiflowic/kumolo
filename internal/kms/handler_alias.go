@@ -111,7 +111,7 @@ func (ro *Router) handleDeleteAlias(w http.ResponseWriter, body []byte) {
 		return
 	}
 	if err := validateAliasName(req.AliasName); err != nil {
-		writeError(w, http.StatusBadRequest, "ValidationException", err.Error())
+		writeError(w, http.StatusBadRequest, "InvalidAliasNameException", err.Error())
 		return
 	}
 
