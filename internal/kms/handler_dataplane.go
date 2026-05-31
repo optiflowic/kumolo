@@ -129,7 +129,6 @@ func marshalContext(ctx map[string]string) []byte {
 // validateEncryptionContext returns a non-nil error if any key or value exceeds
 // 2048 bytes, or if the total serialised size exceeds 8192 bytes.
 func validateEncryptionContext(ctx map[string]string) error {
-	var total int
 	for k, v := range ctx {
 		if len(k) > 2048 {
 			return fmt.Errorf(
@@ -139,11 +138,12 @@ func validateEncryptionContext(ctx map[string]string) error {
 			return fmt.Errorf(
 				"encryptionContext value length %d exceeds maximum of 2048 bytes", len(v))
 		}
-		total += len(k) + len(v)
 	}
-	if total > 8192 {
+	if serialized := marshalContext(ctx); len(serialized) > 8192 {
 		return fmt.Errorf(
-			"encryptionContext total size %d bytes exceeds maximum of 8192 bytes", total)
+			"encryptionContext serialized size %d bytes exceeds maximum of 8192 bytes",
+			len(serialized),
+		)
 	}
 	return nil
 }
