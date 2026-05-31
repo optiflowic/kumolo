@@ -33,5 +33,9 @@ Keys are returned in alphabetical order by key ID. The `Marker` value is the key
 
 | Code | HTTP | Condition |
 |---|---|---|
-| `InvalidMarkerException` | 400 | marker value is not valid |
+| `InvalidMarkerException` | 400 | Marker is not a valid UUID (8-4-4-4-12 hex format) |
 | `KMSInternalException` | 500 | storage failure |
+
+## kumolo deviations
+
+None. Stale markers (valid UUID but key was deleted) advance silently.
