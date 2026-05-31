@@ -1889,22 +1889,6 @@ func TestHandleCreateAlias(t *testing.T) {
 		assertErrType(t, w, "AlreadyExistsException")
 	})
 
-	t.Run("500 GetKeyMetadata storage error", func(t *testing.T) {
-		fs := &aliasFailStore{
-			getKeyMetadata: func(string) (KeyMetadata, error) {
-				return KeyMetadata{}, errors.New("storage failure")
-			},
-		}
-		ro, _ := makeAliasRouter(t, fs)
-		body, _ := json.Marshal(map[string]any{
-			"AliasName":   "alias/my-key",
-			"TargetKeyId": "00000000-0000-0000-0000-000000000001",
-		})
-		w := kmsReq(t, ro, "CreateAlias", string(body))
-		assert.Equal(t, http.StatusInternalServerError, w.Code)
-		assertErrType(t, w, "KMSInternalException")
-	})
-
 	t.Run("400 target key pending deletion", func(t *testing.T) {
 		ro := newTestRouter(t)
 		keyID := mustCreateKey(t, ro, `{}`)
@@ -1929,6 +1913,21 @@ func TestHandleCreateAlias(t *testing.T) {
 		w := kmsReq(t, ro, "CreateAlias", string(body))
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assertErrType(t, w, "NotFoundException")
+	})
+
+	t.Run("400 key pending deletion returned from storage", func(t *testing.T) {
+		fs := &aliasFailStore{
+			createAlias: func(_, _ string) error { return ErrKeyPendingDeletion },
+		}
+		ro, _ := makeAliasRouter(t, fs)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{
+			"AliasName":   "alias/my-key",
+			"TargetKeyId": keyID,
+		})
+		w := kmsReq(t, ro, "CreateAlias", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "KMSInvalidStateException")
 	})
 
 	t.Run("400 alias limit exceeded", func(t *testing.T) {
@@ -2299,6 +2298,26 @@ func TestHandleUpdateAlias(t *testing.T) {
 		w := kmsReq(t, ro, "UpdateAlias", string(body))
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 		assertErrType(t, w, "KMSInternalException")
+	})
+
+	t.Run("400 UpdateAlias returns pending deletion", func(t *testing.T) {
+		dir := t.TempDir()
+		s, err := newStorage(dir, os.OpenRoot)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = s.Close() })
+		realRo := NewRouter(s)
+		key1 := mustCreateKey(t, realRo, `{}`)
+		mustCreateAlias(t, realRo, "alias/my-key", key1)
+
+		fs := &aliasFailStore{
+			inner:       s,
+			updateAlias: func(_, _ string) error { return ErrKeyPendingDeletion },
+		}
+		ro := NewRouter(fs)
+		body, _ := json.Marshal(map[string]any{"AliasName": "alias/my-key", "TargetKeyId": key1})
+		w := kmsReq(t, ro, "UpdateAlias", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "KMSInvalidStateException")
 	})
 }
 

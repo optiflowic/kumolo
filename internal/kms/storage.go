@@ -414,6 +414,14 @@ func (s *Storage) CreateAlias(aliasName, targetKeyID string) error {
 	if err := s.keyExistsLocked(targetKeyID); err != nil {
 		return fmt.Errorf("target key: %w", err)
 	}
+	meta, err := s.readKeyMeta(targetKeyID)
+	if err != nil {
+		// untestable: file is verified to exist via keyExistsLocked just before this call
+		return fmt.Errorf("read key meta: %w", err)
+	}
+	if meta.KeyState == keyStatePendingDeletion {
+		return ErrKeyPendingDeletion
+	}
 
 	// Check per-key alias limit.
 	count, err := s.countAliasesForKeyLocked(targetKeyID)
@@ -469,9 +477,17 @@ func (s *Storage) UpdateAlias(aliasName, targetKeyID string) error {
 		return fmt.Errorf("read alias: %w", err)
 	}
 
-	// Target key must exist.
+	// Target key must exist and must not be pending deletion.
 	if err := s.keyExistsLocked(targetKeyID); err != nil {
 		return fmt.Errorf("target key: %w", err)
+	}
+	targetMeta, err := s.readKeyMeta(targetKeyID)
+	if err != nil {
+		// untestable: file is verified to exist via keyExistsLocked just before this call
+		return fmt.Errorf("read target key meta: %w", err)
+	}
+	if targetMeta.KeyState == keyStatePendingDeletion {
+		return ErrKeyPendingDeletion
 	}
 
 	updated := existing
