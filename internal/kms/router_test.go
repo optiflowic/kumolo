@@ -379,6 +379,17 @@ func TestHandleGetKeyPolicy(t *testing.T) {
 		assert.Equal(t, "default", resp["PolicyName"])
 		assert.NotEmpty(t, resp["Policy"])
 	})
+
+	t.Run("400 for PendingDeletion key", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		w := kmsReq(t, ro, "ScheduleKeyDeletion",
+			`{"KeyId":"`+keyID+`","PendingWindowInDays":7}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		w2 := kmsReq(t, ro, "GetKeyPolicy", `{"KeyId":"`+keyID+`"}`)
+		assert.Equal(t, http.StatusBadRequest, w2.Code)
+		assertErrType(t, w2, "KMSInvalidStateException")
+	})
 }
 
 func TestHandlePutKeyPolicy(t *testing.T) {
@@ -499,6 +510,17 @@ func TestHandlePutKeyPolicy(t *testing.T) {
 		require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &resp))
 		assert.Equal(t, newPolicy, resp["Policy"])
 	})
+
+	t.Run("400 for PendingDeletion key", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		w := kmsReq(t, ro, "ScheduleKeyDeletion",
+			`{"KeyId":"`+keyID+`","PendingWindowInDays":7}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		w2 := kmsReq(t, ro, "PutKeyPolicy", `{"KeyId":"`+keyID+`","Policy":"{}"}`)
+		assert.Equal(t, http.StatusBadRequest, w2.Code)
+		assertErrType(t, w2, "KMSInvalidStateException")
+	})
 }
 
 func TestUnknownOperation(t *testing.T) {
@@ -601,6 +623,32 @@ func TestHandlePutKeyPolicy_storageFailure(t *testing.T) {
 		"PutKeyPolicy",
 		`{"KeyId":"00000000-0000-0000-0000-000000000001","Policy":"{}"}`,
 	)
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, "KMSInternalException")
+}
+
+func TestHandleGetKeyPolicy_policyStorageFailure(t *testing.T) {
+	fs := &aliasFailStore{
+		getKeyPolicy: func(string) (string, error) {
+			return "", errors.New("policy storage error")
+		},
+	}
+	ro, _ := makeAliasRouter(t, fs)
+	keyID := mustCreateKey(t, ro, `{}`)
+	w := kmsReq(t, ro, "GetKeyPolicy", `{"KeyId":"`+keyID+`"}`)
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, "KMSInternalException")
+}
+
+func TestHandlePutKeyPolicy_policyStorageFailure(t *testing.T) {
+	fs := &aliasFailStore{
+		putKeyPolicy: func(string, string) error {
+			return errors.New("policy storage error")
+		},
+	}
+	ro, _ := makeAliasRouter(t, fs)
+	keyID := mustCreateKey(t, ro, `{}`)
+	w := kmsReq(t, ro, "PutKeyPolicy", `{"KeyId":"`+keyID+`","Policy":"{}"}`)
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 	assertErrType(t, w, "KMSInternalException")
 }
@@ -1592,6 +1640,8 @@ type aliasFailStore struct {
 	listAliases    func(string) ([]AliasEntry, error)
 	resolveAlias   func(string) (string, error)
 	getKeyMetadata func(string) (KeyMetadata, error)
+	getKeyPolicy   func(string) (string, error)
+	putKeyPolicy   func(string, string) error
 }
 
 func (a *aliasFailStore) CreateKey(in CreateKeyInput) (KeyMetadata, error) {
@@ -1605,9 +1655,15 @@ func (a *aliasFailStore) GetKeyMetadata(keyID string) (KeyMetadata, error) {
 }
 func (a *aliasFailStore) ListKeyIDs() ([]string, error) { return a.inner.ListKeyIDs() }
 func (a *aliasFailStore) GetKeyPolicy(keyID string) (string, error) {
+	if a.getKeyPolicy != nil {
+		return a.getKeyPolicy(keyID)
+	}
 	return a.inner.GetKeyPolicy(keyID)
 }
 func (a *aliasFailStore) PutKeyPolicy(keyID, policy string) error {
+	if a.putKeyPolicy != nil {
+		return a.putKeyPolicy(keyID, policy)
+	}
 	return a.inner.PutKeyPolicy(keyID, policy)
 }
 func (a *aliasFailStore) GetKeyMaterial(keyID string) (KeyMaterial, error) {
