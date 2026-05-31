@@ -17,7 +17,7 @@ and a copy of it encrypted under the specified KMS key.
 | KeyId | string | yes | key ID, ARN, alias name, alias ARN; max 2048 chars |
 | KeySpec | string | no | `AES_256` (32 bytes) or `AES_128` (16 bytes) |
 | NumberOfBytes | integer | no | 1–1024; cannot be used together with KeySpec |
-| EncryptionContext | map[string]string | no | AEAD additional data; same context must be passed to Decrypt |
+| EncryptionContext | map[string]string | no | AEAD additional data; same context must be passed to Decrypt; each key ≤ 2048 bytes, each value ≤ 2048 bytes, total serialised size ≤ 8192 bytes |
 | GrantTokens | []string | no | ignored in kumolo |
 | DryRun | boolean | no | ignored in kumolo |
 | Recipient | object | no | Nitro Enclave support; not supported in kumolo |
@@ -37,7 +37,7 @@ Exactly one of `KeySpec` or `NumberOfBytes` must be provided.
 
 | Error | HTTP | Condition |
 |---|---|---|
-| ValidationException | 400 | both or neither KeySpec/NumberOfBytes; invalid KeySpec; NumberOfBytes out of 1–1024 |
+| ValidationException | 400 | both or neither KeySpec/NumberOfBytes; invalid KeySpec; NumberOfBytes out of 1–1024; EncryptionContext key/value > 2048 bytes or total > 8192 bytes |
 | NotFoundException | 400 | key not found |
 | DisabledException | 400 | key is disabled |
 | InvalidKeyUsageException | 400 | key KeyUsage is not ENCRYPT_DECRYPT, or key is not SYMMETRIC_DEFAULT |

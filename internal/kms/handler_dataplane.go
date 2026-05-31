@@ -126,6 +126,28 @@ func marshalContext(ctx map[string]string) []byte {
 	return b
 }
 
+// validateEncryptionContext returns a non-nil error if any key or value exceeds
+// 2048 bytes, or if the total serialised size exceeds 8192 bytes.
+func validateEncryptionContext(ctx map[string]string) error {
+	for k, v := range ctx {
+		if len(k) > 2048 {
+			return fmt.Errorf(
+				"encryptionContext key length %d exceeds maximum of 2048 bytes", len(k))
+		}
+		if len(v) > 2048 {
+			return fmt.Errorf(
+				"encryptionContext value length %d exceeds maximum of 2048 bytes", len(v))
+		}
+	}
+	if serialized := marshalContext(ctx); len(serialized) > 8192 {
+		return fmt.Errorf(
+			"encryptionContext serialized size %d bytes exceeds maximum of 8192 bytes",
+			len(serialized),
+		)
+	}
+	return nil
+}
+
 // readFullRand fills dst with random bytes using ro.randRead, treating both an
 // error and a short read (n < len(dst)) as failures.
 func (ro *Router) readFullRand(dst []byte) error {
@@ -295,6 +317,10 @@ func (ro *Router) handleEncrypt(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
+	if err := validateEncryptionContext(req.EncryptionContext); err != nil {
+		writeError(w, http.StatusBadRequest, "ValidationException", err.Error())
+		return
+	}
 
 	meta, keyID, ok := ro.resolveAndValidateKey(w, req.KeyID)
 	if !ok {
@@ -364,6 +390,10 @@ func (ro *Router) handleDecrypt(w http.ResponseWriter, body []byte) {
 				req.EncryptionAlgorithm,
 			),
 		)
+		return
+	}
+	if err := validateEncryptionContext(req.EncryptionContext); err != nil {
+		writeError(w, http.StatusBadRequest, "ValidationException", err.Error())
 		return
 	}
 
@@ -519,6 +549,11 @@ func (ro *Router) generateDataKeyCommon(
 	default:
 		writeError(w, http.StatusBadRequest, "ValidationException",
 			fmt.Sprintf("Invalid KeySpec: %s; valid values are AES_256 and AES_128", req.KeySpec))
+		return nil, nil, "", "", false
+	}
+
+	if err := validateEncryptionContext(req.EncryptionContext); err != nil {
+		writeError(w, http.StatusBadRequest, "ValidationException", err.Error())
 		return nil, nil, "", "", false
 	}
 

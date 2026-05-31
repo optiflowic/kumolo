@@ -42,7 +42,7 @@ Returns `{"KeyMetadata": {...}}`. See [KeyMetadata fields](#keymetadata-fields).
 
 | Code | HTTP | Condition |
 |---|---|---|
-| `ValidationException` | 400 | invalid KeySpec, incompatible KeyUsage |
+| `ValidationException` | 400 | invalid KeySpec, incompatible KeyUsage; Description > 8192 chars |
 | `UnsupportedOperationException` | 400 | Origin != `AWS_KMS` |
 | `KMSInternalException` | 500 | storage failure |
 

@@ -141,6 +141,14 @@ func TestHandleCreateKey(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assertErrType(t, w, "ValidationException")
 	})
+
+	t.Run("400 description exceeds 8192 chars", func(t *testing.T) {
+		ro := newTestRouter(t)
+		body, _ := json.Marshal(map[string]any{"Description": strings.Repeat("x", 8193)})
+		w := kmsReq(t, ro, "CreateKey", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
 }
 
 func TestHandleDescribeKey(t *testing.T) {
@@ -842,6 +850,51 @@ func TestHandleEncrypt(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assertErrType(t, w, "ValidationException")
 	})
+
+	t.Run("400 EncryptionContext key exceeds 2048 bytes", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":             keyID,
+			"Plaintext":         "aGVsbG8=",
+			"EncryptionContext": map[string]string{strings.Repeat("k", 2049): "v"},
+		})
+		w := kmsReq(t, ro, "Encrypt", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 EncryptionContext value exceeds 2048 bytes", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":             keyID,
+			"Plaintext":         "aGVsbG8=",
+			"EncryptionContext": map[string]string{"k": strings.Repeat("v", 2049)},
+		})
+		w := kmsReq(t, ro, "Encrypt", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 EncryptionContext total size exceeds 8192 bytes", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":     keyID,
+			"Plaintext": "aGVsbG8=",
+			"EncryptionContext": map[string]string{
+				strings.Repeat("a", 1000): strings.Repeat("v", 700),
+				strings.Repeat("b", 1000): strings.Repeat("v", 700),
+				strings.Repeat("c", 1000): strings.Repeat("v", 700),
+				strings.Repeat("d", 1000): strings.Repeat("v", 700),
+				strings.Repeat("e", 1000): strings.Repeat("v", 700),
+			},
+		})
+		w := kmsReq(t, ro, "Encrypt", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
 }
 
 func TestHandleEncrypt_storageFailure(t *testing.T) {
@@ -991,6 +1044,60 @@ func TestHandleDecrypt(t *testing.T) {
 	t.Run("400 for invalid JSON", func(t *testing.T) {
 		ro := newTestRouter(t)
 		w := kmsReq(t, ro, "Decrypt", `{bad json}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 EncryptionContext key exceeds 2048 bytes", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		encW := kmsReq(t, ro, "Encrypt", `{"KeyId":"`+keyID+`","Plaintext":"aGVsbG8="}`)
+		require.Equal(t, http.StatusOK, encW.Code)
+		var encResp map[string]any
+		require.NoError(t, json.Unmarshal(encW.Body.Bytes(), &encResp))
+		body, _ := json.Marshal(map[string]any{
+			"CiphertextBlob":    encResp["CiphertextBlob"],
+			"EncryptionContext": map[string]string{strings.Repeat("k", 2049): "v"},
+		})
+		w := kmsReq(t, ro, "Decrypt", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 EncryptionContext value exceeds 2048 bytes", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		encW := kmsReq(t, ro, "Encrypt", `{"KeyId":"`+keyID+`","Plaintext":"aGVsbG8="}`)
+		require.Equal(t, http.StatusOK, encW.Code)
+		var encResp map[string]any
+		require.NoError(t, json.Unmarshal(encW.Body.Bytes(), &encResp))
+		body, _ := json.Marshal(map[string]any{
+			"CiphertextBlob":    encResp["CiphertextBlob"],
+			"EncryptionContext": map[string]string{"k": strings.Repeat("v", 2049)},
+		})
+		w := kmsReq(t, ro, "Decrypt", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 EncryptionContext total size exceeds 8192 bytes", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		encW := kmsReq(t, ro, "Encrypt", `{"KeyId":"`+keyID+`","Plaintext":"aGVsbG8="}`)
+		require.Equal(t, http.StatusOK, encW.Code)
+		var encResp map[string]any
+		require.NoError(t, json.Unmarshal(encW.Body.Bytes(), &encResp))
+		body, _ := json.Marshal(map[string]any{
+			"CiphertextBlob": encResp["CiphertextBlob"],
+			"EncryptionContext": map[string]string{
+				strings.Repeat("a", 1000): strings.Repeat("v", 700),
+				strings.Repeat("b", 1000): strings.Repeat("v", 700),
+				strings.Repeat("c", 1000): strings.Repeat("v", 700),
+				strings.Repeat("d", 1000): strings.Repeat("v", 700),
+				strings.Repeat("e", 1000): strings.Repeat("v", 700),
+			},
+		})
+		w := kmsReq(t, ro, "Decrypt", string(body))
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assertErrType(t, w, "ValidationException")
 	})
@@ -1156,6 +1263,51 @@ func TestHandleGenerateDataKey(t *testing.T) {
 	t.Run("400 for invalid JSON", func(t *testing.T) {
 		ro := newTestRouter(t)
 		w := kmsReq(t, ro, "GenerateDataKey", `{bad json}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 EncryptionContext key exceeds 2048 bytes", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":             keyID,
+			"KeySpec":           "AES_256",
+			"EncryptionContext": map[string]string{strings.Repeat("k", 2049): "v"},
+		})
+		w := kmsReq(t, ro, "GenerateDataKey", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 EncryptionContext value exceeds 2048 bytes", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":             keyID,
+			"KeySpec":           "AES_256",
+			"EncryptionContext": map[string]string{"k": strings.Repeat("v", 2049)},
+		})
+		w := kmsReq(t, ro, "GenerateDataKey", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 EncryptionContext total size exceeds 8192 bytes", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":   keyID,
+			"KeySpec": "AES_256",
+			"EncryptionContext": map[string]string{
+				strings.Repeat("a", 1000): strings.Repeat("v", 700),
+				strings.Repeat("b", 1000): strings.Repeat("v", 700),
+				strings.Repeat("c", 1000): strings.Repeat("v", 700),
+				strings.Repeat("d", 1000): strings.Repeat("v", 700),
+				strings.Repeat("e", 1000): strings.Repeat("v", 700),
+			},
+		})
+		w := kmsReq(t, ro, "GenerateDataKey", string(body))
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assertErrType(t, w, "ValidationException")
 	})
@@ -1790,6 +1942,14 @@ func TestResolveKeyRef_aliasResolution(t *testing.T) {
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 		assertErrType(t, w, "KMSInternalException")
 	})
+
+	t.Run("400 keyId exceeds 2048 chars", func(t *testing.T) {
+		ro := newTestRouter(t)
+		body, _ := json.Marshal(map[string]any{"KeyId": strings.Repeat("x", 2049)})
+		w := kmsReq(t, ro, "DescribeKey", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
 }
 
 // ---- CreateAlias ------------------------------------------------------------
@@ -1832,6 +1992,18 @@ func TestHandleCreateAlias(t *testing.T) {
 		ro := newTestRouter(t)
 		keyID := mustCreateKey(t, ro, `{}`)
 		body, _ := json.Marshal(map[string]any{"AliasName": "noprefix", "TargetKeyId": keyID})
+		w := kmsReq(t, ro, "CreateAlias", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "InvalidAliasNameException")
+	})
+
+	t.Run("400 aliasName exceeds 256 chars", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{
+			"AliasName":   "alias/" + strings.Repeat("x", 251),
+			"TargetKeyId": keyID,
+		})
 		w := kmsReq(t, ro, "CreateAlias", string(body))
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assertErrType(t, w, "InvalidAliasNameException")
@@ -1993,7 +2165,7 @@ func TestHandleDeleteAlias(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{"AliasName": ""})
 		w := kmsReq(t, ro, "DeleteAlias", string(body))
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrType(t, w, "ValidationException")
+		assertErrType(t, w, "InvalidAliasNameException")
 	})
 
 	t.Run("400 alias not found", func(t *testing.T) {
