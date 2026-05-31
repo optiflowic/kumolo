@@ -18,7 +18,12 @@ var (
 
 func validateAliasName(aliasName string) error {
 	if aliasName == "" {
-		return fmt.Errorf("AliasName is required")
+		return fmt.Errorf("aliasName is required")
+	}
+	if len(aliasName) > 256 {
+		return fmt.Errorf(
+			"value at 'aliasName' failed to satisfy constraint: member must have length less than or equal to 256",
+		)
 	}
 	if !reAliasName.MatchString(aliasName) {
 		return fmt.Errorf("invalid alias name %q: must match ^alias/[a-zA-Z0-9/_-]+$", aliasName)
@@ -105,8 +110,8 @@ func (ro *Router) handleDeleteAlias(w http.ResponseWriter, body []byte) {
 		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
 		return
 	}
-	if req.AliasName == "" {
-		writeError(w, http.StatusBadRequest, "ValidationException", "AliasName is required")
+	if err := validateAliasName(req.AliasName); err != nil {
+		writeError(w, http.StatusBadRequest, "ValidationException", err.Error())
 		return
 	}
 

@@ -22,5 +22,6 @@
 
 | Code | HTTP | Condition |
 |---|---|---|
+| `ValidationException` | 400 | AliasName is empty, > 256 chars, or does not match `^alias/[a-zA-Z0-9/_-]+$` |
 | `NotFoundException` | 400 | alias not found |
 | `KMSInternalException` | 500 | storage failure |
