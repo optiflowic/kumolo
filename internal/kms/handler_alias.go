@@ -18,11 +18,11 @@ var (
 
 func validateAliasName(aliasName string) error {
 	if aliasName == "" {
-		return fmt.Errorf("AliasName is required")
+		return fmt.Errorf("aliasName is required")
 	}
 	if len(aliasName) > 256 {
 		return fmt.Errorf(
-			"Value at 'aliasName' failed to satisfy constraint: Member must have length less than or equal to 256",
+			"value at 'aliasName' failed to satisfy constraint: member must have length less than or equal to 256",
 		)
 	}
 	if !reAliasName.MatchString(aliasName) {
