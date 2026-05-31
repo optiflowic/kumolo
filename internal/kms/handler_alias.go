@@ -60,6 +60,9 @@ func (ro *Router) handleCreateAlias(w http.ResponseWriter, body []byte) {
 
 	if err := ro.storage.CreateAlias(req.AliasName, targetKeyID); err != nil {
 		switch {
+		case errors.Is(err, ErrKeyPendingDeletion):
+			writeError(w, http.StatusBadRequest, "KMSInvalidStateException",
+				fmt.Sprintf("KMS key %s is pending deletion", targetKeyID))
 		case errors.Is(err, ErrAliasAlreadyExists):
 			writeError(w, http.StatusBadRequest, "AlreadyExistsException",
 				fmt.Sprintf("An alias with the name %s already exists", req.AliasName))
@@ -232,6 +235,11 @@ func (ro *Router) handleUpdateAlias(w http.ResponseWriter, body []byte) {
 		if errors.Is(err, ErrKeyNotFound) {
 			writeError(w, http.StatusBadRequest, "NotFoundException",
 				fmt.Sprintf("Invalid keyId %s", newKeyID))
+			return
+		}
+		if errors.Is(err, ErrKeyPendingDeletion) {
+			writeError(w, http.StatusBadRequest, "KMSInvalidStateException",
+				fmt.Sprintf("KMS key %s is pending deletion", newKeyID))
 			return
 		}
 		slog.Error("KMS UpdateAlias storage failure", "err", err)

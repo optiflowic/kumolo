@@ -14,6 +14,7 @@ var (
 	ErrAliasAlreadyExists  = errors.New("alias already exists")
 	ErrAliasLimitExceeded  = errors.New("alias limit exceeded")
 	ErrKeyDisabled         = errors.New("key is disabled")
+	ErrKeyPendingDeletion  = errors.New("key is pending deletion")
 	ErrInvalidKeyState     = errors.New("invalid key state for this operation")
 	ErrUnsupportedOp       = errors.New("unsupported operation for this key type")
 )

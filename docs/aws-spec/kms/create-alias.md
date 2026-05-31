@@ -18,7 +18,6 @@
 - Each alias maps one-to-one to a key; a key can have up to 256 aliases.
 - Returns an empty HTTP 200 body on success.
 - Key state of the target key must be `Enabled` or `Disabled` (not `PendingDeletion`).
-- kumolo deviation: key state check is deferred to #257 (key lifecycle); for now any existing key is accepted.
 
 ## Errors
 
@@ -26,6 +25,7 @@
 |---|---|---|
 | `AlreadyExistsException` | 400 | alias name already in use |
 | `InvalidAliasNameException` | 400 | alias name fails pattern or begins with `alias/aws/` |
+| `KMSInvalidStateException` | 400 | target key is in `PendingDeletion` state |
 | `NotFoundException` | 400 | target key not found |
 | `LimitExceededException` | 400 | target key already has 256 aliases |
 | `KMSInternalException` | 500 | storage failure |

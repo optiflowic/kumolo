@@ -16,7 +16,7 @@
 
 - Returns an empty HTTP 200 body on success.
 - Does not affect the underlying KMS key.
-- Key state of the associated key must not be `PendingDeletion` (deferred to #257).
+- Succeeds regardless of the key state of the associated key (including `PendingDeletion`).
 
 ## Errors
 
