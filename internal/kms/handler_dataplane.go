@@ -195,6 +195,11 @@ func (ro *Router) resolveAndValidateKey(
 		return KeyMetadata{}, "", false
 	}
 
+	if meta.KeyState == "PendingDeletion" {
+		writeError(w, http.StatusBadRequest, "KMSInvalidStateException",
+			fmt.Sprintf("KMS key %s is pending deletion", keyID))
+		return KeyMetadata{}, "", false
+	}
 	if !meta.Enabled || meta.KeyState != "Enabled" {
 		writeError(w, http.StatusBadRequest, "DisabledException",
 			fmt.Sprintf("KMS key %s is disabled", keyID))

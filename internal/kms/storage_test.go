@@ -676,3 +676,341 @@ func TestNewStorage_aliasesDirFailure(t *testing.T) {
 	_, err := newStorage(dir, os.OpenRoot)
 	require.Error(t, err)
 }
+
+// ---- EnableKey ---------------------------------------------------------------
+
+func newSymmetricKey(t *testing.T, s *Storage) string {
+	t.Helper()
+	meta, err := s.CreateKey(
+		CreateKeyInput{KeySpec: "SYMMETRIC_DEFAULT", KeyUsage: "ENCRYPT_DECRYPT"},
+	)
+	require.NoError(t, err)
+	return meta.KeyID
+}
+
+func putKeyIntoState(t *testing.T, s *Storage, keyID, state string) {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	meta, err := s.readKeyMeta(keyID)
+	require.NoError(t, err)
+	meta.KeyState = state
+	meta.Enabled = state == "Enabled"
+	require.NoError(t, s.writeJSON(filepath.Join("keys", keyID, "meta.json"), meta))
+}
+
+func TestEnableKey(t *testing.T) {
+	t.Run("Disabled→Enabled", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		keyID := newSymmetricKey(t, s)
+		putKeyIntoState(t, s, keyID, "Disabled")
+
+		require.NoError(t, s.EnableKey(keyID))
+
+		meta, err := s.GetKeyMetadata(keyID)
+		require.NoError(t, err)
+		assert.Equal(t, "Enabled", meta.KeyState)
+		assert.True(t, meta.Enabled)
+	})
+
+	t.Run("already Enabled is no-op", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		keyID := newSymmetricKey(t, s)
+		require.NoError(t, s.EnableKey(keyID))
+
+		meta, err := s.GetKeyMetadata(keyID)
+		require.NoError(t, err)
+		assert.Equal(t, "Enabled", meta.KeyState)
+	})
+
+	t.Run("key not found returns ErrKeyNotFound", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		err := s.EnableKey("00000000-0000-0000-0000-000000000000")
+		require.ErrorIs(t, err, ErrKeyNotFound)
+	})
+
+	t.Run("PendingDeletion returns ErrInvalidKeyState", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		keyID := newSymmetricKey(t, s)
+		_, err := s.ScheduleKeyDeletion(keyID, 30)
+		require.NoError(t, err)
+
+		err = s.EnableKey(keyID)
+		require.ErrorIs(t, err, ErrInvalidKeyState)
+	})
+}
+
+// ---- DisableKey --------------------------------------------------------------
+
+func TestDisableKey(t *testing.T) {
+	t.Run("Enabled→Disabled", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		keyID := newSymmetricKey(t, s)
+
+		require.NoError(t, s.DisableKey(keyID))
+
+		meta, err := s.GetKeyMetadata(keyID)
+		require.NoError(t, err)
+		assert.Equal(t, "Disabled", meta.KeyState)
+		assert.False(t, meta.Enabled)
+	})
+
+	t.Run("already Disabled is no-op", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		keyID := newSymmetricKey(t, s)
+		putKeyIntoState(t, s, keyID, "Disabled")
+		require.NoError(t, s.DisableKey(keyID))
+
+		meta, err := s.GetKeyMetadata(keyID)
+		require.NoError(t, err)
+		assert.Equal(t, "Disabled", meta.KeyState)
+	})
+
+	t.Run("key not found returns ErrKeyNotFound", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		err := s.DisableKey("00000000-0000-0000-0000-000000000000")
+		require.ErrorIs(t, err, ErrKeyNotFound)
+	})
+
+	t.Run("PendingDeletion returns ErrInvalidKeyState", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		keyID := newSymmetricKey(t, s)
+		_, err := s.ScheduleKeyDeletion(keyID, 30)
+		require.NoError(t, err)
+
+		err = s.DisableKey(keyID)
+		require.ErrorIs(t, err, ErrInvalidKeyState)
+	})
+}
+
+// ---- ScheduleKeyDeletion -----------------------------------------------------
+
+func TestScheduleKeyDeletion(t *testing.T) {
+	t.Run("sets PendingDeletion and DeletionDate", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		keyID := newSymmetricKey(t, s)
+
+		meta, err := s.ScheduleKeyDeletion(keyID, 7)
+		require.NoError(t, err)
+		assert.Equal(t, "PendingDeletion", meta.KeyState)
+		assert.False(t, meta.Enabled)
+		assert.NotNil(t, meta.DeletionDate)
+	})
+
+	t.Run("key not found returns ErrKeyNotFound", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		_, err := s.ScheduleKeyDeletion("00000000-0000-0000-0000-000000000000", 30)
+		require.ErrorIs(t, err, ErrKeyNotFound)
+	})
+
+	t.Run("already PendingDeletion returns ErrInvalidKeyState", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		keyID := newSymmetricKey(t, s)
+		_, err := s.ScheduleKeyDeletion(keyID, 30)
+		require.NoError(t, err)
+
+		_, err = s.ScheduleKeyDeletion(keyID, 30)
+		require.ErrorIs(t, err, ErrInvalidKeyState)
+	})
+}
+
+// ---- CancelKeyDeletion -------------------------------------------------------
+
+func TestCancelKeyDeletion(t *testing.T) {
+	t.Run("PendingDeletion→Disabled and clears DeletionDate", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		keyID := newSymmetricKey(t, s)
+		_, err := s.ScheduleKeyDeletion(keyID, 30)
+		require.NoError(t, err)
+
+		meta, err := s.CancelKeyDeletion(keyID)
+		require.NoError(t, err)
+		assert.Equal(t, "Disabled", meta.KeyState)
+		assert.False(t, meta.Enabled)
+		assert.Nil(t, meta.DeletionDate)
+	})
+
+	t.Run("key not found returns ErrKeyNotFound", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		_, err := s.CancelKeyDeletion("00000000-0000-0000-0000-000000000000")
+		require.ErrorIs(t, err, ErrKeyNotFound)
+	})
+
+	t.Run("Enabled key returns ErrInvalidKeyState", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		keyID := newSymmetricKey(t, s)
+		_, err := s.CancelKeyDeletion(keyID)
+		require.ErrorIs(t, err, ErrInvalidKeyState)
+	})
+}
+
+// ---- EnableKeyRotation -------------------------------------------------------
+
+func TestEnableKeyRotation(t *testing.T) {
+	t.Run("success on Enabled SYMMETRIC_DEFAULT key", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		keyID := newSymmetricKey(t, s)
+
+		require.NoError(t, s.EnableKeyRotation(keyID, 365))
+
+		_, cfg, err := s.GetKeyRotationStatus(keyID)
+		require.NoError(t, err)
+		assert.True(t, cfg.Enabled)
+		assert.Equal(t, 365, cfg.RotationPeriodInDays)
+		assert.NotZero(t, cfg.NextRotationDate)
+	})
+
+	t.Run("key not found returns ErrKeyNotFound", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		err := s.EnableKeyRotation("00000000-0000-0000-0000-000000000000", 365)
+		require.ErrorIs(t, err, ErrKeyNotFound)
+	})
+
+	t.Run("PendingDeletion returns ErrInvalidKeyState", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		keyID := newSymmetricKey(t, s)
+		_, err := s.ScheduleKeyDeletion(keyID, 30)
+		require.NoError(t, err)
+
+		err = s.EnableKeyRotation(keyID, 365)
+		require.ErrorIs(t, err, ErrInvalidKeyState)
+	})
+
+	t.Run("Disabled key returns ErrKeyDisabled", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		keyID := newSymmetricKey(t, s)
+		putKeyIntoState(t, s, keyID, "Disabled")
+
+		err := s.EnableKeyRotation(keyID, 365)
+		require.ErrorIs(t, err, ErrKeyDisabled)
+	})
+
+	t.Run("non-SYMMETRIC key returns ErrUnsupportedOp", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		meta, err := s.CreateKey(CreateKeyInput{KeySpec: "RSA_2048", KeyUsage: "SIGN_VERIFY"})
+		require.NoError(t, err)
+
+		err = s.EnableKeyRotation(meta.KeyID, 365)
+		require.ErrorIs(t, err, ErrUnsupportedOp)
+	})
+}
+
+// ---- DisableKeyRotation ------------------------------------------------------
+
+func TestDisableKeyRotation(t *testing.T) {
+	t.Run("success on Enabled SYMMETRIC_DEFAULT key", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		keyID := newSymmetricKey(t, s)
+		require.NoError(t, s.EnableKeyRotation(keyID, 365))
+
+		require.NoError(t, s.DisableKeyRotation(keyID))
+
+		_, cfg, err := s.GetKeyRotationStatus(keyID)
+		require.NoError(t, err)
+		assert.False(t, cfg.Enabled)
+	})
+
+	t.Run("key not found returns ErrKeyNotFound", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		err := s.DisableKeyRotation("00000000-0000-0000-0000-000000000000")
+		require.ErrorIs(t, err, ErrKeyNotFound)
+	})
+
+	t.Run("PendingDeletion returns ErrInvalidKeyState", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		keyID := newSymmetricKey(t, s)
+		_, err := s.ScheduleKeyDeletion(keyID, 30)
+		require.NoError(t, err)
+
+		err = s.DisableKeyRotation(keyID)
+		require.ErrorIs(t, err, ErrInvalidKeyState)
+	})
+
+	t.Run("Disabled key returns ErrKeyDisabled", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		keyID := newSymmetricKey(t, s)
+		putKeyIntoState(t, s, keyID, "Disabled")
+
+		err := s.DisableKeyRotation(keyID)
+		require.ErrorIs(t, err, ErrKeyDisabled)
+	})
+
+	t.Run("non-SYMMETRIC key returns ErrUnsupportedOp", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		meta, err := s.CreateKey(CreateKeyInput{KeySpec: "RSA_2048", KeyUsage: "SIGN_VERIFY"})
+		require.NoError(t, err)
+
+		err = s.DisableKeyRotation(meta.KeyID)
+		require.ErrorIs(t, err, ErrUnsupportedOp)
+	})
+}
+
+// ---- GetKeyRotationStatus ----------------------------------------------------
+
+func TestGetKeyRotationStatus(t *testing.T) {
+	t.Run("no rotation config returns empty cfg", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		keyID := newSymmetricKey(t, s)
+
+		meta, cfg, err := s.GetKeyRotationStatus(keyID)
+		require.NoError(t, err)
+		assert.Equal(t, keyID, meta.KeyID)
+		assert.False(t, cfg.Enabled)
+	})
+
+	t.Run("returns rotation config after EnableKeyRotation", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		keyID := newSymmetricKey(t, s)
+		require.NoError(t, s.EnableKeyRotation(keyID, 180))
+
+		_, cfg, err := s.GetKeyRotationStatus(keyID)
+		require.NoError(t, err)
+		assert.True(t, cfg.Enabled)
+		assert.Equal(t, 180, cfg.RotationPeriodInDays)
+	})
+
+	t.Run("key not found returns ErrKeyNotFound", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		_, _, err := s.GetKeyRotationStatus("00000000-0000-0000-0000-000000000000")
+		require.ErrorIs(t, err, ErrKeyNotFound)
+	})
+
+	t.Run("PendingDeletion returns ErrInvalidKeyState", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		keyID := newSymmetricKey(t, s)
+		_, err := s.ScheduleKeyDeletion(keyID, 30)
+		require.NoError(t, err)
+
+		_, _, err = s.GetKeyRotationStatus(keyID)
+		require.ErrorIs(t, err, ErrInvalidKeyState)
+	})
+
+	t.Run("non-SYMMETRIC key returns ErrUnsupportedOp", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		meta, err := s.CreateKey(CreateKeyInput{KeySpec: "RSA_2048", KeyUsage: "SIGN_VERIFY"})
+		require.NoError(t, err)
+
+		_, _, err = s.GetKeyRotationStatus(meta.KeyID)
+		require.ErrorIs(t, err, ErrUnsupportedOp)
+	})
+
+	t.Run("rotation.json read failure returns wrapped error", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		keyID := newSymmetricKey(t, s)
+		require.NoError(t, s.EnableKeyRotation(keyID, 365))
+
+		readErr := errors.New("read failed")
+		orig := s.readAll
+		calls := 0
+		s.readAll = func(r io.Reader) ([]byte, error) {
+			calls++
+			if calls == 2 { // second readAll: rotation.json (first is meta.json)
+				return nil, readErr
+			}
+			return orig(r)
+		}
+
+		_, _, err := s.GetKeyRotationStatus(keyID)
+		require.ErrorContains(t, err, "read rotation config")
+	})
+}

@@ -21,6 +21,13 @@ type store interface {
 	UpdateAlias(aliasName, targetKeyID string) error
 	ListAliases(filterKeyID string) ([]AliasEntry, error)
 	ResolveAlias(aliasName string) (string, error)
+	EnableKey(keyID string) error
+	DisableKey(keyID string) error
+	ScheduleKeyDeletion(keyID string, pendingWindowInDays int) (KeyMetadata, error)
+	CancelKeyDeletion(keyID string) (KeyMetadata, error)
+	EnableKeyRotation(keyID string, rotationPeriodInDays int) error
+	DisableKeyRotation(keyID string) error
+	GetKeyRotationStatus(keyID string) (KeyMetadata, KeyRotationConfig, error)
 }
 
 // Router handles KMS API requests dispatched via the X-Amz-Target header.
@@ -74,6 +81,20 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ro.handleUpdateAlias(w, body)
 	case "ListAliases":
 		ro.handleListAliases(w, body)
+	case "EnableKey":
+		ro.handleEnableKey(w, body)
+	case "DisableKey":
+		ro.handleDisableKey(w, body)
+	case "ScheduleKeyDeletion":
+		ro.handleScheduleKeyDeletion(w, body)
+	case "CancelKeyDeletion":
+		ro.handleCancelKeyDeletion(w, body)
+	case "EnableKeyRotation":
+		ro.handleEnableKeyRotation(w, body)
+	case "DisableKeyRotation":
+		ro.handleDisableKeyRotation(w, body)
+	case "GetKeyRotationStatus":
+		ro.handleGetKeyRotationStatus(w, body)
 	default:
 		slog.Debug( // #nosec G706 -- target comes from the X-Amz-Target header; log injection risk accepted for a local dev emulator
 			"KMS operation not implemented",
