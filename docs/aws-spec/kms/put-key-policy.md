@@ -27,5 +27,5 @@ HTTP 200 with empty body on success.
 | `InvalidArnException` | 400 | malformed ARN |
 | `ValidationException` | 400 | `PolicyName` is provided but is not `"default"` |
 | `LimitExceededException` | 400 | policy > 32768 bytes |
-| `KMSInvalidStateException` | 400 | key not in a state that allows this operation |
+| `KMSInvalidStateException` | 400 | key is in `PendingDeletion` state; `Enabled` and `Disabled` keys are allowed |
 | `KMSInternalException` | 500 | storage failure |
