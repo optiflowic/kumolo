@@ -1997,50 +1997,7 @@ func TestHandleDeleteAlias(t *testing.T) {
 		assertErrType(t, w, "NotFoundException")
 	})
 
-	t.Run("500 ResolveAlias storage error", func(t *testing.T) {
-		fs := &aliasFailStore{
-			resolveAlias: func(string) (string, error) { return "", errors.New("storage failure") },
-		}
-		ro, _ := makeAliasRouter(t, fs)
-		body, _ := json.Marshal(map[string]any{"AliasName": "alias/my-key"})
-		w := kmsReq(t, ro, "DeleteAlias", string(body))
-		assert.Equal(t, http.StatusInternalServerError, w.Code)
-		assertErrType(t, w, "KMSInternalException")
-	})
-
-	t.Run("400 key not found at GetKeyMetadata", func(t *testing.T) {
-		fs := &aliasFailStore{
-			resolveAlias:   func(string) (string, error) { return "00000000-0000-0000-0000-000000000001", nil },
-			getKeyMetadata: func(string) (KeyMetadata, error) { return KeyMetadata{}, ErrKeyNotFound },
-		}
-		ro, _ := makeAliasRouter(t, fs)
-		body, _ := json.Marshal(map[string]any{"AliasName": "alias/my-key"})
-		w := kmsReq(t, ro, "DeleteAlias", string(body))
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrType(t, w, "NotFoundException")
-	})
-
-	t.Run("500 GetKeyMetadata storage error", func(t *testing.T) {
-		dir := t.TempDir()
-		s, err := newStorage(dir, os.OpenRoot)
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = s.Close() })
-		realRo := NewRouter(s)
-		keyID := mustCreateKey(t, realRo, `{}`)
-		mustCreateAlias(t, realRo, "alias/my-key", keyID)
-
-		fs := &aliasFailStore{
-			inner:          s,
-			getKeyMetadata: func(string) (KeyMetadata, error) { return KeyMetadata{}, errors.New("storage failure") },
-		}
-		ro := NewRouter(fs)
-		body, _ := json.Marshal(map[string]any{"AliasName": "alias/my-key"})
-		w := kmsReq(t, ro, "DeleteAlias", string(body))
-		assert.Equal(t, http.StatusInternalServerError, w.Code)
-		assertErrType(t, w, "KMSInternalException")
-	})
-
-	t.Run("400 target key pending deletion", func(t *testing.T) {
+	t.Run("200 target key pending deletion", func(t *testing.T) {
 		ro := newTestRouter(t)
 		keyID := mustCreateKey(t, ro, `{}`)
 		mustCreateAlias(t, ro, "alias/my-key", keyID)
@@ -2048,28 +2005,7 @@ func TestHandleDeleteAlias(t *testing.T) {
 		require.Equal(t, http.StatusOK, kmsReq(t, ro, "ScheduleKeyDeletion", string(body)).Code)
 		body, _ = json.Marshal(map[string]any{"AliasName": "alias/my-key"})
 		w := kmsReq(t, ro, "DeleteAlias", string(body))
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrType(t, w, "KMSInvalidStateException")
-	})
-
-	t.Run("400 alias not found at DeleteAlias call", func(t *testing.T) {
-		dir := t.TempDir()
-		s, err := newStorage(dir, os.OpenRoot)
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = s.Close() })
-		realRo := NewRouter(s)
-		keyID := mustCreateKey(t, realRo, `{}`)
-		mustCreateAlias(t, realRo, "alias/my-key", keyID)
-
-		fs := &aliasFailStore{
-			inner:       s,
-			deleteAlias: func(string) error { return ErrAliasNotFound },
-		}
-		ro := NewRouter(fs)
-		body, _ := json.Marshal(map[string]any{"AliasName": "alias/my-key"})
-		w := kmsReq(t, ro, "DeleteAlias", string(body))
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrType(t, w, "NotFoundException")
+		assert.Equal(t, http.StatusOK, w.Code)
 	})
 
 	t.Run("500 storage error", func(t *testing.T) {
@@ -2269,7 +2205,7 @@ func TestHandleUpdateAlias(t *testing.T) {
 		assertErrType(t, w, "KMSInternalException")
 	})
 
-	t.Run("400 old key pending deletion", func(t *testing.T) {
+	t.Run("200 old key pending deletion", func(t *testing.T) {
 		ro := newTestRouter(t)
 		key1 := mustCreateKey(t, ro, `{}`)
 		key2 := mustCreateKey(t, ro, `{}`)
@@ -2278,8 +2214,7 @@ func TestHandleUpdateAlias(t *testing.T) {
 		require.Equal(t, http.StatusOK, kmsReq(t, ro, "ScheduleKeyDeletion", string(body)).Code)
 		body, _ = json.Marshal(map[string]any{"AliasName": "alias/my-key", "TargetKeyId": key2})
 		w := kmsReq(t, ro, "UpdateAlias", string(body))
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrType(t, w, "KMSInvalidStateException")
+		assert.Equal(t, http.StatusOK, w.Code)
 	})
 
 	t.Run("400 new key pending deletion", func(t *testing.T) {

@@ -28,5 +28,5 @@
 |---|---|---|
 | `InvalidAliasNameException` | 400 | alias name begins with `alias/aws/` |
 | `NotFoundException` | 400 | alias or target key not found |
-| `KMSInvalidStateException` | 400 | current or new key is in `PendingDeletion` state, or has incompatible type/usage |
+| `KMSInvalidStateException` | 400 | new (destination) key is in `PendingDeletion` state, or current/new key has incompatible type/usage; moving alias away from a `PendingDeletion` key (source) succeeds |
 | `KMSInternalException` | 500 | storage failure |

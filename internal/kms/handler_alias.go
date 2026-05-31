@@ -74,7 +74,7 @@ func (ro *Router) handleCreateAlias(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
-	if targetMeta.KeyState == "PendingDeletion" {
+	if targetMeta.KeyState == keyStatePendingDeletion {
 		writeError(w, http.StatusBadRequest, "KMSInvalidStateException",
 			fmt.Sprintf("KMS key %s is pending deletion", targetKeyID))
 		return
@@ -126,46 +126,6 @@ func (ro *Router) handleDeleteAlias(w http.ResponseWriter, body []byte) {
 	}
 	if req.AliasName == "" {
 		writeError(w, http.StatusBadRequest, "ValidationException", "AliasName is required")
-		return
-	}
-
-	// Resolve alias to check target key state before deleting.
-	targetKeyID, err := ro.storage.ResolveAlias(req.AliasName)
-	if err != nil {
-		if errors.Is(err, ErrAliasNotFound) {
-			writeError(w, http.StatusBadRequest, "NotFoundException",
-				fmt.Sprintf("Alias %s not found", req.AliasName))
-			return
-		}
-		slog.Error("KMS DeleteAlias: ResolveAlias failure", "err", err)
-		writeError(
-			w,
-			http.StatusInternalServerError,
-			"KMSInternalException",
-			"internal server error",
-		)
-		return
-	}
-	targetMeta, err := ro.storage.GetKeyMetadata(targetKeyID)
-	if err != nil {
-		if errors.Is(err, ErrKeyNotFound) {
-			// unreachable: alias exists but its target was deleted out-of-band
-			writeError(w, http.StatusBadRequest, "NotFoundException",
-				fmt.Sprintf("Invalid keyId %s", targetKeyID))
-			return
-		}
-		slog.Error("KMS DeleteAlias: GetKeyMetadata failure", "err", err)
-		writeError(
-			w,
-			http.StatusInternalServerError,
-			"KMSInternalException",
-			"internal server error",
-		)
-		return
-	}
-	if targetMeta.KeyState == "PendingDeletion" {
-		writeError(w, http.StatusBadRequest, "KMSInvalidStateException",
-			fmt.Sprintf("KMS key %s is pending deletion", targetKeyID))
 		return
 	}
 
@@ -273,12 +233,7 @@ func (ro *Router) handleUpdateAlias(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	if oldMeta.KeyState == "PendingDeletion" {
-		writeError(w, http.StatusBadRequest, "KMSInvalidStateException",
-			fmt.Sprintf("KMS key %s is pending deletion", oldKeyID))
-		return
-	}
-	if newMeta.KeyState == "PendingDeletion" {
+	if newMeta.KeyState == keyStatePendingDeletion {
 		writeError(w, http.StatusBadRequest, "KMSInvalidStateException",
 			fmt.Sprintf("KMS key %s is pending deletion", newKeyID))
 		return
