@@ -246,6 +246,34 @@ func (ro *Router) handleListKeys(w http.ResponseWriter, body []byte) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// resolveKeyMeta fetches key metadata and validates the key is not in
+// PendingDeletion state. It writes the appropriate error response and returns
+// false if the caller should stop processing.
+func (ro *Router) resolveKeyMeta(w http.ResponseWriter, keyID string) (KeyMetadata, bool) {
+	meta, err := ro.storage.GetKeyMetadata(keyID)
+	if err != nil {
+		if errors.Is(err, ErrKeyNotFound) {
+			writeError(w, http.StatusBadRequest, "NotFoundException",
+				fmt.Sprintf("Invalid keyId %s", keyID))
+			return KeyMetadata{}, false
+		}
+		slog.Error("GetKeyMetadata failure", "err", err)
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			"KMSInternalException",
+			"internal server error",
+		)
+		return KeyMetadata{}, false
+	}
+	if meta.KeyState == keyStatePendingDeletion {
+		writeError(w, http.StatusBadRequest, "KMSInvalidStateException",
+			fmt.Sprintf("KMS key %s is pending deletion", keyID))
+		return KeyMetadata{}, false
+	}
+	return meta, true
+}
+
 func (ro *Router) handleGetKeyPolicy(w http.ResponseWriter, body []byte) {
 	var req struct {
 		KeyId      string `json:"KeyId"`
@@ -270,26 +298,7 @@ func (ro *Router) handleGetKeyPolicy(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	meta, err := ro.storage.GetKeyMetadata(keyID)
-	if err != nil {
-		if errors.Is(err, ErrKeyNotFound) {
-			slog.Debug("KMS GetKeyPolicy: key not found", "keyID", keyID)
-			writeError(w, http.StatusBadRequest, "NotFoundException",
-				fmt.Sprintf("Invalid keyId %s", keyID))
-			return
-		}
-		slog.Error("GetKeyPolicy: GetKeyMetadata failure", "err", err)
-		writeError(
-			w,
-			http.StatusInternalServerError,
-			"KMSInternalException",
-			"internal server error",
-		)
-		return
-	}
-	if meta.KeyState == "PendingDeletion" {
-		writeError(w, http.StatusBadRequest, "KMSInvalidStateException",
-			fmt.Sprintf("KMS key %s is pending deletion", keyID))
+	if _, ok := ro.resolveKeyMeta(w, keyID); !ok {
 		return
 	}
 
@@ -354,26 +363,7 @@ func (ro *Router) handlePutKeyPolicy(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	meta, err := ro.storage.GetKeyMetadata(keyID)
-	if err != nil {
-		if errors.Is(err, ErrKeyNotFound) {
-			slog.Debug("KMS PutKeyPolicy: key not found", "keyID", keyID)
-			writeError(w, http.StatusBadRequest, "NotFoundException",
-				fmt.Sprintf("Invalid keyId %s", keyID))
-			return
-		}
-		slog.Error("PutKeyPolicy: GetKeyMetadata failure", "err", err)
-		writeError(
-			w,
-			http.StatusInternalServerError,
-			"KMSInternalException",
-			"internal server error",
-		)
-		return
-	}
-	if meta.KeyState == "PendingDeletion" {
-		writeError(w, http.StatusBadRequest, "KMSInvalidStateException",
-			fmt.Sprintf("KMS key %s is pending deletion", keyID))
+	if _, ok := ro.resolveKeyMeta(w, keyID); !ok {
 		return
 	}
 
