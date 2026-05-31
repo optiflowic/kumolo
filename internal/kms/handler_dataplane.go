@@ -133,17 +133,17 @@ func validateEncryptionContext(ctx map[string]string) error {
 	for k, v := range ctx {
 		if len(k) > 2048 {
 			return fmt.Errorf(
-				"EncryptionContext key length %d exceeds maximum of 2048 bytes", len(k))
+				"encryptionContext key length %d exceeds maximum of 2048 bytes", len(k))
 		}
 		if len(v) > 2048 {
 			return fmt.Errorf(
-				"EncryptionContext value length %d exceeds maximum of 2048 bytes", len(v))
+				"encryptionContext value length %d exceeds maximum of 2048 bytes", len(v))
 		}
 		total += len(k) + len(v)
 	}
 	if total > 8192 {
 		return fmt.Errorf(
-			"EncryptionContext total size %d bytes exceeds maximum of 8192 bytes", total)
+			"encryptionContext total size %d bytes exceeds maximum of 8192 bytes", total)
 	}
 	return nil
 }
