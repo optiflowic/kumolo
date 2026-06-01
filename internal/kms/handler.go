@@ -9,6 +9,22 @@ import (
 	"sort"
 )
 
+func validateLimit(w http.ResponseWriter, limit *int) bool {
+	if limit != nil && (*limit < 1 || *limit > 1000) {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"ValidationException",
+			fmt.Sprintf(
+				"Value %d at 'limit' failed to satisfy constraint: Member must have value between 1 and 1000, inclusive",
+				*limit,
+			),
+		)
+		return false
+	}
+	return true
+}
+
 func (ro *Router) handleCreateKey(w http.ResponseWriter, body []byte) {
 	var req struct {
 		Description                    string `json:"Description"`
@@ -191,20 +207,11 @@ func (ro *Router) handleListKeys(w http.ResponseWriter, body []byte) {
 		return
 	}
 
+	if !validateLimit(w, req.Limit) {
+		return
+	}
 	limit := 100
 	if req.Limit != nil {
-		if *req.Limit < 1 || *req.Limit > 1000 {
-			writeError(
-				w,
-				http.StatusBadRequest,
-				"ValidationException",
-				fmt.Sprintf(
-					"Value %d at 'limit' failed to satisfy constraint: Member must have value between 1 and 1000, inclusive",
-					*req.Limit,
-				),
-			)
-			return
-		}
 		limit = *req.Limit
 	}
 
@@ -284,16 +291,7 @@ func (ro *Router) handleListResourceTags(w http.ResponseWriter, body []byte) {
 		writeError(w, http.StatusBadRequest, "ValidationException", "KeyId is required")
 		return
 	}
-	if req.Limit != nil && (*req.Limit < 1 || *req.Limit > 1000) {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			"ValidationException",
-			fmt.Sprintf(
-				"Value %d at 'limit' failed to satisfy constraint: Member must have value between 1 and 1000, inclusive",
-				*req.Limit,
-			),
-		)
+	if !validateLimit(w, req.Limit) {
 		return
 	}
 	// No tags can ever exist (tag management not implemented), so any Marker is invalid.

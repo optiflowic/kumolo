@@ -330,9 +330,11 @@ if [[ -n "$KEY_ID" ]]; then
     fail "ScheduleKeyDeletion (expected DeletionDate and PendingDeletion, got date='$DELETION_DATE' state='$PENDING_STATE')"
   fi
 
-  $AWS cancel-key-deletion --key-id "$KEY_ID" > /dev/null 2>&1 \
-    && ok "CancelKeyDeletion" \
-    || fail "CancelKeyDeletion"
+  if $AWS cancel-key-deletion --key-id "$KEY_ID" > /dev/null 2>&1; then
+    ok "CancelKeyDeletion"
+  else
+    fail "CancelKeyDeletion"
+  fi
 
   CANCEL_DESC=$($AWS describe-key --key-id "$KEY_ID" 2>/dev/null || true)
   CANCEL_STATE=$(echo "$CANCEL_DESC" | jq -r '.KeyMetadata.KeyState // empty' 2>/dev/null || true)
