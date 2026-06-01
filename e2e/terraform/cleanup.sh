@@ -21,5 +21,6 @@ if $AWS s3api head-bucket --bucket kumolo-tf-verify > /dev/null 2>&1; then
   $AWS s3api delete-bucket --bucket kumolo-tf-verify > /dev/null 2>&1 || true
 fi
 
-# Remove DynamoDB table.
-$AWS dynamodb delete-table --table-name kumolo-tf-users > /dev/null 2>&1 || true
+# Remove DynamoDB tables.
+$AWS dynamodb delete-table --table-name kumolo-tf-users        > /dev/null 2>&1 || true
+$AWS dynamodb delete-table --table-name kumolo-tf-streams-test > /dev/null 2>&1 || true

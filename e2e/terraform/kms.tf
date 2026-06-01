@@ -2,11 +2,6 @@ resource "aws_kms_key" "main" {
   description             = "kumolo-tf-verify"
   deletion_window_in_days = 7
   enable_key_rotation     = true
-
-  tags = {
-    Environment = "local"
-    ManagedBy   = "terraform"
-  }
 }
 
 resource "aws_kms_alias" "main" {
@@ -18,9 +13,4 @@ resource "aws_kms_key" "disabled" {
   description             = "kumolo-tf-verify-disabled"
   deletion_window_in_days = 7
   is_enabled              = false
-
-  tags = {
-    Environment = "local"
-    ManagedBy   = "terraform"
-  }
 }
