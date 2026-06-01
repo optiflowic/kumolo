@@ -285,7 +285,7 @@ if [[ -n "$KEY_ID" ]]; then
     $AWS disable-key-rotation --key-id "$KEY_ID"
 
   ROT_RESP2=$($AWS get-key-rotation-status --key-id "$KEY_ID" 2>/dev/null || true)
-  ROT_DISABLED=$(echo "$ROT_RESP2" | jq -r '.KeyRotationEnabled // empty' 2>/dev/null || true)
+  ROT_DISABLED=$(echo "$ROT_RESP2" | jq '.KeyRotationEnabled' 2>/dev/null || true)
   if [[ "$ROT_DISABLED" == "false" ]]; then
     ok "GetKeyRotationStatus (KeyRotationEnabled=false after disable)"
   else
@@ -314,10 +314,14 @@ if [[ -n "$KEY_ID" ]]; then
     fail "ScheduleKeyDeletion (expected DeletionDate and PendingDeletion, got date='$DELETION_DATE' state='$PENDING_STATE')"
   fi
 
-  CANCEL_RESP=$($AWS cancel-key-deletion --key-id "$KEY_ID" 2>/dev/null || true)
-  CANCEL_STATE=$(echo "$CANCEL_RESP" | jq -r '.KeyMetadata.KeyState // empty' 2>/dev/null || true)
+  $AWS cancel-key-deletion --key-id "$KEY_ID" > /dev/null 2>&1 \
+    && ok "CancelKeyDeletion" \
+    || fail "CancelKeyDeletion"
+
+  CANCEL_DESC=$($AWS describe-key --key-id "$KEY_ID" 2>/dev/null || true)
+  CANCEL_STATE=$(echo "$CANCEL_DESC" | jq -r '.KeyMetadata.KeyState // empty' 2>/dev/null || true)
   if [[ "$CANCEL_STATE" == "Disabled" ]]; then
-    ok "CancelKeyDeletion (KeyState=Disabled)"
+    ok "CancelKeyDeletion (KeyState=Disabled after describe-key)"
   else
     fail "CancelKeyDeletion (expected KeyState=Disabled, got '$CANCEL_STATE')"
   fi
