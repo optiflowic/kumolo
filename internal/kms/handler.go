@@ -308,6 +308,7 @@ func (ro *Router) handleListResourceTags(w http.ResponseWriter, body []byte) {
 
 	if _, err := ro.storage.GetKeyMetadata(keyID); err != nil {
 		if errors.Is(err, ErrKeyNotFound) {
+			slog.Debug("KMS ListResourceTags: key not found", "keyID", keyID)
 			writeError(w, http.StatusBadRequest, "NotFoundException",
 				fmt.Sprintf("Invalid keyId %s", keyID))
 			return

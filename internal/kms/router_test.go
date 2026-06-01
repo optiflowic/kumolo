@@ -363,7 +363,7 @@ func TestHandleListResourceTags(t *testing.T) {
 		assertErrType(t, w, "InvalidArnException")
 	})
 
-	t.Run("404 for unknown key", func(t *testing.T) {
+	t.Run("400 for unknown key", func(t *testing.T) {
 		ro := newTestRouter(t)
 		w := kmsReq(t, ro, "ListResourceTags",
 			`{"KeyId":"00000000-0000-0000-0000-000000000001"}`)
