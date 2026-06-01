@@ -24,3 +24,6 @@ fi
 # Remove DynamoDB tables.
 $AWS dynamodb delete-table --table-name kumolo-tf-users        > /dev/null 2>&1 || true
 $AWS dynamodb delete-table --table-name kumolo-tf-streams-test > /dev/null 2>&1 || true
+
+# Remove KMS alias (key itself does not need cleanup; Terraform manages it via state).
+$AWS kms delete-alias --alias-name "alias/kumolo-tf-verify" > /dev/null 2>&1 || true

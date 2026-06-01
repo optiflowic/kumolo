@@ -413,3 +413,35 @@ func TestKMSKeyDeletion(t *testing.T) {
 		assert.Equal(t, types.KeyStateDisabled, meta.KeyMetadata.KeyState)
 	})
 }
+
+func TestKMSListResourceTags(t *testing.T) {
+	clients := newTestClients(t)
+	ctx, cancel := context.WithTimeout(context.Background(), kmsTestTimeout)
+	defer cancel()
+
+	keyID := kmsCreateKey(ctx, t, clients, "list tags test key")
+
+	t.Run("returns empty tags for a new key", func(t *testing.T) {
+		out, err := clients.kms.ListResourceTags(ctx, &awskms.ListResourceTagsInput{
+			KeyId: aws.String(keyID),
+		})
+		require.NoError(t, err)
+		assert.Empty(t, out.Tags)
+		assert.False(t, out.Truncated)
+	})
+
+	t.Run("returns NotFoundException for an unknown key ID", func(t *testing.T) {
+		_, err := clients.kms.ListResourceTags(ctx, &awskms.ListResourceTagsInput{
+			KeyId: aws.String("00000000-0000-0000-0000-000000000000"),
+		})
+		assert.Equal(t, "NotFoundException", apiErrorCode(err))
+	})
+
+	t.Run("returns InvalidMarkerException when Marker is non-empty", func(t *testing.T) {
+		_, err := clients.kms.ListResourceTags(ctx, &awskms.ListResourceTagsInput{
+			KeyId:  aws.String(keyID),
+			Marker: aws.String("invalid-marker"),
+		})
+		assert.Equal(t, "InvalidMarkerException", apiErrorCode(err))
+	})
+}

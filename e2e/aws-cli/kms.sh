@@ -62,6 +62,22 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# ListResourceTags
+# ---------------------------------------------------------------------------
+if [[ -n "$KEY_ID" ]]; then
+  LRT_RESP=$($AWS list-resource-tags --key-id "$KEY_ID" 2>/dev/null || true)
+  LRT_TAGS=$(echo "$LRT_RESP" | jq '.Tags | length' 2>/dev/null || echo -1)
+  LRT_TRUNCATED=$(echo "$LRT_RESP" | jq '.Truncated // false' 2>/dev/null || true)
+  if [[ "$LRT_TAGS" -eq 0 && "$LRT_TRUNCATED" == "false" ]]; then
+    ok "ListResourceTags (empty Tags, Truncated=false)"
+  else
+    fail "ListResourceTags (expected empty Tags and Truncated=false, got tags=$LRT_TAGS truncated=$LRT_TRUNCATED)"
+  fi
+else
+  fail "ListResourceTags (skipped: no KeyId)"
+fi
+
+# ---------------------------------------------------------------------------
 # GetKeyPolicy / PutKeyPolicy
 # ---------------------------------------------------------------------------
 if [[ -n "$KEY_ID" ]]; then
