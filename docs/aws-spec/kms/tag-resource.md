@@ -36,7 +36,7 @@ HTTP 200, empty body.
 ## kumolo notes
 
 - Tags stored as `keys/{keyID}/tags.json` (map[string]string, key→value).
-- Tag key constraints: 1–128 chars; tag value constraints: 0–256 chars.
+- Tag key constraints: 1–128 chars; tag value constraints: 0–256 chars. Tag keys starting with `aws:` are reserved for AWS use and rejected with `TagException`.
 - Limit: 50 tags per key (AWS quota).
 - Key state: Enabled or Disabled are valid; PendingDeletion → KMSInvalidStateException.
 - AWS-managed keys cannot be tagged; kumolo only creates CUSTOMER keys so this check is not needed.

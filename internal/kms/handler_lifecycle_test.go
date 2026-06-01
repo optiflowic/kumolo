@@ -840,6 +840,18 @@ func TestHandleTagResource(t *testing.T) {
 		assertErrType(t, w, "TagException")
 	})
 
+	t.Run("400 TagException for aws: reserved prefix", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{
+			"KeyId": keyID,
+			"Tags":  []map[string]string{{"TagKey": "aws:Env", "TagValue": "prod"}},
+		})
+		w := kmsReq(t, ro, "TagResource", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "TagException")
+	})
+
 	t.Run("400 TagException for tag value exceeding 256 chars", func(t *testing.T) {
 		ro := newTestRouter(t)
 		keyID := mustCreateKey(t, ro, `{}`)
@@ -1021,6 +1033,18 @@ func TestHandleUntagResource(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{
 			"KeyId":   keyID,
 			"TagKeys": []string{strings.Repeat("k", 129)},
+		})
+		w := kmsReq(t, ro, "UntagResource", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "TagException")
+	})
+
+	t.Run("400 TagException for aws: reserved prefix", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":   keyID,
+			"TagKeys": []string{"aws:Env"},
 		})
 		w := kmsReq(t, ro, "UntagResource", string(body))
 		assert.Equal(t, http.StatusBadRequest, w.Code)

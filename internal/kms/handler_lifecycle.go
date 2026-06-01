@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 )
 
 const (
@@ -278,6 +279,11 @@ func (ro *Router) handleTagResource(w http.ResponseWriter, body []byte) {
 		return
 	}
 	for _, t := range req.Tags {
+		if strings.HasPrefix(t.TagKey, "aws:") {
+			writeError(w, http.StatusBadRequest, "TagException",
+				fmt.Sprintf("Tag key %q is reserved for AWS use", t.TagKey))
+			return
+		}
 		if len(t.TagKey) < 1 || len(t.TagKey) > maxTagKeyLen {
 			writeError(w, http.StatusBadRequest, "TagException",
 				fmt.Sprintf("Tag key must be between 1 and %d characters", maxTagKeyLen))
@@ -322,6 +328,11 @@ func (ro *Router) handleUntagResource(w http.ResponseWriter, body []byte) {
 		return
 	}
 	for _, k := range req.TagKeys {
+		if strings.HasPrefix(k, "aws:") {
+			writeError(w, http.StatusBadRequest, "TagException",
+				fmt.Sprintf("Tag key %q is reserved for AWS use", k))
+			return
+		}
 		if len(k) < 1 || len(k) > maxTagKeyLen {
 			writeError(w, http.StatusBadRequest, "TagException",
 				fmt.Sprintf("Tag key must be between 1 and %d characters", maxTagKeyLen))
