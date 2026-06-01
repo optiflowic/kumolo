@@ -1143,6 +1143,19 @@ func TestHandleListResourceTags_withTags(t *testing.T) {
 		assertErrType(t, w, "ValidationException")
 	})
 
+	t.Run("200 ListResourceTags permitted for PendingDeletion key", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustTagResource(t, ro, keyID, map[string]string{"Env": "test"})
+		mustScheduleKeyDeletion(t, ro, keyID)
+
+		w := kmsReq(t, ro, "ListResourceTags", `{"KeyId":"`+keyID+`"}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Len(t, resp["Tags"].([]any), 1)
+	})
+
 	t.Run("400 InvalidMarkerException for unknown marker", func(t *testing.T) {
 		ro := newTestRouter(t)
 		keyID := mustCreateKey(t, ro, `{}`)
