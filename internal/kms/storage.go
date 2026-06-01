@@ -35,6 +35,9 @@ type Storage struct {
 // aliasLimitPerKey is the AWS-spec maximum number of aliases per key.
 const aliasLimitPerKey = 256
 
+// maxTagsPerKey is the AWS-spec maximum number of tags per key.
+const maxTagsPerKey = 50
+
 const secondsPerDay = 86400
 
 const (
@@ -713,6 +716,90 @@ func (s *Storage) GetKeyRotationStatus(keyID string) (KeyMetadata, KeyRotationCo
 		return KeyMetadata{}, KeyRotationConfig{}, fmt.Errorf("read rotation config: %w", err)
 	}
 	return meta, cfg, nil
+}
+
+func (s *Storage) GetTags(keyID string) ([]TagEntry, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.readTagsLocked(keyID)
+}
+
+func (s *Storage) readTagsLocked(keyID string) ([]TagEntry, error) {
+	if err := s.keyExistsLocked(keyID); err != nil {
+		return nil, err
+	}
+	m, err := readJSON[map[string]string](s, filepath.Join("keys", keyID, "tags.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return []TagEntry{}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read tags: %w", err)
+	}
+	entries := make([]TagEntry, 0, len(m))
+	for k, v := range m {
+		entries = append(entries, TagEntry{TagKey: k, TagValue: v})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].TagKey < entries[j].TagKey
+	})
+	return entries, nil
+}
+
+func (s *Storage) TagResource(keyID string, tags []TagEntry) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	meta, err := s.readKeyMeta(keyID)
+	if err != nil {
+		return err
+	}
+	if meta.KeyState == keyStatePendingDeletion {
+		return ErrInvalidKeyState
+	}
+
+	existing := map[string]string{}
+	m, err := readJSON[map[string]string](s, filepath.Join("keys", keyID, "tags.json"))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("read existing tags: %w", err)
+	}
+	if err == nil {
+		existing = m
+	}
+
+	for _, t := range tags {
+		existing[t.TagKey] = t.TagValue
+	}
+	if len(existing) > maxTagsPerKey {
+		return ErrTagLimitExceeded
+	}
+	return s.writeJSON(filepath.Join("keys", keyID, "tags.json"), existing)
+}
+
+func (s *Storage) UntagResource(keyID string, tagKeys []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	meta, err := s.readKeyMeta(keyID)
+	if err != nil {
+		return err
+	}
+	if meta.KeyState == keyStatePendingDeletion {
+		return ErrInvalidKeyState
+	}
+
+	existing := map[string]string{}
+	m, err := readJSON[map[string]string](s, filepath.Join("keys", keyID, "tags.json"))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("read existing tags: %w", err)
+	}
+	if err == nil {
+		existing = m
+	}
+
+	for _, k := range tagKeys {
+		delete(existing, k)
+	}
+	return s.writeJSON(filepath.Join("keys", keyID, "tags.json"), existing)
 }
 
 func (s *Storage) newKeyID() (string, error) {

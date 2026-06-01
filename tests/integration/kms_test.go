@@ -414,6 +414,108 @@ func TestKMSKeyDeletion(t *testing.T) {
 	})
 }
 
+func TestKMSTagResource(t *testing.T) {
+	clients := newTestClients(t)
+	ctx, cancel := context.WithTimeout(context.Background(), kmsTestTimeout)
+	defer cancel()
+
+	keyID := kmsCreateKey(ctx, t, clients, "tag resource test key")
+
+	t.Run("adds tags and reads them back", func(t *testing.T) {
+		_, err := clients.kms.TagResource(ctx, &awskms.TagResourceInput{
+			KeyId: aws.String(keyID),
+			Tags: []types.Tag{
+				{TagKey: aws.String("Env"), TagValue: aws.String("test")},
+				{TagKey: aws.String("Team"), TagValue: aws.String("platform")},
+			},
+		})
+		require.NoError(t, err)
+
+		out, err := clients.kms.ListResourceTags(ctx, &awskms.ListResourceTagsInput{
+			KeyId: aws.String(keyID),
+		})
+		require.NoError(t, err)
+		require.Len(t, out.Tags, 2)
+		assert.False(t, out.Truncated)
+	})
+
+	t.Run("overwrites existing tag value", func(t *testing.T) {
+		_, err := clients.kms.TagResource(ctx, &awskms.TagResourceInput{
+			KeyId: aws.String(keyID),
+			Tags:  []types.Tag{{TagKey: aws.String("Env"), TagValue: aws.String("prod")}},
+		})
+		require.NoError(t, err)
+
+		out, err := clients.kms.ListResourceTags(ctx, &awskms.ListResourceTagsInput{
+			KeyId: aws.String(keyID),
+		})
+		require.NoError(t, err)
+		var found string
+		for _, tag := range out.Tags {
+			if aws.ToString(tag.TagKey) == "Env" {
+				found = aws.ToString(tag.TagValue)
+			}
+		}
+		assert.Equal(t, "prod", found)
+	})
+
+	t.Run("returns NotFoundException for unknown key", func(t *testing.T) {
+		_, err := clients.kms.TagResource(ctx, &awskms.TagResourceInput{
+			KeyId: aws.String("00000000-0000-0000-0000-000000000000"),
+			Tags:  []types.Tag{{TagKey: aws.String("k"), TagValue: aws.String("v")}},
+		})
+		assert.Equal(t, "NotFoundException", apiErrorCode(err))
+	})
+}
+
+func TestKMSUntagResource(t *testing.T) {
+	clients := newTestClients(t)
+	ctx, cancel := context.WithTimeout(context.Background(), kmsTestTimeout)
+	defer cancel()
+
+	keyID := kmsCreateKey(ctx, t, clients, "untag resource test key")
+
+	_, err := clients.kms.TagResource(ctx, &awskms.TagResourceInput{
+		KeyId: aws.String(keyID),
+		Tags: []types.Tag{
+			{TagKey: aws.String("A"), TagValue: aws.String("1")},
+			{TagKey: aws.String("B"), TagValue: aws.String("2")},
+		},
+	})
+	require.NoError(t, err)
+
+	t.Run("removes specified tag", func(t *testing.T) {
+		_, err := clients.kms.UntagResource(ctx, &awskms.UntagResourceInput{
+			KeyId:   aws.String(keyID),
+			TagKeys: []string{"A"},
+		})
+		require.NoError(t, err)
+
+		out, err := clients.kms.ListResourceTags(ctx, &awskms.ListResourceTagsInput{
+			KeyId: aws.String(keyID),
+		})
+		require.NoError(t, err)
+		require.Len(t, out.Tags, 1)
+		assert.Equal(t, "B", aws.ToString(out.Tags[0].TagKey))
+	})
+
+	t.Run("silently ignores non-existent tag key", func(t *testing.T) {
+		_, err := clients.kms.UntagResource(ctx, &awskms.UntagResourceInput{
+			KeyId:   aws.String(keyID),
+			TagKeys: []string{"nonexistent"},
+		})
+		require.NoError(t, err)
+	})
+
+	t.Run("returns NotFoundException for unknown key", func(t *testing.T) {
+		_, err := clients.kms.UntagResource(ctx, &awskms.UntagResourceInput{
+			KeyId:   aws.String("00000000-0000-0000-0000-000000000000"),
+			TagKeys: []string{"k"},
+		})
+		assert.Equal(t, "NotFoundException", apiErrorCode(err))
+	})
+}
+
 func TestKMSListResourceTags(t *testing.T) {
 	clients := newTestClients(t)
 	ctx, cancel := context.WithTimeout(context.Background(), kmsTestTimeout)
@@ -437,11 +539,14 @@ func TestKMSListResourceTags(t *testing.T) {
 		assert.Equal(t, "NotFoundException", apiErrorCode(err))
 	})
 
-	t.Run("returns InvalidMarkerException when Marker is non-empty", func(t *testing.T) {
-		_, err := clients.kms.ListResourceTags(ctx, &awskms.ListResourceTagsInput{
-			KeyId:  aws.String(keyID),
-			Marker: aws.String("invalid-marker"),
-		})
-		assert.Equal(t, "InvalidMarkerException", apiErrorCode(err))
-	})
+	t.Run(
+		"returns InvalidMarkerException when Marker refers to unknown tag key",
+		func(t *testing.T) {
+			_, err := clients.kms.ListResourceTags(ctx, &awskms.ListResourceTagsInput{
+				KeyId:  aws.String(keyID),
+				Marker: aws.String("invalid-marker"),
+			})
+			assert.Equal(t, "InvalidMarkerException", apiErrorCode(err))
+		},
+	)
 }

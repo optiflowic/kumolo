@@ -255,6 +255,127 @@ func (ro *Router) handleGetKeyRotationStatus(w http.ResponseWriter, body []byte)
 	writeJSON(w, http.StatusOK, resp)
 }
 
+const (
+	maxTagKeyLen   = 128
+	maxTagValueLen = 256
+)
+
+func (ro *Router) handleTagResource(w http.ResponseWriter, body []byte) {
+	var req struct {
+		KeyId string     `json:"KeyId"`
+		Tags  []TagEntry `json:"Tags"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
+		return
+	}
+	if req.KeyId == "" {
+		writeError(w, http.StatusBadRequest, "ValidationException", "KeyId is required")
+		return
+	}
+	if len(req.Tags) == 0 {
+		writeError(w, http.StatusBadRequest, "ValidationException", "Tags is required")
+		return
+	}
+	for _, t := range req.Tags {
+		if len(t.TagKey) < 1 || len(t.TagKey) > maxTagKeyLen {
+			writeError(w, http.StatusBadRequest, "TagException",
+				fmt.Sprintf("Tag key must be between 1 and %d characters", maxTagKeyLen))
+			return
+		}
+		if len(t.TagValue) > maxTagValueLen {
+			writeError(w, http.StatusBadRequest, "TagException",
+				fmt.Sprintf("Tag value must be at most %d characters", maxTagValueLen))
+			return
+		}
+	}
+
+	keyID, ok := ro.resolveKeyRef(w, req.KeyId)
+	if !ok {
+		return
+	}
+
+	if err := ro.storage.TagResource(keyID, req.Tags); err != nil {
+		writeTagError(w, keyID, "TagResource", err)
+		return
+	}
+
+	slog.Info("KMS TagResource", "keyID", keyID, "count", len(req.Tags))
+	writeEmpty(w)
+}
+
+func (ro *Router) handleUntagResource(w http.ResponseWriter, body []byte) {
+	var req struct {
+		KeyId   string   `json:"KeyId"`
+		TagKeys []string `json:"TagKeys"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
+		return
+	}
+	if req.KeyId == "" {
+		writeError(w, http.StatusBadRequest, "ValidationException", "KeyId is required")
+		return
+	}
+	if len(req.TagKeys) == 0 {
+		writeError(w, http.StatusBadRequest, "ValidationException", "TagKeys is required")
+		return
+	}
+	for _, k := range req.TagKeys {
+		if len(k) < 1 || len(k) > maxTagKeyLen {
+			writeError(w, http.StatusBadRequest, "TagException",
+				fmt.Sprintf("Tag key must be between 1 and %d characters", maxTagKeyLen))
+			return
+		}
+	}
+
+	keyID, ok := ro.resolveKeyRef(w, req.KeyId)
+	if !ok {
+		return
+	}
+
+	if err := ro.storage.UntagResource(keyID, req.TagKeys); err != nil {
+		writeTagError(w, keyID, "UntagResource", err)
+		return
+	}
+
+	slog.Info("KMS UntagResource", "keyID", keyID, "count", len(req.TagKeys))
+	writeEmpty(w)
+}
+
+// writeTagError handles errors common to TagResource and UntagResource.
+func writeTagError(w http.ResponseWriter, keyID, op string, err error) {
+	switch {
+	case errors.Is(err, ErrKeyNotFound):
+		slog.Debug("KMS "+op+": key not found", "keyID", keyID)
+		writeError(w, http.StatusBadRequest, "NotFoundException",
+			fmt.Sprintf("Invalid keyId %s", keyID))
+	case errors.Is(err, ErrInvalidKeyState):
+		slog.Debug("KMS "+op+": invalid key state", "keyID", keyID)
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"KMSInvalidStateException",
+			fmt.Sprintf(
+				"KMS key %s is in a state that is not compatible with this operation",
+				keyID,
+			),
+		)
+	case errors.Is(err, ErrTagLimitExceeded):
+		slog.Debug("KMS "+op+": tag limit exceeded", "keyID", keyID)
+		writeError(w, http.StatusBadRequest, "LimitExceededException",
+			fmt.Sprintf("Key %s has reached the maximum number of tags (%d)", keyID, maxTagsPerKey))
+	default:
+		slog.Error("KMS "+op+" storage failure", "keyID", keyID, "err", err)
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			"KMSInternalException",
+			"internal server error",
+		)
+	}
+}
+
 // writeLifecycleError handles errors common to EnableKey, DisableKey,
 // ScheduleKeyDeletion, and CancelKeyDeletion.
 func writeLifecycleError(w http.ResponseWriter, keyID, op string, err error) {

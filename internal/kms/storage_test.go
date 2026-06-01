@@ -723,6 +723,193 @@ func putKeyIntoState(t *testing.T, s *Storage, keyID, state string) {
 	require.NoError(t, s.writeJSON(filepath.Join("keys", keyID, "meta.json"), meta))
 }
 
+// ---- GetTags / TagResource / UntagResource -----------------------------------
+
+func TestGetTags(t *testing.T) {
+	t.Run("returns empty slice when no tags file exists", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		keyID := newSymmetricKey(t, s)
+
+		tags, err := s.GetTags(keyID)
+		require.NoError(t, err)
+		assert.Empty(t, tags)
+	})
+
+	t.Run("returns ErrKeyNotFound for unknown key", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		_, err := s.GetTags("00000000-0000-0000-0000-000000000000")
+		require.ErrorIs(t, err, ErrKeyNotFound)
+	})
+
+	t.Run("readAll failure wrapped in error", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		keyID := newSymmetricKey(t, s)
+
+		// Seed a tags file so readAll is called on the tags.json path.
+		require.NoError(t, s.TagResource(keyID, []TagEntry{{TagKey: "k", TagValue: "v"}}))
+
+		readErr := errors.New("read failed")
+		orig := s.readAll
+		calls := 0
+		s.readAll = func(r io.Reader) ([]byte, error) {
+			calls++
+			// keyExistsLocked uses statFn not readAll; first readAll call in GetTags is tags.json.
+			if calls == 1 {
+				return nil, readErr
+			}
+			return orig(r)
+		}
+		_, err := s.GetTags(keyID)
+		require.ErrorContains(t, err, "read tags")
+	})
+}
+
+func TestTagResource(t *testing.T) {
+	t.Run("adds tags and reads them back sorted", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		keyID := newSymmetricKey(t, s)
+
+		err := s.TagResource(keyID, []TagEntry{
+			{TagKey: "Z", TagValue: "last"},
+			{TagKey: "A", TagValue: "first"},
+		})
+		require.NoError(t, err)
+
+		tags, err := s.GetTags(keyID)
+		require.NoError(t, err)
+		require.Len(t, tags, 2)
+		assert.Equal(t, "A", tags[0].TagKey)
+		assert.Equal(t, "Z", tags[1].TagKey)
+	})
+
+	t.Run("overwrites existing tag value", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		keyID := newSymmetricKey(t, s)
+
+		require.NoError(t, s.TagResource(keyID, []TagEntry{{TagKey: "k", TagValue: "old"}}))
+		require.NoError(t, s.TagResource(keyID, []TagEntry{{TagKey: "k", TagValue: "new"}}))
+
+		tags, err := s.GetTags(keyID)
+		require.NoError(t, err)
+		require.Len(t, tags, 1)
+		assert.Equal(t, "new", tags[0].TagValue)
+	})
+
+	t.Run("returns ErrKeyNotFound for unknown key", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		err := s.TagResource("00000000-0000-0000-0000-000000000000",
+			[]TagEntry{{TagKey: "k", TagValue: "v"}})
+		require.ErrorIs(t, err, ErrKeyNotFound)
+	})
+
+	t.Run("returns ErrInvalidKeyState for PendingDeletion key", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		keyID := newSymmetricKey(t, s)
+		putKeyIntoState(t, s, keyID, "PendingDeletion")
+
+		err := s.TagResource(keyID, []TagEntry{{TagKey: "k", TagValue: "v"}})
+		require.ErrorIs(t, err, ErrInvalidKeyState)
+	})
+
+	t.Run("returns ErrTagLimitExceeded when exceeding 50 tags", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		keyID := newSymmetricKey(t, s)
+
+		// Add exactly 50 tags.
+		tags := make([]TagEntry, 50)
+		for i := range 50 {
+			tags[i] = TagEntry{
+				TagKey:   "key" + string(rune('A'+i%26)) + string(rune('0'+i/26)),
+				TagValue: "v",
+			}
+		}
+		require.NoError(t, s.TagResource(keyID, tags))
+
+		// Adding one more must fail.
+		err := s.TagResource(keyID, []TagEntry{{TagKey: "extra", TagValue: "v"}})
+		require.ErrorIs(t, err, ErrTagLimitExceeded)
+	})
+
+	t.Run("read existing tags failure is wrapped", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		keyID := newSymmetricKey(t, s)
+		require.NoError(t, s.TagResource(keyID, []TagEntry{{TagKey: "k", TagValue: "v"}}))
+
+		readErr := errors.New("io error")
+		orig := s.readAll
+		calls := 0
+		s.readAll = func(r io.Reader) ([]byte, error) {
+			calls++
+			if calls == 2 { // second call: tags.json
+				return nil, readErr
+			}
+			return orig(r)
+		}
+		err := s.TagResource(keyID, []TagEntry{{TagKey: "k2", TagValue: "v"}})
+		require.ErrorContains(t, err, "read existing tags")
+	})
+}
+
+func TestUntagResource(t *testing.T) {
+	t.Run("removes specified tag keys", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		keyID := newSymmetricKey(t, s)
+		require.NoError(t, s.TagResource(keyID, []TagEntry{
+			{TagKey: "A", TagValue: "1"},
+			{TagKey: "B", TagValue: "2"},
+		}))
+
+		require.NoError(t, s.UntagResource(keyID, []string{"A"}))
+
+		tags, err := s.GetTags(keyID)
+		require.NoError(t, err)
+		require.Len(t, tags, 1)
+		assert.Equal(t, "B", tags[0].TagKey)
+	})
+
+	t.Run("silently ignores non-existent tag key", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		keyID := newSymmetricKey(t, s)
+
+		err := s.UntagResource(keyID, []string{"nonexistent"})
+		require.NoError(t, err)
+	})
+
+	t.Run("returns ErrKeyNotFound for unknown key", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		err := s.UntagResource("00000000-0000-0000-0000-000000000000", []string{"k"})
+		require.ErrorIs(t, err, ErrKeyNotFound)
+	})
+
+	t.Run("returns ErrInvalidKeyState for PendingDeletion key", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		keyID := newSymmetricKey(t, s)
+		putKeyIntoState(t, s, keyID, "PendingDeletion")
+
+		err := s.UntagResource(keyID, []string{"k"})
+		require.ErrorIs(t, err, ErrInvalidKeyState)
+	})
+
+	t.Run("read existing tags failure is wrapped", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		keyID := newSymmetricKey(t, s)
+		require.NoError(t, s.TagResource(keyID, []TagEntry{{TagKey: "k", TagValue: "v"}}))
+
+		readErr := errors.New("io error")
+		orig := s.readAll
+		calls := 0
+		s.readAll = func(r io.Reader) ([]byte, error) {
+			calls++
+			if calls == 2 { // second call: tags.json
+				return nil, readErr
+			}
+			return orig(r)
+		}
+		err := s.UntagResource(keyID, []string{"k"})
+		require.ErrorContains(t, err, "read existing tags")
+	})
+}
+
 func TestEnableKey(t *testing.T) {
 	t.Run("Disabled→Enabled", func(t *testing.T) {
 		s, _ := newTestStorage(t)
