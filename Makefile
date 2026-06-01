@@ -48,6 +48,7 @@ integration:
 e2e:
 	./e2e/aws-cli/s3.sh
 	./e2e/aws-cli/dynamodb.sh
+	./e2e/aws-cli/kms.sh
 
 e2e-terraform:
 	./e2e/terraform/cleanup.sh

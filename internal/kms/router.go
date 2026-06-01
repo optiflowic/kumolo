@@ -95,6 +95,8 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ro.handleDisableKeyRotation(w, body)
 	case "GetKeyRotationStatus":
 		ro.handleGetKeyRotationStatus(w, body)
+	case "ListResourceTags":
+		ro.handleListResourceTags(w, body)
 	default:
 		slog.Debug( // #nosec G706 -- target comes from the X-Amz-Target header; log injection risk accepted for a local dev emulator
 			"KMS operation not implemented",

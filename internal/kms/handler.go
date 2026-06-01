@@ -9,6 +9,22 @@ import (
 	"sort"
 )
 
+func validateLimit(w http.ResponseWriter, limit *int) bool {
+	if limit != nil && (*limit < 1 || *limit > 1000) {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"ValidationException",
+			fmt.Sprintf(
+				"Value %d at 'limit' failed to satisfy constraint: Member must have value between 1 and 1000, inclusive",
+				*limit,
+			),
+		)
+		return false
+	}
+	return true
+}
+
 func (ro *Router) handleCreateKey(w http.ResponseWriter, body []byte) {
 	var req struct {
 		Description                    string `json:"Description"`
@@ -191,20 +207,11 @@ func (ro *Router) handleListKeys(w http.ResponseWriter, body []byte) {
 		return
 	}
 
+	if !validateLimit(w, req.Limit) {
+		return
+	}
 	limit := 100
 	if req.Limit != nil {
-		if *req.Limit < 1 || *req.Limit > 1000 {
-			writeError(
-				w,
-				http.StatusBadRequest,
-				"ValidationException",
-				fmt.Sprintf(
-					"Value %d at 'limit' failed to satisfy constraint: Member must have value between 1 and 1000, inclusive",
-					*req.Limit,
-				),
-			)
-			return
-		}
 		limit = *req.Limit
 	}
 
@@ -268,6 +275,59 @@ func (ro *Router) handleListKeys(w http.ResponseWriter, body []byte) {
 
 	slog.Debug("KMS ListKeys", "count", len(entries))
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (ro *Router) handleListResourceTags(w http.ResponseWriter, body []byte) {
+	var req struct {
+		KeyId  string `json:"KeyId"`
+		Limit  *int   `json:"Limit"`
+		Marker string `json:"Marker"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
+		return
+	}
+	if req.KeyId == "" {
+		writeError(w, http.StatusBadRequest, "ValidationException", "KeyId is required")
+		return
+	}
+	if !validateLimit(w, req.Limit) {
+		return
+	}
+	// No tags can ever exist (tag management not implemented), so any Marker is invalid.
+	if req.Marker != "" {
+		writeError(w, http.StatusBadRequest, "InvalidMarkerException",
+			fmt.Sprintf("The marker %s is not valid", req.Marker))
+		return
+	}
+
+	keyID, ok := ro.resolveKeyRef(w, req.KeyId)
+	if !ok {
+		return
+	}
+
+	if _, err := ro.storage.GetKeyMetadata(keyID); err != nil {
+		if errors.Is(err, ErrKeyNotFound) {
+			slog.Debug("KMS ListResourceTags: key not found", "keyID", keyID)
+			writeError(w, http.StatusBadRequest, "NotFoundException",
+				fmt.Sprintf("Invalid keyId %s", keyID))
+			return
+		}
+		slog.Error("ListResourceTags storage failure", "err", err)
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			"KMSInternalException",
+			"internal server error",
+		)
+		return
+	}
+
+	slog.Debug("KMS ListResourceTags", "keyID", keyID)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"Tags":      []any{},
+		"Truncated": false,
+	})
 }
 
 // resolveKeyMeta fetches key metadata and validates the key is not in
