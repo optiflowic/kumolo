@@ -11,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	awsdynamodb "github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	awsstreams "github.com/aws/aws-sdk-go-v2/service/dynamodbstreams"
+	awskms "github.com/aws/aws-sdk-go-v2/service/kms"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	awssts "github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/aws/smithy-go"
@@ -23,6 +24,7 @@ type testClients struct {
 	ddb     *awsdynamodb.Client
 	streams *awsstreams.Client
 	sts     *awssts.Client
+	kms     *awskms.Client
 }
 
 // apiErrorCode extracts the AWS error code from an SDK error.
@@ -64,5 +66,6 @@ func newTestClients(t *testing.T) testClients {
 		ddb:     awsdynamodb.NewFromConfig(cfg),
 		streams: awsstreams.NewFromConfig(cfg),
 		sts:     awssts.NewFromConfig(cfg),
+		kms:     awskms.NewFromConfig(cfg),
 	}
 }
