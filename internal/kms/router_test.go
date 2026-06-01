@@ -360,6 +360,7 @@ func TestHandleListResourceTags(t *testing.T) {
 		w := kmsReq(t, ro, "ListResourceTags",
 			`{"KeyId":"arn:aws:kms:us-east-1:123456789012:invalid"}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "InvalidArnException")
 	})
 
 	t.Run("404 for unknown key", func(t *testing.T) {
