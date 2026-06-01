@@ -30,4 +30,4 @@ HTTP 200, empty body.
 
 - Removing a tag key that does not exist on the key is silently ignored (no error).
 - Key state: Enabled or Disabled are valid; PendingDeletion → KMSInvalidStateException.
-- Tag key constraints: 1–128 chars.
+- Tag key constraints: 1–128 chars; keys with the reserved `aws:` prefix are rejected with TagException (same validation as TagResource).

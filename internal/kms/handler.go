@@ -9,15 +9,16 @@ import (
 	"sort"
 )
 
-func validateLimit(w http.ResponseWriter, limit *int) bool {
-	if limit != nil && (*limit < 1 || *limit > 1000) {
+func validateLimit(w http.ResponseWriter, limit *int, max int) bool {
+	if limit != nil && (*limit < 1 || *limit > max) {
 		writeError(
 			w,
 			http.StatusBadRequest,
 			"ValidationException",
 			fmt.Sprintf(
-				"Value %d at 'limit' failed to satisfy constraint: Member must have value between 1 and 1000, inclusive",
+				"Value %d at 'limit' failed to satisfy constraint: Member must have value between 1 and %d, inclusive",
 				*limit,
+				max,
 			),
 		)
 		return false
@@ -207,7 +208,7 @@ func (ro *Router) handleListKeys(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	if !validateLimit(w, req.Limit) {
+	if !validateLimit(w, req.Limit, 1000) {
 		return
 	}
 	limit := 100
@@ -291,7 +292,7 @@ func (ro *Router) handleListResourceTags(w http.ResponseWriter, body []byte) {
 		writeError(w, http.StatusBadRequest, "ValidationException", "KeyId is required")
 		return
 	}
-	if !validateLimit(w, req.Limit) {
+	if !validateLimit(w, req.Limit, 50) {
 		return
 	}
 

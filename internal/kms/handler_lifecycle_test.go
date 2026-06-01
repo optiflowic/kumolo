@@ -1125,6 +1125,24 @@ func TestHandleListResourceTags_withTags(t *testing.T) {
 		assert.Equal(t, "C", page2["Tags"].([]any)[0].(map[string]any)["TagKey"])
 	})
 
+	t.Run("400 ValidationException for Limit > 50", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{"KeyId": keyID, "Limit": 51})
+		w := kmsReq(t, ro, "ListResourceTags", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 ValidationException for Limit = 0", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{"KeyId": keyID, "Limit": 0})
+		w := kmsReq(t, ro, "ListResourceTags", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
 	t.Run("400 InvalidMarkerException for unknown marker", func(t *testing.T) {
 		ro := newTestRouter(t)
 		keyID := mustCreateKey(t, ro, `{}`)
