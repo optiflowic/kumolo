@@ -306,6 +306,79 @@ func TestHandleListKeys(t *testing.T) {
 	})
 }
 
+func TestHandleListResourceTags(t *testing.T) {
+	t.Run("returns empty tags for existing key", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		w := kmsReq(t, ro, "ListResourceTags", `{"KeyId":"`+keyID+`"}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, []any{}, resp["Tags"])
+		assert.Equal(t, false, resp["Truncated"])
+	})
+
+	t.Run("400 for invalid JSON", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "ListResourceTags", `{bad json}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 when KeyId is missing", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "ListResourceTags", `{}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 for Limit less than 1", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "ListResourceTags", `{"KeyId":"some-id","Limit":0}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 for Limit greater than 1000", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "ListResourceTags", `{"KeyId":"some-id","Limit":1001}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 for non-empty Marker", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		w := kmsReq(t, ro, "ListResourceTags", `{"KeyId":"`+keyID+`","Marker":"some-marker"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "InvalidMarkerException")
+	})
+
+	t.Run("400 for invalid ARN format", func(t *testing.T) {
+		ro := newTestRouter(t)
+		// ARN prefix without ":key/" makes resolveKeyRef return !ok.
+		w := kmsReq(t, ro, "ListResourceTags",
+			`{"KeyId":"arn:aws:kms:us-east-1:123456789012:invalid"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("404 for unknown key", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "ListResourceTags",
+			`{"KeyId":"00000000-0000-0000-0000-000000000001"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "NotFoundException")
+	})
+
+	t.Run("500 on storage failure", func(t *testing.T) {
+		ro := newFailRouter()
+		w := kmsReq(t, ro, "ListResourceTags",
+			`{"KeyId":"00000000-0000-0000-0000-000000000001"}`)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assertErrType(t, w, "KMSInternalException")
+	})
+}
+
 func TestHandleGetKeyPolicy(t *testing.T) {
 	t.Run("returns default policy", func(t *testing.T) {
 		ro := newTestRouter(t)
