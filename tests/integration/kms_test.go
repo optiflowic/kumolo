@@ -1,7 +1,6 @@
 package integration_test
 
 import (
-	"bytes"
 	"context"
 	"testing"
 
@@ -108,7 +107,7 @@ func TestKMSIntegration(t *testing.T) {
 			CiphertextBlob: encOut.CiphertextBlob,
 		})
 		require.NoError(t, err)
-		assert.True(t, bytes.Equal(plaintext, decOut.Plaintext))
+		assert.Equal(t, plaintext, decOut.Plaintext)
 	})
 
 	t.Run("Encrypt_Decrypt_with_context", func(t *testing.T) {
@@ -127,7 +126,7 @@ func TestKMSIntegration(t *testing.T) {
 			EncryptionContext: encCtx,
 		})
 		require.NoError(t, err)
-		assert.True(t, bytes.Equal(plaintext, decOut.Plaintext))
+		assert.Equal(t, plaintext, decOut.Plaintext)
 
 		_, err = clients.kms.Decrypt(ctx, &awskms.DecryptInput{
 			CiphertextBlob:    encOut.CiphertextBlob,
@@ -150,7 +149,7 @@ func TestKMSIntegration(t *testing.T) {
 			CiphertextBlob: out.CiphertextBlob,
 		})
 		require.NoError(t, err)
-		assert.True(t, bytes.Equal(out.Plaintext, decOut.Plaintext))
+		assert.Equal(t, out.Plaintext, decOut.Plaintext)
 	})
 
 	t.Run("GenerateDataKeyWithoutPlaintext", func(t *testing.T) {
