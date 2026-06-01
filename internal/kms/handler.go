@@ -270,6 +270,67 @@ func (ro *Router) handleListKeys(w http.ResponseWriter, body []byte) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+func (ro *Router) handleListResourceTags(w http.ResponseWriter, body []byte) {
+	var req struct {
+		KeyId  string `json:"KeyId"`
+		Limit  *int   `json:"Limit"`
+		Marker string `json:"Marker"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
+		return
+	}
+	if req.KeyId == "" {
+		writeError(w, http.StatusBadRequest, "ValidationException", "KeyId is required")
+		return
+	}
+	if req.Limit != nil && (*req.Limit < 1 || *req.Limit > 1000) {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"ValidationException",
+			fmt.Sprintf(
+				"Value %d at 'limit' failed to satisfy constraint: Member must have value between 1 and 1000, inclusive",
+				*req.Limit,
+			),
+		)
+		return
+	}
+	// No tags can ever exist (tag management not implemented), so any Marker is invalid.
+	if req.Marker != "" {
+		writeError(w, http.StatusBadRequest, "InvalidMarkerException",
+			fmt.Sprintf("The marker %s is not valid", req.Marker))
+		return
+	}
+
+	keyID, ok := ro.resolveKeyRef(w, req.KeyId)
+	if !ok {
+		return
+	}
+
+	if _, err := ro.storage.GetKeyMetadata(keyID); err != nil {
+		if errors.Is(err, ErrKeyNotFound) {
+			writeError(w, http.StatusBadRequest, "NotFoundException",
+				fmt.Sprintf("Invalid keyId %s", keyID))
+			return
+		}
+		slog.Error("ListResourceTags storage failure", "err", err)
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			"KMSInternalException",
+			"internal server error",
+		)
+		return
+	}
+
+	slog.Debug("KMS ListResourceTags", "keyID", keyID)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"Tags":      []any{},
+		"Truncated": false,
+	})
+}
+
 // resolveKeyMeta fetches key metadata and validates the key is not in
 // PendingDeletion state. It writes the appropriate error response and returns
 // false if the caller should stop processing.
