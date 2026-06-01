@@ -25,5 +25,6 @@ provider "aws" {
     s3       = var.kumolo_endpoint
     dynamodb = var.kumolo_endpoint
     sts      = var.kumolo_endpoint
+    kms      = var.kumolo_endpoint
   }
 }

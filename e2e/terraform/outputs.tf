@@ -24,3 +24,19 @@ output "dynamodb_stream_table" {
 output "dynamodb_stream_arn" {
   value = aws_dynamodb_table.stream_test.stream_arn
 }
+
+output "kms_key_id" {
+  value = aws_kms_key.main.key_id
+}
+
+output "kms_key_arn" {
+  value = aws_kms_key.main.arn
+}
+
+output "kms_alias" {
+  value = aws_kms_alias.main.name
+}
+
+output "kms_disabled_key_id" {
+  value = aws_kms_key.disabled.key_id
+}
