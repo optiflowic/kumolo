@@ -2,7 +2,9 @@ package integration_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awskms "github.com/aws/aws-sdk-go-v2/service/kms"
@@ -11,16 +13,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestKMSIntegration runs sub-tests sequentially against shared state.
-// Each sub-test depends on the state left by the previous one; order matters.
-func TestKMSIntegration(t *testing.T) {
+const kmsTestTimeout = 30 * time.Second
+
+func kmsCreateKey(t *testing.T, clients testClients, ctx context.Context, desc string) string {
+	t.Helper()
+	out, err := clients.kms.CreateKey(ctx, &awskms.CreateKeyInput{
+		Description: aws.String(desc),
+	})
+	require.NoError(t, err)
+	return aws.ToString(out.KeyMetadata.KeyId)
+}
+
+func TestKMSKeyCreation(t *testing.T) {
 	clients := newTestClients(t)
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), kmsTestTimeout)
+	defer cancel()
 
-	var keyID string  // created in CreateKey, reused by subsequent sub-tests
-	var key2ID string // second key for UpdateAlias compatibility test
-
-	t.Run("CreateKey", func(t *testing.T) {
+	t.Run("creates a symmetric encrypt/decrypt key with the given description", func(t *testing.T) {
 		out, err := clients.kms.CreateKey(ctx, &awskms.CreateKeyInput{
 			Description: aws.String("integration test key"),
 		})
@@ -32,19 +41,17 @@ func TestKMSIntegration(t *testing.T) {
 		assert.Equal(t, types.KeyUsageTypeEncryptDecrypt, out.KeyMetadata.KeyUsage)
 		assert.Equal(t, types.KeyStateEnabled, out.KeyMetadata.KeyState)
 		assert.True(t, out.KeyMetadata.Enabled)
-		keyID = aws.ToString(out.KeyMetadata.KeyId)
 	})
+}
 
-	t.Run("CreateKey_second", func(t *testing.T) {
-		out, err := clients.kms.CreateKey(ctx, &awskms.CreateKeyInput{
-			Description: aws.String("integration test key 2"),
-		})
-		require.NoError(t, err)
-		require.NotNil(t, out.KeyMetadata)
-		key2ID = aws.ToString(out.KeyMetadata.KeyId)
-	})
+func TestKMSKeyDescribeAndList(t *testing.T) {
+	clients := newTestClients(t)
+	ctx, cancel := context.WithTimeout(context.Background(), kmsTestTimeout)
+	defer cancel()
 
-	t.Run("DescribeKey", func(t *testing.T) {
+	keyID := kmsCreateKey(t, clients, ctx, "integration test key")
+
+	t.Run("returns metadata for a known key", func(t *testing.T) {
 		out, err := clients.kms.DescribeKey(ctx, &awskms.DescribeKeyInput{
 			KeyId: aws.String(keyID),
 		})
@@ -53,7 +60,7 @@ func TestKMSIntegration(t *testing.T) {
 		assert.Equal(t, "integration test key", aws.ToString(out.KeyMetadata.Description))
 	})
 
-	t.Run("ListKeys", func(t *testing.T) {
+	t.Run("includes the created key in list results", func(t *testing.T) {
 		out, err := clients.kms.ListKeys(ctx, &awskms.ListKeysInput{})
 		require.NoError(t, err)
 		var found bool
@@ -65,8 +72,16 @@ func TestKMSIntegration(t *testing.T) {
 		}
 		assert.True(t, found, "created key should appear in ListKeys")
 	})
+}
 
-	t.Run("GetKeyPolicy", func(t *testing.T) {
+func TestKMSKeyPolicy(t *testing.T) {
+	clients := newTestClients(t)
+	ctx, cancel := context.WithTimeout(context.Background(), kmsTestTimeout)
+	defer cancel()
+
+	keyID := kmsCreateKey(t, clients, ctx, "policy test key")
+
+	t.Run("returns the default policy for a new key", func(t *testing.T) {
 		out, err := clients.kms.GetKeyPolicy(ctx, &awskms.GetKeyPolicyInput{
 			KeyId:      aws.String(keyID),
 			PolicyName: aws.String("default"),
@@ -76,7 +91,7 @@ func TestKMSIntegration(t *testing.T) {
 		assert.Equal(t, "default", aws.ToString(out.PolicyName))
 	})
 
-	t.Run("PutKeyPolicy", func(t *testing.T) {
+	t.Run("reflects the updated policy after PutKeyPolicy", func(t *testing.T) {
 		policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::000000000000:root"},"Action":"kms:*","Resource":"*"}]}`
 		_, err := clients.kms.PutKeyPolicy(ctx, &awskms.PutKeyPolicyInput{
 			KeyId:      aws.String(keyID),
@@ -90,10 +105,22 @@ func TestKMSIntegration(t *testing.T) {
 			PolicyName: aws.String("default"),
 		})
 		require.NoError(t, err)
-		assert.Equal(t, policy, aws.ToString(out.Policy))
-	})
 
-	t.Run("Encrypt_Decrypt_roundtrip", func(t *testing.T) {
+		var want, got any
+		require.NoError(t, json.Unmarshal([]byte(policy), &want))
+		require.NoError(t, json.Unmarshal([]byte(aws.ToString(out.Policy)), &got))
+		assert.Equal(t, want, got)
+	})
+}
+
+func TestKMSEncryptDecrypt(t *testing.T) {
+	clients := newTestClients(t)
+	ctx, cancel := context.WithTimeout(context.Background(), kmsTestTimeout)
+	defer cancel()
+
+	keyID := kmsCreateKey(t, clients, ctx, "encrypt test key")
+
+	t.Run("decrypted ciphertext matches the original plaintext", func(t *testing.T) {
 		plaintext := []byte("hello kumolo KMS")
 
 		encOut, err := clients.kms.Encrypt(ctx, &awskms.EncryptInput{
@@ -110,7 +137,7 @@ func TestKMSIntegration(t *testing.T) {
 		assert.Equal(t, plaintext, decOut.Plaintext)
 	})
 
-	t.Run("Encrypt_Decrypt_with_context", func(t *testing.T) {
+	t.Run("decrypts successfully with matching encryption context", func(t *testing.T) {
 		plaintext := []byte("context-bound plaintext")
 		encCtx := map[string]string{"env": "test", "app": "kumolo"}
 
@@ -127,32 +154,57 @@ func TestKMSIntegration(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.Equal(t, plaintext, decOut.Plaintext)
-
-		_, err = clients.kms.Decrypt(ctx, &awskms.DecryptInput{
-			CiphertextBlob:    encOut.CiphertextBlob,
-			EncryptionContext: map[string]string{"env": "wrong"},
-		})
-		assert.Equal(t, "InvalidCiphertextException", apiErrorCode(err))
 	})
 
-	t.Run("GenerateDataKey", func(t *testing.T) {
-		out, err := clients.kms.GenerateDataKey(ctx, &awskms.GenerateDataKeyInput{
-			KeyId:   aws.String(keyID),
-			KeySpec: types.DataKeySpecAes256,
-		})
-		require.NoError(t, err)
-		assert.Len(t, out.Plaintext, 32)
-		assert.NotEmpty(t, out.CiphertextBlob)
+	t.Run(
+		"returns InvalidCiphertextException when encryption context does not match",
+		func(t *testing.T) {
+			plaintext := []byte("context-bound plaintext")
+			encCtx := map[string]string{"env": "test", "app": "kumolo"}
 
-		// Decrypt the wrapped data key to verify it matches the plaintext.
-		decOut, err := clients.kms.Decrypt(ctx, &awskms.DecryptInput{
-			CiphertextBlob: out.CiphertextBlob,
-		})
-		require.NoError(t, err)
-		assert.Equal(t, out.Plaintext, decOut.Plaintext)
-	})
+			encOut, err := clients.kms.Encrypt(ctx, &awskms.EncryptInput{
+				KeyId:             aws.String(keyID),
+				Plaintext:         plaintext,
+				EncryptionContext: encCtx,
+			})
+			require.NoError(t, err)
 
-	t.Run("GenerateDataKeyWithoutPlaintext", func(t *testing.T) {
+			_, err = clients.kms.Decrypt(ctx, &awskms.DecryptInput{
+				CiphertextBlob:    encOut.CiphertextBlob,
+				EncryptionContext: map[string]string{"env": "wrong"},
+			})
+			assert.Equal(t, "InvalidCiphertextException", apiErrorCode(err))
+		},
+	)
+}
+
+func TestKMSDataKeys(t *testing.T) {
+	clients := newTestClients(t)
+	ctx, cancel := context.WithTimeout(context.Background(), kmsTestTimeout)
+	defer cancel()
+
+	keyID := kmsCreateKey(t, clients, ctx, "data key test key")
+
+	t.Run(
+		"generates a 256-bit data key and wrapped ciphertext that decrypts to the same key",
+		func(t *testing.T) {
+			out, err := clients.kms.GenerateDataKey(ctx, &awskms.GenerateDataKeyInput{
+				KeyId:   aws.String(keyID),
+				KeySpec: types.DataKeySpecAes256,
+			})
+			require.NoError(t, err)
+			assert.Len(t, out.Plaintext, 32)
+			assert.NotEmpty(t, out.CiphertextBlob)
+
+			decOut, err := clients.kms.Decrypt(ctx, &awskms.DecryptInput{
+				CiphertextBlob: out.CiphertextBlob,
+			})
+			require.NoError(t, err)
+			assert.Equal(t, out.Plaintext, decOut.Plaintext)
+		},
+	)
+
+	t.Run("generates a 128-bit wrapped data key without returning plaintext", func(t *testing.T) {
 		out, err := clients.kms.GenerateDataKeyWithoutPlaintext(
 			ctx,
 			&awskms.GenerateDataKeyWithoutPlaintextInput{
@@ -163,23 +215,31 @@ func TestKMSIntegration(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotEmpty(t, out.CiphertextBlob)
 
-		// Decrypt the wrapped data key and verify it is 16 bytes (AES-128).
 		decOut, err := clients.kms.Decrypt(ctx, &awskms.DecryptInput{
 			CiphertextBlob: out.CiphertextBlob,
 		})
 		require.NoError(t, err)
 		assert.Len(t, decOut.Plaintext, 16)
 	})
+}
 
-	t.Run("CreateAlias", func(t *testing.T) {
+func TestKMSAliasOperations(t *testing.T) {
+	clients := newTestClients(t)
+	ctx, cancel := context.WithTimeout(context.Background(), kmsTestTimeout)
+	defer cancel()
+
+	keyID := kmsCreateKey(t, clients, ctx, "alias test key 1")
+	key2ID := kmsCreateKey(t, clients, ctx, "alias test key 2")
+
+	// Subtests below are sequential: each depends on state set by the previous one.
+
+	t.Run("creates an alias and the alias appears in ListAliases for the key", func(t *testing.T) {
 		_, err := clients.kms.CreateAlias(ctx, &awskms.CreateAliasInput{
 			AliasName:   aws.String("alias/integration-test"),
 			TargetKeyId: aws.String(keyID),
 		})
 		require.NoError(t, err)
-	})
 
-	t.Run("ListAliases", func(t *testing.T) {
 		out, err := clients.kms.ListAliases(ctx, &awskms.ListAliasesInput{
 			KeyId: aws.String(keyID),
 		})
@@ -194,7 +254,7 @@ func TestKMSIntegration(t *testing.T) {
 		assert.True(t, found, "created alias should appear in ListAliases")
 	})
 
-	t.Run("DescribeKey_via_alias", func(t *testing.T) {
+	t.Run("DescribeKey resolves the target key when called with an alias", func(t *testing.T) {
 		out, err := clients.kms.DescribeKey(ctx, &awskms.DescribeKeyInput{
 			KeyId: aws.String("alias/integration-test"),
 		})
@@ -202,7 +262,7 @@ func TestKMSIntegration(t *testing.T) {
 		assert.Equal(t, keyID, aws.ToString(out.KeyMetadata.KeyId))
 	})
 
-	t.Run("UpdateAlias", func(t *testing.T) {
+	t.Run("UpdateAlias retargets the alias to a different key", func(t *testing.T) {
 		_, err := clients.kms.UpdateAlias(ctx, &awskms.UpdateAliasInput{
 			AliasName:   aws.String("alias/integration-test"),
 			TargetKeyId: aws.String(key2ID),
@@ -216,7 +276,7 @@ func TestKMSIntegration(t *testing.T) {
 		assert.Equal(t, key2ID, aws.ToString(out.KeyMetadata.KeyId))
 	})
 
-	t.Run("DeleteAlias", func(t *testing.T) {
+	t.Run("DescribeKey returns NotFoundException after the alias is deleted", func(t *testing.T) {
 		_, err := clients.kms.DeleteAlias(ctx, &awskms.DeleteAliasInput{
 			AliasName: aws.String("alias/integration-test"),
 		})
@@ -227,8 +287,18 @@ func TestKMSIntegration(t *testing.T) {
 		})
 		assert.Equal(t, "NotFoundException", apiErrorCode(err))
 	})
+}
 
-	t.Run("DisableKey", func(t *testing.T) {
+func TestKMSKeyStateTransitions(t *testing.T) {
+	clients := newTestClients(t)
+	ctx, cancel := context.WithTimeout(context.Background(), kmsTestTimeout)
+	defer cancel()
+
+	keyID := kmsCreateKey(t, clients, ctx, "state transition test key")
+
+	// Subtests below are sequential: DisableKey must precede EnableKey.
+
+	t.Run("Encrypt fails with DisabledException after the key is disabled", func(t *testing.T) {
 		_, err := clients.kms.DisableKey(ctx, &awskms.DisableKeyInput{
 			KeyId: aws.String(keyID),
 		})
@@ -248,7 +318,7 @@ func TestKMSIntegration(t *testing.T) {
 		assert.Equal(t, "DisabledException", apiErrorCode(err))
 	})
 
-	t.Run("EnableKey", func(t *testing.T) {
+	t.Run("Encrypt succeeds again after the key is re-enabled", func(t *testing.T) {
 		_, err := clients.kms.EnableKey(ctx, &awskms.EnableKeyInput{
 			KeyId: aws.String(keyID),
 		})
@@ -261,16 +331,24 @@ func TestKMSIntegration(t *testing.T) {
 		assert.Equal(t, types.KeyStateEnabled, out.KeyMetadata.KeyState)
 		assert.True(t, out.KeyMetadata.Enabled)
 	})
+}
 
-	t.Run("EnableKeyRotation", func(t *testing.T) {
+func TestKMSKeyRotation(t *testing.T) {
+	clients := newTestClients(t)
+	ctx, cancel := context.WithTimeout(context.Background(), kmsTestTimeout)
+	defer cancel()
+
+	keyID := kmsCreateKey(t, clients, ctx, "rotation test key")
+
+	// Subtests below are sequential: EnableKeyRotation must precede DisableKeyRotation.
+
+	t.Run("enables rotation with the specified period and status reflects it", func(t *testing.T) {
 		_, err := clients.kms.EnableKeyRotation(ctx, &awskms.EnableKeyRotationInput{
 			KeyId:                aws.String(keyID),
 			RotationPeriodInDays: aws.Int32(90),
 		})
 		require.NoError(t, err)
-	})
 
-	t.Run("GetKeyRotationStatus", func(t *testing.T) {
 		out, err := clients.kms.GetKeyRotationStatus(ctx, &awskms.GetKeyRotationStatusInput{
 			KeyId: aws.String(keyID),
 		})
@@ -279,7 +357,7 @@ func TestKMSIntegration(t *testing.T) {
 		assert.Equal(t, int32(90), aws.ToInt32(out.RotationPeriodInDays))
 	})
 
-	t.Run("DisableKeyRotation", func(t *testing.T) {
+	t.Run("disabling rotation marks the status as not enabled", func(t *testing.T) {
 		_, err := clients.kms.DisableKeyRotation(ctx, &awskms.DisableKeyRotationInput{
 			KeyId: aws.String(keyID),
 		})
@@ -291,24 +369,37 @@ func TestKMSIntegration(t *testing.T) {
 		require.NoError(t, err)
 		assert.False(t, out.KeyRotationEnabled)
 	})
+}
 
-	t.Run("ScheduleKeyDeletion", func(t *testing.T) {
-		out, err := clients.kms.ScheduleKeyDeletion(ctx, &awskms.ScheduleKeyDeletionInput{
-			KeyId:               aws.String(keyID),
-			PendingWindowInDays: aws.Int32(7),
-		})
-		require.NoError(t, err)
-		assert.Equal(t, types.KeyStatePendingDeletion, out.KeyState)
-		assert.NotNil(t, out.DeletionDate)
+func TestKMSKeyDeletion(t *testing.T) {
+	clients := newTestClients(t)
+	ctx, cancel := context.WithTimeout(context.Background(), kmsTestTimeout)
+	defer cancel()
 
-		_, err = clients.kms.Encrypt(ctx, &awskms.EncryptInput{
-			KeyId:     aws.String(keyID),
-			Plaintext: []byte("should fail"),
-		})
-		assert.Equal(t, "KMSInvalidStateException", apiErrorCode(err))
-	})
+	keyID := kmsCreateKey(t, clients, ctx, "deletion test key")
 
-	t.Run("CancelKeyDeletion", func(t *testing.T) {
+	// Subtests below are sequential: ScheduleKeyDeletion must precede CancelKeyDeletion.
+
+	t.Run(
+		"Encrypt fails with KMSInvalidStateException while key is pending deletion",
+		func(t *testing.T) {
+			out, err := clients.kms.ScheduleKeyDeletion(ctx, &awskms.ScheduleKeyDeletionInput{
+				KeyId:               aws.String(keyID),
+				PendingWindowInDays: aws.Int32(7),
+			})
+			require.NoError(t, err)
+			assert.Equal(t, types.KeyStatePendingDeletion, out.KeyState)
+			assert.NotNil(t, out.DeletionDate)
+
+			_, err = clients.kms.Encrypt(ctx, &awskms.EncryptInput{
+				KeyId:     aws.String(keyID),
+				Plaintext: []byte("should fail"),
+			})
+			assert.Equal(t, "KMSInvalidStateException", apiErrorCode(err))
+		},
+	)
+
+	t.Run("key returns to Disabled state after deletion is cancelled", func(t *testing.T) {
 		out, err := clients.kms.CancelKeyDeletion(ctx, &awskms.CancelKeyDeletionInput{
 			KeyId: aws.String(keyID),
 		})
