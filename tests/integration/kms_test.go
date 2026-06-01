@@ -15,7 +15,7 @@ import (
 
 const kmsTestTimeout = 30 * time.Second
 
-func kmsCreateKey(t *testing.T, clients testClients, ctx context.Context, desc string) string {
+func kmsCreateKey(ctx context.Context, t *testing.T, clients testClients, desc string) string {
 	t.Helper()
 	out, err := clients.kms.CreateKey(ctx, &awskms.CreateKeyInput{
 		Description: aws.String(desc),
@@ -49,7 +49,7 @@ func TestKMSKeyDescribeAndList(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), kmsTestTimeout)
 	defer cancel()
 
-	keyID := kmsCreateKey(t, clients, ctx, "integration test key")
+	keyID := kmsCreateKey(ctx, t, clients, "integration test key")
 
 	t.Run("returns metadata for a known key", func(t *testing.T) {
 		out, err := clients.kms.DescribeKey(ctx, &awskms.DescribeKeyInput{
@@ -79,7 +79,7 @@ func TestKMSKeyPolicy(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), kmsTestTimeout)
 	defer cancel()
 
-	keyID := kmsCreateKey(t, clients, ctx, "policy test key")
+	keyID := kmsCreateKey(ctx, t, clients, "policy test key")
 
 	t.Run("returns the default policy for a new key", func(t *testing.T) {
 		out, err := clients.kms.GetKeyPolicy(ctx, &awskms.GetKeyPolicyInput{
@@ -118,7 +118,7 @@ func TestKMSEncryptDecrypt(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), kmsTestTimeout)
 	defer cancel()
 
-	keyID := kmsCreateKey(t, clients, ctx, "encrypt test key")
+	keyID := kmsCreateKey(ctx, t, clients, "encrypt test key")
 
 	t.Run("decrypted ciphertext matches the original plaintext", func(t *testing.T) {
 		plaintext := []byte("hello kumolo KMS")
@@ -183,7 +183,7 @@ func TestKMSDataKeys(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), kmsTestTimeout)
 	defer cancel()
 
-	keyID := kmsCreateKey(t, clients, ctx, "data key test key")
+	keyID := kmsCreateKey(ctx, t, clients, "data key test key")
 
 	t.Run(
 		"generates a 256-bit data key and wrapped ciphertext that decrypts to the same key",
@@ -228,8 +228,8 @@ func TestKMSAliasOperations(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), kmsTestTimeout)
 	defer cancel()
 
-	keyID := kmsCreateKey(t, clients, ctx, "alias test key 1")
-	key2ID := kmsCreateKey(t, clients, ctx, "alias test key 2")
+	keyID := kmsCreateKey(ctx, t, clients, "alias test key 1")
+	key2ID := kmsCreateKey(ctx, t, clients, "alias test key 2")
 
 	// Subtests below are sequential: each depends on state set by the previous one.
 
@@ -294,7 +294,7 @@ func TestKMSKeyStateTransitions(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), kmsTestTimeout)
 	defer cancel()
 
-	keyID := kmsCreateKey(t, clients, ctx, "state transition test key")
+	keyID := kmsCreateKey(ctx, t, clients, "state transition test key")
 
 	// Subtests below are sequential: DisableKey must precede EnableKey.
 
@@ -338,7 +338,7 @@ func TestKMSKeyRotation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), kmsTestTimeout)
 	defer cancel()
 
-	keyID := kmsCreateKey(t, clients, ctx, "rotation test key")
+	keyID := kmsCreateKey(ctx, t, clients, "rotation test key")
 
 	// Subtests below are sequential: EnableKeyRotation must precede DisableKeyRotation.
 
@@ -376,7 +376,7 @@ func TestKMSKeyDeletion(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), kmsTestTimeout)
 	defer cancel()
 
-	keyID := kmsCreateKey(t, clients, ctx, "deletion test key")
+	keyID := kmsCreateKey(ctx, t, clients, "deletion test key")
 
 	// Subtests below are sequential: ScheduleKeyDeletion must precede CancelKeyDeletion.
 
