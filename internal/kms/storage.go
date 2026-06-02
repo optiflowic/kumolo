@@ -115,18 +115,21 @@ func generateKeyPair(keySpec string) ([]byte, error) {
 	case "RSA_2048":
 		k, err := generateRSAKey(2048)
 		if err != nil {
+			// untestable: generateRSAKey only fails on I/O errors from rand.Reader
 			return nil, err
 		}
 		priv = k
 	case "RSA_3072":
 		k, err := generateRSAKey(3072)
 		if err != nil {
+			// untestable: generateRSAKey only fails on I/O errors from rand.Reader
 			return nil, err
 		}
 		priv = k
 	case "RSA_4096":
 		k, err := generateRSAKey(4096)
 		if err != nil {
+			// untestable: generateRSAKey only fails on I/O errors from rand.Reader
 			return nil, err
 		}
 		priv = k
