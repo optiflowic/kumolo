@@ -147,6 +147,7 @@ func isHMACSpec(spec string) bool {
 func extractPublicKeyDER(privKeyDER []byte) ([]byte, error) {
 	priv, err := x509.ParsePKCS8PrivateKey(privKeyDER)
 	if err != nil {
+		// untestable: stored DER is always written by MarshalPKCS8PrivateKey, so parsing cannot fail
 		return nil, fmt.Errorf("parse PKCS#8 private key: %w", err)
 	}
 	var pub any
