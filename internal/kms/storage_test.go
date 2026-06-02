@@ -1,6 +1,10 @@
 package kms
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
 	"errors"
 	"io"
 	"os"
@@ -10,6 +14,16 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// testECKeyDER generates an ephemeral P-256 private key and returns its PKCS#8 DER.
+func testECKeyDER(t *testing.T) []byte {
+	t.Helper()
+	k, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	der, err := x509.MarshalPKCS8PrivateKey(k)
+	require.NoError(t, err)
+	return der
+}
 
 func newTestStorage(t *testing.T) (*Storage, string) {
 	t.Helper()
@@ -1224,4 +1238,134 @@ func TestGetKeyRotationStatus(t *testing.T) {
 		_, _, err := s.GetKeyRotationStatus(keyID)
 		require.ErrorContains(t, err, "read rotation config")
 	})
+}
+
+// ---- CreateKey: asymmetric key generation ------------------------------------
+
+func TestCreateKey_asymmetricKey_storesMaterial(t *testing.T) {
+	s, _ := newTestStorage(t)
+	der := testECKeyDER(t)
+	s.generateKeyPairFn = func(string) ([]byte, error) { return der, nil }
+	meta, err := s.CreateKey(CreateKeyInput{KeySpec: "ECC_NIST_P256", KeyUsage: "SIGN_VERIFY"})
+	require.NoError(t, err)
+
+	mat, err := s.GetKeyMaterial(meta.KeyID)
+	require.NoError(t, err)
+	assert.Equal(t, der, mat.PrivateKeyDER)
+	assert.NotEmpty(t, mat.KeyMaterialID)
+}
+
+func TestCreateKey_asymmetricUnsupportedSpec_noMaterial(t *testing.T) {
+	s, _ := newTestStorage(t)
+	// ECC_SECG_P256K1 returns nil, nil from generateKeyPair — no material.json is written.
+	meta, err := s.CreateKey(CreateKeyInput{KeySpec: "ECC_SECG_P256K1", KeyUsage: "SIGN_VERIFY"})
+	require.NoError(t, err)
+
+	_, err = s.GetKeyMaterial(meta.KeyID)
+	require.ErrorIs(t, err, ErrKeyMaterialNotFound)
+}
+
+func TestCreateKey_asymmetricKeyPairGenerationFailure(t *testing.T) {
+	s, _ := newTestStorage(t)
+	genErr := errors.New("gen failed")
+	s.generateKeyPairFn = func(string) ([]byte, error) { return nil, genErr }
+	_, err := s.CreateKey(CreateKeyInput{KeySpec: "ECC_NIST_P256", KeyUsage: "SIGN_VERIFY"})
+	require.ErrorIs(t, err, genErr)
+}
+
+func TestCreateKey_asymmetricKeyPairGenerationFailure_cleanupFailure(t *testing.T) {
+	s, _ := newTestStorage(t)
+	genErr := errors.New("gen failed")
+	s.generateKeyPairFn = func(string) ([]byte, error) { return nil, genErr }
+	var removedPaths []string
+	s.removeFile = func(name string) error {
+		removedPaths = append(removedPaths, name)
+		return errors.New("remove failed")
+	}
+	_, err := s.CreateKey(CreateKeyInput{KeySpec: "ECC_NIST_P256", KeyUsage: "SIGN_VERIFY"})
+	require.ErrorIs(t, err, genErr)
+	require.Len(t, removedPaths, 2)
+	assert.Contains(t, removedPaths[0], "meta.json")
+	assert.NotContains(t, removedPaths[1], ".json")
+}
+
+func TestCreateKey_asymmetricMaterialIDRandReadFailure(t *testing.T) {
+	s, _ := newTestStorage(t)
+	der := testECKeyDER(t)
+	s.generateKeyPairFn = func(string) ([]byte, error) { return der, nil }
+	calls := 0
+	orig := s.randRead
+	s.randRead = func(b []byte) (int, error) {
+		calls++
+		if calls == 2 { // second call: material ID bytes in the asymmetric branch
+			return 0, errors.New("rand failed")
+		}
+		return orig(b)
+	}
+	_, err := s.CreateKey(CreateKeyInput{KeySpec: "ECC_NIST_P256", KeyUsage: "SIGN_VERIFY"})
+	require.Error(t, err)
+}
+
+func TestCreateKey_asymmetricMaterialIDRandReadFailure_cleanupFailure(t *testing.T) {
+	s, _ := newTestStorage(t)
+	der := testECKeyDER(t)
+	s.generateKeyPairFn = func(string) ([]byte, error) { return der, nil }
+	calls := 0
+	orig := s.randRead
+	s.randRead = func(b []byte) (int, error) {
+		calls++
+		if calls == 2 {
+			return 0, errors.New("rand failed")
+		}
+		return orig(b)
+	}
+	s.removeFile = func(string) error { return errors.New("remove failed") }
+	_, err := s.CreateKey(CreateKeyInput{KeySpec: "ECC_NIST_P256", KeyUsage: "SIGN_VERIFY"})
+	require.Error(t, err)
+}
+
+func TestCreateKey_asymmetricMaterialWriteFailure(t *testing.T) {
+	s, _ := newTestStorage(t)
+	der := testECKeyDER(t)
+	s.generateKeyPairFn = func(string) ([]byte, error) { return der, nil }
+	wantErr := errors.New("open failed")
+	calls := 0
+	orig := s.openFile
+	s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+		calls++
+		if calls == 2 { // material.json is the second write for asymmetric keys
+			return nil, wantErr
+		}
+		return orig(name, flag, perm)
+	}
+	_, err := s.CreateKey(CreateKeyInput{KeySpec: "ECC_NIST_P256", KeyUsage: "SIGN_VERIFY"})
+	require.ErrorIs(t, err, wantErr)
+}
+
+func TestCreateKey_asymmetricMaterialWriteFailure_cleanupFailure(t *testing.T) {
+	s, _ := newTestStorage(t)
+	der := testECKeyDER(t)
+	s.generateKeyPairFn = func(string) ([]byte, error) { return der, nil }
+	wantErr := errors.New("open failed")
+	calls := 0
+	orig := s.openFile
+	s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+		calls++
+		if calls == 2 {
+			return nil, wantErr
+		}
+		return orig(name, flag, perm)
+	}
+	var removedPaths []string
+	s.removeFile = func(name string) error {
+		removedPaths = append(removedPaths, name)
+		return errors.New("remove failed")
+	}
+	_, err := s.CreateKey(CreateKeyInput{KeySpec: "ECC_NIST_P256", KeyUsage: "SIGN_VERIFY"})
+	require.ErrorIs(t, err, wantErr)
+	// meta.json, material.json, keyDir
+	require.Len(t, removedPaths, 3)
+	assert.Contains(t, removedPaths[0], "meta.json")
+	assert.Contains(t, removedPaths[1], "material.json")
+	assert.NotContains(t, removedPaths[2], ".json")
 }
