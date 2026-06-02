@@ -3623,3 +3623,491 @@ func TestHandleVerify(t *testing.T) {
 		assertErrType(t, vw, "DisabledException")
 	})
 }
+
+func TestHandleSign_inputValidation(t *testing.T) {
+	t.Run("error: invalid request body", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "Sign", "{invalid")
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("error: Message exceeds 4096 bytes", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateSignVerifyKey(t, ro, "ECC_NIST_P256")
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":            keyID,
+			"Message":          make([]byte, 4097),
+			"SigningAlgorithm": "ECDSA_SHA_256",
+		})
+		w := kmsReq(t, ro, "Sign", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("error: invalid MessageType", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateSignVerifyKey(t, ro, "ECC_NIST_P256")
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":            keyID,
+			"Message":          []byte("hello"),
+			"SigningAlgorithm": "ECDSA_SHA_256",
+			"MessageType":      "BLOB",
+		})
+		w := kmsReq(t, ro, "Sign", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("error: unsupported algorithm", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateSignVerifyKey(t, ro, "ECC_NIST_P256")
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":            keyID,
+			"Message":          []byte("hello"),
+			"SigningAlgorithm": "SM2DSA",
+		})
+		w := kmsReq(t, ro, "Sign", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("error: DIGEST length mismatch", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateSignVerifyKey(t, ro, "ECC_NIST_P256")
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":            keyID,
+			"Message":          make([]byte, 31), // SHA-256 expects 32 bytes
+			"SigningAlgorithm": "ECDSA_SHA_256",
+			"MessageType":      "DIGEST",
+		})
+		w := kmsReq(t, ro, "Sign", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("error: empty KeyId", func(t *testing.T) {
+		ro := newTestRouter(t)
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":            "",
+			"Message":          []byte("hello"),
+			"SigningAlgorithm": "ECDSA_SHA_256",
+		})
+		w := kmsReq(t, ro, "Sign", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("error: key not found", func(t *testing.T) {
+		ro := newTestRouter(t)
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":            "00000000-0000-0000-0000-000000000000",
+			"Message":          []byte("hello"),
+			"SigningAlgorithm": "ECDSA_SHA_256",
+		})
+		w := kmsReq(t, ro, "Sign", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "NotFoundException")
+	})
+
+	t.Run("error: key pending deletion", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateSignVerifyKey(t, ro, "ECC_NIST_P256")
+		sw := kmsReq(t, ro, "ScheduleKeyDeletion", `{"KeyId":"`+keyID+`","PendingWindowInDays":7}`)
+		require.Equal(t, http.StatusOK, sw.Code)
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":            keyID,
+			"Message":          []byte("hello"),
+			"SigningAlgorithm": "ECDSA_SHA_256",
+		})
+		w := kmsReq(t, ro, "Sign", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "KMSInvalidStateException")
+	})
+
+	t.Run("error: alias not found", func(t *testing.T) {
+		ro := newTestRouter(t)
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":            "alias/nonexistent-sign-key",
+			"Message":          []byte("hello"),
+			"SigningAlgorithm": "ECDSA_SHA_256",
+		})
+		w := kmsReq(t, ro, "Sign", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "NotFoundException")
+	})
+
+	t.Run("error: Ed25519 tampered signature", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateSignVerifyKey(t, ro, "ECC_NIST_EDWARDS25519")
+		msg := []byte("ed25519 message")
+		signBody, _ := json.Marshal(map[string]any{
+			"KeyId":            keyID,
+			"Message":          msg,
+			"SigningAlgorithm": "ED25519_SHA_512",
+		})
+		sw := kmsReq(t, ro, "Sign", string(signBody))
+		require.Equal(t, http.StatusOK, sw.Code)
+		var sResp map[string]any
+		require.NoError(t, json.Unmarshal(sw.Body.Bytes(), &sResp))
+		sigRaw, _ := json.Marshal(sResp["Signature"])
+		var sigBytes []byte
+		require.NoError(t, json.Unmarshal(sigRaw, &sigBytes))
+		sigBytes[0] ^= 0xFF
+
+		verBody, _ := json.Marshal(map[string]any{
+			"KeyId":            keyID,
+			"Message":          msg,
+			"Signature":        sigBytes,
+			"SigningAlgorithm": "ED25519_SHA_512",
+		})
+		vw := kmsReq(t, ro, "Verify", string(verBody))
+		assert.Equal(t, http.StatusBadRequest, vw.Code)
+		assertErrType(t, vw, "KMSInvalidSignatureException")
+	})
+}
+
+func TestHandleVerify_inputValidation(t *testing.T) {
+	t.Run("error: invalid request body", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "Verify", "{invalid")
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("error: Message exceeds 4096 bytes", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateSignVerifyKey(t, ro, "ECC_NIST_P256")
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":            keyID,
+			"Message":          make([]byte, 4097),
+			"Signature":        []byte("sig"),
+			"SigningAlgorithm": "ECDSA_SHA_256",
+		})
+		w := kmsReq(t, ro, "Verify", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("error: missing SigningAlgorithm", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateSignVerifyKey(t, ro, "ECC_NIST_P256")
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":     keyID,
+			"Message":   []byte("hello"),
+			"Signature": []byte("sig"),
+		})
+		w := kmsReq(t, ro, "Verify", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("error: invalid MessageType", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateSignVerifyKey(t, ro, "ECC_NIST_P256")
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":            keyID,
+			"Message":          []byte("hello"),
+			"Signature":        []byte("sig"),
+			"SigningAlgorithm": "ECDSA_SHA_256",
+			"MessageType":      "BLOB",
+		})
+		w := kmsReq(t, ro, "Verify", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("error: ED25519_SHA_512 with DIGEST rejected", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateSignVerifyKey(t, ro, "ECC_NIST_EDWARDS25519")
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":            keyID,
+			"Message":          []byte("hello"),
+			"Signature":        []byte("sig"),
+			"SigningAlgorithm": "ED25519_SHA_512",
+			"MessageType":      "DIGEST",
+		})
+		w := kmsReq(t, ro, "Verify", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("error: ED25519_PH_SHA_512 not supported", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateSignVerifyKey(t, ro, "ECC_NIST_EDWARDS25519")
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":            keyID,
+			"Message":          []byte("hello"),
+			"Signature":        []byte("sig"),
+			"SigningAlgorithm": "ED25519_PH_SHA_512",
+		})
+		w := kmsReq(t, ro, "Verify", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "UnsupportedOperationException")
+	})
+
+	t.Run("error: unsupported algorithm", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateSignVerifyKey(t, ro, "ECC_NIST_P256")
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":            keyID,
+			"Message":          []byte("hello"),
+			"Signature":        []byte("sig"),
+			"SigningAlgorithm": "SM2DSA",
+		})
+		w := kmsReq(t, ro, "Verify", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("error: DIGEST length mismatch", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateSignVerifyKey(t, ro, "ECC_NIST_P256")
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":            keyID,
+			"Message":          make([]byte, 31), // SHA-256 expects 32 bytes
+			"Signature":        []byte("sig"),
+			"SigningAlgorithm": "ECDSA_SHA_256",
+			"MessageType":      "DIGEST",
+		})
+		w := kmsReq(t, ro, "Verify", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+}
+
+func TestHandleGenerateMac_inputValidation(t *testing.T) {
+	t.Run("error: invalid request body", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "GenerateMac", "{invalid")
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("error: empty KeyId", func(t *testing.T) {
+		ro := newTestRouter(t)
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":        "",
+			"MacAlgorithm": "HMAC_SHA_256",
+			"Message":      []byte("hello"),
+		})
+		w := kmsReq(t, ro, "GenerateMac", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("error: key not found", func(t *testing.T) {
+		ro := newTestRouter(t)
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":        "00000000-0000-0000-0000-000000000000",
+			"MacAlgorithm": "HMAC_SHA_256",
+			"Message":      []byte("hello"),
+		})
+		w := kmsReq(t, ro, "GenerateMac", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "NotFoundException")
+	})
+
+	t.Run("error: key pending deletion", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateHMACKey(t, ro, "HMAC_256")
+		sw := kmsReq(t, ro, "ScheduleKeyDeletion", `{"KeyId":"`+keyID+`","PendingWindowInDays":7}`)
+		require.Equal(t, http.StatusOK, sw.Code)
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":        keyID,
+			"MacAlgorithm": "HMAC_SHA_256",
+			"Message":      []byte("hello"),
+		})
+		w := kmsReq(t, ro, "GenerateMac", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "KMSInvalidStateException")
+	})
+
+	t.Run("error: alias not found", func(t *testing.T) {
+		ro := newTestRouter(t)
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":        "alias/nonexistent-mac-key",
+			"MacAlgorithm": "HMAC_SHA_256",
+			"Message":      []byte("hello"),
+		})
+		w := kmsReq(t, ro, "GenerateMac", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "NotFoundException")
+	})
+}
+
+func TestHandleVerifyMac_inputValidation(t *testing.T) {
+	t.Run("error: invalid request body", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "VerifyMac", "{invalid")
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("error: missing Message", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateHMACKey(t, ro, "HMAC_256")
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":        keyID,
+			"MacAlgorithm": "HMAC_SHA_256",
+			"Mac":          []byte("mac"),
+		})
+		w := kmsReq(t, ro, "VerifyMac", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("error: Message exceeds 4096 bytes", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateHMACKey(t, ro, "HMAC_256")
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":        keyID,
+			"MacAlgorithm": "HMAC_SHA_256",
+			"Message":      make([]byte, 4097),
+			"Mac":          []byte("mac"),
+		})
+		w := kmsReq(t, ro, "VerifyMac", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("error: missing MacAlgorithm", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateHMACKey(t, ro, "HMAC_256")
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":   keyID,
+			"Message": []byte("hello"),
+			"Mac":     []byte("mac"),
+		})
+		w := kmsReq(t, ro, "VerifyMac", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("error: invalid MacAlgorithm", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateHMACKey(t, ro, "HMAC_256")
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":        keyID,
+			"MacAlgorithm": "INVALID",
+			"Message":      []byte("hello"),
+			"Mac":          []byte("mac"),
+		})
+		w := kmsReq(t, ro, "VerifyMac", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("error: empty KeyId", func(t *testing.T) {
+		ro := newTestRouter(t)
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":        "",
+			"MacAlgorithm": "HMAC_SHA_256",
+			"Message":      []byte("hello"),
+			"Mac":          []byte("mac"),
+		})
+		w := kmsReq(t, ro, "VerifyMac", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+}
+
+func TestHandleReEncrypt_inputValidation(t *testing.T) {
+	t.Run("error: invalid request body", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "ReEncrypt", "{invalid")
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("error: invalid source encryption context", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		ciphertext := mustEncryptForReEncrypt(t, ro, keyID, []byte("data"))
+		bigKey := string(make([]byte, 2049))
+		body, _ := json.Marshal(map[string]any{
+			"CiphertextBlob":          ciphertext,
+			"DestinationKeyId":        keyID,
+			"SourceEncryptionContext": map[string]string{bigKey: "v"},
+		})
+		w := kmsReq(t, ro, "ReEncrypt", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("error: invalid destination encryption context", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		ciphertext := mustEncryptForReEncrypt(t, ro, keyID, []byte("data"))
+		bigKey := string(make([]byte, 2049))
+		body, _ := json.Marshal(map[string]any{
+			"CiphertextBlob":               ciphertext,
+			"DestinationKeyId":             keyID,
+			"DestinationEncryptionContext": map[string]string{bigKey: "v"},
+		})
+		w := kmsReq(t, ro, "ReEncrypt", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("error: wrong envelope version", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		blob := make([]byte, envelopeSealedOffset+1)
+		blob[0] = 0x02 // invalid version
+		body, _ := json.Marshal(map[string]any{
+			"CiphertextBlob":   blob,
+			"DestinationKeyId": keyID,
+		})
+		w := kmsReq(t, ro, "ReEncrypt", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "InvalidCiphertextException")
+	})
+
+	t.Run("error: non-UUID embedded key ID", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		blob := make([]byte, envelopeSealedOffset+1)
+		blob[0] = envelopeVersion
+		copy(
+			blob[envelopeKeyIDOffset:envelopeKeyIDOffset+envelopeKeyIDLen],
+			"XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+		)
+		body, _ := json.Marshal(map[string]any{
+			"CiphertextBlob":   blob,
+			"DestinationKeyId": keyID,
+		})
+		w := kmsReq(t, ro, "ReEncrypt", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "InvalidCiphertextException")
+	})
+
+	t.Run("error: source key pending deletion", func(t *testing.T) {
+		ro := newTestRouter(t)
+		srcKey := mustCreateKey(t, ro, `{}`)
+		dstKey := mustCreateKey(t, ro, `{}`)
+		ciphertext := mustEncryptForReEncrypt(t, ro, srcKey, []byte("data"))
+		sw := kmsReq(t, ro, "ScheduleKeyDeletion", `{"KeyId":"`+srcKey+`","PendingWindowInDays":7}`)
+		require.Equal(t, http.StatusOK, sw.Code)
+		body, _ := json.Marshal(map[string]any{
+			"CiphertextBlob":   ciphertext,
+			"DestinationKeyId": dstKey,
+		})
+		w := kmsReq(t, ro, "ReEncrypt", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "KMSInvalidStateException")
+	})
+}
+
+func TestHandleGenerateRandom_customKeyStore(t *testing.T) {
+	t.Run("error: CustomKeyStoreId not supported", func(t *testing.T) {
+		ro := newTestRouter(t)
+		body, _ := json.Marshal(map[string]any{
+			"NumberOfBytes":    64,
+			"CustomKeyStoreId": "custom-store-id",
+		})
+		w := kmsReq(t, ro, "GenerateRandom", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "UnsupportedOperationException")
+	})
+}
