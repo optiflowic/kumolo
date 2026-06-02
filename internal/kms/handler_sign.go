@@ -76,6 +76,7 @@ func (ro *Router) resolveAndValidateSignKey(
 				fmt.Sprintf("Invalid keyId %s", keyID))
 			return KeyMetadata{}, KeyMaterial{}, false
 		}
+		// untestable: storage.GetKeyMetadata returns a non-ErrKeyNotFound error; storage I/O failures cannot be simulated in unit tests
 		slog.Error("KMS: GetKeyMetadata failure", "err", err)
 		writeError(
 			w,
@@ -125,6 +126,7 @@ func (ro *Router) resolveAndValidateSignKey(
 				))
 			return KeyMetadata{}, KeyMaterial{}, false
 		}
+		// untestable: storage.GetKeyMaterial returns a non-ErrKeyMaterialNotFound error; storage I/O failures cannot be simulated in unit tests
 		slog.Error("KMS: GetKeyMaterial failure", "err", err)
 		writeError(
 			w,
@@ -291,6 +293,7 @@ func (ro *Router) handleSign(w http.ResponseWriter, body []byte) {
 
 	sig, err := signData(mat.PrivateKeyDER, req.SigningAlgorithm, h, dataToSign)
 	if err != nil {
+		// untestable: signData only fails when the private key is malformed; keys stored via generateKeyPair are always valid
 		slog.Error("KMS Sign: sign failure", "keyID", meta.KeyID, "err", err)
 		writeError(
 			w,

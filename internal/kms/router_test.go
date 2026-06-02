@@ -3036,6 +3036,13 @@ func TestHandleReEncrypt(t *testing.T) {
 }
 
 func TestHandleGenerateRandom(t *testing.T) {
+	t.Run("error: invalid request body", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "GenerateRandom", "{invalid")
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
 	t.Run("returns random bytes of requested length", func(t *testing.T) {
 		ro := newTestRouter(t)
 		w := kmsReq(t, ro, "GenerateRandom", `{"NumberOfBytes":32}`)
@@ -3775,6 +3782,17 @@ func TestHandleVerify_inputValidation(t *testing.T) {
 		assertErrType(t, w, "ValidationException")
 	})
 
+	t.Run("error: empty Message", func(t *testing.T) {
+		ro := newTestRouter(t)
+		body, _ := json.Marshal(map[string]any{
+			"Signature":        []byte("sig"),
+			"SigningAlgorithm": "ECDSA_SHA_256",
+		})
+		w := kmsReq(t, ro, "Verify", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
 	t.Run("error: Message exceeds 4096 bytes", func(t *testing.T) {
 		ro := newTestRouter(t)
 		keyID := mustCreateSignVerifyKey(t, ro, "ECC_NIST_P256")
@@ -4097,6 +4115,21 @@ func TestHandleReEncrypt_inputValidation(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assertErrType(t, w, "KMSInvalidStateException")
 	})
+
+	t.Run("error: SourceKeyId alias not found", func(t *testing.T) {
+		ro := newTestRouter(t)
+		srcKey := mustCreateKey(t, ro, `{}`)
+		dstKey := mustCreateKey(t, ro, `{}`)
+		ciphertext := mustEncryptForReEncrypt(t, ro, srcKey, []byte("data"))
+		body, _ := json.Marshal(map[string]any{
+			"CiphertextBlob":   ciphertext,
+			"SourceKeyId":      "alias/nonexistent-src",
+			"DestinationKeyId": dstKey,
+		})
+		w := kmsReq(t, ro, "ReEncrypt", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "NotFoundException")
+	})
 }
 
 func TestHandleGenerateRandom_customKeyStore(t *testing.T) {
@@ -4110,4 +4143,109 @@ func TestHandleGenerateRandom_customKeyStore(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assertErrType(t, w, "UnsupportedOperationException")
 	})
+}
+
+func TestHandleGenerateRandom_randReadFailure(t *testing.T) {
+	dir := t.TempDir()
+	s, err := newStorage(dir, os.OpenRoot)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	ro := NewRouter(s)
+	ro.randRead = func([]byte) (int, error) { return 0, errors.New("rand failed") }
+	w := kmsReq(t, ro, "GenerateRandom", `{"NumberOfBytes":32}`)
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, "KMSInternalException")
+}
+
+func TestHandleReEncrypt_srcMaterialNotFound(t *testing.T) {
+	dir := t.TempDir()
+	s, err := newStorage(dir, os.OpenRoot)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	ro := NewRouter(s)
+	srcKey := mustCreateKey(t, ro, `{}`)
+	dstKey := mustCreateKey(t, ro, `{}`)
+	ciphertext := mustEncryptForReEncrypt(t, ro, srcKey, []byte("data"))
+	require.NoError(t, os.Remove(filepath.Join(dir, "kms", "keys", srcKey, "material.json")))
+	body, _ := json.Marshal(map[string]any{
+		"CiphertextBlob":   ciphertext,
+		"DestinationKeyId": dstKey,
+	})
+	w := kmsReq(t, ro, "ReEncrypt", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, "KMSInvalidStateException")
+}
+
+func TestHandleReEncrypt_dstMaterialNotFound(t *testing.T) {
+	dir := t.TempDir()
+	s, err := newStorage(dir, os.OpenRoot)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	ro := NewRouter(s)
+	srcKey := mustCreateKey(t, ro, `{}`)
+	dstKey := mustCreateKey(t, ro, `{}`)
+	ciphertext := mustEncryptForReEncrypt(t, ro, srcKey, []byte("data"))
+	require.NoError(t, os.Remove(filepath.Join(dir, "kms", "keys", dstKey, "material.json")))
+	body, _ := json.Marshal(map[string]any{
+		"CiphertextBlob":   ciphertext,
+		"DestinationKeyId": dstKey,
+	})
+	w := kmsReq(t, ro, "ReEncrypt", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, "KMSInvalidStateException")
+}
+
+func TestHandleReEncrypt_randReadFailure(t *testing.T) {
+	dir := t.TempDir()
+	s, err := newStorage(dir, os.OpenRoot)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	ro := NewRouter(s)
+	srcKey := mustCreateKey(t, ro, `{}`)
+	dstKey := mustCreateKey(t, ro, `{}`)
+	ciphertext := mustEncryptForReEncrypt(t, ro, srcKey, []byte("data"))
+	ro.randRead = func([]byte) (int, error) { return 0, errors.New("rand failed") }
+	body, _ := json.Marshal(map[string]any{
+		"CiphertextBlob":   ciphertext,
+		"DestinationKeyId": dstKey,
+	})
+	w := kmsReq(t, ro, "ReEncrypt", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, "KMSInternalException")
+}
+
+func TestHandleGenerateMac_materialNotFound(t *testing.T) {
+	dir := t.TempDir()
+	s, err := newStorage(dir, os.OpenRoot)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	ro := NewRouter(s)
+	keyID := mustCreateKey(t, ro, `{"KeySpec":"HMAC_256","KeyUsage":"GENERATE_VERIFY_MAC"}`)
+	require.NoError(t, os.Remove(filepath.Join(dir, "kms", "keys", keyID, "material.json")))
+	body, _ := json.Marshal(map[string]any{
+		"KeyId":        keyID,
+		"MacAlgorithm": "HMAC_SHA_256",
+		"Message":      []byte("test"),
+	})
+	w := kmsReq(t, ro, "GenerateMac", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, "KMSInvalidStateException")
+}
+
+func TestHandleSign_materialNotFound(t *testing.T) {
+	dir := t.TempDir()
+	s, err := newStorage(dir, os.OpenRoot)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	ro := NewRouter(s)
+	keyID := mustCreateKey(t, ro, `{"KeySpec":"RSA_2048","KeyUsage":"SIGN_VERIFY"}`)
+	require.NoError(t, os.Remove(filepath.Join(dir, "kms", "keys", keyID, "material.json")))
+	body, _ := json.Marshal(map[string]any{
+		"KeyId":            keyID,
+		"Message":          make([]byte, 32),
+		"SigningAlgorithm": "RSASSA_PKCS1_V1_5_SHA_256",
+	})
+	w := kmsReq(t, ro, "Sign", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, "UnsupportedOperationException")
 }

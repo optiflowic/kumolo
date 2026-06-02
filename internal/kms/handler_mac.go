@@ -52,6 +52,7 @@ func (ro *Router) resolveAndValidateMACKey(
 				fmt.Sprintf("Invalid keyId %s", keyID))
 			return KeyMetadata{}, KeyMaterial{}, false
 		}
+		// untestable: storage.GetKeyMetadata returns a non-ErrKeyNotFound error; storage I/O failures cannot be simulated in unit tests
 		slog.Error("KMS: GetKeyMetadata failure", "err", err)
 		writeError(
 			w,
@@ -100,6 +101,7 @@ func (ro *Router) resolveAndValidateMACKey(
 				fmt.Sprintf("Key material not available for key %s", keyID))
 			return KeyMetadata{}, KeyMaterial{}, false
 		}
+		// untestable: storage.GetKeyMaterial returns a non-ErrKeyMaterialNotFound error; storage I/O failures cannot be simulated in unit tests
 		slog.Error("KMS: GetKeyMaterial failure", "err", err)
 		writeError(
 			w,
