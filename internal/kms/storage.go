@@ -105,42 +105,49 @@ func generateKeyPair(keySpec string) ([]byte, error) {
 	case "RSA_2048":
 		k, err := rsa.GenerateKey(rand.Reader, 2048)
 		if err != nil {
+			// untestable: rsa.GenerateKey only fails on I/O errors from rand.Reader
 			return nil, fmt.Errorf("generate RSA_2048: %w", err)
 		}
 		priv = k
 	case "RSA_3072":
 		k, err := rsa.GenerateKey(rand.Reader, 3072)
 		if err != nil {
+			// untestable: rsa.GenerateKey only fails on I/O errors from rand.Reader
 			return nil, fmt.Errorf("generate RSA_3072: %w", err)
 		}
 		priv = k
 	case "RSA_4096":
 		k, err := rsa.GenerateKey(rand.Reader, 4096)
 		if err != nil {
+			// untestable: rsa.GenerateKey only fails on I/O errors from rand.Reader
 			return nil, fmt.Errorf("generate RSA_4096: %w", err)
 		}
 		priv = k
 	case "ECC_NIST_P256":
 		k, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 		if err != nil {
+			// untestable: ecdsa.GenerateKey only fails on I/O errors from rand.Reader
 			return nil, fmt.Errorf("generate ECC_NIST_P256: %w", err)
 		}
 		priv = k
 	case "ECC_NIST_P384":
 		k, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 		if err != nil {
+			// untestable: ecdsa.GenerateKey only fails on I/O errors from rand.Reader
 			return nil, fmt.Errorf("generate ECC_NIST_P384: %w", err)
 		}
 		priv = k
 	case "ECC_NIST_P521":
 		k, err := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
 		if err != nil {
+			// untestable: ecdsa.GenerateKey only fails on I/O errors from rand.Reader
 			return nil, fmt.Errorf("generate ECC_NIST_P521: %w", err)
 		}
 		priv = k
 	case "ECC_NIST_EDWARDS25519":
 		_, k, err := ed25519.GenerateKey(rand.Reader)
 		if err != nil {
+			// untestable: ed25519.GenerateKey only fails on I/O errors from rand.Reader
 			return nil, fmt.Errorf("generate ECC_NIST_EDWARDS25519: %w", err)
 		}
 		priv = k

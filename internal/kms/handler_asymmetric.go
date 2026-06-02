@@ -101,6 +101,7 @@ func (ro *Router) handleGetPublicKey(w http.ResponseWriter, body []byte) {
 
 	pubDER, err := extractPublicKeyDER(mat.PrivateKeyDER)
 	if err != nil {
+		// untestable: only reached if stored key material is corrupt; the normal API cannot produce this
 		slog.Error("KMS GetPublicKey: extract public key failure", "keyID", keyID, "err", err)
 		writeError(
 			w,

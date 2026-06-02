@@ -153,6 +153,19 @@ func TestHandleGetPublicKey(t *testing.T) {
 		assert.True(t, ok)
 	})
 
+	t.Run("200 RSA_4096 SIGN_VERIFY — returns RSA public key", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{"KeySpec":"RSA_4096","KeyUsage":"SIGN_VERIFY"}`)
+		w := kmsReq(t, ro, "GetPublicKey", `{"KeyId":"`+keyID+`"}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		pub, err := x509.ParsePKIXPublicKey(decodePubKeyDER(t, resp["PublicKey"]))
+		require.NoError(t, err)
+		_, ok := pub.(*rsa.PublicKey)
+		assert.True(t, ok)
+	})
+
 	t.Run("200 disabled key — GetPublicKey is allowed in Disabled state", func(t *testing.T) {
 		dir := t.TempDir()
 		s, err := newStorage(dir, os.OpenRoot)
