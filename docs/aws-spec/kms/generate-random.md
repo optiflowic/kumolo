@@ -29,5 +29,5 @@ Last verified: 2026-06-02
 
 ## kumolo Deviations
 
-- `CustomKeyStoreId` and `Recipient` parameters are not supported. If `CustomKeyStoreId` is provided, return `UnsupportedOperationException`. `Recipient` is silently ignored (or rejected — choose reject for safety).
+- `CustomKeyStoreId` is not supported. If provided, returns `UnsupportedOperationException`. `Recipient` is silently ignored.
 - Does not require a KMS key; entropy is sourced directly from `crypto/rand`.

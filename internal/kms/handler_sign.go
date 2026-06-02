@@ -32,9 +32,9 @@ func hashForSigningAlgorithm(algo string) (crypto.Hash, error) {
 	return 0, fmt.Errorf("unsupported signing algorithm: %s", algo)
 }
 
-// digestMessage hashes msg with the hash for algo.
-// For Ed25519 (hash == 0) the message is returned unchanged.
-func digestMessage(algo string, h crypto.Hash, msg []byte) []byte {
+// digestMessage hashes msg with h.
+// For Ed25519 (h == 0) the message is returned unchanged.
+func digestMessage(h crypto.Hash, msg []byte) []byte {
 	if h == 0 {
 		return msg
 	}
@@ -50,7 +50,6 @@ func digestMessage(algo string, h crypto.Hash, msg []byte) []byte {
 		d := sha512.Sum512(msg)
 		sum = d[:]
 	}
-	_ = algo
 	return sum
 }
 
@@ -263,6 +262,20 @@ func (ro *Router) handleSign(w http.ResponseWriter, body []byte) {
 		writeError(w, http.StatusBadRequest, "ValidationException", err.Error())
 		return
 	}
+	if req.MessageType == "DIGEST" && h != 0 && len(req.Message) != h.Size() {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"ValidationException",
+			fmt.Sprintf(
+				"Message length %d does not match expected digest length %d for algorithm %s",
+				len(req.Message),
+				h.Size(),
+				req.SigningAlgorithm,
+			),
+		)
+		return
+	}
 
 	meta, mat, ok := ro.resolveAndValidateSignKey(w, req.KeyID, req.SigningAlgorithm)
 	if !ok {
@@ -273,7 +286,7 @@ func (ro *Router) handleSign(w http.ResponseWriter, body []byte) {
 	if req.MessageType == "DIGEST" {
 		dataToSign = req.Message
 	} else {
-		dataToSign = digestMessage(req.SigningAlgorithm, h, req.Message)
+		dataToSign = digestMessage(h, req.Message)
 	}
 
 	sig, err := signData(mat.PrivateKeyDER, req.SigningAlgorithm, h, dataToSign)
@@ -358,6 +371,20 @@ func (ro *Router) handleVerify(w http.ResponseWriter, body []byte) {
 		writeError(w, http.StatusBadRequest, "ValidationException", err.Error())
 		return
 	}
+	if req.MessageType == "DIGEST" && h != 0 && len(req.Message) != h.Size() {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"ValidationException",
+			fmt.Sprintf(
+				"Message length %d does not match expected digest length %d for algorithm %s",
+				len(req.Message),
+				h.Size(),
+				req.SigningAlgorithm,
+			),
+		)
+		return
+	}
 
 	meta, mat, ok := ro.resolveAndValidateSignKey(w, req.KeyID, req.SigningAlgorithm)
 	if !ok {
@@ -368,7 +395,7 @@ func (ro *Router) handleVerify(w http.ResponseWriter, body []byte) {
 	if req.MessageType == "DIGEST" {
 		dataToVerify = req.Message
 	} else {
-		dataToVerify = digestMessage(req.SigningAlgorithm, h, req.Message)
+		dataToVerify = digestMessage(h, req.Message)
 	}
 
 	if err := verifyData(mat.PrivateKeyDER, req.SigningAlgorithm, h, dataToVerify, req.Signature); err != nil {

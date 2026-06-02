@@ -35,13 +35,13 @@ Last verified: 2026-06-02
 
 | Error                    | HTTP | Condition                                         |
 |--------------------------|------|---------------------------------------------------|
-| ValidationException      | 400  | Missing required params, algorithm mismatch       |
+| ValidationException      | 400  | Missing required params (CiphertextBlob, DestinationKeyId) |
 | InvalidCiphertextException| 400  | Malformed ciphertext blob                        |
 | IncorrectKeyException    | 400  | SourceKeyId does not match embedded key in blob   |
 | NotFoundException        | 400  | Source or destination key not found               |
 | DisabledException        | 400  | Source or destination key is disabled             |
 | KMSInvalidStateException | 400  | Key is pending deletion                           |
-| InvalidKeyUsageException | 400  | Key does not have ENCRYPT_DECRYPT usage           |
+| InvalidKeyUsageException | 400  | Key does not have ENCRYPT_DECRYPT usage; unsupported EncryptionAlgorithm value |
 | KMSInternalException     | 500  | Entropy failure or internal error                 |
 
 ## kumolo Deviations
