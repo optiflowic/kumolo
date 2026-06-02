@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -701,6 +702,500 @@ func TestDecrypt_pendingDeletionKey(t *testing.T) {
 	w := kmsReq(t, ro, "Decrypt", string(body))
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assertErrType(t, w, "KMSInvalidStateException")
+}
+
+// mustTagResource adds tags via the API.
+func mustTagResource(t *testing.T, ro *Router, keyID string, tags map[string]string) {
+	t.Helper()
+	entries := make([]map[string]string, 0, len(tags))
+	for k, v := range tags {
+		entries = append(entries, map[string]string{"TagKey": k, "TagValue": v})
+	}
+	body, _ := json.Marshal(map[string]any{"KeyId": keyID, "Tags": entries})
+	w := kmsReq(t, ro, "TagResource", string(body))
+	require.Equal(t, http.StatusOK, w.Code, "TagResource should succeed")
+}
+
+// ---- TagResource -------------------------------------------------------------
+
+func TestHandleTagResource(t *testing.T) {
+	t.Run("200 adds tags and reads them back via ListResourceTags", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustTagResource(t, ro, keyID, map[string]string{"Env": "test", "Team": "platform"})
+
+		w := kmsReq(t, ro, "ListResourceTags", `{"KeyId":"`+keyID+`"}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		tags := resp["Tags"].([]any)
+		assert.Len(t, tags, 2)
+		// Tags are sorted by key.
+		assert.Equal(t, "Env", tags[0].(map[string]any)["TagKey"])
+		assert.Equal(t, "test", tags[0].(map[string]any)["TagValue"])
+	})
+
+	t.Run("200 overwrites existing tag value", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustTagResource(t, ro, keyID, map[string]string{"Env": "staging"})
+		mustTagResource(t, ro, keyID, map[string]string{"Env": "prod"})
+
+		w := kmsReq(t, ro, "ListResourceTags", `{"KeyId":"`+keyID+`"}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		tags := resp["Tags"].([]any)
+		require.Len(t, tags, 1)
+		assert.Equal(t, "prod", tags[0].(map[string]any)["TagValue"])
+	})
+
+	t.Run("200 accepts empty tag value", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustTagResource(t, ro, keyID, map[string]string{"Empty": ""})
+
+		w := kmsReq(t, ro, "ListResourceTags", `{"KeyId":"`+keyID+`"}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		tags := resp["Tags"].([]any)
+		require.Len(t, tags, 1)
+		assert.Equal(t, "", tags[0].(map[string]any)["TagValue"])
+	})
+
+	t.Run("200 works on disabled key", func(t *testing.T) {
+		dir := t.TempDir()
+		s, err := newStorage(dir, os.OpenRoot)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = s.Close() })
+		ro := NewRouter(s)
+
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustDisableKey(t, s, keyID)
+
+		body, _ := json.Marshal(map[string]any{
+			"KeyId": keyID,
+			"Tags":  []map[string]string{{"TagKey": "k", "TagValue": "v"}},
+		})
+		w := kmsReq(t, ro, "TagResource", string(body))
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("400 for missing KeyId", func(t *testing.T) {
+		ro := newTestRouter(t)
+		body, _ := json.Marshal(map[string]any{
+			"Tags": []map[string]string{{"TagKey": "k", "TagValue": "v"}},
+		})
+		w := kmsReq(t, ro, "TagResource", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 for missing Tags", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		w := kmsReq(t, ro, "TagResource", `{"KeyId":"`+keyID+`"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 for empty Tags array", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{"KeyId": keyID, "Tags": []any{}})
+		w := kmsReq(t, ro, "TagResource", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 for invalid JSON", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "TagResource", `{bad json}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 TagException for empty tag key", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{
+			"KeyId": keyID,
+			"Tags":  []map[string]string{{"TagKey": "", "TagValue": "v"}},
+		})
+		w := kmsReq(t, ro, "TagResource", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "TagException")
+	})
+
+	t.Run("400 TagException for tag key exceeding 128 chars", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{
+			"KeyId": keyID,
+			"Tags":  []map[string]string{{"TagKey": strings.Repeat("k", 129), "TagValue": "v"}},
+		})
+		w := kmsReq(t, ro, "TagResource", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "TagException")
+	})
+
+	t.Run("400 TagException for aws: reserved prefix", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{
+			"KeyId": keyID,
+			"Tags":  []map[string]string{{"TagKey": "aws:Env", "TagValue": "prod"}},
+		})
+		w := kmsReq(t, ro, "TagResource", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "TagException")
+	})
+
+	t.Run("400 TagException for tag value exceeding 256 chars", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{
+			"KeyId": keyID,
+			"Tags":  []map[string]string{{"TagKey": "k", "TagValue": strings.Repeat("v", 257)}},
+		})
+		w := kmsReq(t, ro, "TagResource", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "TagException")
+	})
+
+	t.Run("400 for non-existent key", func(t *testing.T) {
+		ro := newTestRouter(t)
+		body, _ := json.Marshal(map[string]any{
+			"KeyId": "00000000-0000-0000-0000-000000000000",
+			"Tags":  []map[string]string{{"TagKey": "k", "TagValue": "v"}},
+		})
+		w := kmsReq(t, ro, "TagResource", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "NotFoundException")
+	})
+
+	t.Run("400 KMSInvalidStateException for PendingDeletion key", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustScheduleKeyDeletion(t, ro, keyID)
+		body, _ := json.Marshal(map[string]any{
+			"KeyId": keyID,
+			"Tags":  []map[string]string{{"TagKey": "k", "TagValue": "v"}},
+		})
+		w := kmsReq(t, ro, "TagResource", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "KMSInvalidStateException")
+	})
+
+	t.Run("400 LimitExceededException when exceeding 50 tags", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		// Add 50 tags first.
+		tags := make([]map[string]string, 50)
+		for i := range 50 {
+			tags[i] = map[string]string{
+				"TagKey":   "key" + string(rune('A'+i%26)) + string(rune('0'+i/26)),
+				"TagValue": "v",
+			}
+		}
+		body, _ := json.Marshal(map[string]any{"KeyId": keyID, "Tags": tags})
+		w := kmsReq(t, ro, "TagResource", string(body))
+		require.Equal(t, http.StatusOK, w.Code)
+		// Adding one more should fail.
+		extra, _ := json.Marshal(map[string]any{
+			"KeyId": keyID,
+			"Tags":  []map[string]string{{"TagKey": "extra", "TagValue": "v"}},
+		})
+		w2 := kmsReq(t, ro, "TagResource", string(extra))
+		assert.Equal(t, http.StatusBadRequest, w2.Code)
+		assertErrType(t, w2, "LimitExceededException")
+	})
+
+	t.Run("400 for alias not found", func(t *testing.T) {
+		ro := newTestRouter(t)
+		body, _ := json.Marshal(map[string]any{
+			"KeyId": "alias/nonexistent",
+			"Tags":  []map[string]string{{"TagKey": "k", "TagValue": "v"}},
+		})
+		w := kmsReq(t, ro, "TagResource", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "NotFoundException")
+	})
+
+	t.Run("500 on storage failure", func(t *testing.T) {
+		ro := newFailRouter()
+		body, _ := json.Marshal(map[string]any{
+			"KeyId": "00000000-0000-0000-0000-000000000001",
+			"Tags":  []map[string]string{{"TagKey": "k", "TagValue": "v"}},
+		})
+		w := kmsReq(t, ro, "TagResource", string(body))
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assertErrType(t, w, "KMSInternalException")
+	})
+}
+
+// ---- UntagResource -----------------------------------------------------------
+
+func TestHandleUntagResource(t *testing.T) {
+	t.Run("200 removes specified tags", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustTagResource(t, ro, keyID, map[string]string{"Env": "test", "Team": "platform"})
+
+		body, _ := json.Marshal(map[string]any{"KeyId": keyID, "TagKeys": []string{"Env"}})
+		w := kmsReq(t, ro, "UntagResource", string(body))
+		require.Equal(t, http.StatusOK, w.Code)
+		assert.Empty(t, w.Body.String())
+
+		// Verify only "Team" remains.
+		w2 := kmsReq(t, ro, "ListResourceTags", `{"KeyId":"`+keyID+`"}`)
+		require.Equal(t, http.StatusOK, w2.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &resp))
+		tags := resp["Tags"].([]any)
+		require.Len(t, tags, 1)
+		assert.Equal(t, "Team", tags[0].(map[string]any)["TagKey"])
+	})
+
+	t.Run("200 silently ignores non-existent tag key", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":   keyID,
+			"TagKeys": []string{"nonexistent"},
+		})
+		w := kmsReq(t, ro, "UntagResource", string(body))
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("200 works on disabled key", func(t *testing.T) {
+		dir := t.TempDir()
+		s, err := newStorage(dir, os.OpenRoot)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = s.Close() })
+		ro := NewRouter(s)
+
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustTagResource(t, ro, keyID, map[string]string{"k": "v"})
+		mustDisableKey(t, s, keyID)
+
+		body, _ := json.Marshal(map[string]any{"KeyId": keyID, "TagKeys": []string{"k"}})
+		w := kmsReq(t, ro, "UntagResource", string(body))
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("400 for missing KeyId", func(t *testing.T) {
+		ro := newTestRouter(t)
+		body, _ := json.Marshal(map[string]any{"TagKeys": []string{"k"}})
+		w := kmsReq(t, ro, "UntagResource", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 for missing TagKeys", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		w := kmsReq(t, ro, "UntagResource", `{"KeyId":"`+keyID+`"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 for empty TagKeys array", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{"KeyId": keyID, "TagKeys": []string{}})
+		w := kmsReq(t, ro, "UntagResource", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 for invalid JSON", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "UntagResource", `{bad json}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 TagException for empty tag key", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{"KeyId": keyID, "TagKeys": []string{""}})
+		w := kmsReq(t, ro, "UntagResource", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "TagException")
+	})
+
+	t.Run("400 TagException for tag key exceeding 128 chars", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":   keyID,
+			"TagKeys": []string{strings.Repeat("k", 129)},
+		})
+		w := kmsReq(t, ro, "UntagResource", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "TagException")
+	})
+
+	t.Run("400 TagException for aws: reserved prefix", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":   keyID,
+			"TagKeys": []string{"aws:Env"},
+		})
+		w := kmsReq(t, ro, "UntagResource", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "TagException")
+	})
+
+	t.Run("400 for non-existent key", func(t *testing.T) {
+		ro := newTestRouter(t)
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":   "00000000-0000-0000-0000-000000000000",
+			"TagKeys": []string{"k"},
+		})
+		w := kmsReq(t, ro, "UntagResource", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "NotFoundException")
+	})
+
+	t.Run("400 KMSInvalidStateException for PendingDeletion key", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustScheduleKeyDeletion(t, ro, keyID)
+		body, _ := json.Marshal(map[string]any{"KeyId": keyID, "TagKeys": []string{"k"}})
+		w := kmsReq(t, ro, "UntagResource", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "KMSInvalidStateException")
+	})
+
+	t.Run("400 for alias not found", func(t *testing.T) {
+		ro := newTestRouter(t)
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":   "alias/nonexistent",
+			"TagKeys": []string{"k"},
+		})
+		w := kmsReq(t, ro, "UntagResource", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "NotFoundException")
+	})
+
+	t.Run("500 on storage failure", func(t *testing.T) {
+		ro := newFailRouter()
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":   "00000000-0000-0000-0000-000000000001",
+			"TagKeys": []string{"k"},
+		})
+		w := kmsReq(t, ro, "UntagResource", string(body))
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assertErrType(t, w, "KMSInternalException")
+	})
+}
+
+// ---- ListResourceTags (with real tag data) -----------------------------------
+
+func TestHandleListResourceTags_withTags(t *testing.T) {
+	t.Run("pagination: Marker and NextMarker work", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustTagResource(t, ro, keyID, map[string]string{"A": "1", "B": "2", "C": "3"})
+
+		// First page: Limit=2
+		body, _ := json.Marshal(map[string]any{"KeyId": keyID, "Limit": 2})
+		w := kmsReq(t, ro, "ListResourceTags", string(body))
+		require.Equal(t, http.StatusOK, w.Code)
+		var page1 map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &page1))
+		assert.Equal(t, true, page1["Truncated"])
+		assert.Len(t, page1["Tags"].([]any), 2)
+		nextMarker := page1["NextMarker"].(string)
+		assert.Equal(t, "B", nextMarker)
+
+		// Second page using NextMarker.
+		body2, _ := json.Marshal(map[string]any{"KeyId": keyID, "Marker": nextMarker})
+		w2 := kmsReq(t, ro, "ListResourceTags", string(body2))
+		require.Equal(t, http.StatusOK, w2.Code)
+		var page2 map[string]any
+		require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &page2))
+		assert.Equal(t, false, page2["Truncated"])
+		assert.Len(t, page2["Tags"].([]any), 1)
+		assert.Equal(t, "C", page2["Tags"].([]any)[0].(map[string]any)["TagKey"])
+	})
+
+	t.Run("400 ValidationException for Limit > 50", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{"KeyId": keyID, "Limit": 51})
+		w := kmsReq(t, ro, "ListResourceTags", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 ValidationException for Limit = 0", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{"KeyId": keyID, "Limit": 0})
+		w := kmsReq(t, ro, "ListResourceTags", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("200 ListResourceTags permitted for PendingDeletion key", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustTagResource(t, ro, keyID, map[string]string{"Env": "test"})
+		mustScheduleKeyDeletion(t, ro, keyID)
+
+		w := kmsReq(t, ro, "ListResourceTags", `{"KeyId":"`+keyID+`"}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Len(t, resp["Tags"].([]any), 1)
+	})
+
+	t.Run("400 InvalidMarkerException for unknown marker", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustTagResource(t, ro, keyID, map[string]string{"A": "1"})
+
+		body, _ := json.Marshal(map[string]any{"KeyId": keyID, "Marker": "nonexistent-marker"})
+		w := kmsReq(t, ro, "ListResourceTags", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "InvalidMarkerException")
+	})
+
+	t.Run("500 on GetTags storage failure", func(t *testing.T) {
+		ro := newFailRouter()
+		w := kmsReq(t, ro, "ListResourceTags",
+			`{"KeyId":"00000000-0000-0000-0000-000000000001"}`)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assertErrType(t, w, "KMSInternalException")
+	})
+}
+
+// ---- tag roundtrip -----------------------------------------------------------
+
+func TestTagRoundtrip(t *testing.T) {
+	ro := newTestRouter(t)
+	keyID := mustCreateKey(t, ro, `{}`)
+
+	mustTagResource(t, ro, keyID, map[string]string{"Env": "dev", "App": "myapp"})
+
+	body, _ := json.Marshal(map[string]any{"KeyId": keyID, "TagKeys": []string{"Env"}})
+	w := kmsReq(t, ro, "UntagResource", string(body))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	w2 := kmsReq(t, ro, "ListResourceTags", `{"KeyId":"`+keyID+`"}`)
+	require.Equal(t, http.StatusOK, w2.Code)
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &resp))
+	tags := resp["Tags"].([]any)
+	require.Len(t, tags, 1)
+	assert.Equal(t, "App", tags[0].(map[string]any)["TagKey"])
+	assert.Equal(t, "myapp", tags[0].(map[string]any)["TagValue"])
 }
 
 func TestKeyLifecycle_scheduleAndCancelRoundtrip(t *testing.T) {

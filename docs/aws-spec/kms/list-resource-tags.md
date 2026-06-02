@@ -31,11 +31,12 @@
 
 ## kumolo Implementation Notes
 
-- Tag management (TagResource / UntagResource) is not implemented; all keys
-  have zero tags. ListResourceTags always returns `{"Tags": [], "Truncated": false}`.
+- Tags stored in `keys/{keyID}/tags.json` as `map[string]string`. See `tag-resource.md`.
+- Tags returned sorted by TagKey (ascending).
+- Pagination: Marker is a TagKey value from a previous response's NextMarker.
+  InvalidMarkerException if the marker is not found in the current tag list.
+- Default Limit is 50 (not 100). AWS docs don't specify the default; 50 matches
+  observed real-AWS behavior.
 - KeyId is validated: NotFoundException returned for unknown keys.
 - PendingDeletion keys: AWS allows ListResourceTags on PendingDeletion keys;
   kumolo follows the same behavior (no state check beyond key existence).
-- Marker/Limit: accepted in the request but Truncated is always false, so
-  NextMarker is never returned. A non-empty Marker is rejected with
-  InvalidMarkerException (no valid marker can ever exist).

@@ -28,6 +28,9 @@ type store interface {
 	EnableKeyRotation(keyID string, rotationPeriodInDays int) error
 	DisableKeyRotation(keyID string) error
 	GetKeyRotationStatus(keyID string) (KeyMetadata, KeyRotationConfig, error)
+	GetTags(keyID string) ([]TagEntry, error)
+	TagResource(keyID string, tags []TagEntry) error
+	UntagResource(keyID string, tagKeys []string) error
 }
 
 // Router handles KMS API requests dispatched via the X-Amz-Target header.
@@ -97,6 +100,10 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ro.handleGetKeyRotationStatus(w, body)
 	case "ListResourceTags":
 		ro.handleListResourceTags(w, body)
+	case "TagResource":
+		ro.handleTagResource(w, body)
+	case "UntagResource":
+		ro.handleUntagResource(w, body)
 	default:
 		slog.Debug( // #nosec G706 -- target comes from the X-Amz-Target header; log injection risk accepted for a local dev emulator
 			"KMS operation not implemented",

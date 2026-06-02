@@ -670,6 +670,23 @@ func (a *alwaysFailStore) DisableKeyRotation(
 func (a *alwaysFailStore) GetKeyRotationStatus(string) (KeyMetadata, KeyRotationConfig, error) {
 	return KeyMetadata{}, KeyRotationConfig{}, errors.New("storage error")
 }
+func (a *alwaysFailStore) GetTags(string) ([]TagEntry, error) {
+	return nil, errors.New("storage error")
+}
+
+func (a *alwaysFailStore) TagResource(
+	string,
+	[]TagEntry,
+) error {
+	return errors.New("storage error")
+}
+
+func (a *alwaysFailStore) UntagResource(
+	string,
+	[]string,
+) error {
+	return errors.New("storage error")
+}
 
 func newFailRouter() *Router {
 	return &Router{storage: &alwaysFailStore{}, randRead: func(b []byte) (int, error) {
@@ -1784,6 +1801,15 @@ func (p *partialFailStore) GetKeyRotationStatus(
 ) (KeyMetadata, KeyRotationConfig, error) {
 	return p.inner.GetKeyRotationStatus(keyID)
 }
+func (p *partialFailStore) GetTags(keyID string) ([]TagEntry, error) {
+	return p.inner.GetTags(keyID)
+}
+func (p *partialFailStore) TagResource(keyID string, tags []TagEntry) error {
+	return p.inner.TagResource(keyID, tags)
+}
+func (p *partialFailStore) UntagResource(keyID string, tagKeys []string) error {
+	return p.inner.UntagResource(keyID, tagKeys)
+}
 
 func TestLoadSymmetricMaterial_storageError(t *testing.T) {
 	dir := t.TempDir()
@@ -1952,6 +1978,15 @@ func (a *aliasFailStore) GetKeyRotationStatus(
 	keyID string,
 ) (KeyMetadata, KeyRotationConfig, error) {
 	return a.inner.GetKeyRotationStatus(keyID)
+}
+func (a *aliasFailStore) GetTags(keyID string) ([]TagEntry, error) {
+	return a.inner.GetTags(keyID)
+}
+func (a *aliasFailStore) TagResource(keyID string, tags []TagEntry) error {
+	return a.inner.TagResource(keyID, tags)
+}
+func (a *aliasFailStore) UntagResource(keyID string, tagKeys []string) error {
+	return a.inner.UntagResource(keyID, tagKeys)
 }
 
 // makeAliasRouter creates a Router backed by aliasFailStore with a real storage as inner.

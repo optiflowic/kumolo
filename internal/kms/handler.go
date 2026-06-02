@@ -9,15 +9,16 @@ import (
 	"sort"
 )
 
-func validateLimit(w http.ResponseWriter, limit *int) bool {
-	if limit != nil && (*limit < 1 || *limit > 1000) {
+func validateLimit(w http.ResponseWriter, limit *int, max int) bool {
+	if limit != nil && (*limit < 1 || *limit > max) {
 		writeError(
 			w,
 			http.StatusBadRequest,
 			"ValidationException",
 			fmt.Sprintf(
-				"Value %d at 'limit' failed to satisfy constraint: Member must have value between 1 and 1000, inclusive",
+				"Value %d at 'limit' failed to satisfy constraint: Member must have value between 1 and %d, inclusive",
 				*limit,
+				max,
 			),
 		)
 		return false
@@ -207,7 +208,7 @@ func (ro *Router) handleListKeys(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	if !validateLimit(w, req.Limit) {
+	if !validateLimit(w, req.Limit, 1000) {
 		return
 	}
 	limit := 100
@@ -291,14 +292,13 @@ func (ro *Router) handleListResourceTags(w http.ResponseWriter, body []byte) {
 		writeError(w, http.StatusBadRequest, "ValidationException", "KeyId is required")
 		return
 	}
-	if !validateLimit(w, req.Limit) {
+	if !validateLimit(w, req.Limit, 50) {
 		return
 	}
-	// No tags can ever exist (tag management not implemented), so any Marker is invalid.
-	if req.Marker != "" {
-		writeError(w, http.StatusBadRequest, "InvalidMarkerException",
-			fmt.Sprintf("The marker %s is not valid", req.Marker))
-		return
+
+	limit := 50
+	if req.Limit != nil {
+		limit = *req.Limit
 	}
 
 	keyID, ok := ro.resolveKeyRef(w, req.KeyId)
@@ -306,7 +306,8 @@ func (ro *Router) handleListResourceTags(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	if _, err := ro.storage.GetKeyMetadata(keyID); err != nil {
+	tags, err := ro.storage.GetTags(keyID)
+	if err != nil {
 		if errors.Is(err, ErrKeyNotFound) {
 			slog.Debug("KMS ListResourceTags: key not found", "keyID", keyID)
 			writeError(w, http.StatusBadRequest, "NotFoundException",
@@ -323,11 +324,38 @@ func (ro *Router) handleListResourceTags(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	slog.Debug("KMS ListResourceTags", "keyID", keyID)
-	writeJSON(w, http.StatusOK, map[string]any{
-		"Tags":      []any{},
-		"Truncated": false,
-	})
+	// Apply Marker pagination: Marker is the TagKey to start after.
+	if req.Marker != "" {
+		start := -1
+		for i, t := range tags {
+			if t.TagKey == req.Marker {
+				start = i + 1
+				break
+			}
+		}
+		if start == -1 {
+			writeError(w, http.StatusBadRequest, "InvalidMarkerException",
+				fmt.Sprintf("The marker %s is not valid", req.Marker))
+			return
+		}
+		tags = tags[start:]
+	}
+
+	truncated := len(tags) > limit
+	if truncated {
+		tags = tags[:limit]
+	}
+
+	resp := map[string]any{
+		"Tags":      tags,
+		"Truncated": truncated,
+	}
+	if truncated && len(tags) > 0 {
+		resp["NextMarker"] = tags[len(tags)-1].TagKey
+	}
+
+	slog.Debug("KMS ListResourceTags", "keyID", keyID, "count", len(tags))
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // resolveKeyMeta fetches key metadata and validates the key is not in

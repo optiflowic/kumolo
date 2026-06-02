@@ -17,6 +17,7 @@ var (
 	ErrKeyPendingDeletion  = errors.New("key is pending deletion")
 	ErrInvalidKeyState     = errors.New("invalid key state for this operation")
 	ErrUnsupportedOp       = errors.New("unsupported operation for this key type")
+	ErrTagLimitExceeded    = errors.New("tag limit exceeded")
 )
 
 type errResponse struct {

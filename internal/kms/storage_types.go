@@ -227,6 +227,12 @@ func keyAgreementAlgorithmsForKey(spec, usage string) []string {
 	return nil // unreachable: handler validates spec/usage before calling
 }
 
+// TagEntry is one key/value tag on a KMS key.
+type TagEntry struct {
+	TagKey   string `json:"TagKey"`
+	TagValue string `json:"TagValue"`
+}
+
 // KeyMaterial holds the cryptographic key bytes for a KMS key.
 // Only generated for SYMMETRIC_DEFAULT keys; other key types have no material file.
 type KeyMaterial struct {

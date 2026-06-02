@@ -62,19 +62,51 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# ListResourceTags
+# TagResource / UntagResource / ListResourceTags
 # ---------------------------------------------------------------------------
 if [[ -n "$KEY_ID" ]]; then
+  run "TagResource (add two tags)" \
+    $AWS tag-resource --key-id "$KEY_ID" \
+      --tags TagKey=Env,TagValue=test TagKey=Team,TagValue=platform
+
   LRT_RESP=$($AWS list-resource-tags --key-id "$KEY_ID" 2>/dev/null || true)
   LRT_TAGS=$(echo "$LRT_RESP" | jq '.Tags | length' 2>/dev/null || echo -1)
-  LRT_TRUNCATED=$(echo "$LRT_RESP" | jq '.Truncated // false' 2>/dev/null || true)
-  if [[ "$LRT_TAGS" -eq 0 && "$LRT_TRUNCATED" == "false" ]]; then
-    ok "ListResourceTags (empty Tags, Truncated=false)"
+  if [[ "$LRT_TAGS" -eq 2 ]]; then
+    ok "ListResourceTags (2 tags after TagResource)"
   else
-    fail "ListResourceTags (expected empty Tags and Truncated=false, got tags=$LRT_TAGS truncated=$LRT_TRUNCATED)"
+    fail "ListResourceTags (expected 2 tags, got $LRT_TAGS)"
+  fi
+
+  run "TagResource (overwrite tag value)" \
+    $AWS tag-resource --key-id "$KEY_ID" \
+      --tags TagKey=Env,TagValue=prod
+
+  LRT_RESP2=$($AWS list-resource-tags --key-id "$KEY_ID" 2>/dev/null || true)
+  ENV_VALUE=$(echo "$LRT_RESP2" | jq -r '.Tags[] | select(.TagKey=="Env") | .TagValue' 2>/dev/null || true)
+  if [[ "$ENV_VALUE" == "prod" ]]; then
+    ok "TagResource (tag value overwritten)"
+  else
+    fail "TagResource (expected Env=prod, got '$ENV_VALUE')"
+  fi
+
+  run "UntagResource" \
+    $AWS untag-resource --key-id "$KEY_ID" --tag-keys Env
+
+  LRT_RESP3=$($AWS list-resource-tags --key-id "$KEY_ID" 2>/dev/null || true)
+  LRT_TAGS3=$(echo "$LRT_RESP3" | jq '.Tags | length' 2>/dev/null || echo -1)
+  LRT_TRUNCATED3=$(echo "$LRT_RESP3" | jq '.Truncated // false' 2>/dev/null || true)
+  if [[ "$LRT_TAGS3" -eq 1 && "$LRT_TRUNCATED3" == "false" ]]; then
+    ok "ListResourceTags (1 tag remains after UntagResource, Truncated=false)"
+  else
+    fail "ListResourceTags (expected 1 tag and Truncated=false, got tags=$LRT_TAGS3 truncated=$LRT_TRUNCATED3)"
   fi
 else
-  fail "ListResourceTags (skipped: no KeyId)"
+  fail "TagResource (skipped: no KeyId)"
+  fail "ListResourceTags (2 tags after TagResource) (skipped)"
+  fail "TagResource (overwrite tag value) (skipped)"
+  fail "TagResource (tag value overwritten) (skipped)"
+  fail "UntagResource (skipped)"
+  fail "ListResourceTags (1 tag remains after UntagResource) (skipped)"
 fi
 
 # ---------------------------------------------------------------------------
