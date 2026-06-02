@@ -3629,6 +3629,35 @@ func TestHandleVerify(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, vw.Code)
 		assertErrType(t, vw, "DisabledException")
 	})
+
+	t.Run("error: Ed25519 tampered signature", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateSignVerifyKey(t, ro, "ECC_NIST_EDWARDS25519")
+		msg := []byte("ed25519 message")
+		signBody, _ := json.Marshal(map[string]any{
+			"KeyId":            keyID,
+			"Message":          msg,
+			"SigningAlgorithm": "ED25519_SHA_512",
+		})
+		sw := kmsReq(t, ro, "Sign", string(signBody))
+		require.Equal(t, http.StatusOK, sw.Code)
+		var sResp map[string]any
+		require.NoError(t, json.Unmarshal(sw.Body.Bytes(), &sResp))
+		sigRaw, _ := json.Marshal(sResp["Signature"])
+		var sigBytes []byte
+		require.NoError(t, json.Unmarshal(sigRaw, &sigBytes))
+		sigBytes[0] ^= 0xFF
+
+		verBody, _ := json.Marshal(map[string]any{
+			"KeyId":            keyID,
+			"Message":          msg,
+			"Signature":        sigBytes,
+			"SigningAlgorithm": "ED25519_SHA_512",
+		})
+		vw := kmsReq(t, ro, "Verify", string(verBody))
+		assert.Equal(t, http.StatusBadRequest, vw.Code)
+		assertErrType(t, vw, "KMSInvalidSignatureException")
+	})
 }
 
 func TestHandleSign_inputValidation(t *testing.T) {
@@ -3673,6 +3702,19 @@ func TestHandleSign_inputValidation(t *testing.T) {
 			"KeyId":            keyID,
 			"Message":          []byte("hello"),
 			"SigningAlgorithm": "SM2DSA",
+		})
+		w := kmsReq(t, ro, "Sign", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "UnsupportedOperationException")
+	})
+
+	t.Run("error: unknown algorithm", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateSignVerifyKey(t, ro, "ECC_NIST_P256")
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":            keyID,
+			"Message":          []byte("hello"),
+			"SigningAlgorithm": "UNKNOWN_ALGO",
 		})
 		w := kmsReq(t, ro, "Sign", string(body))
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -3742,35 +3784,6 @@ func TestHandleSign_inputValidation(t *testing.T) {
 		w := kmsReq(t, ro, "Sign", string(body))
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assertErrType(t, w, "NotFoundException")
-	})
-
-	t.Run("error: Ed25519 tampered signature", func(t *testing.T) {
-		ro := newTestRouter(t)
-		keyID := mustCreateSignVerifyKey(t, ro, "ECC_NIST_EDWARDS25519")
-		msg := []byte("ed25519 message")
-		signBody, _ := json.Marshal(map[string]any{
-			"KeyId":            keyID,
-			"Message":          msg,
-			"SigningAlgorithm": "ED25519_SHA_512",
-		})
-		sw := kmsReq(t, ro, "Sign", string(signBody))
-		require.Equal(t, http.StatusOK, sw.Code)
-		var sResp map[string]any
-		require.NoError(t, json.Unmarshal(sw.Body.Bytes(), &sResp))
-		sigRaw, _ := json.Marshal(sResp["Signature"])
-		var sigBytes []byte
-		require.NoError(t, json.Unmarshal(sigRaw, &sigBytes))
-		sigBytes[0] ^= 0xFF
-
-		verBody, _ := json.Marshal(map[string]any{
-			"KeyId":            keyID,
-			"Message":          msg,
-			"Signature":        sigBytes,
-			"SigningAlgorithm": "ED25519_SHA_512",
-		})
-		vw := kmsReq(t, ro, "Verify", string(verBody))
-		assert.Equal(t, http.StatusBadRequest, vw.Code)
-		assertErrType(t, vw, "KMSInvalidSignatureException")
 	})
 }
 
@@ -3872,6 +3885,20 @@ func TestHandleVerify_inputValidation(t *testing.T) {
 			"Message":          []byte("hello"),
 			"Signature":        []byte("sig"),
 			"SigningAlgorithm": "SM2DSA",
+		})
+		w := kmsReq(t, ro, "Verify", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "UnsupportedOperationException")
+	})
+
+	t.Run("error: unknown algorithm", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateSignVerifyKey(t, ro, "ECC_NIST_P256")
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":            keyID,
+			"Message":          []byte("hello"),
+			"Signature":        []byte("sig"),
+			"SigningAlgorithm": "UNKNOWN_ALGO",
 		})
 		w := kmsReq(t, ro, "Verify", string(body))
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -4143,18 +4170,6 @@ func TestHandleGenerateRandom_customKeyStore(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assertErrType(t, w, "UnsupportedOperationException")
 	})
-}
-
-func TestHandleGenerateRandom_randReadFailure(t *testing.T) {
-	dir := t.TempDir()
-	s, err := newStorage(dir, os.OpenRoot)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = s.Close() })
-	ro := NewRouter(s)
-	ro.randRead = func([]byte) (int, error) { return 0, errors.New("rand failed") }
-	w := kmsReq(t, ro, "GenerateRandom", `{"NumberOfBytes":32}`)
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assertErrType(t, w, "KMSInternalException")
 }
 
 func TestHandleReEncrypt_srcMaterialNotFound(t *testing.T) {

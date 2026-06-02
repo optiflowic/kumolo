@@ -205,6 +205,16 @@ func isPSSAlgorithm(algo string) bool {
 	return false
 }
 
+// isUnsupportedSigningAlgorithm reports whether algo is a valid AWS KMS SigningAlgorithm
+// enum value that kumolo does not implement (e.g. region-restricted or post-quantum).
+func isUnsupportedSigningAlgorithm(algo string) bool {
+	switch algo {
+	case "SM2DSA", "ML_DSA_44", "ML_DSA_65", "ML_DSA_87":
+		return true
+	}
+	return false
+}
+
 // ---- Sign ------------------------------------------------------------------
 
 func (ro *Router) handleSign(w http.ResponseWriter, body []byte) {
@@ -254,6 +264,11 @@ func (ro *Router) handleSign(w http.ResponseWriter, body []byte) {
 	if req.SigningAlgorithm == "ED25519_PH_SHA_512" {
 		writeError(w, http.StatusBadRequest, "UnsupportedOperationException",
 			"ED25519_PH_SHA_512 is not supported in kumolo")
+		return
+	}
+	if isUnsupportedSigningAlgorithm(req.SigningAlgorithm) {
+		writeError(w, http.StatusBadRequest, "UnsupportedOperationException",
+			fmt.Sprintf("%s is not supported in kumolo", req.SigningAlgorithm))
 		return
 	}
 
@@ -364,6 +379,11 @@ func (ro *Router) handleVerify(w http.ResponseWriter, body []byte) {
 	if req.SigningAlgorithm == "ED25519_PH_SHA_512" {
 		writeError(w, http.StatusBadRequest, "UnsupportedOperationException",
 			"ED25519_PH_SHA_512 is not supported in kumolo")
+		return
+	}
+	if isUnsupportedSigningAlgorithm(req.SigningAlgorithm) {
+		writeError(w, http.StatusBadRequest, "UnsupportedOperationException",
+			fmt.Sprintf("%s is not supported in kumolo", req.SigningAlgorithm))
 		return
 	}
 
