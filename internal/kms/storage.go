@@ -96,6 +96,16 @@ func newStorage(dataDir string, openRoot func(string) (*os.Root, error)) (*Stora
 	return s, nil
 }
 
+// generateRSAKey generates an RSA private key of the given bit size.
+func generateRSAKey(bits int) (*rsa.PrivateKey, error) {
+	k, err := rsa.GenerateKey(rand.Reader, bits)
+	if err != nil {
+		// untestable: rsa.GenerateKey only fails on I/O errors from rand.Reader
+		return nil, fmt.Errorf("generate RSA_%d: %w", bits, err)
+	}
+	return k, nil
+}
+
 // generateKeyPair generates an asymmetric key pair for the given KeySpec and
 // returns the PKCS#8 DER-encoded private key. Returns nil, nil for unsupported
 // or non-asymmetric specs (HMAC, SYMMETRIC_DEFAULT, ECC_SECG_P256K1, SM2, ML_DSA_*).
@@ -103,24 +113,21 @@ func generateKeyPair(keySpec string) ([]byte, error) {
 	var priv any
 	switch keySpec {
 	case "RSA_2048":
-		k, err := rsa.GenerateKey(rand.Reader, 2048)
+		k, err := generateRSAKey(2048)
 		if err != nil {
-			// untestable: rsa.GenerateKey only fails on I/O errors from rand.Reader
-			return nil, fmt.Errorf("generate RSA_2048: %w", err)
+			return nil, err
 		}
 		priv = k
 	case "RSA_3072":
-		k, err := rsa.GenerateKey(rand.Reader, 3072)
+		k, err := generateRSAKey(3072)
 		if err != nil {
-			// untestable: rsa.GenerateKey only fails on I/O errors from rand.Reader
-			return nil, fmt.Errorf("generate RSA_3072: %w", err)
+			return nil, err
 		}
 		priv = k
 	case "RSA_4096":
-		k, err := rsa.GenerateKey(rand.Reader, 4096)
+		k, err := generateRSAKey(4096)
 		if err != nil {
-			// untestable: rsa.GenerateKey only fails on I/O errors from rand.Reader
-			return nil, fmt.Errorf("generate RSA_4096: %w", err)
+			return nil, err
 		}
 		priv = k
 	case "ECC_NIST_P256":
