@@ -1,6 +1,8 @@
 package kms
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -2775,5 +2777,849 @@ func TestHandleListAliases(t *testing.T) {
 		var resp map[string]any
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		assert.Empty(t, resp["Aliases"].([]any))
+	})
+}
+
+func mustEncryptForReEncrypt(t *testing.T, ro *Router, keyID string, plaintext []byte) []byte {
+	t.Helper()
+	body, _ := json.Marshal(map[string]any{"KeyId": keyID, "Plaintext": plaintext})
+	w := kmsReq(t, ro, "Encrypt", string(body))
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	got, _ := json.Marshal(resp["CiphertextBlob"])
+	var blob []byte
+	require.NoError(t, json.Unmarshal(got, &blob))
+	return blob
+}
+
+func TestHandleReEncrypt(t *testing.T) {
+	t.Run("roundtrip: same key", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		plaintext := []byte("hello reencrypt")
+		ciphertext := mustEncryptForReEncrypt(t, ro, keyID, plaintext)
+
+		body, _ := json.Marshal(map[string]any{
+			"CiphertextBlob":   ciphertext,
+			"DestinationKeyId": keyID,
+		})
+		w := kmsReq(t, ro, "ReEncrypt", string(body))
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, "SYMMETRIC_DEFAULT", resp["SourceEncryptionAlgorithm"])
+		assert.Equal(t, "SYMMETRIC_DEFAULT", resp["DestinationEncryptionAlgorithm"])
+		assert.NotEmpty(t, resp["KeyId"])
+		assert.NotEmpty(t, resp["SourceKeyId"])
+		assert.NotEmpty(t, resp["SourceKeyMaterialId"])
+		assert.NotEmpty(t, resp["DestinationKeyMaterialId"])
+
+		// Decrypt the re-encrypted ciphertext and verify plaintext.
+		got, _ := json.Marshal(resp["CiphertextBlob"])
+		var newBlob []byte
+		require.NoError(t, json.Unmarshal(got, &newBlob))
+		decBody, _ := json.Marshal(map[string]any{"KeyId": keyID, "CiphertextBlob": newBlob})
+		dw := kmsReq(t, ro, "Decrypt", string(decBody))
+		require.Equal(t, http.StatusOK, dw.Code)
+		var dResp map[string]any
+		require.NoError(t, json.Unmarshal(dw.Body.Bytes(), &dResp))
+		gotBytes, _ := json.Marshal(dResp["Plaintext"])
+		var decrypted []byte
+		require.NoError(t, json.Unmarshal(gotBytes, &decrypted))
+		assert.Equal(t, plaintext, decrypted)
+	})
+
+	t.Run("roundtrip: different key", func(t *testing.T) {
+		ro := newTestRouter(t)
+		srcKey := mustCreateKey(t, ro, `{}`)
+		dstKey := mustCreateKey(t, ro, `{}`)
+		plaintext := []byte("cross-key reencrypt")
+		ciphertext := mustEncryptForReEncrypt(t, ro, srcKey, plaintext)
+
+		body, _ := json.Marshal(map[string]any{
+			"CiphertextBlob":   ciphertext,
+			"DestinationKeyId": dstKey,
+		})
+		w := kmsReq(t, ro, "ReEncrypt", string(body))
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		got, _ := json.Marshal(resp["CiphertextBlob"])
+		var newBlob []byte
+		require.NoError(t, json.Unmarshal(got, &newBlob))
+		decBody, _ := json.Marshal(map[string]any{"KeyId": dstKey, "CiphertextBlob": newBlob})
+		dw := kmsReq(t, ro, "Decrypt", string(decBody))
+		require.Equal(t, http.StatusOK, dw.Code)
+		var dResp map[string]any
+		require.NoError(t, json.Unmarshal(dw.Body.Bytes(), &dResp))
+		gotBytes, _ := json.Marshal(dResp["Plaintext"])
+		var decrypted []byte
+		require.NoError(t, json.Unmarshal(gotBytes, &decrypted))
+		assert.Equal(t, plaintext, decrypted)
+	})
+
+	t.Run("roundtrip: with encryption contexts", func(t *testing.T) {
+		ro := newTestRouter(t)
+		srcKey := mustCreateKey(t, ro, `{}`)
+		dstKey := mustCreateKey(t, ro, `{}`)
+		srcCtx := map[string]string{"src": "a"}
+		dstCtx := map[string]string{"dst": "b"}
+		encBody, _ := json.Marshal(map[string]any{
+			"KeyId":             srcKey,
+			"Plaintext":         []byte("ctx test"),
+			"EncryptionContext": srcCtx,
+		})
+		ew := kmsReq(t, ro, "Encrypt", string(encBody))
+		require.Equal(t, http.StatusOK, ew.Code)
+		var eResp map[string]any
+		require.NoError(t, json.Unmarshal(ew.Body.Bytes(), &eResp))
+		gotBlob, _ := json.Marshal(eResp["CiphertextBlob"])
+		var ciphertext []byte
+		require.NoError(t, json.Unmarshal(gotBlob, &ciphertext))
+
+		body, _ := json.Marshal(map[string]any{
+			"CiphertextBlob":               ciphertext,
+			"DestinationKeyId":             dstKey,
+			"SourceEncryptionContext":      srcCtx,
+			"DestinationEncryptionContext": dstCtx,
+		})
+		w := kmsReq(t, ro, "ReEncrypt", string(body))
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		got, _ := json.Marshal(resp["CiphertextBlob"])
+		var newBlob []byte
+		require.NoError(t, json.Unmarshal(got, &newBlob))
+		decBody, _ := json.Marshal(map[string]any{
+			"KeyId":             dstKey,
+			"CiphertextBlob":    newBlob,
+			"EncryptionContext": dstCtx,
+		})
+		dw := kmsReq(t, ro, "Decrypt", string(decBody))
+		require.Equal(t, http.StatusOK, dw.Code)
+	})
+
+	t.Run("with valid SourceKeyId", func(t *testing.T) {
+		ro := newTestRouter(t)
+		srcKey := mustCreateKey(t, ro, `{}`)
+		dstKey := mustCreateKey(t, ro, `{}`)
+		ciphertext := mustEncryptForReEncrypt(t, ro, srcKey, []byte("data"))
+
+		body, _ := json.Marshal(map[string]any{
+			"CiphertextBlob":   ciphertext,
+			"SourceKeyId":      srcKey,
+			"DestinationKeyId": dstKey,
+		})
+		w := kmsReq(t, ro, "ReEncrypt", string(body))
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("error: missing CiphertextBlob", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{"DestinationKeyId": keyID})
+		w := kmsReq(t, ro, "ReEncrypt", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("error: missing DestinationKeyId", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		ciphertext := mustEncryptForReEncrypt(t, ro, keyID, []byte("data"))
+		body, _ := json.Marshal(map[string]any{"CiphertextBlob": ciphertext})
+		w := kmsReq(t, ro, "ReEncrypt", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("error: SourceKeyId mismatch", func(t *testing.T) {
+		ro := newTestRouter(t)
+		srcKey := mustCreateKey(t, ro, `{}`)
+		otherKey := mustCreateKey(t, ro, `{}`)
+		dstKey := mustCreateKey(t, ro, `{}`)
+		ciphertext := mustEncryptForReEncrypt(t, ro, srcKey, []byte("data"))
+
+		body, _ := json.Marshal(map[string]any{
+			"CiphertextBlob":   ciphertext,
+			"SourceKeyId":      otherKey,
+			"DestinationKeyId": dstKey,
+		})
+		w := kmsReq(t, ro, "ReEncrypt", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "IncorrectKeyException")
+	})
+
+	t.Run("error: malformed ciphertext", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{
+			"CiphertextBlob":   []byte("not-a-valid-ciphertext"),
+			"DestinationKeyId": keyID,
+		})
+		w := kmsReq(t, ro, "ReEncrypt", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "InvalidCiphertextException")
+	})
+
+	t.Run("error: wrong source encryption context", func(t *testing.T) {
+		ro := newTestRouter(t)
+		srcKey := mustCreateKey(t, ro, `{}`)
+		dstKey := mustCreateKey(t, ro, `{}`)
+		encBody, _ := json.Marshal(map[string]any{
+			"KeyId":             srcKey,
+			"Plaintext":         []byte("data"),
+			"EncryptionContext": map[string]string{"k": "v"},
+		})
+		ew := kmsReq(t, ro, "Encrypt", string(encBody))
+		require.Equal(t, http.StatusOK, ew.Code)
+		var eResp map[string]any
+		require.NoError(t, json.Unmarshal(ew.Body.Bytes(), &eResp))
+		gotBlob, _ := json.Marshal(eResp["CiphertextBlob"])
+		var ciphertext []byte
+		require.NoError(t, json.Unmarshal(gotBlob, &ciphertext))
+
+		body, _ := json.Marshal(map[string]any{
+			"CiphertextBlob":          ciphertext,
+			"DestinationKeyId":        dstKey,
+			"SourceEncryptionContext": map[string]string{"wrong": "ctx"},
+		})
+		w := kmsReq(t, ro, "ReEncrypt", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "InvalidCiphertextException")
+	})
+
+	t.Run("error: unsupported source algorithm", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		ciphertext := mustEncryptForReEncrypt(t, ro, keyID, []byte("data"))
+		body, _ := json.Marshal(map[string]any{
+			"CiphertextBlob":            ciphertext,
+			"DestinationKeyId":          keyID,
+			"SourceEncryptionAlgorithm": "RSAES_OAEP_SHA_256",
+		})
+		w := kmsReq(t, ro, "ReEncrypt", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "InvalidKeyUsageException")
+	})
+
+	t.Run("error: unsupported destination algorithm", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		ciphertext := mustEncryptForReEncrypt(t, ro, keyID, []byte("data"))
+		body, _ := json.Marshal(map[string]any{
+			"CiphertextBlob":                 ciphertext,
+			"DestinationKeyId":               keyID,
+			"DestinationEncryptionAlgorithm": "RSAES_OAEP_SHA_256",
+		})
+		w := kmsReq(t, ro, "ReEncrypt", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "InvalidKeyUsageException")
+	})
+
+	t.Run("error: destination key not found", func(t *testing.T) {
+		ro := newTestRouter(t)
+		srcKey := mustCreateKey(t, ro, `{}`)
+		ciphertext := mustEncryptForReEncrypt(t, ro, srcKey, []byte("data"))
+		body, _ := json.Marshal(map[string]any{
+			"CiphertextBlob":   ciphertext,
+			"DestinationKeyId": "00000000-0000-0000-0000-000000000000",
+		})
+		w := kmsReq(t, ro, "ReEncrypt", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "NotFoundException")
+	})
+}
+
+func TestHandleGenerateRandom(t *testing.T) {
+	t.Run("returns random bytes of requested length", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "GenerateRandom", `{"NumberOfBytes":32}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		plaintext, ok := resp["Plaintext"].(string)
+		require.True(t, ok)
+		decoded, err := base64.StdEncoding.DecodeString(plaintext)
+		require.NoError(t, err)
+		assert.Len(t, decoded, 32)
+	})
+
+	t.Run("boundary: 1 byte", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "GenerateRandom", `{"NumberOfBytes":1}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		decoded, err := base64.StdEncoding.DecodeString(resp["Plaintext"].(string))
+		require.NoError(t, err)
+		assert.Len(t, decoded, 1)
+	})
+
+	t.Run("boundary: 1024 bytes", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "GenerateRandom", `{"NumberOfBytes":1024}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		decoded, err := base64.StdEncoding.DecodeString(resp["Plaintext"].(string))
+		require.NoError(t, err)
+		assert.Len(t, decoded, 1024)
+	})
+
+	t.Run("error: NumberOfBytes missing", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "GenerateRandom", `{}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("error: NumberOfBytes zero", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "GenerateRandom", `{"NumberOfBytes":0}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("error: NumberOfBytes exceeds 1024", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "GenerateRandom", `{"NumberOfBytes":1025}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("error: CustomKeyStoreId provided", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "GenerateRandom", `{"NumberOfBytes":32,"CustomKeyStoreId":"cks-123"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "UnsupportedOperationException")
+	})
+
+	t.Run("error: rand read failure", func(t *testing.T) {
+		s, err := newStorage(t.TempDir(), os.OpenRoot)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = s.Close() })
+		ro := newRouterWithRand(s, func(b []byte) (int, error) {
+			return 0, errors.New("entropy failure")
+		})
+		w := kmsReq(t, ro, "GenerateRandom", `{"NumberOfBytes":32}`)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assertErrType(t, w, "KMSInternalException")
+	})
+}
+
+// mustCreateHMACKey creates an HMAC key with the given spec and returns its key ID.
+func mustCreateHMACKey(t *testing.T, ro *Router, spec string) string {
+	t.Helper()
+	return mustCreateKey(t, ro, `{"KeySpec":"`+spec+`","KeyUsage":"GENERATE_VERIFY_MAC"}`)
+}
+
+func TestHandleGenerateMac(t *testing.T) {
+	specs := []struct {
+		spec string
+		algo string
+	}{
+		{"HMAC_224", "HMAC_SHA_224"},
+		{"HMAC_256", "HMAC_SHA_256"},
+		{"HMAC_384", "HMAC_SHA_384"},
+		{"HMAC_512", "HMAC_SHA_512"},
+	}
+
+	for _, tc := range specs {
+		t.Run("roundtrip "+tc.spec, func(t *testing.T) {
+			ro := newTestRouter(t)
+			keyID := mustCreateHMACKey(t, ro, tc.spec)
+			msg := []byte("hello mac")
+
+			genBody, _ := json.Marshal(map[string]any{
+				"KeyId":        keyID,
+				"MacAlgorithm": tc.algo,
+				"Message":      msg,
+			})
+			gw := kmsReq(t, ro, "GenerateMac", string(genBody))
+			require.Equal(t, http.StatusOK, gw.Code)
+
+			var gResp map[string]any
+			require.NoError(t, json.Unmarshal(gw.Body.Bytes(), &gResp))
+			assert.Equal(t, tc.algo, gResp["MacAlgorithm"])
+			assert.NotEmpty(t, gResp["KeyId"])
+
+			// Decode the Mac for VerifyMac
+			macRaw, _ := json.Marshal(gResp["Mac"])
+			var macBytes []byte
+			require.NoError(t, json.Unmarshal(macRaw, &macBytes))
+
+			verBody, _ := json.Marshal(map[string]any{
+				"KeyId":        keyID,
+				"MacAlgorithm": tc.algo,
+				"Message":      msg,
+				"Mac":          macBytes,
+			})
+			vw := kmsReq(t, ro, "VerifyMac", string(verBody))
+			require.Equal(t, http.StatusOK, vw.Code)
+			var vResp map[string]any
+			require.NoError(t, json.Unmarshal(vw.Body.Bytes(), &vResp))
+			assert.Equal(t, true, vResp["MacValid"])
+		})
+	}
+
+	t.Run("error: missing Message", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateHMACKey(t, ro, "HMAC_256")
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":        keyID,
+			"MacAlgorithm": "HMAC_SHA_256",
+		})
+		w := kmsReq(t, ro, "GenerateMac", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("error: missing MacAlgorithm", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateHMACKey(t, ro, "HMAC_256")
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":   keyID,
+			"Message": []byte("hello"),
+		})
+		w := kmsReq(t, ro, "GenerateMac", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("error: invalid MacAlgorithm", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateHMACKey(t, ro, "HMAC_256")
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":        keyID,
+			"MacAlgorithm": "INVALID",
+			"Message":      []byte("hello"),
+		})
+		w := kmsReq(t, ro, "GenerateMac", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("error: algorithm not compatible with key", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateHMACKey(t, ro, "HMAC_256")
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":        keyID,
+			"MacAlgorithm": "HMAC_SHA_512",
+			"Message":      []byte("hello"),
+		})
+		w := kmsReq(t, ro, "GenerateMac", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "InvalidKeyUsageException")
+	})
+
+	t.Run("error: ENCRYPT_DECRYPT key not allowed", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":        keyID,
+			"MacAlgorithm": "HMAC_SHA_256",
+			"Message":      []byte("hello"),
+		})
+		w := kmsReq(t, ro, "GenerateMac", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "InvalidKeyUsageException")
+	})
+
+	t.Run("error: Message exceeds 4096 bytes", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateHMACKey(t, ro, "HMAC_256")
+		big := make([]byte, 4097)
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":        keyID,
+			"MacAlgorithm": "HMAC_SHA_256",
+			"Message":      big,
+		})
+		w := kmsReq(t, ro, "GenerateMac", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+}
+
+func TestHandleVerifyMac(t *testing.T) {
+	t.Run("error: tampered Mac", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateHMACKey(t, ro, "HMAC_256")
+		msg := []byte("authentic message")
+
+		genBody, _ := json.Marshal(map[string]any{
+			"KeyId":        keyID,
+			"MacAlgorithm": "HMAC_SHA_256",
+			"Message":      msg,
+		})
+		gw := kmsReq(t, ro, "GenerateMac", string(genBody))
+		require.Equal(t, http.StatusOK, gw.Code)
+		var gResp map[string]any
+		require.NoError(t, json.Unmarshal(gw.Body.Bytes(), &gResp))
+		macRaw, _ := json.Marshal(gResp["Mac"])
+		var macBytes []byte
+		require.NoError(t, json.Unmarshal(macRaw, &macBytes))
+		macBytes[0] ^= 0xFF // tamper
+
+		verBody, _ := json.Marshal(map[string]any{
+			"KeyId":        keyID,
+			"MacAlgorithm": "HMAC_SHA_256",
+			"Message":      msg,
+			"Mac":          macBytes,
+		})
+		vw := kmsReq(t, ro, "VerifyMac", string(verBody))
+		assert.Equal(t, http.StatusBadRequest, vw.Code)
+		assertErrType(t, vw, "KMSInvalidMacException")
+	})
+
+	t.Run("error: wrong message", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateHMACKey(t, ro, "HMAC_256")
+		genBody, _ := json.Marshal(map[string]any{
+			"KeyId":        keyID,
+			"MacAlgorithm": "HMAC_SHA_256",
+			"Message":      []byte("original"),
+		})
+		gw := kmsReq(t, ro, "GenerateMac", string(genBody))
+		require.Equal(t, http.StatusOK, gw.Code)
+		var gResp map[string]any
+		require.NoError(t, json.Unmarshal(gw.Body.Bytes(), &gResp))
+		macRaw, _ := json.Marshal(gResp["Mac"])
+		var macBytes []byte
+		require.NoError(t, json.Unmarshal(macRaw, &macBytes))
+
+		verBody, _ := json.Marshal(map[string]any{
+			"KeyId":        keyID,
+			"MacAlgorithm": "HMAC_SHA_256",
+			"Message":      []byte("tampered"),
+			"Mac":          macBytes,
+		})
+		vw := kmsReq(t, ro, "VerifyMac", string(verBody))
+		assert.Equal(t, http.StatusBadRequest, vw.Code)
+		assertErrType(t, vw, "KMSInvalidMacException")
+	})
+
+	t.Run("error: missing Mac", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateHMACKey(t, ro, "HMAC_256")
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":        keyID,
+			"MacAlgorithm": "HMAC_SHA_256",
+			"Message":      []byte("hello"),
+		})
+		w := kmsReq(t, ro, "VerifyMac", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("error: key disabled", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateHMACKey(t, ro, "HMAC_256")
+		msg := []byte("msg")
+		genBody, _ := json.Marshal(map[string]any{
+			"KeyId":        keyID,
+			"MacAlgorithm": "HMAC_SHA_256",
+			"Message":      msg,
+		})
+		gw := kmsReq(t, ro, "GenerateMac", string(genBody))
+		require.Equal(t, http.StatusOK, gw.Code)
+		var gResp map[string]any
+		require.NoError(t, json.Unmarshal(gw.Body.Bytes(), &gResp))
+		macRaw, _ := json.Marshal(gResp["Mac"])
+		var macBytes []byte
+		require.NoError(t, json.Unmarshal(macRaw, &macBytes))
+
+		dw := kmsReq(t, ro, "DisableKey", `{"KeyId":"`+keyID+`"}`)
+		require.Equal(t, http.StatusOK, dw.Code)
+
+		verBody, _ := json.Marshal(map[string]any{
+			"KeyId":        keyID,
+			"MacAlgorithm": "HMAC_SHA_256",
+			"Message":      msg,
+			"Mac":          macBytes,
+		})
+		vw := kmsReq(t, ro, "VerifyMac", string(verBody))
+		assert.Equal(t, http.StatusBadRequest, vw.Code)
+		assertErrType(t, vw, "DisabledException")
+	})
+}
+
+// mustCreateSignVerifyKey creates a SIGN_VERIFY key with the given spec.
+func mustCreateSignVerifyKey(t *testing.T, ro *Router, spec string) string {
+	t.Helper()
+	return mustCreateKey(t, ro, `{"KeySpec":"`+spec+`","KeyUsage":"SIGN_VERIFY"}`)
+}
+
+func TestHandleSign(t *testing.T) {
+	type algoCase struct {
+		spec string
+		algo string
+	}
+	cases := []algoCase{
+		{"RSA_2048", "RSASSA_PSS_SHA_256"},
+		{"RSA_2048", "RSASSA_PSS_SHA_384"},
+		{"RSA_2048", "RSASSA_PSS_SHA_512"},
+		{"RSA_2048", "RSASSA_PKCS1_V1_5_SHA_256"},
+		{"RSA_2048", "RSASSA_PKCS1_V1_5_SHA_384"},
+		{"RSA_2048", "RSASSA_PKCS1_V1_5_SHA_512"},
+		{"ECC_NIST_P256", "ECDSA_SHA_256"},
+		{"ECC_NIST_P384", "ECDSA_SHA_384"},
+		{"ECC_NIST_P521", "ECDSA_SHA_512"},
+		{"ECC_NIST_EDWARDS25519", "ED25519_SHA_512"},
+	}
+	for _, tc := range cases {
+		t.Run("roundtrip RAW "+tc.spec+"/"+tc.algo, func(t *testing.T) {
+			ro := newTestRouter(t)
+			keyID := mustCreateSignVerifyKey(t, ro, tc.spec)
+			msg := []byte("hello signature")
+
+			signBody, _ := json.Marshal(map[string]any{
+				"KeyId":            keyID,
+				"Message":          msg,
+				"SigningAlgorithm": tc.algo,
+				"MessageType":      "RAW",
+			})
+			sw := kmsReq(t, ro, "Sign", string(signBody))
+			require.Equal(t, http.StatusOK, sw.Code, "Sign failed: %s", sw.Body.String())
+
+			var sResp map[string]any
+			require.NoError(t, json.Unmarshal(sw.Body.Bytes(), &sResp))
+			assert.Equal(t, tc.algo, sResp["SigningAlgorithm"])
+			assert.NotEmpty(t, sResp["KeyId"])
+
+			sigRaw, _ := json.Marshal(sResp["Signature"])
+			var sigBytes []byte
+			require.NoError(t, json.Unmarshal(sigRaw, &sigBytes))
+
+			verBody, _ := json.Marshal(map[string]any{
+				"KeyId":            keyID,
+				"Message":          msg,
+				"Signature":        sigBytes,
+				"SigningAlgorithm": tc.algo,
+				"MessageType":      "RAW",
+			})
+			vw := kmsReq(t, ro, "Verify", string(verBody))
+			require.Equal(t, http.StatusOK, vw.Code, "Verify failed: %s", vw.Body.String())
+			var vResp map[string]any
+			require.NoError(t, json.Unmarshal(vw.Body.Bytes(), &vResp))
+			assert.Equal(t, true, vResp["SignatureValid"])
+		})
+	}
+
+	t.Run("roundtrip DIGEST RSA_2048/RSASSA_PSS_SHA_256", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateSignVerifyKey(t, ro, "RSA_2048")
+		msg := []byte("hello digest")
+		h := sha256.Sum256(msg)
+		digest := h[:]
+
+		signBody, _ := json.Marshal(map[string]any{
+			"KeyId":            keyID,
+			"Message":          digest,
+			"SigningAlgorithm": "RSASSA_PSS_SHA_256",
+			"MessageType":      "DIGEST",
+		})
+		sw := kmsReq(t, ro, "Sign", string(signBody))
+		require.Equal(t, http.StatusOK, sw.Code)
+
+		var sResp map[string]any
+		require.NoError(t, json.Unmarshal(sw.Body.Bytes(), &sResp))
+		sigRaw, _ := json.Marshal(sResp["Signature"])
+		var sigBytes []byte
+		require.NoError(t, json.Unmarshal(sigRaw, &sigBytes))
+
+		verBody, _ := json.Marshal(map[string]any{
+			"KeyId":            keyID,
+			"Message":          digest,
+			"Signature":        sigBytes,
+			"SigningAlgorithm": "RSASSA_PSS_SHA_256",
+			"MessageType":      "DIGEST",
+		})
+		vw := kmsReq(t, ro, "Verify", string(verBody))
+		require.Equal(t, http.StatusOK, vw.Code)
+	})
+
+	t.Run("error: missing Message", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateSignVerifyKey(t, ro, "ECC_NIST_P256")
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":            keyID,
+			"SigningAlgorithm": "ECDSA_SHA_256",
+		})
+		w := kmsReq(t, ro, "Sign", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("error: missing SigningAlgorithm", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateSignVerifyKey(t, ro, "ECC_NIST_P256")
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":   keyID,
+			"Message": []byte("hello"),
+		})
+		w := kmsReq(t, ro, "Sign", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("error: algorithm not compatible with key spec", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateSignVerifyKey(t, ro, "ECC_NIST_P256")
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":            keyID,
+			"Message":          []byte("hello"),
+			"SigningAlgorithm": "ECDSA_SHA_512",
+		})
+		w := kmsReq(t, ro, "Sign", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "InvalidKeyUsageException")
+	})
+
+	t.Run("error: ENCRYPT_DECRYPT key not allowed", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":            keyID,
+			"Message":          []byte("hello"),
+			"SigningAlgorithm": "ECDSA_SHA_256",
+		})
+		w := kmsReq(t, ro, "Sign", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "InvalidKeyUsageException")
+	})
+
+	t.Run("error: ED25519_SHA_512 with DIGEST rejected", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateSignVerifyKey(t, ro, "ECC_NIST_EDWARDS25519")
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":            keyID,
+			"Message":          []byte("hello"),
+			"SigningAlgorithm": "ED25519_SHA_512",
+			"MessageType":      "DIGEST",
+		})
+		w := kmsReq(t, ro, "Sign", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("error: ED25519_PH_SHA_512 not supported", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateSignVerifyKey(t, ro, "ECC_NIST_EDWARDS25519")
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":            keyID,
+			"Message":          []byte("hello"),
+			"SigningAlgorithm": "ED25519_PH_SHA_512",
+		})
+		w := kmsReq(t, ro, "Sign", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "UnsupportedOperationException")
+	})
+}
+
+func TestHandleVerify(t *testing.T) {
+	t.Run("error: tampered signature", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateSignVerifyKey(t, ro, "ECC_NIST_P256")
+		msg := []byte("authentic message")
+
+		signBody, _ := json.Marshal(map[string]any{
+			"KeyId":            keyID,
+			"Message":          msg,
+			"SigningAlgorithm": "ECDSA_SHA_256",
+		})
+		sw := kmsReq(t, ro, "Sign", string(signBody))
+		require.Equal(t, http.StatusOK, sw.Code)
+		var sResp map[string]any
+		require.NoError(t, json.Unmarshal(sw.Body.Bytes(), &sResp))
+		sigRaw, _ := json.Marshal(sResp["Signature"])
+		var sigBytes []byte
+		require.NoError(t, json.Unmarshal(sigRaw, &sigBytes))
+		sigBytes[0] ^= 0xFF
+
+		verBody, _ := json.Marshal(map[string]any{
+			"KeyId":            keyID,
+			"Message":          msg,
+			"Signature":        sigBytes,
+			"SigningAlgorithm": "ECDSA_SHA_256",
+		})
+		vw := kmsReq(t, ro, "Verify", string(verBody))
+		assert.Equal(t, http.StatusBadRequest, vw.Code)
+		assertErrType(t, vw, "KMSInvalidSignatureException")
+	})
+
+	t.Run("error: wrong message", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateSignVerifyKey(t, ro, "ECC_NIST_P256")
+		signBody, _ := json.Marshal(map[string]any{
+			"KeyId":            keyID,
+			"Message":          []byte("original"),
+			"SigningAlgorithm": "ECDSA_SHA_256",
+		})
+		sw := kmsReq(t, ro, "Sign", string(signBody))
+		require.Equal(t, http.StatusOK, sw.Code)
+		var sResp map[string]any
+		require.NoError(t, json.Unmarshal(sw.Body.Bytes(), &sResp))
+		sigRaw, _ := json.Marshal(sResp["Signature"])
+		var sigBytes []byte
+		require.NoError(t, json.Unmarshal(sigRaw, &sigBytes))
+
+		verBody, _ := json.Marshal(map[string]any{
+			"KeyId":            keyID,
+			"Message":          []byte("tampered"),
+			"Signature":        sigBytes,
+			"SigningAlgorithm": "ECDSA_SHA_256",
+		})
+		vw := kmsReq(t, ro, "Verify", string(verBody))
+		assert.Equal(t, http.StatusBadRequest, vw.Code)
+		assertErrType(t, vw, "KMSInvalidSignatureException")
+	})
+
+	t.Run("error: missing Signature", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateSignVerifyKey(t, ro, "ECC_NIST_P256")
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":            keyID,
+			"Message":          []byte("hello"),
+			"SigningAlgorithm": "ECDSA_SHA_256",
+		})
+		w := kmsReq(t, ro, "Verify", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("error: key disabled", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateSignVerifyKey(t, ro, "ECC_NIST_P256")
+		msg := []byte("msg")
+		signBody, _ := json.Marshal(map[string]any{
+			"KeyId":            keyID,
+			"Message":          msg,
+			"SigningAlgorithm": "ECDSA_SHA_256",
+		})
+		sw := kmsReq(t, ro, "Sign", string(signBody))
+		require.Equal(t, http.StatusOK, sw.Code)
+		var sResp map[string]any
+		require.NoError(t, json.Unmarshal(sw.Body.Bytes(), &sResp))
+		sigRaw, _ := json.Marshal(sResp["Signature"])
+		var sigBytes []byte
+		require.NoError(t, json.Unmarshal(sigRaw, &sigBytes))
+
+		dw := kmsReq(t, ro, "DisableKey", `{"KeyId":"`+keyID+`"}`)
+		require.Equal(t, http.StatusOK, dw.Code)
+
+		verBody, _ := json.Marshal(map[string]any{
+			"KeyId":            keyID,
+			"Message":          msg,
+			"Signature":        sigBytes,
+			"SigningAlgorithm": "ECDSA_SHA_256",
+		})
+		vw := kmsReq(t, ro, "Verify", string(verBody))
+		assert.Equal(t, http.StatusBadRequest, vw.Code)
+		assertErrType(t, vw, "DisabledException")
 	})
 }

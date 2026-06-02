@@ -76,6 +76,18 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ro.handleGenerateDataKey(w, body)
 	case "GenerateDataKeyWithoutPlaintext":
 		ro.handleGenerateDataKeyWithoutPlaintext(w, body)
+	case "GenerateRandom":
+		ro.handleGenerateRandom(w, body)
+	case "ReEncrypt":
+		ro.handleReEncrypt(w, body)
+	case "GenerateMac":
+		ro.handleGenerateMac(w, body)
+	case "VerifyMac":
+		ro.handleVerifyMac(w, body)
+	case "Sign":
+		ro.handleSign(w, body)
+	case "Verify":
+		ro.handleVerify(w, body)
 	case "CreateAlias":
 		ro.handleCreateAlias(w, body)
 	case "DeleteAlias":

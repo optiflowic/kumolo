@@ -243,6 +243,21 @@ type KeyMaterial struct {
 	KeyMaterialID string `json:"KeyMaterialId"`           // 64-char hex, identifies this key material
 }
 
+// hmacKeySize returns the key length in bytes for an HMAC key spec, or 0 if not an HMAC spec.
+func hmacKeySize(spec string) int {
+	switch spec {
+	case "HMAC_224":
+		return 28
+	case "HMAC_256":
+		return 32
+	case "HMAC_384":
+		return 48
+	case "HMAC_512":
+		return 64
+	}
+	return 0
+}
+
 func macAlgorithmsForKey(spec string) []string {
 	switch spec {
 	case "HMAC_224":
