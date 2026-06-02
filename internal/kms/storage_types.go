@@ -233,11 +233,14 @@ type TagEntry struct {
 	TagValue string `json:"TagValue"`
 }
 
-// KeyMaterial holds the cryptographic key bytes for a KMS key.
-// Only generated for SYMMETRIC_DEFAULT keys; other key types have no material file.
+// KeyMaterial holds the cryptographic key material for a KMS key.
+// For SYMMETRIC_DEFAULT keys, KeyBytes holds 32 AES-256 bytes.
+// For RSA/ECC keys, PrivateKeyDER holds the PKCS#8 DER-encoded private key.
+// KeyMaterialID is a 64-char hex identifier generated for all key types.
 type KeyMaterial struct {
-	KeyBytes      []byte `json:"KeyBytes"`      // 32 bytes for AES-256 (SYMMETRIC_DEFAULT)
-	KeyMaterialID string `json:"KeyMaterialId"` // 64-char hex, identifies this key material
+	KeyBytes      []byte `json:"KeyBytes,omitempty"`      // 32 bytes for AES-256 (SYMMETRIC_DEFAULT)
+	PrivateKeyDER []byte `json:"PrivateKeyDER,omitempty"` // PKCS#8 DER for RSA/ECC asymmetric keys
+	KeyMaterialID string `json:"KeyMaterialId"`           // 64-char hex, identifies this key material
 }
 
 func macAlgorithmsForKey(spec string) []string {

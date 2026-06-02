@@ -2,6 +2,9 @@ package integration_test
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/json"
 	"testing"
 	"time"
@@ -549,4 +552,123 @@ func TestKMSListResourceTags(t *testing.T) {
 			assert.Equal(t, "InvalidMarkerException", apiErrorCode(err))
 		},
 	)
+}
+
+func TestKMSGetPublicKey(t *testing.T) {
+	clients := newTestClients(t)
+	ctx, cancel := context.WithTimeout(context.Background(), kmsTestTimeout)
+	defer cancel()
+
+	t.Run(
+		"RSA_2048 ENCRYPT_DECRYPT returns RSA public key and EncryptionAlgorithms",
+		func(t *testing.T) {
+			out, err := clients.kms.CreateKey(ctx, &awskms.CreateKeyInput{
+				KeySpec:  types.KeySpecRsa2048,
+				KeyUsage: types.KeyUsageTypeEncryptDecrypt,
+			})
+			require.NoError(t, err)
+			keyID := aws.ToString(out.KeyMetadata.KeyId)
+
+			resp, err := clients.kms.GetPublicKey(ctx, &awskms.GetPublicKeyInput{
+				KeyId: aws.String(keyID),
+			})
+			require.NoError(t, err)
+			assert.Equal(t, types.KeySpecRsa2048, resp.KeySpec)
+			assert.Equal(t, types.KeyUsageTypeEncryptDecrypt, resp.KeyUsage)
+			assert.NotEmpty(t, resp.EncryptionAlgorithms)
+			assert.Empty(t, resp.SigningAlgorithms)
+
+			pub, err := x509.ParsePKIXPublicKey(resp.PublicKey)
+			require.NoError(t, err)
+			_, ok := pub.(*rsa.PublicKey)
+			assert.True(t, ok)
+		},
+	)
+
+	t.Run(
+		"ECC_NIST_P256 SIGN_VERIFY returns ECDSA public key and SigningAlgorithms",
+		func(t *testing.T) {
+			out, err := clients.kms.CreateKey(ctx, &awskms.CreateKeyInput{
+				KeySpec:  types.KeySpecEccNistP256,
+				KeyUsage: types.KeyUsageTypeSignVerify,
+			})
+			require.NoError(t, err)
+			keyID := aws.ToString(out.KeyMetadata.KeyId)
+
+			resp, err := clients.kms.GetPublicKey(ctx, &awskms.GetPublicKeyInput{
+				KeyId: aws.String(keyID),
+			})
+			require.NoError(t, err)
+			assert.Equal(t, types.KeySpecEccNistP256, resp.KeySpec)
+			assert.Equal(t, types.KeyUsageTypeSignVerify, resp.KeyUsage)
+			assert.NotEmpty(t, resp.SigningAlgorithms)
+			assert.Empty(t, resp.EncryptionAlgorithms)
+
+			pub, err := x509.ParsePKIXPublicKey(resp.PublicKey)
+			require.NoError(t, err)
+			ecPub, ok := pub.(*ecdsa.PublicKey)
+			require.True(t, ok)
+			assert.Equal(t, "P-256", ecPub.Curve.Params().Name)
+		},
+	)
+
+	t.Run("accepts alias as KeyId", func(t *testing.T) {
+		out, err := clients.kms.CreateKey(ctx, &awskms.CreateKeyInput{
+			KeySpec:  types.KeySpecEccNistP256,
+			KeyUsage: types.KeyUsageTypeSignVerify,
+		})
+		require.NoError(t, err)
+		keyID := aws.ToString(out.KeyMetadata.KeyId)
+		_, err = clients.kms.CreateAlias(ctx, &awskms.CreateAliasInput{
+			AliasName:   aws.String("alias/gpk-test-ecc"),
+			TargetKeyId: aws.String(keyID),
+		})
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_, _ = clients.kms.DeleteAlias(ctx, &awskms.DeleteAliasInput{
+				AliasName: aws.String("alias/gpk-test-ecc"),
+			})
+		})
+
+		resp, err := clients.kms.GetPublicKey(ctx, &awskms.GetPublicKeyInput{
+			KeyId: aws.String("alias/gpk-test-ecc"),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, types.KeySpecEccNistP256, resp.KeySpec)
+	})
+
+	t.Run("returns NotFoundException for unknown key", func(t *testing.T) {
+		_, err := clients.kms.GetPublicKey(ctx, &awskms.GetPublicKeyInput{
+			KeyId: aws.String("00000000-0000-0000-0000-000000000000"),
+		})
+		assert.Equal(t, "NotFoundException", apiErrorCode(err))
+	})
+
+	t.Run("returns InvalidKeyUsageException for SYMMETRIC_DEFAULT key", func(t *testing.T) {
+		keyID := kmsCreateKey(ctx, t, clients, "symmetric key for gpk test")
+		_, err := clients.kms.GetPublicKey(ctx, &awskms.GetPublicKeyInput{
+			KeyId: aws.String(keyID),
+		})
+		assert.Equal(t, "InvalidKeyUsageException", apiErrorCode(err))
+	})
+
+	t.Run("returns KMSInvalidStateException for PendingDeletion key", func(t *testing.T) {
+		out, err := clients.kms.CreateKey(ctx, &awskms.CreateKeyInput{
+			KeySpec:  types.KeySpecEccNistP256,
+			KeyUsage: types.KeyUsageTypeSignVerify,
+		})
+		require.NoError(t, err)
+		keyID := aws.ToString(out.KeyMetadata.KeyId)
+
+		_, err = clients.kms.ScheduleKeyDeletion(ctx, &awskms.ScheduleKeyDeletionInput{
+			KeyId:               aws.String(keyID),
+			PendingWindowInDays: aws.Int32(7),
+		})
+		require.NoError(t, err)
+
+		_, err = clients.kms.GetPublicKey(ctx, &awskms.GetPublicKeyInput{
+			KeyId: aws.String(keyID),
+		})
+		assert.Equal(t, "KMSInvalidStateException", apiErrorCode(err))
+	})
 }

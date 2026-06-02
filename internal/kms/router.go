@@ -98,6 +98,8 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ro.handleDisableKeyRotation(w, body)
 	case "GetKeyRotationStatus":
 		ro.handleGetKeyRotationStatus(w, body)
+	case "GetPublicKey":
+		ro.handleGetPublicKey(w, body)
 	case "ListResourceTags":
 		ro.handleListResourceTags(w, body)
 	case "TagResource":

@@ -1,7 +1,12 @@
 package kms
 
 import (
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,16 +25,17 @@ func nowUnix() float64 { return float64(time.Now().Unix()) }
 // Storage is a filesystem-backed KMS backend. os.Root scopes all access to
 // the storage root, preventing path traversal attacks.
 type Storage struct {
-	mu               sync.RWMutex
-	root             *os.Root
-	maxAliasesPerKey int
-	mkdirFn          func(name string, perm os.FileMode) error
-	removeFile       func(name string) error
-	openFile         func(name string, flag int, perm os.FileMode) (io.WriteCloser, error)
-	readAll          func(r io.Reader) ([]byte, error)
-	listDirFn        func(name string) ([]os.DirEntry, error)
-	statFn           func(name string) (os.FileInfo, error)
-	randRead         func(b []byte) (int, error)
+	mu                sync.RWMutex
+	root              *os.Root
+	maxAliasesPerKey  int
+	mkdirFn           func(name string, perm os.FileMode) error
+	removeFile        func(name string) error
+	openFile          func(name string, flag int, perm os.FileMode) (io.WriteCloser, error)
+	readAll           func(r io.Reader) ([]byte, error)
+	listDirFn         func(name string) ([]os.DirEntry, error)
+	statFn            func(name string) (os.FileInfo, error)
+	randRead          func(b []byte) (int, error)
+	generateKeyPairFn func(keySpec string) (privKeyDER []byte, err error)
 }
 
 // aliasLimitPerKey is the AWS-spec maximum number of aliases per key.
@@ -86,7 +92,67 @@ func newStorage(dataDir string, openRoot func(string) (*os.Root, error)) (*Stora
 	}
 	s.statFn = s.root.Stat
 	s.randRead = rand.Read
+	s.generateKeyPairFn = generateKeyPair
 	return s, nil
+}
+
+// generateKeyPair generates an asymmetric key pair for the given KeySpec and
+// returns the PKCS#8 DER-encoded private key. Returns nil, nil for unsupported
+// or non-asymmetric specs (HMAC, SYMMETRIC_DEFAULT, ECC_SECG_P256K1, SM2, ML_DSA_*).
+func generateKeyPair(keySpec string) ([]byte, error) {
+	var priv any
+	switch keySpec {
+	case "RSA_2048":
+		k, err := rsa.GenerateKey(rand.Reader, 2048)
+		if err != nil {
+			return nil, fmt.Errorf("generate RSA_2048: %w", err)
+		}
+		priv = k
+	case "RSA_3072":
+		k, err := rsa.GenerateKey(rand.Reader, 3072)
+		if err != nil {
+			return nil, fmt.Errorf("generate RSA_3072: %w", err)
+		}
+		priv = k
+	case "RSA_4096":
+		k, err := rsa.GenerateKey(rand.Reader, 4096)
+		if err != nil {
+			return nil, fmt.Errorf("generate RSA_4096: %w", err)
+		}
+		priv = k
+	case "ECC_NIST_P256":
+		k, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		if err != nil {
+			return nil, fmt.Errorf("generate ECC_NIST_P256: %w", err)
+		}
+		priv = k
+	case "ECC_NIST_P384":
+		k, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+		if err != nil {
+			return nil, fmt.Errorf("generate ECC_NIST_P384: %w", err)
+		}
+		priv = k
+	case "ECC_NIST_P521":
+		k, err := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
+		if err != nil {
+			return nil, fmt.Errorf("generate ECC_NIST_P521: %w", err)
+		}
+		priv = k
+	case "ECC_NIST_EDWARDS25519":
+		_, k, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			return nil, fmt.Errorf("generate ECC_NIST_EDWARDS25519: %w", err)
+		}
+		priv = k
+	default:
+		return nil, nil
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(priv)
+	if err != nil {
+		// untestable: MarshalPKCS8PrivateKey always succeeds for RSA, ECDSA, and Ed25519 keys
+		return nil, fmt.Errorf("marshal private key: %w", err)
+	}
+	return der, nil
 }
 
 type CreateKeyInput struct {
@@ -235,6 +301,88 @@ func (s *Storage) CreateKey(in CreateKeyInput) (KeyMetadata, error) {
 				)
 			}
 			return KeyMetadata{}, fmt.Errorf("write key material: %w", err)
+		}
+	} else {
+		privKeyDER, err := s.generateKeyPairFn(in.KeySpec)
+		if err != nil {
+			if rmErr := s.removeFile(filepath.Join(keyDir, "meta.json")); rmErr != nil {
+				slog.Warn(
+					"failed to clean up meta.json after key pair generation failure",
+					"keyID",
+					keyID,
+					"err",
+					rmErr,
+				)
+			}
+			if rmErr := s.removeFile(keyDir); rmErr != nil {
+				slog.Warn(
+					"failed to clean up key dir after key pair generation failure",
+					"keyID",
+					keyID,
+					"err",
+					rmErr,
+				)
+			}
+			return KeyMetadata{}, fmt.Errorf("generate key pair: %w", err)
+		}
+		if privKeyDER != nil {
+			var matIDBytes [32]byte
+			if _, err := s.randRead(matIDBytes[:]); err != nil {
+				if rmErr := s.removeFile(filepath.Join(keyDir, "meta.json")); rmErr != nil {
+					slog.Warn(
+						"failed to clean up meta.json after asymmetric material ID rand failure",
+						"keyID",
+						keyID,
+						"err",
+						rmErr,
+					)
+				}
+				if rmErr := s.removeFile(keyDir); rmErr != nil {
+					slog.Warn(
+						"failed to clean up key dir after asymmetric material ID rand failure",
+						"keyID",
+						keyID,
+						"err",
+						rmErr,
+					)
+				}
+				return KeyMetadata{}, fmt.Errorf("generate key material ID: %w", err)
+			}
+			material := KeyMaterial{
+				PrivateKeyDER: privKeyDER,
+				KeyMaterialID: fmt.Sprintf("%x", matIDBytes),
+			}
+			if err := s.writeJSON(filepath.Join(keyDir, "material.json"), material); err != nil {
+				if rmErr := s.removeFile(filepath.Join(keyDir, "meta.json")); rmErr != nil {
+					slog.Warn(
+						"failed to clean up meta.json after asymmetric material write failure",
+						"keyID",
+						keyID,
+						"err",
+						rmErr,
+					)
+				}
+				if rmErr := s.removeFile(filepath.Join(keyDir, "material.json")); rmErr != nil &&
+					!errors.Is(rmErr, os.ErrNotExist) {
+					slog.Warn(
+						"failed to clean up material.json after asymmetric material write failure",
+						"keyID",
+						keyID,
+						"err",
+						rmErr,
+					)
+				}
+				if rmErr := s.removeFile(keyDir); rmErr != nil {
+					slog.Warn(
+						"failed to clean up key dir after asymmetric material write failure",
+						"keyID",
+						keyID,
+						"err",
+						rmErr,
+					)
+				}
+				return KeyMetadata{}, fmt.Errorf("write key material: %w", err)
+			}
 		}
 	}
 
