@@ -4249,3 +4249,87 @@ func TestHandleSign_materialNotFound(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assertErrType(t, w, "UnsupportedOperationException")
 }
+
+// resolveAndValidateMACKey: GetKeyMetadata storage error (non-ErrKeyNotFound).
+func TestResolveAndValidateMACKey_metadataStorageError(t *testing.T) {
+	dir := t.TempDir()
+	s, err := newStorage(dir, os.OpenRoot)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	fs := &aliasFailStore{
+		inner: s,
+		getKeyMetadata: func(string) (KeyMetadata, error) {
+			return KeyMetadata{}, errors.New("storage error")
+		},
+	}
+	ro := newRouterWithRand(fs, s.randRead)
+	body, _ := json.Marshal(map[string]any{
+		"KeyId":        "00000000-0000-0000-0000-000000000000",
+		"MacAlgorithm": "HMAC_SHA_256",
+		"Message":      []byte("test"),
+	})
+	w := kmsReq(t, ro, "GenerateMac", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, "KMSInternalException")
+}
+
+// resolveAndValidateMACKey: GetKeyMaterial storage error (non-ErrKeyMaterialNotFound).
+func TestResolveAndValidateMACKey_materialStorageError(t *testing.T) {
+	dir := t.TempDir()
+	s, err := newStorage(dir, os.OpenRoot)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	realRo := NewRouter(s)
+	keyID := mustCreateKey(t, realRo, `{"KeySpec":"HMAC_256","KeyUsage":"GENERATE_VERIFY_MAC"}`)
+	ro := newRouterWithRand(&partialFailStore{inner: s}, s.randRead)
+	body, _ := json.Marshal(map[string]any{
+		"KeyId":        keyID,
+		"MacAlgorithm": "HMAC_SHA_256",
+		"Message":      []byte("test"),
+	})
+	w := kmsReq(t, ro, "GenerateMac", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, "KMSInternalException")
+}
+
+// resolveAndValidateSignKey: GetKeyMetadata storage error (non-ErrKeyNotFound).
+func TestResolveAndValidateSignKey_metadataStorageError(t *testing.T) {
+	dir := t.TempDir()
+	s, err := newStorage(dir, os.OpenRoot)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	fs := &aliasFailStore{
+		inner: s,
+		getKeyMetadata: func(string) (KeyMetadata, error) {
+			return KeyMetadata{}, errors.New("storage error")
+		},
+	}
+	ro := newRouterWithRand(fs, s.randRead)
+	body, _ := json.Marshal(map[string]any{
+		"KeyId":            "00000000-0000-0000-0000-000000000000",
+		"Message":          make([]byte, 32),
+		"SigningAlgorithm": "RSASSA_PKCS1_V1_5_SHA_256",
+	})
+	w := kmsReq(t, ro, "Sign", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, "KMSInternalException")
+}
+
+// resolveAndValidateSignKey: GetKeyMaterial storage error (non-ErrKeyMaterialNotFound).
+func TestResolveAndValidateSignKey_materialStorageError(t *testing.T) {
+	dir := t.TempDir()
+	s, err := newStorage(dir, os.OpenRoot)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	realRo := NewRouter(s)
+	keyID := mustCreateKey(t, realRo, `{"KeySpec":"RSA_2048","KeyUsage":"SIGN_VERIFY"}`)
+	ro := newRouterWithRand(&partialFailStore{inner: s}, s.randRead)
+	body, _ := json.Marshal(map[string]any{
+		"KeyId":            keyID,
+		"Message":          make([]byte, 32),
+		"SigningAlgorithm": "RSASSA_PKCS1_V1_5_SHA_256",
+	})
+	w := kmsReq(t, ro, "Sign", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, "KMSInternalException")
+}
