@@ -30,6 +30,7 @@ const (
 	amzDeleteMarker                = "X-Amz-Delete-Marker"
 	amzSSE                         = "X-Amz-Server-Side-Encryption"
 	amzSSEKMSKeyID                 = "X-Amz-Server-Side-Encryption-Aws-Kms-Key-Id"
+	amzSSEBucketKeyEnabled         = "X-Amz-Server-Side-Encryption-Bucket-Key-Enabled"
 	amzStorageClass                = "X-Amz-Storage-Class"
 	amzMetadataDirective           = "X-Amz-Metadata-Directive"
 	amzCopySourceRange             = "X-Amz-Copy-Source-Range"

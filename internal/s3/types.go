@@ -28,19 +28,20 @@ type ObjectLegalHold struct {
 
 // ObjectMetadata is stored as a sidecar .meta.json file alongside each object.
 type ObjectMetadata struct {
-	ContentType      string            `json:"contentType"`
-	ETag             string            `json:"etag"`
-	LastModified     time.Time         `json:"lastModified"`
-	Size             int64             `json:"size"`
-	UserMetadata     map[string]string `json:"userMetadata,omitempty"`
-	VersionID        string            `json:"versionId,omitempty"`
-	IsDeleteMarker   bool              `json:"isDeleteMarker,omitempty"`
-	SSEAlgorithm     string            `json:"sseAlgorithm,omitempty"`
-	SSEKMSKeyID      string            `json:"sseKmsKeyId,omitempty"`
-	StorageClass     string            `json:"storageClass,omitempty"`
-	RestoreInitiated bool              `json:"restoreInitiated,omitempty"`
-	Retention        *ObjectRetention  `json:"retention,omitempty"`
-	LegalHold        *ObjectLegalHold  `json:"legalHold,omitempty"`
+	ContentType         string            `json:"contentType"`
+	ETag                string            `json:"etag"`
+	LastModified        time.Time         `json:"lastModified"`
+	Size                int64             `json:"size"`
+	UserMetadata        map[string]string `json:"userMetadata,omitempty"`
+	VersionID           string            `json:"versionId,omitempty"`
+	IsDeleteMarker      bool              `json:"isDeleteMarker,omitempty"`
+	SSEAlgorithm        string            `json:"sseAlgorithm,omitempty"`
+	SSEKMSKeyID         string            `json:"sseKmsKeyId,omitempty"`
+	SSEBucketKeyEnabled bool              `json:"sseBucketKeyEnabled,omitempty"`
+	StorageClass        string            `json:"storageClass,omitempty"`
+	RestoreInitiated    bool              `json:"restoreInitiated,omitempty"`
+	Retention           *ObjectRetention  `json:"retention,omitempty"`
+	LegalHold           *ObjectLegalHold  `json:"legalHold,omitempty"`
 	// Set when superseded; zero for versions predating lifecycle enforcement.
 	NoncurrentSince time.Time `json:"noncurrentSince,omitempty"`
 }

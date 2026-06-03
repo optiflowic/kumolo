@@ -202,6 +202,7 @@ func (s *Storage) PutObject(
 	contentType string,
 	userMetadata map[string]string,
 	sseAlgorithm, sseKMSKeyID string,
+	sseBucketKeyEnabled bool,
 	retention *ObjectRetention,
 	legalHold *ObjectLegalHold,
 	storageClass string,
@@ -245,6 +246,7 @@ func (s *Storage) PutObject(
 		versionID,
 		sseAlgorithm,
 		sseKMSKeyID,
+		sseBucketKeyEnabled,
 		retention,
 		legalHold,
 		storageClass,
@@ -258,6 +260,7 @@ func (s *Storage) PutObjectIfNotExists(
 	contentType string,
 	userMetadata map[string]string,
 	sseAlgorithm, sseKMSKeyID string,
+	sseBucketKeyEnabled bool,
 	retention *ObjectRetention,
 	legalHold *ObjectLegalHold,
 	storageClass string,
@@ -309,6 +312,7 @@ func (s *Storage) PutObjectIfNotExists(
 		versionID,
 		sseAlgorithm,
 		sseKMSKeyID,
+		sseBucketKeyEnabled,
 		retention,
 		legalHold,
 		storageClass,
@@ -326,6 +330,7 @@ func (s *Storage) writeObject(
 	userMetadata map[string]string,
 	versionID string,
 	sseAlgorithm, sseKMSKeyID string,
+	sseBucketKeyEnabled bool,
 	retention *ObjectRetention,
 	legalHold *ObjectLegalHold,
 	storageClass string,
@@ -355,17 +360,18 @@ func (s *Storage) writeObject(
 		etag = `"` + hex.EncodeToString(h.Sum(nil)) + `"`
 	}
 	meta := ObjectMetadata{
-		ContentType:  contentType,
-		ETag:         etag,
-		LastModified: time.Now().UTC(),
-		Size:         size,
-		UserMetadata: userMetadata,
-		VersionID:    versionID,
-		SSEAlgorithm: sseAlgorithm,
-		SSEKMSKeyID:  sseKMSKeyID,
-		StorageClass: storageClass,
-		Retention:    retention,
-		LegalHold:    legalHold,
+		ContentType:         contentType,
+		ETag:                etag,
+		LastModified:        time.Now().UTC(),
+		Size:                size,
+		UserMetadata:        userMetadata,
+		VersionID:           versionID,
+		SSEAlgorithm:        sseAlgorithm,
+		SSEKMSKeyID:         sseKMSKeyID,
+		SSEBucketKeyEnabled: sseBucketKeyEnabled,
+		StorageClass:        storageClass,
+		Retention:           retention,
+		LegalHold:           legalHold,
 	}
 	if err := s.writeMeta(objPath, meta); err != nil {
 		if removeErr := s.removeFile(objPath); removeErr != nil &&
@@ -414,6 +420,7 @@ func (s *Storage) CopyObject(
 	contentType string,
 	userMetadata map[string]string,
 	sseAlgorithm, sseKMSKeyID string,
+	sseBucketKeyEnabled bool,
 	retention *ObjectRetention,
 	legalHold *ObjectLegalHold,
 	storageClass string,
@@ -506,6 +513,7 @@ func (s *Storage) CopyObject(
 		meta.UserMetadata = userMetadata
 		meta.SSEAlgorithm = sseAlgorithm
 		meta.SSEKMSKeyID = sseKMSKeyID
+		meta.SSEBucketKeyEnabled = sseBucketKeyEnabled
 		meta.StorageClass = storageClass
 		meta.Retention = retention
 		meta.LegalHold = legalHold
@@ -536,6 +544,7 @@ func (s *Storage) CopyObject(
 		dstVersionID,
 		sseAlgorithm,
 		sseKMSKeyID,
+		sseBucketKeyEnabled,
 		retention,
 		legalHold,
 		storageClass,
@@ -1510,15 +1519,16 @@ func (s *Storage) DeleteBucketPolicy(bucket string) error {
 
 // uploadMeta is stored as .mpu/<uploadID>/upload.json.
 type uploadMeta struct {
-	Bucket       string           `json:"bucket"`
-	Key          string           `json:"key"`
-	ContentType  string           `json:"contentType"`
-	Initiated    time.Time        `json:"initiated"`
-	SSEAlgorithm string           `json:"sseAlgorithm,omitempty"`
-	SSEKMSKeyID  string           `json:"sseKmsKeyId,omitempty"`
-	StorageClass string           `json:"storageClass,omitempty"`
-	Retention    *ObjectRetention `json:"retention,omitempty"`
-	LegalHold    *ObjectLegalHold `json:"legalHold,omitempty"`
+	Bucket              string           `json:"bucket"`
+	Key                 string           `json:"key"`
+	ContentType         string           `json:"contentType"`
+	Initiated           time.Time        `json:"initiated"`
+	SSEAlgorithm        string           `json:"sseAlgorithm,omitempty"`
+	SSEKMSKeyID         string           `json:"sseKmsKeyId,omitempty"`
+	SSEBucketKeyEnabled bool             `json:"sseBucketKeyEnabled,omitempty"`
+	StorageClass        string           `json:"storageClass,omitempty"`
+	Retention           *ObjectRetention `json:"retention,omitempty"`
+	LegalHold           *ObjectLegalHold `json:"legalHold,omitempty"`
 }
 
 // partMeta is stored as .mpu/<uploadID>/<partNumber>.part.meta.json.
@@ -1531,6 +1541,7 @@ const mpuDir = ".mpu"
 
 func (s *Storage) CreateMultipartUpload(
 	bucket, key, contentType, sseAlgorithm, sseKMSKeyID string,
+	sseBucketKeyEnabled bool,
 	retention *ObjectRetention,
 	legalHold *ObjectLegalHold,
 	storageClass string,
@@ -1553,15 +1564,16 @@ func (s *Storage) CreateMultipartUpload(
 		return "", err
 	}
 	meta := uploadMeta{
-		Bucket:       bucket,
-		Key:          key,
-		ContentType:  contentType,
-		Initiated:    time.Now().UTC(),
-		SSEAlgorithm: sseAlgorithm,
-		SSEKMSKeyID:  sseKMSKeyID,
-		StorageClass: storageClass,
-		Retention:    retention,
-		LegalHold:    legalHold,
+		Bucket:              bucket,
+		Key:                 key,
+		ContentType:         contentType,
+		Initiated:           time.Now().UTC(),
+		SSEAlgorithm:        sseAlgorithm,
+		SSEKMSKeyID:         sseKMSKeyID,
+		SSEBucketKeyEnabled: sseBucketKeyEnabled,
+		StorageClass:        storageClass,
+		Retention:           retention,
+		LegalHold:           legalHold,
 	}
 	data, _ := json.Marshal(meta) // json.Marshal never fails for uploadMeta
 	var uploadJSONWritten bool
@@ -1852,6 +1864,7 @@ func (s *Storage) CompleteMultipartUpload(
 		versionID,
 		umeta.SSEAlgorithm,
 		umeta.SSEKMSKeyID,
+		umeta.SSEBucketKeyEnabled,
 		umeta.Retention,
 		umeta.LegalHold,
 		umeta.StorageClass,

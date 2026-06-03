@@ -95,6 +95,7 @@ func (ro *Router) handleCopyObject(
 		return
 	}
 	sseKMSKeyID := r.Header.Get(amzSSEKMSKeyID)
+	sseBucketKeyEnabled := parseBucketKeyEnabled(r, sseAlgorithm)
 	retention, legalHold, ok := parseObjectLockHeaders(w, r)
 	if !ok {
 		return
@@ -110,6 +111,7 @@ func (ro *Router) handleCopyObject(
 		userMetadata,
 		sseAlgorithm,
 		sseKMSKeyID,
+		sseBucketKeyEnabled,
 		retention,
 		legalHold,
 		storageClass,
@@ -183,6 +185,22 @@ func setSSEHeaders(w http.ResponseWriter, meta ObjectMetadata) {
 	if meta.SSEKMSKeyID != "" {
 		w.Header().Set(amzSSEKMSKeyID, meta.SSEKMSKeyID)
 	}
+	if meta.SSEBucketKeyEnabled && isKMSAlgorithm(meta.SSEAlgorithm) {
+		w.Header().Set(amzSSEBucketKeyEnabled, "true")
+	}
+}
+
+// parseBucketKeyEnabled reads X-Amz-Server-Side-Encryption-Bucket-Key-Enabled.
+// Only meaningful for aws:kms / aws:kms:dsse; returns false for all other algorithms.
+func parseBucketKeyEnabled(r *http.Request, sseAlgorithm string) bool {
+	if !isKMSAlgorithm(sseAlgorithm) {
+		return false
+	}
+	return r.Header.Get(amzSSEBucketKeyEnabled) == "true"
+}
+
+func isKMSAlgorithm(alg string) bool {
+	return alg == "aws:kms" || alg == "aws:kms:dsse"
 }
 
 func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket, key string) {
@@ -196,6 +214,7 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 		return
 	}
 	sseKMSKeyID := r.Header.Get(amzSSEKMSKeyID)
+	sseBucketKeyEnabled := parseBucketKeyEnabled(r, sseAlgorithm)
 	expected, ok := parseContentMD5Header(w, r)
 	if !ok {
 		return
@@ -230,6 +249,7 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 		userMetadata,
 		sseAlgorithm,
 		sseKMSKeyID,
+		sseBucketKeyEnabled,
 		retention,
 		legalHold,
 		storageClass,
