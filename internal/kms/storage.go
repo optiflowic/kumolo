@@ -512,6 +512,15 @@ func (s *Storage) GetKeyMaterial(keyID string) (KeyMaterial, error) {
 		}
 		return KeyMaterial{}, fmt.Errorf("failed to read key material for %s: %w", keyID, err)
 	}
+	meta, err := s.readKeyMeta(keyID)
+	if err != nil {
+		// unreachable: keyExistsLocked confirmed meta.json exists immediately above
+		return KeyMaterial{}, fmt.Errorf("failed to read key metadata for %s: %w", keyID, err)
+	}
+	if n := hmacKeySize(meta.KeySpec); n > 0 && len(mat.KeyBytes) != n {
+		return KeyMaterial{}, fmt.Errorf("%w: key %s expects %d bytes, got %d",
+			ErrKeyMaterialCorrupted, keyID, n, len(mat.KeyBytes))
+	}
 	return mat, nil
 }
 
