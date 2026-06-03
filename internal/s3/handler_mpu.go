@@ -24,7 +24,10 @@ func (ro *Router) handleCreateMultipartUpload(
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
-	sseAlgorithm := r.Header.Get(amzSSE)
+	sseAlgorithm, ok := resolveSSEAlgorithm(w, r)
+	if !ok {
+		return
+	}
 	sseKMSKeyID := r.Header.Get(amzSSEKMSKeyID)
 	retention, legalHold, ok := parseObjectLockHeaders(w, r)
 	if !ok {

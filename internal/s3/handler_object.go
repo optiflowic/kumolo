@@ -18,6 +18,19 @@ import (
 	"unicode/utf8"
 )
 
+// resolveSSEAlgorithm returns the SSE algorithm header value; empty (absent) is valid, unknown values write 400 and return false.
+func resolveSSEAlgorithm(w http.ResponseWriter, r *http.Request) (string, bool) {
+	alg := r.Header.Get(amzSSE)
+	switch alg {
+	case "", "AES256", "aws:kms", "aws:kms:dsse":
+		return alg, true
+	default:
+		writeError(w, r, http.StatusBadRequest, "InvalidArgument",
+			"The encryption method specified is not supported.")
+		return "", false
+	}
+}
+
 // extractUserMetadata collects all x-amz-meta-* headers from h and returns
 // them as a map keyed by the suffix after the prefix (lowercased). Returns nil
 // if no such headers are present.
@@ -77,7 +90,10 @@ func (ro *Router) handleCopyObject(
 			userMetadata = map[string]string{}
 		}
 	}
-	sseAlgorithm := r.Header.Get(amzSSE)
+	sseAlgorithm, ok := resolveSSEAlgorithm(w, r)
+	if !ok {
+		return
+	}
 	sseKMSKeyID := r.Header.Get(amzSSEKMSKeyID)
 	retention, legalHold, ok := parseObjectLockHeaders(w, r)
 	if !ok {
@@ -175,7 +191,10 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 		contentType = "application/octet-stream"
 	}
 	userMetadata := extractUserMetadata(r.Header)
-	sseAlgorithm := r.Header.Get(amzSSE)
+	sseAlgorithm, ok := resolveSSEAlgorithm(w, r)
+	if !ok {
+		return
+	}
 	sseKMSKeyID := r.Header.Get(amzSSEKMSKeyID)
 	expected, ok := parseContentMD5Header(w, r)
 	if !ok {
