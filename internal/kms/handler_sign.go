@@ -179,12 +179,12 @@ func verifyData(privKeyDER []byte, algo string, h crypto.Hash, data, sig []byte)
 		pub := &k.PublicKey
 		if isPSSAlgorithm(algo) {
 			if err := rsa.VerifyPSS(pub, h, data, sig, &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthAuto}); err != nil {
-				return fmt.Errorf("%w: %w", ErrInvalidSignature, err)
+				return fmt.Errorf("%w: %s", ErrInvalidSignature, err)
 			}
 			return nil
 		}
 		if err := rsa.VerifyPKCS1v15(pub, h, data, sig); err != nil {
-			return fmt.Errorf("%w: %w", ErrInvalidSignature, err)
+			return fmt.Errorf("%w: %s", ErrInvalidSignature, err)
 		}
 		return nil
 	case *ecdsa.PrivateKey:
