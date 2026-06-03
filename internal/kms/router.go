@@ -33,6 +33,15 @@ type store interface {
 	UntagResource(keyID string, tagKeys []string) error
 }
 
+const (
+	opGenerateRandom = "GenerateRandom"
+	opReEncrypt      = "ReEncrypt"
+	opGenerateMac    = "GenerateMac"
+	opVerifyMac      = "VerifyMac"
+	opSign           = "Sign"
+	opVerify         = "Verify"
+)
+
 // Router handles KMS API requests dispatched via the X-Amz-Target header.
 type Router struct {
 	storage  store
@@ -76,17 +85,17 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ro.handleGenerateDataKey(w, body)
 	case "GenerateDataKeyWithoutPlaintext":
 		ro.handleGenerateDataKeyWithoutPlaintext(w, body)
-	case "GenerateRandom":
+	case opGenerateRandom:
 		ro.handleGenerateRandom(w, body)
-	case "ReEncrypt":
+	case opReEncrypt:
 		ro.handleReEncrypt(w, body)
-	case "GenerateMac":
+	case opGenerateMac:
 		ro.handleGenerateMac(w, body)
-	case "VerifyMac":
+	case opVerifyMac:
 		ro.handleVerifyMac(w, body)
-	case "Sign":
+	case opSign:
 		ro.handleSign(w, body)
-	case "Verify":
+	case opVerify:
 		ro.handleVerify(w, body)
 	case "CreateAlias":
 		ro.handleCreateAlias(w, body)
