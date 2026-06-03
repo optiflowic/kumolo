@@ -8050,8 +8050,10 @@ func TestSSEBucketKeyEnabled(t *testing.T) {
 				amzSSE:                 "AES256",
 				amzSSEBucketKeyEnabled: "true",
 			},
-			body:        "data",
-			respMeta:    ObjectMetadata{SSEAlgorithm: "AES256", SSEBucketKeyEnabled: false},
+			body: "data",
+			// Metadata has SSEBucketKeyEnabled=true to verify setSSEHeaders suppresses
+			// the response header for non-KMS algorithms regardless of stored value.
+			respMeta:    ObjectMetadata{SSEAlgorithm: "AES256", SSEBucketKeyEnabled: true},
 			wantPresent: false,
 		},
 		{

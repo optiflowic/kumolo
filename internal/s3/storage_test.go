@@ -742,15 +742,77 @@ func TestPutObject(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateBucket("b", "", false))
 		meta, err := s.PutObject("b", "k", strings.NewReader("x"), "text/plain", nil,
-			"aws:kms", "my-key-id", false, nil, nil, "")
+			"aws:kms", "my-key-id", true, nil, nil, "")
 		require.NoError(t, err)
 		assert.Equal(t, "aws:kms", meta.SSEAlgorithm)
 		assert.Equal(t, "my-key-id", meta.SSEKMSKeyID)
+		assert.True(t, meta.SSEBucketKeyEnabled)
 
 		got, err := s.HeadObject("b", "k")
 		require.NoError(t, err)
 		assert.Equal(t, "aws:kms", got.SSEAlgorithm)
 		assert.Equal(t, "my-key-id", got.SSEKMSKeyID)
+		assert.True(t, got.SSEBucketKeyEnabled)
+	})
+
+	t.Run("SSEBucketKeyEnabled round-trips through CopyObject", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("b", "", false))
+		_, err := s.PutObject("b", "src", strings.NewReader("x"), "text/plain", nil,
+			"aws:kms", "key-1", true, nil, nil, "")
+		require.NoError(t, err)
+		meta, err := s.CopyObject(
+			"b",
+			"src",
+			"",
+			"b",
+			"dst",
+			"",
+			nil,
+			"aws:kms",
+			"key-1",
+			true,
+			nil,
+			nil,
+			"",
+		)
+		require.NoError(t, err)
+		assert.True(t, meta.SSEBucketKeyEnabled)
+		got, err := s.HeadObject("b", "dst")
+		require.NoError(t, err)
+		assert.True(t, got.SSEBucketKeyEnabled)
+	})
+
+	t.Run("SSEBucketKeyEnabled round-trips through multipart upload", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("b", "", false))
+		uploadID, err := s.CreateMultipartUpload(
+			"b",
+			"k",
+			"text/plain",
+			"aws:kms",
+			"key-1",
+			true,
+			nil,
+			nil,
+			"",
+		)
+		require.NoError(t, err)
+		etag, err := s.UploadPart(
+			uploadID,
+			1,
+			strings.NewReader(strings.Repeat("a", 5*1024*1024+1)),
+		)
+		require.NoError(t, err)
+		meta, err := s.CompleteMultipartUpload(
+			uploadID,
+			[]CompletePart{{PartNumber: 1, ETag: etag}},
+		)
+		require.NoError(t, err)
+		assert.True(t, meta.SSEBucketKeyEnabled)
+		got, err := s.HeadObject("b", "k")
+		require.NoError(t, err)
+		assert.True(t, got.SSEBucketKeyEnabled)
 	})
 
 	t.Run("retention and legal hold headers are stored in metadata", func(t *testing.T) {
