@@ -21,7 +21,7 @@ Last verified: 2026-06-02
 | Field            | Notes                                            |
 |-----------------|--------------------------------------------------|
 | KeyId           | ARN of the signing key                           |
-| Signature       | DER-encoded signature (blob)                     |
+| Signature       | Signature bytes; encoding varies: DER/ASN.1 for ECDSA, raw PKCS#1 bytes for RSA, raw 64 bytes for Ed25519 |
 | SigningAlgorithm | Algorithm used                                  |
 
 ## Verify Request Parameters
