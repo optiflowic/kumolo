@@ -192,6 +192,11 @@ func (ro *Router) handleVerifyMac(w http.ResponseWriter, body []byte) {
 		writeError(w, http.StatusBadRequest, "ValidationException", "Mac is required")
 		return
 	}
+	if len(req.Mac) > 6144 {
+		writeError(w, http.StatusBadRequest, "ValidationException",
+			fmt.Sprintf("Mac length %d exceeds maximum of 6144 bytes", len(req.Mac)))
+		return
+	}
 	newHash := hmacHashForAlgorithm(req.MacAlgorithm)
 	if newHash == nil {
 		writeError(w, http.StatusBadRequest, "ValidationException",

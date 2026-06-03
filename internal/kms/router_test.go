@@ -4043,6 +4043,20 @@ func TestHandleVerifyMac_inputValidation(t *testing.T) {
 		assertErrType(t, w, "ValidationException")
 	})
 
+	t.Run("error: Mac exceeds 6144 bytes", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateHMACKey(t, ro, "HMAC_256")
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":        keyID,
+			"MacAlgorithm": "HMAC_SHA_256",
+			"Message":      []byte("hello"),
+			"Mac":          make([]byte, 6145),
+		})
+		w := kmsReq(t, ro, "VerifyMac", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
 	t.Run("error: empty KeyId", func(t *testing.T) {
 		ro := newTestRouter(t)
 		body, _ := json.Marshal(map[string]any{
