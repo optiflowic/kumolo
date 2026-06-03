@@ -20,7 +20,7 @@ Empty (header absent) means no SSE requested — also valid.
 
 ## Error on Invalid Value
 
-```
+```http
 HTTP 400 Bad Request
 Code:    InvalidArgument
 Message: The encryption method specified is not supported.
