@@ -3658,6 +3658,44 @@ func TestHandleVerify(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, vw.Code)
 		assertErrType(t, vw, "KMSInvalidSignatureException")
 	})
+
+	for _, tc := range []struct {
+		name    string
+		keySpec string
+		algo    string
+	}{
+		{"error: RSA-PSS tampered signature", "RSA_2048", "RSASSA_PSS_SHA_256"},
+		{"error: RSA-PKCS1v15 tampered signature", "RSA_2048", "RSASSA_PKCS1_V1_5_SHA_256"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ro := newTestRouter(t)
+			keyID := mustCreateSignVerifyKey(t, ro, tc.keySpec)
+			msg := []byte("rsa message")
+			signBody, _ := json.Marshal(map[string]any{
+				"KeyId":            keyID,
+				"Message":          msg,
+				"SigningAlgorithm": tc.algo,
+			})
+			sw := kmsReq(t, ro, "Sign", string(signBody))
+			require.Equal(t, http.StatusOK, sw.Code)
+			var sResp map[string]any
+			require.NoError(t, json.Unmarshal(sw.Body.Bytes(), &sResp))
+			sigRaw, _ := json.Marshal(sResp["Signature"])
+			var sigBytes []byte
+			require.NoError(t, json.Unmarshal(sigRaw, &sigBytes))
+			sigBytes[0] ^= 0xFF
+
+			verBody, _ := json.Marshal(map[string]any{
+				"KeyId":            keyID,
+				"Message":          msg,
+				"Signature":        sigBytes,
+				"SigningAlgorithm": tc.algo,
+			})
+			vw := kmsReq(t, ro, "Verify", string(verBody))
+			assert.Equal(t, http.StatusBadRequest, vw.Code)
+			assertErrType(t, vw, "KMSInvalidSignatureException")
+		})
+	}
 }
 
 func TestHandleSign_inputValidation(t *testing.T) {
