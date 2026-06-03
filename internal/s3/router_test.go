@@ -8174,6 +8174,37 @@ func TestSSEBucketKeyEnabled(t *testing.T) {
 			assert.Equal(t, "true", w.Header().Get(amzSSEBucketKeyEnabled))
 		},
 	)
+
+	for _, op := range []struct {
+		name   string
+		method string
+		url    string
+		body   string
+		extra  map[string]string
+	}{
+		{name: "PutObject", method: http.MethodPut, url: "/b/k", body: "data"},
+		{name: "CopyObject", method: http.MethodPut, url: "/dst/k", extra: map[string]string{amzCopySource: "/src/k"}},
+		{name: "CreateMultipartUpload", method: http.MethodPost, url: "/b/k?uploads"},
+	} {
+		op := op
+		t.Run(op.name+" with aws:kms and invalid BucketKeyEnabled returns 400", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{})
+			var bodyReader io.Reader
+			if op.body != "" {
+				bodyReader = strings.NewReader(op.body)
+			}
+			req := httptest.NewRequest(op.method, op.url, bodyReader)
+			req.Header.Set(amzSSE, "aws:kms")
+			req.Header.Set(amzSSEBucketKeyEnabled, "TRUE")
+			for k, v := range op.extra {
+				req.Header.Set(k, v)
+			}
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Contains(t, w.Body.String(), "InvalidArgument")
+		})
+	}
 }
 
 func TestSSEAlgorithmValidation(t *testing.T) {

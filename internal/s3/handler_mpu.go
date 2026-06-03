@@ -29,7 +29,10 @@ func (ro *Router) handleCreateMultipartUpload(
 		return
 	}
 	sseKMSKeyID := r.Header.Get(amzSSEKMSKeyID)
-	sseBucketKeyEnabled := parseBucketKeyEnabled(r, sseAlgorithm)
+	sseBucketKeyEnabled, ok := parseBucketKeyEnabled(w, r, sseAlgorithm)
+	if !ok {
+		return
+	}
 	retention, legalHold, ok := parseObjectLockHeaders(w, r)
 	if !ok {
 		return

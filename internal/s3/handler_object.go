@@ -95,7 +95,10 @@ func (ro *Router) handleCopyObject(
 		return
 	}
 	sseKMSKeyID := r.Header.Get(amzSSEKMSKeyID)
-	sseBucketKeyEnabled := parseBucketKeyEnabled(r, sseAlgorithm)
+	sseBucketKeyEnabled, ok := parseBucketKeyEnabled(w, r, sseAlgorithm)
+	if !ok {
+		return
+	}
 	retention, legalHold, ok := parseObjectLockHeaders(w, r)
 	if !ok {
 		return
@@ -191,12 +194,27 @@ func setSSEHeaders(w http.ResponseWriter, meta ObjectMetadata) {
 }
 
 // parseBucketKeyEnabled reads X-Amz-Server-Side-Encryption-Bucket-Key-Enabled.
-// Only meaningful for aws:kms / aws:kms:dsse; returns false for all other algorithms.
-func parseBucketKeyEnabled(r *http.Request, sseAlgorithm string) bool {
+// Only meaningful for aws:kms / aws:kms:dsse; other algorithms ignore the header.
+// Returns (value, ok); ok is false when the header contains an invalid value and a
+// 400 response has already been written.
+func parseBucketKeyEnabled(
+	w http.ResponseWriter,
+	r *http.Request,
+	sseAlgorithm string,
+) (bool, bool) {
 	if !isKMSAlgorithm(sseAlgorithm) {
-		return false
+		return false, true
 	}
-	return r.Header.Get(amzSSEBucketKeyEnabled) == "true"
+	switch r.Header.Get(amzSSEBucketKeyEnabled) {
+	case "", "false":
+		return false, true
+	case "true":
+		return true, true
+	default:
+		writeError(w, r, http.StatusBadRequest, "InvalidArgument",
+			`X-Amz-Server-Side-Encryption-Bucket-Key-Enabled must be "true" or "false".`)
+		return false, false
+	}
 }
 
 func isKMSAlgorithm(alg string) bool {
@@ -214,7 +232,10 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 		return
 	}
 	sseKMSKeyID := r.Header.Get(amzSSEKMSKeyID)
-	sseBucketKeyEnabled := parseBucketKeyEnabled(r, sseAlgorithm)
+	sseBucketKeyEnabled, ok := parseBucketKeyEnabled(w, r, sseAlgorithm)
+	if !ok {
+		return
+	}
 	expected, ok := parseContentMD5Header(w, r)
 	if !ok {
 		return
