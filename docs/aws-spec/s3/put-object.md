@@ -21,6 +21,7 @@
 | `x-amz-storage-class` | Stored; returned on GetObject/HeadObject |
 | `x-amz-server-side-encryption` | Stored as metadata only (AES256 / aws:kms); no actual encryption |
 | `x-amz-server-side-encryption-aws-kms-key-id` | Stored as metadata only |
+| `x-amz-server-side-encryption-bucket-key-enabled` | Stored as metadata; only meaningful for `aws:kms` / `aws:kms:dsse` — see `sse-bucket-key-enabled.md` |
 | `x-amz-checksum-crc32` / `crc32c` / `sha1` / `sha256` | Validated against body |
 | `x-amz-sdk-checksum-algorithm` | Selects which checksum header to validate |
 | `x-amz-object-lock-mode` | GOVERNANCE or COMPLIANCE; requires Object Lock enabled bucket |
@@ -47,6 +48,7 @@
 | `x-amz-checksum-crc32` / `crc32c` / `sha1` / `sha256` | When checksum was provided |
 | `x-amz-server-side-encryption` | When SSE header was provided |
 | `x-amz-server-side-encryption-aws-kms-key-id` | When KMS key ID was provided |
+| `x-amz-server-side-encryption-bucket-key-enabled` | `true` when BucketKeyEnabled was set and algorithm is `aws:kms` or `aws:kms:dsse` |
 
 ## Errors
 

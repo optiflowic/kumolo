@@ -19,6 +19,7 @@ Initiates a multipart upload and returns an `UploadId`.
 | `x-amz-meta-*` | User metadata stored with the final object |
 | `x-amz-server-side-encryption` | Stored as metadata only (AES256 / aws:kms); no actual encryption |
 | `x-amz-server-side-encryption-aws-kms-key-id` | Stored as metadata only |
+| `x-amz-server-side-encryption-bucket-key-enabled` | Stored as metadata; only meaningful for `aws:kms` / `aws:kms:dsse` — see `sse-bucket-key-enabled.md` |
 | `x-amz-storage-class` | Stored; returned on GetObject/HeadObject |
 | `x-amz-object-lock-mode` | GOVERNANCE or COMPLIANCE |
 | `x-amz-object-lock-retain-until-date` | RFC3339 timestamp |
@@ -48,6 +49,7 @@ Initiates a multipart upload and returns an `UploadId`.
 |---|---|
 | `x-amz-server-side-encryption` | When SSE header was provided |
 | `x-amz-server-side-encryption-aws-kms-key-id` | When KMS key ID was provided |
+| `x-amz-server-side-encryption-bucket-key-enabled` | `true` when BucketKeyEnabled was set and algorithm is `aws:kms` or `aws:kms:dsse` |
 
 ## Errors
 
