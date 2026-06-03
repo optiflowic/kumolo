@@ -8004,6 +8004,119 @@ func TestSSEResponseHeaders(t *testing.T) {
 	})
 }
 
+func TestSSEAlgorithmValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		method    string
+		url       string
+		extraHdr  map[string]string
+		body      string
+		wantCode  int
+		wantErr   string
+		mockStore *mockStore
+	}{
+		{
+			name:     "PutObject rejects unknown algorithm",
+			method:   http.MethodPut,
+			url:      "/b/k",
+			extraHdr: map[string]string{amzSSE: "INVALID"},
+			body:     "data",
+			wantCode: http.StatusBadRequest,
+			wantErr:  "InvalidArgument",
+		},
+		{
+			name:      "PutObject accepts AES256",
+			method:    http.MethodPut,
+			url:       "/b/k",
+			extraHdr:  map[string]string{amzSSE: "AES256"},
+			body:      "data",
+			wantCode:  http.StatusOK,
+			mockStore: &mockStore{putObjectMeta: ObjectMetadata{SSEAlgorithm: "AES256"}},
+		},
+		{
+			name:      "PutObject accepts aws:kms",
+			method:    http.MethodPut,
+			url:       "/b/k",
+			extraHdr:  map[string]string{amzSSE: "aws:kms"},
+			body:      "data",
+			wantCode:  http.StatusOK,
+			mockStore: &mockStore{putObjectMeta: ObjectMetadata{SSEAlgorithm: "aws:kms"}},
+		},
+		{
+			name:      "PutObject accepts aws:kms:dsse",
+			method:    http.MethodPut,
+			url:       "/b/k",
+			extraHdr:  map[string]string{amzSSE: "aws:kms:dsse"},
+			body:      "data",
+			wantCode:  http.StatusOK,
+			mockStore: &mockStore{putObjectMeta: ObjectMetadata{SSEAlgorithm: "aws:kms:dsse"}},
+		},
+		{
+			name:      "PutObject accepts absent SSE header",
+			method:    http.MethodPut,
+			url:       "/b/k",
+			body:      "data",
+			wantCode:  http.StatusOK,
+			mockStore: &mockStore{},
+		},
+		{
+			name:     "CopyObject rejects unknown algorithm",
+			method:   http.MethodPut,
+			url:      "/dst/k",
+			extraHdr: map[string]string{amzCopySource: "/src/k", amzSSE: "BADVALUE"},
+			wantCode: http.StatusBadRequest,
+			wantErr:  "InvalidArgument",
+		},
+		{
+			name:      "CopyObject accepts AES256",
+			method:    http.MethodPut,
+			url:       "/dst/k",
+			extraHdr:  map[string]string{amzCopySource: "/src/k", amzSSE: "AES256"},
+			wantCode:  http.StatusOK,
+			mockStore: &mockStore{copyObjectMeta: ObjectMetadata{SSEAlgorithm: "AES256"}},
+		},
+		{
+			name:     "CreateMultipartUpload rejects unknown algorithm",
+			method:   http.MethodPost,
+			url:      "/b/k?uploads",
+			extraHdr: map[string]string{amzSSE: "BADVALUE"},
+			wantCode: http.StatusBadRequest,
+			wantErr:  "InvalidArgument",
+		},
+		{
+			name:      "CreateMultipartUpload accepts aws:kms:dsse",
+			method:    http.MethodPost,
+			url:       "/b/k?uploads",
+			extraHdr:  map[string]string{amzSSE: "aws:kms:dsse"},
+			wantCode:  http.StatusOK,
+			mockStore: &mockStore{createMultipartUploadID: "uid-dsse"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ms := tt.mockStore
+			if ms == nil {
+				ms = &mockStore{}
+			}
+			ro := newRouterWithMock(ms)
+			var bodyReader io.Reader
+			if tt.body != "" {
+				bodyReader = strings.NewReader(tt.body)
+			}
+			req := httptest.NewRequest(tt.method, tt.url, bodyReader)
+			for k, v := range tt.extraHdr {
+				req.Header.Set(k, v)
+			}
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, tt.wantCode, w.Code)
+			if tt.wantErr != "" {
+				assert.Contains(t, w.Body.String(), tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestStorageClassResponseHeaders(t *testing.T) {
 	t.Run("HeadObject returns X-Amz-Storage-Class for non-STANDARD object", func(t *testing.T) {
 		ro := newRouterWithMock(&mockStore{
