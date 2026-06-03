@@ -178,17 +178,23 @@ func verifyData(privKeyDER []byte, algo string, h crypto.Hash, data, sig []byte)
 	case *rsa.PrivateKey:
 		pub := &k.PublicKey
 		if isPSSAlgorithm(algo) {
-			return rsa.VerifyPSS(pub, h, data, sig, &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthAuto})
+			if err := rsa.VerifyPSS(pub, h, data, sig, &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthAuto}); err != nil {
+				return fmt.Errorf("%w: %w", ErrInvalidSignature, err)
+			}
+			return nil
 		}
-		return rsa.VerifyPKCS1v15(pub, h, data, sig)
+		if err := rsa.VerifyPKCS1v15(pub, h, data, sig); err != nil {
+			return fmt.Errorf("%w: %w", ErrInvalidSignature, err)
+		}
+		return nil
 	case *ecdsa.PrivateKey:
 		if !ecdsa.VerifyASN1(&k.PublicKey, data, sig) {
-			return fmt.Errorf("ECDSA signature verification failed")
+			return fmt.Errorf("%w: ECDSA signature verification failed", ErrInvalidSignature)
 		}
 		return nil
 	case ed25519.PrivateKey:
 		if !ed25519.Verify(k.Public().(ed25519.PublicKey), data, sig) {
-			return fmt.Errorf("Ed25519 signature verification failed")
+			return fmt.Errorf("%w: Ed25519 signature verification failed", ErrInvalidSignature)
 		}
 		return nil
 	default:
@@ -420,9 +426,16 @@ func (ro *Router) handleVerify(w http.ResponseWriter, body []byte) {
 	}
 
 	if err := verifyData(mat.PrivateKeyDER, req.SigningAlgorithm, h, dataToVerify, req.Signature); err != nil {
-		slog.Debug("KMS Verify: signature verification failed", "keyID", meta.KeyID, "err", err)
-		writeError(w, http.StatusBadRequest, "KMSInvalidSignatureException",
-			"The signature verification failed")
+		if errors.Is(err, ErrInvalidSignature) {
+			slog.Debug("KMS Verify: signature verification failed", "keyID", meta.KeyID, "err", err)
+			writeError(w, http.StatusBadRequest, "KMSInvalidSignatureException",
+				"The signature verification failed")
+		} else {
+			// untestable: only reachable if stored private key DER is malformed
+			slog.Error("KMS Verify: internal error", "keyID", meta.KeyID, "err", err)
+			writeError(w, http.StatusInternalServerError, "KMSInternalException",
+				"internal server error")
+		}
 		return
 	}
 
