@@ -5,6 +5,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -272,6 +273,23 @@ func TestGetKeyMaterial_readAllFailure(t *testing.T) {
 	s.readAll = func(io.Reader) ([]byte, error) { return nil, errors.New("read failed") }
 	_, err = s.GetKeyMaterial(meta.KeyID)
 	require.Error(t, err)
+}
+
+func TestGetKeyMaterial_hmacSizeMismatch(t *testing.T) {
+	s, dir := newTestStorage(t)
+	meta, err := s.CreateKey(CreateKeyInput{KeySpec: "HMAC_256", KeyUsage: "GENERATE_VERIFY_MAC"})
+	require.NoError(t, err)
+
+	// Overwrite material.json with wrong-sized key bytes to simulate a key created
+	// before the hmacKeySize fix (old code always allocated 32 bytes regardless of spec).
+	wrongMat := KeyMaterial{KeyBytes: make([]byte, 16), KeyMaterialID: "legacy"}
+	data, err := json.Marshal(wrongMat)
+	require.NoError(t, err)
+	matPath := filepath.Join(dir, "kms", "keys", meta.KeyID, "material.json")
+	require.NoError(t, os.WriteFile(matPath, data, 0o600))
+
+	_, err = s.GetKeyMaterial(meta.KeyID)
+	require.ErrorIs(t, err, ErrKeyMaterialCorrupted)
 }
 
 func TestGetKeyMetadata_readAllFailure(t *testing.T) {

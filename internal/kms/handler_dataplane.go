@@ -504,6 +504,215 @@ func (ro *Router) handleGenerateDataKeyWithoutPlaintext(w http.ResponseWriter, b
 	})
 }
 
+// ---- ReEncrypt -------------------------------------------------------------
+
+func (ro *Router) handleReEncrypt(w http.ResponseWriter, body []byte) {
+	var req struct {
+		CiphertextBlob                 []byte            `json:"CiphertextBlob"`
+		DestinationKeyId               string            `json:"DestinationKeyId"`
+		SourceKeyId                    string            `json:"SourceKeyId"`
+		SourceEncryptionAlgorithm      string            `json:"SourceEncryptionAlgorithm"`
+		SourceEncryptionContext        map[string]string `json:"SourceEncryptionContext"`
+		DestinationEncryptionAlgorithm string            `json:"DestinationEncryptionAlgorithm"`
+		DestinationEncryptionContext   map[string]string `json:"DestinationEncryptionContext"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
+		return
+	}
+	if len(req.CiphertextBlob) == 0 {
+		writeError(w, http.StatusBadRequest, "ValidationException", "CiphertextBlob is required")
+		return
+	}
+	if req.DestinationKeyId == "" {
+		writeError(w, http.StatusBadRequest, "ValidationException", "DestinationKeyId is required")
+		return
+	}
+	if req.SourceEncryptionAlgorithm != "" && req.SourceEncryptionAlgorithm != "SYMMETRIC_DEFAULT" {
+		writeError(w, http.StatusBadRequest, "InvalidKeyUsageException",
+			fmt.Sprintf(
+				"SourceEncryptionAlgorithm %s is not supported; only SYMMETRIC_DEFAULT is supported in kumolo",
+				req.SourceEncryptionAlgorithm,
+			))
+		return
+	}
+	if req.DestinationEncryptionAlgorithm != "" &&
+		req.DestinationEncryptionAlgorithm != "SYMMETRIC_DEFAULT" {
+		writeError(w, http.StatusBadRequest, "InvalidKeyUsageException",
+			fmt.Sprintf(
+				"DestinationEncryptionAlgorithm %s is not supported; only SYMMETRIC_DEFAULT is supported in kumolo",
+				req.DestinationEncryptionAlgorithm,
+			))
+		return
+	}
+	if err := validateEncryptionContext(req.SourceEncryptionContext); err != nil {
+		writeError(w, http.StatusBadRequest, "ValidationException", err.Error())
+		return
+	}
+	if err := validateEncryptionContext(req.DestinationEncryptionContext); err != nil {
+		writeError(w, http.StatusBadRequest, "ValidationException", err.Error())
+		return
+	}
+
+	// Parse and validate the source ciphertext envelope.
+	if len(req.CiphertextBlob) < envelopeSealedOffset+1 {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"InvalidCiphertextException",
+			"ciphertext is malformed",
+		)
+		return
+	}
+	if req.CiphertextBlob[0] != envelopeVersion {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"InvalidCiphertextException",
+			"ciphertext is malformed",
+		)
+		return
+	}
+	embeddedKeyID := string(
+		req.CiphertextBlob[envelopeKeyIDOffset : envelopeKeyIDOffset+envelopeKeyIDLen],
+	)
+	if !looksLikeUUID(embeddedKeyID) {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"InvalidCiphertextException",
+			"ciphertext is malformed",
+		)
+		return
+	}
+
+	// If SourceKeyId is provided, verify it matches the embedded key ID.
+	if req.SourceKeyId != "" {
+		resolvedSrc, ok := ro.resolveKeyRef(w, req.SourceKeyId)
+		if !ok {
+			return
+		}
+		if resolvedSrc != embeddedKeyID {
+			writeError(w, http.StatusBadRequest, "IncorrectKeyException",
+				"The key ID in the request does not match the key used to encrypt the ciphertext")
+			return
+		}
+	}
+
+	// Decrypt with source key.
+	srcMeta, srcKeyID, ok := ro.resolveAndValidateKey(w, embeddedKeyID)
+	if !ok {
+		return
+	}
+	srcMat, ok := ro.loadSymmetricMaterial(w, srcMeta, srcKeyID)
+	if !ok {
+		return
+	}
+	_, plaintext, err := openEnvelope(req.CiphertextBlob, srcMat, req.SourceEncryptionContext)
+	if err != nil {
+		slog.Debug("KMS ReEncrypt: open envelope failed", "err", err)
+		writeError(w, http.StatusBadRequest, "InvalidCiphertextException",
+			"ciphertext is invalid or the source encryption context does not match")
+		return
+	}
+
+	// Re-encrypt with destination key.
+	dstMeta, dstKeyID, ok := ro.resolveAndValidateKey(w, req.DestinationKeyId)
+	if !ok {
+		return
+	}
+	dstMat, ok := ro.loadSymmetricMaterial(w, dstMeta, dstKeyID)
+	if !ok {
+		return
+	}
+
+	var nonce [envelopeNonceLen]byte
+	if err := ro.readFullRand(nonce[:]); err != nil {
+		slog.Error("KMS ReEncrypt: rand read failure", "err", err)
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			"KMSInternalException",
+			"internal server error",
+		)
+		return
+	}
+	newCiphertext, err := sealEnvelope(
+		dstKeyID,
+		dstMat,
+		plaintext,
+		req.DestinationEncryptionContext,
+		nonce,
+	)
+	if err != nil {
+		// untestable: sealEnvelope only fails on AES init which cannot fail with 32-byte keys
+		slog.Error("KMS ReEncrypt: seal failure", "err", err)
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			"KMSInternalException",
+			"internal server error",
+		)
+		return
+	}
+
+	slog.Info("KMS ReEncrypt", "sourceKeyID", srcKeyID, "destKeyID", dstKeyID)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"CiphertextBlob":                 newCiphertext,
+		"KeyId":                          dstMeta.Arn,
+		"SourceKeyId":                    srcMeta.Arn,
+		"SourceEncryptionAlgorithm":      "SYMMETRIC_DEFAULT",
+		"SourceKeyMaterialId":            srcMat.KeyMaterialID,
+		"DestinationEncryptionAlgorithm": "SYMMETRIC_DEFAULT",
+		"DestinationKeyMaterialId":       dstMat.KeyMaterialID,
+	})
+}
+
+// ---- GenerateRandom --------------------------------------------------------
+
+func (ro *Router) handleGenerateRandom(w http.ResponseWriter, body []byte) {
+	var req struct {
+		NumberOfBytes    *int   `json:"NumberOfBytes"`
+		CustomKeyStoreId string `json:"CustomKeyStoreId"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
+		return
+	}
+	if req.CustomKeyStoreId != "" {
+		writeError(w, http.StatusBadRequest, "UnsupportedOperationException",
+			"CustomKeyStoreId is not supported")
+		return
+	}
+	if req.NumberOfBytes == nil {
+		writeError(w, http.StatusBadRequest, "ValidationException", "NumberOfBytes is required")
+		return
+	}
+	n := *req.NumberOfBytes
+	if n < 1 || n > 1024 {
+		writeError(w, http.StatusBadRequest, "ValidationException",
+			fmt.Sprintf("NumberOfBytes must be between 1 and 1024, got %d", n))
+		return
+	}
+
+	buf := make([]byte, n)
+	if err := ro.readFullRand(buf); err != nil {
+		slog.Error("KMS GenerateRandom: rand read failure", "err", err)
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			"KMSInternalException",
+			"internal server error",
+		)
+		return
+	}
+
+	slog.Debug("KMS GenerateRandom", "numberOfBytes", n)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"Plaintext": buf,
+	})
+}
+
 // generateDataKeyCommon handles the shared logic of GenerateDataKey and
 // GenerateDataKeyWithoutPlaintext. Returns (rawKeyBytes, ciphertext, arn, materialID, ok).
 func (ro *Router) generateDataKeyCommon(

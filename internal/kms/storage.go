@@ -239,9 +239,13 @@ func (s *Storage) CreateKey(in CreateKeyInput) (KeyMetadata, error) {
 		return KeyMetadata{}, fmt.Errorf("write key metadata: %w", err)
 	}
 
-	if in.KeySpec == keySpecSymmetricDefault {
-		var keyBytes [32]byte
-		if _, err := s.randRead(keyBytes[:]); err != nil {
+	if in.KeySpec == keySpecSymmetricDefault || isHMACSpec(in.KeySpec) {
+		keySize := 32 // AES-256 for SYMMETRIC_DEFAULT
+		if n := hmacKeySize(in.KeySpec); n > 0 {
+			keySize = n
+		}
+		keyBytes := make([]byte, keySize)
+		if _, err := s.randRead(keyBytes); err != nil {
 			if rmErr := s.removeFile(filepath.Join(keyDir, "meta.json")); rmErr != nil {
 				slog.Warn(
 					"failed to clean up meta.json after material rand failure",
@@ -285,7 +289,7 @@ func (s *Storage) CreateKey(in CreateKeyInput) (KeyMetadata, error) {
 			return KeyMetadata{}, fmt.Errorf("generate key material ID: %w", err)
 		}
 		material := KeyMaterial{
-			KeyBytes:      keyBytes[:],
+			KeyBytes:      keyBytes,
 			KeyMaterialID: fmt.Sprintf("%x", matIDBytes),
 		}
 		if err := s.writeJSON(filepath.Join(keyDir, "material.json"), material); err != nil {
@@ -507,6 +511,15 @@ func (s *Storage) GetKeyMaterial(keyID string) (KeyMaterial, error) {
 			return KeyMaterial{}, ErrKeyMaterialNotFound
 		}
 		return KeyMaterial{}, fmt.Errorf("failed to read key material for %s: %w", keyID, err)
+	}
+	meta, err := s.readKeyMeta(keyID)
+	if err != nil {
+		// unreachable: keyExistsLocked confirmed meta.json exists immediately above
+		return KeyMaterial{}, fmt.Errorf("failed to read key metadata for %s: %w", keyID, err)
+	}
+	if n := hmacKeySize(meta.KeySpec); n > 0 && len(mat.KeyBytes) != n {
+		return KeyMaterial{}, fmt.Errorf("%w: key %s expects %d bytes, got %d",
+			ErrKeyMaterialCorrupted, keyID, n, len(mat.KeyBytes))
 	}
 	return mat, nil
 }
