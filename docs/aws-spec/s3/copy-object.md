@@ -21,8 +21,8 @@ Source may include a `?versionId=<id>` query string to copy a specific version.
 | `x-amz-metadata-directive` | `COPY` (default) or `REPLACE`; controls whether metadata is inherited or replaced |
 | `Content-Type` | Only applied when `x-amz-metadata-directive: REPLACE` |
 | `x-amz-meta-*` | Only applied when `x-amz-metadata-directive: REPLACE` |
-| `x-amz-server-side-encryption` | Stored as metadata on the destination |
-| `x-amz-server-side-encryption-aws-kms-key-id` | Stored as metadata on the destination |
+| `x-amz-server-side-encryption` | Stored as metadata on the destination (AES256 / aws:kms / aws:kms:dsse); no actual encryption |
+| `x-amz-server-side-encryption-aws-kms-key-id` | For aws:kms / aws:kms:dsse: resolved to canonical ARN via KMS and stored; see `sse-algorithm-validation.md` |
 | `x-amz-server-side-encryption-bucket-key-enabled` | Stored as metadata; only meaningful for `aws:kms` / `aws:kms:dsse` — see `sse-bucket-key-enabled.md` |
 | `x-amz-storage-class` | Storage class for the destination object |
 | `x-amz-object-lock-mode` | GOVERNANCE or COMPLIANCE |
@@ -68,4 +68,4 @@ Source may include a `?versionId=<id>` query string to copy a specific version.
 
 - `x-amz-copy-source-if-*` conditional headers are not evaluated.
 - Tags are not copied regardless of `x-amz-tagging-directive`.
-- SSE headers are stored in metadata but no actual encryption is applied.
+- SSE headers are stored in metadata but no actual encryption is applied. For aws:kms / aws:kms:dsse the key is validated and resolved to a canonical ARN via the KMS service; see `sse-algorithm-validation.md`.

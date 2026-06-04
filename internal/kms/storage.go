@@ -527,6 +527,9 @@ func (s *Storage) ResolveKeyForEncryption(keyRef string) (string, error) {
 			// ":alias/", but isAliasRef already requires strings.Contains(keyID, ":alias/").
 			return "", ErrKeyNotFound
 		}
+		if aliasName == "alias/aws/s3" {
+			return s.EnsureAwsS3Key()
+		}
 		id, err := s.ResolveAlias(aliasName)
 		if err != nil {
 			if errors.Is(err, ErrAliasNotFound) {

@@ -114,7 +114,7 @@ func writeKMSError(w http.ResponseWriter, r *http.Request, err error) {
 			"The specified KMS key is pending deletion.")
 	default:
 		slog.Error("S3 SSE-KMS: KMS service error", "err", err)
-		writeError(w, r, http.StatusInternalServerError, "KMSInternalError",
+		writeError(w, r, http.StatusInternalServerError, "KMS.KMSInternalException",
 			"An internal error occurred in the KMS service.")
 	}
 }
