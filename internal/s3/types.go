@@ -384,6 +384,23 @@ type xmlObjectParts struct {
 	TotalPartsCount int `xml:"TotalPartsCount"`
 }
 
+// xmlSSEConfiguration is the XML representation of ServerSideEncryptionConfiguration
+// used for parsing bucket default encryption settings.
+type xmlSSEConfiguration struct {
+	XMLName xml.Name     `xml:"ServerSideEncryptionConfiguration"`
+	Rules   []xmlSSERule `xml:"Rule"`
+}
+
+type xmlSSERule struct {
+	Apply            xmlApplySSEByDefault `xml:"ApplyServerSideEncryptionByDefault"`
+	BucketKeyEnabled bool                 `xml:"BucketKeyEnabled"`
+}
+
+type xmlApplySSEByDefault struct {
+	SSEAlgorithm   string `xml:"SSEAlgorithm"`
+	KMSMasterKeyID string `xml:"KMSMasterKeyID"`
+}
+
 // Lifecycle configuration XML types used by LifecycleEnforcer.
 
 type lifecycleConfiguration struct {
