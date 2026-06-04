@@ -713,6 +713,154 @@ func (ro *Router) handleGenerateRandom(w http.ResponseWriter, body []byte) {
 	})
 }
 
+// validKeyPairSpecs is the set of KeyPairSpec values accepted by GenerateDataKeyPair(WithoutPlaintext).
+var validKeyPairSpecs = map[string]bool{
+	"RSA_2048":              true,
+	"RSA_3072":              true,
+	"RSA_4096":              true,
+	"ECC_NIST_P256":         true,
+	"ECC_NIST_P384":         true,
+	"ECC_NIST_P521":         true,
+	"ECC_SECG_P256K1":       true,
+	"SM2":                   true,
+	"ECC_NIST_EDWARDS25519": true,
+}
+
+// ---- GenerateDataKeyPair ---------------------------------------------------
+
+func (ro *Router) handleGenerateDataKeyPair(w http.ResponseWriter, body []byte) {
+	privKeyDER, pubKeyDER, ciphertextBlob, spec, arn, materialID, ok :=
+		ro.generateDataKeyPairCommon(w, body)
+	if !ok {
+		return
+	}
+	slog.Info("KMS GenerateDataKeyPair", "keyPairSpec", spec)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"KeyId":                    arn,
+		"KeyPairSpec":              spec,
+		"PublicKey":                pubKeyDER,
+		"PrivateKeyPlaintext":      privKeyDER,
+		"PrivateKeyCiphertextBlob": ciphertextBlob,
+		"KeyMaterialId":            materialID,
+	})
+}
+
+// ---- GenerateDataKeyPairWithoutPlaintext -----------------------------------
+
+func (ro *Router) handleGenerateDataKeyPairWithoutPlaintext(w http.ResponseWriter, body []byte) {
+	_, pubKeyDER, ciphertextBlob, spec, arn, materialID, ok :=
+		ro.generateDataKeyPairCommon(w, body)
+	if !ok {
+		return
+	}
+	slog.Info("KMS GenerateDataKeyPairWithoutPlaintext", "keyPairSpec", spec)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"KeyId":                    arn,
+		"KeyPairSpec":              spec,
+		"PublicKey":                pubKeyDER,
+		"PrivateKeyCiphertextBlob": ciphertextBlob,
+		"KeyMaterialId":            materialID,
+	})
+}
+
+// generateDataKeyPairCommon handles the shared logic of GenerateDataKeyPair and
+// GenerateDataKeyPairWithoutPlaintext. Returns (privKeyDER, pubKeyDER, ciphertextBlob, spec, arn, materialID, ok).
+func (ro *Router) generateDataKeyPairCommon(
+	w http.ResponseWriter,
+	body []byte,
+) ([]byte, []byte, []byte, string, string, string, bool) {
+	var req struct {
+		KeyID             string            `json:"KeyId"`
+		KeyPairSpec       string            `json:"KeyPairSpec"`
+		EncryptionContext map[string]string `json:"EncryptionContext"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
+		return nil, nil, nil, "", "", "", false
+	}
+	if req.KeyID == "" {
+		writeError(w, http.StatusBadRequest, "ValidationException", "KeyId is required")
+		return nil, nil, nil, "", "", "", false
+	}
+	if req.KeyPairSpec == "" {
+		writeError(w, http.StatusBadRequest, "ValidationException", "KeyPairSpec is required")
+		return nil, nil, nil, "", "", "", false
+	}
+	if !validKeyPairSpecs[req.KeyPairSpec] {
+		writeError(w, http.StatusBadRequest, "ValidationException",
+			fmt.Sprintf("Invalid KeyPairSpec: %s", req.KeyPairSpec))
+		return nil, nil, nil, "", "", "", false
+	}
+	if err := validateEncryptionContext(req.EncryptionContext); err != nil {
+		writeError(w, http.StatusBadRequest, "ValidationException", err.Error())
+		return nil, nil, nil, "", "", "", false
+	}
+
+	meta, keyID, ok := ro.resolveAndValidateKey(w, req.KeyID)
+	if !ok {
+		return nil, nil, nil, "", "", "", false
+	}
+	mat, ok := ro.loadSymmetricMaterial(w, meta, keyID)
+	if !ok {
+		return nil, nil, nil, "", "", "", false
+	}
+
+	privKeyDER, err := ro.generateEphemeralKeyPairFn(req.KeyPairSpec)
+	if err != nil {
+		slog.Error("KMS GenerateDataKeyPair: key generation failure", "err", err)
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			"KMSInternalException",
+			"internal server error",
+		)
+		return nil, nil, nil, "", "", "", false
+	}
+	if privKeyDER == nil {
+		writeError(w, http.StatusBadRequest, "UnsupportedOperationException",
+			fmt.Sprintf("KeyPairSpec %s is not supported in kumolo", req.KeyPairSpec))
+		return nil, nil, nil, "", "", "", false
+	}
+
+	pubKeyDER, err := extractPublicKeyDER(privKeyDER)
+	if err != nil {
+		slog.Error("KMS GenerateDataKeyPair: extract public key failure", "err", err)
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			"KMSInternalException",
+			"internal server error",
+		)
+		return nil, nil, nil, "", "", "", false
+	}
+
+	var nonce [envelopeNonceLen]byte
+	if err := ro.readFullRand(nonce[:]); err != nil {
+		slog.Error("KMS GenerateDataKeyPair: rand read failure", "err", err)
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			"KMSInternalException",
+			"internal server error",
+		)
+		return nil, nil, nil, "", "", "", false
+	}
+	ciphertextBlob, err := sealEnvelope(keyID, mat, privKeyDER, req.EncryptionContext, nonce)
+	if err != nil {
+		// untestable: sealEnvelope only fails on AES init which cannot fail with 32-byte keys
+		slog.Error("KMS GenerateDataKeyPair: seal failure", "err", err)
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			"KMSInternalException",
+			"internal server error",
+		)
+		return nil, nil, nil, "", "", "", false
+	}
+
+	return privKeyDER, pubKeyDER, ciphertextBlob, req.KeyPairSpec, meta.Arn, mat.KeyMaterialID, true
+}
+
 // generateDataKeyCommon handles the shared logic of GenerateDataKey and
 // GenerateDataKeyWithoutPlaintext. Returns (rawKeyBytes, ciphertext, arn, materialID, ok).
 func (ro *Router) generateDataKeyCommon(
