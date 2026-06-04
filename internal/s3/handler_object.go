@@ -34,7 +34,8 @@ func resolveSSEAlgorithm(w http.ResponseWriter, r *http.Request) (string, bool) 
 // resolveSSE returns the SSE algorithm, KMS key ID, and bucket-key-enabled flag.
 // Explicit request headers take priority; when the X-Amz-Server-Side-Encryption
 // header is absent the bucket's stored default encryption config is applied.
-// Returns ok=false (after writing a 400) only when an explicit header is invalid.
+// For aws:kms / aws:kms:dsse, the key ID is resolved to a canonical ARN via the
+// KMS service (if wired). Returns ok=false (after writing an error) on failure.
 func (ro *Router) resolveSSE(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -47,6 +48,12 @@ func (ro *Router) resolveSSE(
 		}
 		keyID = r.Header.Get(amzSSEKMSKeyID)
 		bucketKeyEnabled, ok = parseBucketKeyEnabled(w, r, alg)
+		if !ok {
+			return
+		}
+		if isKMSAlgorithm(alg) && ro.kms != nil {
+			keyID, ok = ro.resolveKMSKey(w, r, keyID)
+		}
 		return
 	}
 
@@ -68,8 +75,46 @@ func (ro *Router) resolveSSE(
 	alg = rule.Apply.SSEAlgorithm
 	keyID = rule.Apply.KMSMasterKeyID
 	bucketKeyEnabled = rule.BucketKeyEnabled && isKMSAlgorithm(alg)
+	if isKMSAlgorithm(alg) && ro.kms != nil {
+		keyID, ok = ro.resolveKMSKey(w, r, keyID)
+		return
+	}
 	ok = true
 	return
+}
+
+// resolveKMSKey calls the KMS service to resolve keyRef to a canonical ARN.
+// On failure it writes the appropriate S3 KMS error and returns ok=false.
+func (ro *Router) resolveKMSKey(
+	w http.ResponseWriter,
+	r *http.Request,
+	keyRef string,
+) (string, bool) {
+	arn, err := ro.kms.ResolveKeyForEncryption(keyRef)
+	if err != nil {
+		writeKMSError(w, r, err)
+		return "", false
+	}
+	return arn, true
+}
+
+// writeKMSError maps a KMS service error to the appropriate S3 KMS error response.
+func writeKMSError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, ErrKMSKeyNotFound):
+		writeError(w, r, http.StatusBadRequest, "KMS.NotFoundException",
+			"The specified KMS key does not exist.")
+	case errors.Is(err, ErrKMSKeyDisabled):
+		writeError(w, r, http.StatusBadRequest, "KMS.DisabledException",
+			"The specified KMS key is disabled.")
+	case errors.Is(err, ErrKMSKeyPendingDeletion):
+		writeError(w, r, http.StatusBadRequest, "KMS.InvalidStateException",
+			"The specified KMS key is pending deletion.")
+	default:
+		slog.Error("S3 SSE-KMS: KMS service error", "err", err)
+		writeError(w, r, http.StatusInternalServerError, "KMS.KMSInternalException",
+			"An internal error occurred in the KMS service.")
+	}
 }
 
 // extractUserMetadata collects all x-amz-meta-* headers from h and returns

@@ -10,9 +10,85 @@ import (
 	"testing"
 	"time"
 
+	"github.com/optiflowic/kumolo/internal/kms"
+	"github.com/optiflowic/kumolo/internal/s3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func newTestKMSStorage(t *testing.T) (*kms.Storage, string) {
+	t.Helper()
+	dir := t.TempDir()
+	s, err := kms.NewStorage(dir)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	return s, dir
+}
+
+func TestKMSAdapter(t *testing.T) {
+	t.Run("resolves valid key to ARN", func(t *testing.T) {
+		s, _ := newTestKMSStorage(t)
+		a := &kmsAdapter{s: s}
+		arn, err := a.ResolveKeyForEncryption("")
+		require.NoError(t, err)
+		assert.Contains(t, arn, ":key/")
+	})
+
+	t.Run("maps ErrKeyNotFound to s3.ErrKMSKeyNotFound", func(t *testing.T) {
+		s, _ := newTestKMSStorage(t)
+		a := &kmsAdapter{s: s}
+		_, err := a.ResolveKeyForEncryption("00000000-0000-0000-0000-000000000000")
+		assert.ErrorIs(t, err, s3.ErrKMSKeyNotFound)
+	})
+
+	t.Run("maps ErrKeyDisabled to s3.ErrKMSKeyDisabled", func(t *testing.T) {
+		s, _ := newTestKMSStorage(t)
+		meta, err := s.CreateKey(kms.CreateKeyInput{
+			KeySpec:  "SYMMETRIC_DEFAULT",
+			KeyUsage: "ENCRYPT_DECRYPT",
+			Origin:   "AWS_KMS",
+		})
+		require.NoError(t, err)
+		require.NoError(t, s.DisableKey(meta.KeyID))
+		a := &kmsAdapter{s: s}
+		_, err = a.ResolveKeyForEncryption(meta.KeyID)
+		assert.ErrorIs(t, err, s3.ErrKMSKeyDisabled)
+	})
+
+	t.Run("maps ErrKeyPendingDeletion to s3.ErrKMSKeyPendingDeletion", func(t *testing.T) {
+		s, _ := newTestKMSStorage(t)
+		meta, err := s.CreateKey(kms.CreateKeyInput{
+			KeySpec:  "SYMMETRIC_DEFAULT",
+			KeyUsage: "ENCRYPT_DECRYPT",
+			Origin:   "AWS_KMS",
+		})
+		require.NoError(t, err)
+		_, err = s.ScheduleKeyDeletion(meta.KeyID, 7)
+		require.NoError(t, err)
+		a := &kmsAdapter{s: s}
+		_, err = a.ResolveKeyForEncryption(meta.KeyID)
+		assert.ErrorIs(t, err, s3.ErrKMSKeyPendingDeletion)
+	})
+
+	t.Run("passes through unknown errors unwrapped", func(t *testing.T) {
+		s, dir := newTestKMSStorage(t)
+		meta, err := s.CreateKey(kms.CreateKeyInput{
+			KeySpec:  "SYMMETRIC_DEFAULT",
+			KeyUsage: "ENCRYPT_DECRYPT",
+			Origin:   "AWS_KMS",
+		})
+		require.NoError(t, err)
+		// Corrupt meta.json to produce a non-sentinel JSON parse error.
+		metaPath := filepath.Join(dir, "kms", "keys", meta.KeyID, "meta.json")
+		require.NoError(t, os.WriteFile(metaPath, []byte("not-json"), 0o600))
+		a := &kmsAdapter{s: s}
+		_, err = a.ResolveKeyForEncryption(meta.KeyID)
+		require.Error(t, err)
+		assert.NotErrorIs(t, err, s3.ErrKMSKeyNotFound)
+		assert.NotErrorIs(t, err, s3.ErrKMSKeyDisabled)
+		assert.NotErrorIs(t, err, s3.ErrKMSKeyPendingDeletion)
+	})
+}
 
 func TestNewMuxError(t *testing.T) {
 	t.Run("error when s3 storage fails to init", func(t *testing.T) {

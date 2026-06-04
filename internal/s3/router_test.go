@@ -26,7 +26,7 @@ func newTestRouter(t *testing.T) *Router {
 	storage, err := NewStorage(t.TempDir())
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = storage.Close() })
-	return NewRouter(storage)
+	return NewRouter(storage, nil)
 }
 
 func TestParsePath(t *testing.T) {
@@ -9662,4 +9662,214 @@ func TestParseMultipartPartCount(t *testing.T) {
 			assert.Equal(t, tt.want, parseMultipartPartCount(tt.etag))
 		})
 	}
+}
+
+// mockKMSService is a test stub for KMSService.
+type mockKMSService struct {
+	resolveKeyForEncryptionFn func(keyRef string) (string, error)
+}
+
+func (m *mockKMSService) ResolveKeyForEncryption(keyRef string) (string, error) {
+	if m.resolveKeyForEncryptionFn != nil {
+		return m.resolveKeyForEncryptionFn(keyRef)
+	}
+	return "arn:aws:kms:us-east-1:000000000000:key/mock-key-id", nil
+}
+
+func newRouterWithMockKMS(store *mockStore, kms KMSService) *Router {
+	return &Router{storage: store, kms: kms, now: time.Now}
+}
+
+func TestSSEKMSIntegration(t *testing.T) {
+	const mockARN = "arn:aws:kms:us-east-1:000000000000:key/mock-key-id"
+	const disabledErr = "KMS.DisabledException"
+	const notFoundErr = "KMS.NotFoundException"
+	const invalidStateErr = "KMS.InvalidStateException"
+
+	kmsOK := &mockKMSService{}
+	kmsDisabled := &mockKMSService{
+		resolveKeyForEncryptionFn: func(string) (string, error) {
+			return "", ErrKMSKeyDisabled
+		},
+	}
+	kmsNotFound := &mockKMSService{
+		resolveKeyForEncryptionFn: func(string) (string, error) {
+			return "", ErrKMSKeyNotFound
+		},
+	}
+	kmsPendingDeletion := &mockKMSService{
+		resolveKeyForEncryptionFn: func(string) (string, error) {
+			return "", ErrKMSKeyPendingDeletion
+		},
+	}
+
+	t.Run("PutObject with kms=nil stores key verbatim", func(t *testing.T) {
+		ms := &mockStore{}
+		ro := newRouterWithMock(ms) // kms=nil
+		req := httptest.NewRequest(http.MethodPut, "/b/k", strings.NewReader("data"))
+		req.Header.Set(amzSSE, "aws:kms")
+		req.Header.Set(amzSSEKMSKeyID, "my-raw-key")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "my-raw-key", ms.capturedPutObjectSSEKeyID)
+	})
+
+	t.Run("PutObject with valid KMS resolves key ID to ARN", func(t *testing.T) {
+		ms := &mockStore{
+			putObjectMeta: ObjectMetadata{SSEAlgorithm: "aws:kms", SSEKMSKeyID: mockARN},
+		}
+		ro := newRouterWithMockKMS(ms, kmsOK)
+		req := httptest.NewRequest(http.MethodPut, "/b/k", strings.NewReader("data"))
+		req.Header.Set(amzSSE, "aws:kms")
+		req.Header.Set(amzSSEKMSKeyID, "my-key-id")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, mockARN, ms.capturedPutObjectSSEKeyID)
+		assert.Equal(t, mockARN, w.Header().Get(amzSSEKMSKeyID))
+	})
+
+	t.Run("PutObject with disabled key returns 400 KMS.DisabledException", func(t *testing.T) {
+		ro := newRouterWithMockKMS(&mockStore{}, kmsDisabled)
+		req := httptest.NewRequest(http.MethodPut, "/b/k", strings.NewReader("data"))
+		req.Header.Set(amzSSE, "aws:kms")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), disabledErr)
+	})
+
+	t.Run("PutObject with not-found key returns 400 KMS.NotFoundException", func(t *testing.T) {
+		ro := newRouterWithMockKMS(&mockStore{}, kmsNotFound)
+		req := httptest.NewRequest(http.MethodPut, "/b/k", strings.NewReader("data"))
+		req.Header.Set(amzSSE, "aws:kms")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), notFoundErr)
+	})
+
+	t.Run(
+		"PutObject with pending-deletion key returns 400 KMS.InvalidStateException",
+		func(t *testing.T) {
+			ro := newRouterWithMockKMS(&mockStore{}, kmsPendingDeletion)
+			req := httptest.NewRequest(http.MethodPut, "/b/k", strings.NewReader("data"))
+			req.Header.Set(amzSSE, "aws:kms")
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Contains(t, w.Body.String(), invalidStateErr)
+		},
+	)
+
+	t.Run("PutObject with aws:kms:dsse resolves key ID to ARN", func(t *testing.T) {
+		ms := &mockStore{
+			putObjectMeta: ObjectMetadata{SSEAlgorithm: "aws:kms:dsse", SSEKMSKeyID: mockARN},
+		}
+		ro := newRouterWithMockKMS(ms, kmsOK)
+		req := httptest.NewRequest(http.MethodPut, "/b/k", strings.NewReader("data"))
+		req.Header.Set(amzSSE, "aws:kms:dsse")
+		req.Header.Set(amzSSEKMSKeyID, "my-key-id")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, mockARN, ms.capturedPutObjectSSEKeyID)
+		assert.Equal(t, mockARN, w.Header().Get(amzSSEKMSKeyID))
+	})
+
+	t.Run(
+		"PutObject with aws:kms:dsse disabled key returns 400 KMS.DisabledException",
+		func(t *testing.T) {
+			ro := newRouterWithMockKMS(&mockStore{}, kmsDisabled)
+			req := httptest.NewRequest(http.MethodPut, "/b/k", strings.NewReader("data"))
+			req.Header.Set(amzSSE, "aws:kms:dsse")
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Contains(t, w.Body.String(), disabledErr)
+		},
+	)
+
+	t.Run("CopyObject with valid KMS resolves key to ARN", func(t *testing.T) {
+		ms := &mockStore{
+			getBucketRegionStr: "us-east-1",
+			headObjectMeta:     ObjectMetadata{ContentType: "text/plain"},
+			copyObjectMeta:     ObjectMetadata{SSEAlgorithm: "aws:kms", SSEKMSKeyID: mockARN},
+		}
+		ro := newRouterWithMockKMS(ms, kmsOK)
+		req := httptest.NewRequest(http.MethodPut, "/dst-bucket/dst-key", nil)
+		req.Header.Set(amzCopySource, "/src-bucket/src-key")
+		req.Header.Set(amzSSE, "aws:kms")
+		req.Header.Set(amzSSEKMSKeyID, "some-key")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, mockARN, ms.capturedCopyObjectSSEKeyID)
+		assert.Equal(t, mockARN, w.Header().Get(amzSSEKMSKeyID))
+	})
+
+	t.Run("CreateMultipartUpload with valid KMS resolves key to ARN", func(t *testing.T) {
+		ms := &mockStore{createMultipartUploadID: "uid-1"}
+		ro := newRouterWithMockKMS(ms, kmsOK)
+		req := httptest.NewRequest(http.MethodPost, "/b/k?uploads", nil)
+		req.Header.Set(amzSSE, "aws:kms")
+		req.Header.Set(amzSSEKMSKeyID, "some-key")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, mockARN, ms.capturedCreateMPUSSEKeyID)
+		assert.Equal(t, mockARN, w.Header().Get(amzSSEKMSKeyID))
+	})
+
+	t.Run("bucket default aws:kms encryption with KMS resolves key to ARN", func(t *testing.T) {
+		const kmsXML = `<ServerSideEncryptionConfiguration><Rule>` +
+			`<ApplyServerSideEncryptionByDefault><SSEAlgorithm>aws:kms</SSEAlgorithm>` +
+			`<KMSMasterKeyID>bucket-default-key</KMSMasterKeyID></ApplyServerSideEncryptionByDefault>` +
+			`</Rule></ServerSideEncryptionConfiguration>`
+		ms := &mockStore{
+			getBucketEncryptionResult: kmsXML,
+			putObjectMeta: ObjectMetadata{
+				SSEAlgorithm: "aws:kms",
+				SSEKMSKeyID:  mockARN,
+			},
+		}
+		ro := newRouterWithMockKMS(ms, kmsOK)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, httptest.NewRequest(http.MethodPut, "/b/k", strings.NewReader("data")))
+		require.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, mockARN, ms.capturedPutObjectSSEKeyID)
+		assert.Equal(t, mockARN, w.Header().Get(amzSSEKMSKeyID))
+	})
+
+	t.Run("AES256 algorithm skips KMS validation", func(t *testing.T) {
+		kmsAlwaysFail := &mockKMSService{
+			resolveKeyForEncryptionFn: func(string) (string, error) {
+				return "", errors.New("should not be called")
+			},
+		}
+		ms := &mockStore{}
+		ro := newRouterWithMockKMS(ms, kmsAlwaysFail)
+		req := httptest.NewRequest(http.MethodPut, "/b/k", strings.NewReader("data"))
+		req.Header.Set(amzSSE, "AES256")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "AES256", ms.capturedPutObjectSSEAlg)
+	})
+
+	t.Run("unexpected KMS error returns 500 KMS.KMSInternalException", func(t *testing.T) {
+		kmsInternal := &mockKMSService{
+			resolveKeyForEncryptionFn: func(string) (string, error) {
+				return "", errors.New("unexpected internal error")
+			},
+		}
+		ro := newRouterWithMockKMS(&mockStore{}, kmsInternal)
+		req := httptest.NewRequest(http.MethodPut, "/b/k", strings.NewReader("data"))
+		req.Header.Set(amzSSE, "aws:kms")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assert.Contains(t, w.Body.String(), "KMS.KMSInternalException")
+	})
 }

@@ -19,8 +19,8 @@
 | `x-amz-meta-*` | Arbitrary user metadata (lowercased key suffix) |
 | `x-amz-tagging` | URL-encoded tag set |
 | `x-amz-storage-class` | Stored; returned on GetObject/HeadObject |
-| `x-amz-server-side-encryption` | Stored as metadata only (AES256 / aws:kms); no actual encryption |
-| `x-amz-server-side-encryption-aws-kms-key-id` | Stored as metadata only |
+| `x-amz-server-side-encryption` | Stored as metadata (AES256 / aws:kms / aws:kms:dsse); no actual encryption |
+| `x-amz-server-side-encryption-aws-kms-key-id` | For aws:kms / aws:kms:dsse: resolved to canonical ARN via KMS and stored; see `sse-algorithm-validation.md` |
 | `x-amz-server-side-encryption-bucket-key-enabled` | Stored as metadata; only meaningful for `aws:kms` / `aws:kms:dsse` — see `sse-bucket-key-enabled.md` |
 | `x-amz-checksum-crc32` / `crc32c` / `sha1` / `sha256` | Validated against body |
 | `x-amz-sdk-checksum-algorithm` | Selects which checksum header to validate |
@@ -62,6 +62,6 @@
 
 ## Kumolo deviations
 
-- SSE (x-amz-server-side-encryption) headers are stored in metadata but no actual encryption is applied.
+- SSE headers are stored in metadata but no actual encryption is applied. For aws:kms / aws:kms:dsse the key is validated and resolved to a canonical ARN via the KMS service; see `sse-algorithm-validation.md`.
 - ACL-related headers are ignored.
 - `x-amz-website-redirect-location` is accepted but not used in redirects.
