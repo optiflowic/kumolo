@@ -466,7 +466,7 @@ func (s *Storage) EnsureAwsS3Key() (string, error) {
 		if metaErr != nil {
 			// untestable: alias exists but key metadata is missing — only possible via
 			// manual filesystem corruption between ResolveAlias and GetKeyMetadata.
-			return "", metaErr
+			return "", fmt.Errorf("read alias/aws/s3 metadata: %w", metaErr)
 		}
 		return meta.Arn, nil
 	}
@@ -497,7 +497,7 @@ func (s *Storage) EnsureAwsS3Key() (string, error) {
 		}
 		m, resolveErr := s.GetKeyMetadata(raceKeyID)
 		if resolveErr != nil {
-			return "", resolveErr
+			return "", fmt.Errorf("read alias/aws/s3 race winner metadata: %w", resolveErr)
 		}
 		return m.Arn, nil
 	}
@@ -510,11 +510,12 @@ func (s *Storage) EnsureAwsS3Key() (string, error) {
 // on first call). Returns ErrKeyNotFound, ErrKeyDisabled, or ErrKeyPendingDeletion
 // on validation failure.
 func (s *Storage) ResolveKeyForEncryption(keyRef string) (string, error) {
-	if keyRef == "" {
-		return s.EnsureAwsS3Key()
-	}
-	if keyRef == "alias/aws/s3" {
-		return s.EnsureAwsS3Key()
+	// Normalize default/shorthand aliases so they go through state validation below.
+	if keyRef == "" || keyRef == "alias/aws/s3" {
+		if _, err := s.EnsureAwsS3Key(); err != nil {
+			return "", fmt.Errorf("ensure alias/aws/s3: %w", err)
+		}
+		keyRef = "alias/aws/s3"
 	}
 
 	var keyID string
@@ -526,14 +527,17 @@ func (s *Storage) ResolveKeyForEncryption(keyRef string) (string, error) {
 			return "", ErrKeyNotFound
 		}
 		if aliasName == "alias/aws/s3" {
-			return s.EnsureAwsS3Key()
+			// Ensure the managed key exists before resolving its ID for state validation.
+			if _, err := s.EnsureAwsS3Key(); err != nil {
+				return "", fmt.Errorf("ensure alias/aws/s3: %w", err)
+			}
 		}
 		id, err := s.ResolveAlias(aliasName)
 		if err != nil {
 			if errors.Is(err, ErrAliasNotFound) {
 				return "", ErrKeyNotFound
 			}
-			return "", err
+			return "", fmt.Errorf("resolve alias %s: %w", aliasName, err)
 		}
 		keyID = id
 	} else {
@@ -546,7 +550,7 @@ func (s *Storage) ResolveKeyForEncryption(keyRef string) (string, error) {
 
 	meta, err := s.GetKeyMetadata(keyID)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("read key metadata %s: %w", keyID, err)
 	}
 
 	switch meta.KeyState {
