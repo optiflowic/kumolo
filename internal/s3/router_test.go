@@ -9717,7 +9717,9 @@ func TestSSEKMSIntegration(t *testing.T) {
 	})
 
 	t.Run("PutObject with valid KMS resolves key ID to ARN", func(t *testing.T) {
-		ms := &mockStore{}
+		ms := &mockStore{
+			putObjectMeta: ObjectMetadata{SSEAlgorithm: "aws:kms", SSEKMSKeyID: mockARN},
+		}
 		ro := newRouterWithMockKMS(ms, kmsOK)
 		req := httptest.NewRequest(http.MethodPut, "/b/k", strings.NewReader("data"))
 		req.Header.Set(amzSSE, "aws:kms")
@@ -9726,6 +9728,7 @@ func TestSSEKMSIntegration(t *testing.T) {
 		ro.ServeHTTP(w, req)
 		require.Equal(t, http.StatusOK, w.Code)
 		assert.Equal(t, mockARN, ms.capturedPutObjectSSEKeyID)
+		assert.Equal(t, mockARN, w.Header().Get(amzSSEKMSKeyID))
 	})
 
 	t.Run("PutObject with disabled key returns 400 KMS.DisabledException", func(t *testing.T) {
@@ -9762,7 +9765,9 @@ func TestSSEKMSIntegration(t *testing.T) {
 	)
 
 	t.Run("PutObject with aws:kms:dsse resolves key ID to ARN", func(t *testing.T) {
-		ms := &mockStore{}
+		ms := &mockStore{
+			putObjectMeta: ObjectMetadata{SSEAlgorithm: "aws:kms:dsse", SSEKMSKeyID: mockARN},
+		}
 		ro := newRouterWithMockKMS(ms, kmsOK)
 		req := httptest.NewRequest(http.MethodPut, "/b/k", strings.NewReader("data"))
 		req.Header.Set(amzSSE, "aws:kms:dsse")
@@ -9771,6 +9776,7 @@ func TestSSEKMSIntegration(t *testing.T) {
 		ro.ServeHTTP(w, req)
 		require.Equal(t, http.StatusOK, w.Code)
 		assert.Equal(t, mockARN, ms.capturedPutObjectSSEKeyID)
+		assert.Equal(t, mockARN, w.Header().Get(amzSSEKMSKeyID))
 	})
 
 	t.Run(
@@ -9801,6 +9807,7 @@ func TestSSEKMSIntegration(t *testing.T) {
 		ro.ServeHTTP(w, req)
 		require.Equal(t, http.StatusOK, w.Code)
 		assert.Equal(t, mockARN, ms.capturedCopyObjectSSEKeyID)
+		assert.Equal(t, mockARN, w.Header().Get(amzSSEKMSKeyID))
 	})
 
 	t.Run("CreateMultipartUpload with valid KMS resolves key to ARN", func(t *testing.T) {
@@ -9813,6 +9820,7 @@ func TestSSEKMSIntegration(t *testing.T) {
 		ro.ServeHTTP(w, req)
 		require.Equal(t, http.StatusOK, w.Code)
 		assert.Equal(t, mockARN, ms.capturedCreateMPUSSEKeyID)
+		assert.Equal(t, mockARN, w.Header().Get(amzSSEKMSKeyID))
 	})
 
 	t.Run("bucket default aws:kms encryption with KMS resolves key to ARN", func(t *testing.T) {
@@ -9820,12 +9828,19 @@ func TestSSEKMSIntegration(t *testing.T) {
 			`<ApplyServerSideEncryptionByDefault><SSEAlgorithm>aws:kms</SSEAlgorithm>` +
 			`<KMSMasterKeyID>bucket-default-key</KMSMasterKeyID></ApplyServerSideEncryptionByDefault>` +
 			`</Rule></ServerSideEncryptionConfiguration>`
-		ms := &mockStore{getBucketEncryptionResult: kmsXML}
+		ms := &mockStore{
+			getBucketEncryptionResult: kmsXML,
+			putObjectMeta: ObjectMetadata{
+				SSEAlgorithm: "aws:kms",
+				SSEKMSKeyID:  mockARN,
+			},
+		}
 		ro := newRouterWithMockKMS(ms, kmsOK)
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, httptest.NewRequest(http.MethodPut, "/b/k", strings.NewReader("data")))
 		require.Equal(t, http.StatusOK, w.Code)
 		assert.Equal(t, mockARN, ms.capturedPutObjectSSEKeyID)
+		assert.Equal(t, mockARN, w.Header().Get(amzSSEKMSKeyID))
 	})
 
 	t.Run("AES256 algorithm skips KMS validation", func(t *testing.T) {

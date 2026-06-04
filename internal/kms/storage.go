@@ -464,8 +464,6 @@ func (s *Storage) EnsureAwsS3Key() (string, error) {
 	if err == nil {
 		meta, metaErr := s.GetKeyMetadata(keyID)
 		if metaErr != nil {
-			// untestable: alias exists but key metadata is missing — only possible via
-			// manual filesystem corruption between ResolveAlias and GetKeyMetadata.
 			return "", fmt.Errorf("read alias/aws/s3 metadata: %w", metaErr)
 		}
 		return meta.Arn, nil

@@ -1465,6 +1465,18 @@ func TestEnsureAwsS3Key(t *testing.T) {
 		assert.ErrorContains(t, err, "resolve alias/aws/s3 after race")
 	})
 
+	t.Run("alias exists but key metadata missing returns wrapped error", func(t *testing.T) {
+		s, dir := newTestStorage(t)
+		_, err := s.EnsureAwsS3Key()
+		require.NoError(t, err)
+		keyID, err := s.ResolveAlias("alias/aws/s3")
+		require.NoError(t, err)
+		require.NoError(t, os.Remove(filepath.Join(dir, "kms", "keys", keyID, "meta.json")))
+		_, err = s.EnsureAwsS3Key()
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "read alias/aws/s3 metadata")
+	})
+
 	t.Run("CreateAlias ErrAliasAlreadyExists race: GetKeyMetadata fails", func(t *testing.T) {
 		s, dir := newTestStorage(t)
 		// Alias points to a nonexistent key; GetKeyMetadata will return ErrKeyNotFound.
