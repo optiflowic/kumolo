@@ -46,8 +46,8 @@
 | `ETag` | Always; MD5 hex quoted (or checksum-based for multipart) |
 | `x-amz-version-id` | When versioning is enabled on the bucket |
 | `x-amz-checksum-crc32` / `crc32c` / `sha1` / `sha256` | When checksum was provided |
-| `x-amz-server-side-encryption` | When SSE is applied (explicit header or bucket default encryption) |
-| `x-amz-server-side-encryption-aws-kms-key-id` | When KMS key ID is applied (explicit header or bucket default encryption) |
+| `x-amz-server-side-encryption` | Explicit header, or bucket default encryption when no explicit header is provided |
+| `x-amz-server-side-encryption-aws-kms-key-id` | Explicit header KMS key ID, or bucket default KMS key when no explicit header is provided |
 | `x-amz-server-side-encryption-bucket-key-enabled` | `true` when BucketKeyEnabled was set and algorithm is `aws:kms` or `aws:kms:dsse` |
 
 ## Errors

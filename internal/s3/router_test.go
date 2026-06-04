@@ -8355,6 +8355,9 @@ func TestSSEBucketDefaultEncryption(t *testing.T) {
 			`<ApplyServerSideEncryptionByDefault><SSEAlgorithm>aws:kms</SSEAlgorithm>` +
 			`<KMSMasterKeyID>my-kms-key</KMSMasterKeyID></ApplyServerSideEncryptionByDefault>` +
 			`<BucketKeyEnabled>true</BucketKeyEnabled></Rule></ServerSideEncryptionConfiguration>`
+		kmsDSSEXML = `<ServerSideEncryptionConfiguration><Rule>` +
+			`<ApplyServerSideEncryptionByDefault><SSEAlgorithm>aws:kms:dsse</SSEAlgorithm></ApplyServerSideEncryptionByDefault>` +
+			`<BucketKeyEnabled>true</BucketKeyEnabled></Rule></ServerSideEncryptionConfiguration>`
 	)
 
 	t.Run(
@@ -8383,6 +8386,21 @@ func TestSSEBucketDefaultEncryption(t *testing.T) {
 			)
 			assert.Equal(t, "aws:kms", ms.capturedPutObjectSSEAlg)
 			assert.Equal(t, "my-kms-key", ms.capturedPutObjectSSEKeyID)
+			assert.True(t, ms.capturedPutObjectBucketKeyEnabled)
+		},
+	)
+
+	t.Run(
+		"PutObject: no SSE header + aws:kms:dsse bucket config passes dsse alg and BucketKeyEnabled to storage",
+		func(t *testing.T) {
+			ms := &mockStore{getBucketEncryptionResult: kmsDSSEXML}
+			ro := newRouterWithMock(ms)
+			ro.ServeHTTP(
+				httptest.NewRecorder(),
+				httptest.NewRequest(http.MethodPut, "/b/k", strings.NewReader("data")),
+			)
+			assert.Equal(t, "aws:kms:dsse", ms.capturedPutObjectSSEAlg)
+			assert.Empty(t, ms.capturedPutObjectSSEKeyID)
 			assert.True(t, ms.capturedPutObjectBucketKeyEnabled)
 		},
 	)
@@ -8466,6 +8484,59 @@ func TestSSEBucketDefaultEncryption(t *testing.T) {
 	)
 
 	t.Run(
+		"CopyObject: no SSE header + aws:kms:dsse bucket config passes dsse alg to storage",
+		func(t *testing.T) {
+			ms := &mockStore{getBucketEncryptionResult: kmsDSSEXML}
+			ro := newRouterWithMock(ms)
+			req := httptest.NewRequest(http.MethodPut, "/dst/k", nil)
+			req.Header.Set(amzCopySource, "/src/k")
+			ro.ServeHTTP(httptest.NewRecorder(), req)
+			assert.Equal(t, "aws:kms:dsse", ms.capturedCopyObjectSSEAlg)
+			assert.Empty(t, ms.capturedCopyObjectSSEKeyID)
+			assert.True(t, ms.capturedCopyObjectBucketKeyEnabled)
+		},
+	)
+
+	t.Run("CopyObject: GetBucketEncryption error yields 200 with no SSE", func(t *testing.T) {
+		ms := &mockStore{getBucketEncryptionErr: errors.New("disk failure")}
+		ro := newRouterWithMock(ms)
+		req := httptest.NewRequest(http.MethodPut, "/dst/k", nil)
+		req.Header.Set(amzCopySource, "/src/k")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Empty(t, ms.capturedCopyObjectSSEAlg)
+		assert.Empty(t, ms.capturedCopyObjectSSEKeyID)
+	})
+
+	t.Run("CopyObject: malformed bucket encryption XML yields 200 with no SSE", func(t *testing.T) {
+		ms := &mockStore{getBucketEncryptionResult: "<not-valid-xml"}
+		ro := newRouterWithMock(ms)
+		req := httptest.NewRequest(http.MethodPut, "/dst/k", nil)
+		req.Header.Set(amzCopySource, "/src/k")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Empty(t, ms.capturedCopyObjectSSEAlg)
+	})
+
+	t.Run(
+		"CopyObject: bucket encryption XML with no rules yields 200 with no SSE",
+		func(t *testing.T) {
+			ms := &mockStore{
+				getBucketEncryptionResult: `<ServerSideEncryptionConfiguration></ServerSideEncryptionConfiguration>`,
+			}
+			ro := newRouterWithMock(ms)
+			req := httptest.NewRequest(http.MethodPut, "/dst/k", nil)
+			req.Header.Set(amzCopySource, "/src/k")
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Empty(t, ms.capturedCopyObjectSSEAlg)
+		},
+	)
+
+	t.Run(
 		"CreateMultipartUpload: no SSE header + AES256 bucket config emits AES256 response header",
 		func(t *testing.T) {
 			ms := &mockStore{
@@ -8499,6 +8570,24 @@ func TestSSEBucketDefaultEncryption(t *testing.T) {
 	)
 
 	t.Run(
+		"CreateMultipartUpload: no SSE header + aws:kms:dsse + BucketKeyEnabled emits dsse response headers",
+		func(t *testing.T) {
+			ms := &mockStore{
+				getBucketEncryptionResult: kmsDSSEXML,
+				createMultipartUploadID:   "uid-dsse",
+			}
+			ro := newRouterWithMock(ms)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/b/k?uploads", nil))
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Equal(t, "aws:kms:dsse", w.Header().Get(amzSSE))
+			assert.Equal(t, "true", w.Header().Get(amzSSEBucketKeyEnabled))
+			assert.Equal(t, "aws:kms:dsse", ms.capturedCreateMPUSSEAlg)
+			assert.True(t, ms.capturedCreateMPUBucketKeyEnabled)
+		},
+	)
+
+	t.Run(
 		"CreateMultipartUpload: no bucket config emits no SSE response header",
 		func(t *testing.T) {
 			ms := &mockStore{createMultipartUploadID: "uid-none"}
@@ -8524,6 +8613,54 @@ func TestSSEBucketDefaultEncryption(t *testing.T) {
 		assert.Equal(t, "aws:kms", w.Header().Get(amzSSE))
 		assert.Equal(t, "aws:kms", ms.capturedCreateMPUSSEAlg)
 	})
+
+	t.Run(
+		"CreateMultipartUpload: GetBucketEncryption error yields 200 with no SSE",
+		func(t *testing.T) {
+			ms := &mockStore{
+				getBucketEncryptionErr:  errors.New("disk failure"),
+				createMultipartUploadID: "uid-err",
+			}
+			ro := newRouterWithMock(ms)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/b/k?uploads", nil))
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Empty(t, w.Header().Get(amzSSE))
+			assert.Empty(t, ms.capturedCreateMPUSSEAlg)
+		},
+	)
+
+	t.Run(
+		"CreateMultipartUpload: malformed bucket encryption XML yields 200 with no SSE",
+		func(t *testing.T) {
+			ms := &mockStore{
+				getBucketEncryptionResult: "<not-valid-xml",
+				createMultipartUploadID:   "uid-bad",
+			}
+			ro := newRouterWithMock(ms)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/b/k?uploads", nil))
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Empty(t, w.Header().Get(amzSSE))
+			assert.Empty(t, ms.capturedCreateMPUSSEAlg)
+		},
+	)
+
+	t.Run(
+		"CreateMultipartUpload: bucket encryption XML with no rules yields 200 with no SSE",
+		func(t *testing.T) {
+			ms := &mockStore{
+				getBucketEncryptionResult: `<ServerSideEncryptionConfiguration></ServerSideEncryptionConfiguration>`,
+				createMultipartUploadID:   "uid-norule",
+			}
+			ro := newRouterWithMock(ms)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/b/k?uploads", nil))
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Empty(t, w.Header().Get(amzSSE))
+			assert.Empty(t, ms.capturedCreateMPUSSEAlg)
+		},
+	)
 }
 
 func TestStorageClassResponseHeaders(t *testing.T) {
