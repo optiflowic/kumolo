@@ -34,7 +34,7 @@ func NewMux(
 		return nil, nil, err
 	}
 
-	s3Router := s3.NewRouter(s3Storage)
+	s3Router := s3.NewRouter(s3Storage, kmsStorage)
 	dynamoRouter := dynamodb.NewRouter(dynamoStorage)
 	dynamoStreamsRouter := dynamodb.NewStreamsRouter(dynamoStorage)
 	stsRouter := sts.NewRouter()

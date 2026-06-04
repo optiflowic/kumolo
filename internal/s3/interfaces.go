@@ -207,3 +207,10 @@ type objectLegalHoldStore interface {
 	PutObjectLegalHold(bucket, key, versionID, status string) error
 	GetObjectLegalHold(bucket, key, versionID string) (string, error)
 }
+
+// KMSService is the subset of KMS used by S3 for SSE-KMS key resolution.
+// ResolveKeyForEncryption resolves keyRef to a canonical key ARN and validates
+// the key is Enabled. Empty keyRef resolves to alias/aws/s3.
+type KMSService interface {
+	ResolveKeyForEncryption(keyRef string) (string, error)
+}

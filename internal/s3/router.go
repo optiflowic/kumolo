@@ -85,11 +85,14 @@ type Router struct {
 		objectRetentionStore
 		objectLegalHoldStore
 	}
+	kms KMSService       // nil means SSE-KMS key validation is skipped
 	now func() time.Time // injectable for testing; defaults to time.Now
 }
 
-func NewRouter(storage *Storage) *Router {
-	return &Router{storage: storage, now: time.Now}
+// NewRouter creates a new S3 router. kms may be nil, in which case SSE-KMS
+// key validation is skipped and key IDs are stored verbatim.
+func NewRouter(storage *Storage, kms KMSService) *Router {
+	return &Router{storage: storage, kms: kms, now: time.Now}
 }
 
 func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {

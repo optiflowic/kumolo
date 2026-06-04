@@ -179,6 +179,7 @@ type CreateKeyInput struct {
 	MultiRegion bool   `json:"MultiRegion"`
 	Origin      string `json:"Origin"`
 	Policy      string `json:"Policy"`
+	keyManager  string // internal only; "AWS" for managed keys; defaults to "CUSTOMER"
 }
 
 func (s *Storage) CreateKey(in CreateKeyInput) (KeyMetadata, error) {
@@ -190,6 +191,10 @@ func (s *Storage) CreateKey(in CreateKeyInput) (KeyMetadata, error) {
 		return KeyMetadata{}, fmt.Errorf("generate key ID: %w", err)
 	}
 
+	km := in.keyManager
+	if km == "" {
+		km = "CUSTOMER"
+	}
 	now := nowUnix()
 	meta := KeyMetadata{
 		KeyID:                  keyID,
@@ -201,7 +206,7 @@ func (s *Storage) CreateKey(in CreateKeyInput) (KeyMetadata, error) {
 		KeyUsage:               in.KeyUsage,
 		KeyState:               keyStateEnabled,
 		Enabled:                true,
-		KeyManager:             "CUSTOMER",
+		KeyManager:             km,
 		Origin:                 in.Origin,
 		MultiRegion:            in.MultiRegion,
 		CreationDate:           now,
@@ -450,6 +455,107 @@ func (s *Storage) GetKeyMetadata(keyID string) (KeyMetadata, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.readKeyMeta(keyID)
+}
+
+// EnsureAwsS3Key returns the ARN of the alias/aws/s3 managed key, creating it
+// (and the alias) if it does not yet exist.
+func (s *Storage) EnsureAwsS3Key() (string, error) {
+	keyID, err := s.ResolveAlias("alias/aws/s3")
+	if err == nil {
+		meta, metaErr := s.GetKeyMetadata(keyID)
+		if metaErr != nil {
+			// untestable: alias exists but key metadata is missing — only possible via
+			// manual filesystem corruption between ResolveAlias and GetKeyMetadata.
+			return "", metaErr
+		}
+		return meta.Arn, nil
+	}
+	if !errors.Is(err, ErrAliasNotFound) {
+		return "", fmt.Errorf("resolve alias/aws/s3: %w", err)
+	}
+
+	meta, err := s.CreateKey(CreateKeyInput{
+		Description: "Default KMS key used by Amazon S3",
+		KeySpec:     keySpecSymmetricDefault,
+		KeyUsage:    "ENCRYPT_DECRYPT",
+		Origin:      "AWS_KMS",
+		keyManager:  "AWS",
+	})
+	if err != nil {
+		return "", fmt.Errorf("create aws/s3 managed key: %w", err)
+	}
+
+	if aliasErr := s.CreateAlias("alias/aws/s3", meta.KeyID); aliasErr != nil {
+		if !errors.Is(aliasErr, ErrAliasAlreadyExists) {
+			// untestable: CreateAlias returns an unexpected error (not ErrAliasAlreadyExists).
+			return "", fmt.Errorf("create alias/aws/s3: %w", aliasErr)
+		}
+		// untestable: race — another goroutine created alias/aws/s3 between our
+		// ErrAliasNotFound check and our CreateAlias call; impossible to trigger
+		// in single-threaded tests without OS-level synchronization.
+		raceKeyID, resolveErr := s.ResolveAlias("alias/aws/s3")
+		if resolveErr != nil {
+			return "", fmt.Errorf("resolve alias/aws/s3 after race: %w", resolveErr)
+		}
+		m, resolveErr := s.GetKeyMetadata(raceKeyID)
+		if resolveErr != nil {
+			return "", resolveErr
+		}
+		return m.Arn, nil
+	}
+
+	return meta.Arn, nil
+}
+
+// ResolveKeyForEncryption resolves keyRef to a canonical key ARN and validates
+// that the key is Enabled. If keyRef is empty, alias/aws/s3 is used (auto-created
+// on first call). Returns ErrKeyNotFound, ErrKeyDisabled, or ErrKeyPendingDeletion
+// on validation failure.
+func (s *Storage) ResolveKeyForEncryption(keyRef string) (string, error) {
+	if keyRef == "" {
+		return s.EnsureAwsS3Key()
+	}
+	if keyRef == "alias/aws/s3" {
+		return s.EnsureAwsS3Key()
+	}
+
+	var keyID string
+	if isAliasRef(keyRef) {
+		aliasName, ok := normalizeAliasRef(keyRef)
+		if !ok {
+			// unreachable: normalizeAliasRef only fails for ARN-style refs without
+			// ":alias/", but isAliasRef already requires strings.Contains(keyID, ":alias/").
+			return "", ErrKeyNotFound
+		}
+		id, err := s.ResolveAlias(aliasName)
+		if err != nil {
+			if errors.Is(err, ErrAliasNotFound) {
+				return "", ErrKeyNotFound
+			}
+			return "", err
+		}
+		keyID = id
+	} else {
+		id, ok := resolveKeyID(keyRef)
+		if !ok {
+			return "", ErrKeyNotFound
+		}
+		keyID = id
+	}
+
+	meta, err := s.GetKeyMetadata(keyID)
+	if err != nil {
+		return "", err
+	}
+
+	switch meta.KeyState {
+	case keyStateDisabled:
+		return "", ErrKeyDisabled
+	case keyStatePendingDeletion:
+		return "", ErrKeyPendingDeletion
+	}
+
+	return meta.Arn, nil
 }
 
 func (s *Storage) ListKeyIDs() ([]string, error) {

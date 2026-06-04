@@ -1387,3 +1387,147 @@ func TestCreateKey_asymmetricMaterialWriteFailure_cleanupFailure(t *testing.T) {
 	assert.Contains(t, removedPaths[1], "material.json")
 	assert.NotContains(t, removedPaths[2], ".json")
 }
+
+func TestEnsureAwsS3Key(t *testing.T) {
+	t.Run("creates alias/aws/s3 on first call", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		arn, err := s.EnsureAwsS3Key()
+		require.NoError(t, err)
+		assert.Contains(t, arn, "arn:aws:kms:")
+		assert.Contains(t, arn, ":key/")
+
+		// Alias must now exist.
+		keyID, err := s.ResolveAlias("alias/aws/s3")
+		require.NoError(t, err)
+		assert.NotEmpty(t, keyID)
+
+		// Key must have KeyManager=AWS.
+		meta, err := s.GetKeyMetadata(keyID)
+		require.NoError(t, err)
+		assert.Equal(t, "AWS", meta.KeyManager)
+		assert.Equal(t, "SYMMETRIC_DEFAULT", meta.KeySpec)
+	})
+
+	t.Run("idempotent: returns same ARN on repeated calls", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		arn1, err := s.EnsureAwsS3Key()
+		require.NoError(t, err)
+		arn2, err := s.EnsureAwsS3Key()
+		require.NoError(t, err)
+		assert.Equal(t, arn1, arn2)
+	})
+
+	t.Run("ResolveAlias non-ErrAliasNotFound error is propagated", func(t *testing.T) {
+		s, dir := newTestStorage(t)
+		// Write a corrupt alias file so ResolveAlias returns a JSON parse error
+		// rather than ErrAliasNotFound; exercises the error propagation branch.
+		aliasFile := filepath.Join(dir, "kms", "aliases", "alias%2Faws%2Fs3.json")
+		require.NoError(t, os.WriteFile(aliasFile, []byte("not-json"), 0o600))
+		_, err := s.EnsureAwsS3Key()
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "resolve alias/aws/s3")
+	})
+
+	t.Run("CreateKey failure is propagated", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		wantErr := errors.New("rand read failure")
+		s.randRead = func([]byte) (int, error) { return 0, wantErr }
+		_, err := s.EnsureAwsS3Key()
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "create aws/s3 managed key")
+	})
+}
+
+func TestResolveKeyForEncryption(t *testing.T) {
+	newStorageWithKey := func(t *testing.T) (*Storage, string) {
+		t.Helper()
+		s, _ := newTestStorage(t)
+		meta, err := s.CreateKey(CreateKeyInput{
+			KeySpec:  keySpecSymmetricDefault,
+			KeyUsage: "ENCRYPT_DECRYPT",
+			Origin:   "AWS_KMS",
+		})
+		require.NoError(t, err)
+		return s, meta.Arn
+	}
+
+	t.Run("empty keyRef auto-creates alias/aws/s3 and returns ARN", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		arn, err := s.ResolveKeyForEncryption("")
+		require.NoError(t, err)
+		assert.Contains(t, arn, ":key/")
+	})
+
+	t.Run("alias/aws/s3 auto-creates managed key", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		arn, err := s.ResolveKeyForEncryption("alias/aws/s3")
+		require.NoError(t, err)
+		assert.Contains(t, arn, ":key/")
+	})
+
+	t.Run("resolves plain key ID to ARN", func(t *testing.T) {
+		s, wantARN := newStorageWithKey(t)
+		// Extract key ID from ARN: arn:...:key/<id>
+		keyID := wantARN[len("arn:aws:kms:us-east-1:000000000000:key/"):]
+		arn, err := s.ResolveKeyForEncryption(keyID)
+		require.NoError(t, err)
+		assert.Equal(t, wantARN, arn)
+	})
+
+	t.Run("resolves key ARN", func(t *testing.T) {
+		s, wantARN := newStorageWithKey(t)
+		arn, err := s.ResolveKeyForEncryption(wantARN)
+		require.NoError(t, err)
+		assert.Equal(t, wantARN, arn)
+	})
+
+	t.Run("resolves alias name to key ARN", func(t *testing.T) {
+		s, wantARN := newStorageWithKey(t)
+		keyID := wantARN[len("arn:aws:kms:us-east-1:000000000000:key/"):]
+		err := s.CreateAlias("alias/mykey", keyID)
+		require.NoError(t, err)
+		arn, err := s.ResolveKeyForEncryption("alias/mykey")
+		require.NoError(t, err)
+		assert.Equal(t, wantARN, arn)
+	})
+
+	t.Run("disabled key returns ErrKeyDisabled", func(t *testing.T) {
+		s, wantARN := newStorageWithKey(t)
+		keyID := wantARN[len("arn:aws:kms:us-east-1:000000000000:key/"):]
+		require.NoError(t, s.DisableKey(keyID))
+		_, err := s.ResolveKeyForEncryption(keyID)
+		assert.ErrorIs(t, err, ErrKeyDisabled)
+	})
+
+	t.Run("pending deletion key returns ErrKeyPendingDeletion", func(t *testing.T) {
+		s, wantARN := newStorageWithKey(t)
+		keyID := wantARN[len("arn:aws:kms:us-east-1:000000000000:key/"):]
+		_, err := s.ScheduleKeyDeletion(keyID, 7)
+		require.NoError(t, err)
+		_, err = s.ResolveKeyForEncryption(keyID)
+		assert.ErrorIs(t, err, ErrKeyPendingDeletion)
+	})
+
+	t.Run("nonexistent key ID returns ErrKeyNotFound", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		_, err := s.ResolveKeyForEncryption("00000000-0000-0000-0000-000000000000")
+		assert.ErrorIs(t, err, ErrKeyNotFound)
+	})
+
+	t.Run("nonexistent alias returns ErrKeyNotFound", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		_, err := s.ResolveKeyForEncryption("alias/no-such-alias")
+		assert.ErrorIs(t, err, ErrKeyNotFound)
+	})
+
+	t.Run("corrupt alias file causes propagated error", func(t *testing.T) {
+		s, dir := newTestStorage(t)
+		// Write corrupt JSON at a custom alias path; ResolveAlias will return a
+		// non-ErrAliasNotFound error, exercising the error-propagation branch.
+		aliasFile := filepath.Join(dir, "kms", "aliases", "alias%2Fbadkey.json")
+		require.NoError(t, os.WriteFile(aliasFile, []byte("not-json"), 0o600))
+		_, err := s.ResolveKeyForEncryption("alias/badkey")
+		require.Error(t, err)
+		assert.NotErrorIs(t, err, ErrKeyNotFound)
+	})
+}
