@@ -1479,9 +1479,7 @@ func TestEnsureAwsS3Key(t *testing.T) {
 		origStat := s.statFn
 		s.statFn = func(name string) (os.FileInfo, error) {
 			if name == aliasPath("alias/aws/s3") {
-				if werr := os.WriteFile(aliasFile, aliasJSON, 0o600); werr != nil {
-					t.Errorf("write alias file: %v", werr)
-				}
+				require.NoError(t, os.WriteFile(aliasFile, aliasJSON, 0o600))
 				return nil, nil
 			}
 			return origStat(name)
@@ -1511,9 +1509,7 @@ func TestEnsureAwsS3Key(t *testing.T) {
 		origStat := s.statFn
 		s.statFn = func(name string) (os.FileInfo, error) {
 			if name == aliasPath("alias/aws/s3") {
-				if werr := os.WriteFile(aliasFile, aliasJSON, 0o600); werr != nil {
-					t.Errorf("write alias file: %v", werr)
-				}
+				require.NoError(t, os.WriteFile(aliasFile, aliasJSON, 0o600))
 				return nil, nil
 			}
 			return origStat(name)
@@ -1544,12 +1540,68 @@ func TestResolveKeyForEncryption(t *testing.T) {
 		assert.Contains(t, arn, ":key/")
 	})
 
+	t.Run("empty keyRef EnsureAwsS3Key failure propagates error", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		wantErr := errors.New("mkdir failed")
+		s.mkdirFn = func(string, os.FileMode) error { return wantErr }
+		_, err := s.ResolveKeyForEncryption("")
+		assert.ErrorIs(t, err, wantErr)
+	})
+
+	t.Run("empty keyRef disabled managed key returns ErrKeyDisabled", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		arn, err := s.ResolveKeyForEncryption("")
+		require.NoError(t, err)
+		keyID := arn[len("arn:aws:kms:us-east-1:000000000000:key/"):]
+		require.NoError(t, s.DisableKey(keyID))
+		_, err = s.ResolveKeyForEncryption("")
+		assert.ErrorIs(t, err, ErrKeyDisabled)
+	})
+
+	t.Run(
+		"empty keyRef pending-deletion managed key returns ErrKeyPendingDeletion",
+		func(t *testing.T) {
+			s, _ := newTestStorage(t)
+			arn, err := s.ResolveKeyForEncryption("")
+			require.NoError(t, err)
+			keyID := arn[len("arn:aws:kms:us-east-1:000000000000:key/"):]
+			_, err = s.ScheduleKeyDeletion(keyID, 7)
+			require.NoError(t, err)
+			_, err = s.ResolveKeyForEncryption("")
+			assert.ErrorIs(t, err, ErrKeyPendingDeletion)
+		},
+	)
+
 	t.Run("alias/aws/s3 auto-creates managed key", func(t *testing.T) {
 		s, _ := newTestStorage(t)
 		arn, err := s.ResolveKeyForEncryption("alias/aws/s3")
 		require.NoError(t, err)
 		assert.Contains(t, arn, ":key/")
 	})
+
+	t.Run("alias/aws/s3 disabled managed key returns ErrKeyDisabled", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		arn, err := s.ResolveKeyForEncryption("alias/aws/s3")
+		require.NoError(t, err)
+		keyID := arn[len("arn:aws:kms:us-east-1:000000000000:key/"):]
+		require.NoError(t, s.DisableKey(keyID))
+		_, err = s.ResolveKeyForEncryption("alias/aws/s3")
+		assert.ErrorIs(t, err, ErrKeyDisabled)
+	})
+
+	t.Run(
+		"alias/aws/s3 pending-deletion managed key returns ErrKeyPendingDeletion",
+		func(t *testing.T) {
+			s, _ := newTestStorage(t)
+			arn, err := s.ResolveKeyForEncryption("alias/aws/s3")
+			require.NoError(t, err)
+			keyID := arn[len("arn:aws:kms:us-east-1:000000000000:key/"):]
+			_, err = s.ScheduleKeyDeletion(keyID, 7)
+			require.NoError(t, err)
+			_, err = s.ResolveKeyForEncryption("alias/aws/s3")
+			assert.ErrorIs(t, err, ErrKeyPendingDeletion)
+		},
+	)
 
 	t.Run("resolves plain key ID to ARN", func(t *testing.T) {
 		s, wantARN := newStorageWithKey(t)
@@ -1623,6 +1675,38 @@ func TestResolveKeyForEncryption(t *testing.T) {
 		require.NoError(t, err)
 		assert.Contains(t, arn, ":key/")
 	})
+
+	t.Run("ARN-form alias/aws/s3 EnsureAwsS3Key failure propagates error", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		wantErr := errors.New("mkdir failed")
+		s.mkdirFn = func(string, os.FileMode) error { return wantErr }
+		_, err := s.ResolveKeyForEncryption("arn:aws:kms:us-east-1:000000000000:alias/aws/s3")
+		assert.ErrorIs(t, err, wantErr)
+	})
+
+	t.Run("ARN-form alias/aws/s3 disabled managed key returns ErrKeyDisabled", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		arn, err := s.ResolveKeyForEncryption("arn:aws:kms:us-east-1:000000000000:alias/aws/s3")
+		require.NoError(t, err)
+		keyID := arn[len("arn:aws:kms:us-east-1:000000000000:key/"):]
+		require.NoError(t, s.DisableKey(keyID))
+		_, err = s.ResolveKeyForEncryption("arn:aws:kms:us-east-1:000000000000:alias/aws/s3")
+		assert.ErrorIs(t, err, ErrKeyDisabled)
+	})
+
+	t.Run(
+		"ARN-form alias/aws/s3 pending-deletion managed key returns ErrKeyPendingDeletion",
+		func(t *testing.T) {
+			s, _ := newTestStorage(t)
+			arn, err := s.ResolveKeyForEncryption("arn:aws:kms:us-east-1:000000000000:alias/aws/s3")
+			require.NoError(t, err)
+			keyID := arn[len("arn:aws:kms:us-east-1:000000000000:key/"):]
+			_, err = s.ScheduleKeyDeletion(keyID, 7)
+			require.NoError(t, err)
+			_, err = s.ResolveKeyForEncryption("arn:aws:kms:us-east-1:000000000000:alias/aws/s3")
+			assert.ErrorIs(t, err, ErrKeyPendingDeletion)
+		},
+	)
 
 	t.Run("malformed key ARN returns ErrKeyNotFound", func(t *testing.T) {
 		s, _ := newTestStorage(t)
