@@ -386,7 +386,7 @@ func (s *Storage) UpdateItem(
 			if err := applyNestedRemove(item, op.segs); err != nil { // unreachable: applyNestedRemove always returns nil
 				return nil, nil, fmt.Errorf("%w: %v", ErrValidationException, err)
 			}
-		default: // unreachable: parseUpdateExpression only produces the sentinel types above
+		default:
 			item[attr] = val
 		}
 	}
