@@ -16,8 +16,6 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
-
-	"github.com/optiflowic/kumolo/internal/kms"
 )
 
 // resolveSSEAlgorithm returns the SSE algorithm header value; empty (absent) is valid, unknown values write 400 and return false.
@@ -103,13 +101,13 @@ func (ro *Router) resolveKMSKey(
 // writeKMSError maps a KMS service error to the appropriate S3 KMS error response.
 func writeKMSError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
-	case errors.Is(err, kms.ErrKeyNotFound):
+	case errors.Is(err, ErrKMSKeyNotFound):
 		writeError(w, r, http.StatusBadRequest, "KMS.NotFoundException",
 			"The specified KMS key does not exist.")
-	case errors.Is(err, kms.ErrKeyDisabled):
+	case errors.Is(err, ErrKMSKeyDisabled):
 		writeError(w, r, http.StatusBadRequest, "KMS.DisabledException",
 			"The specified KMS key is disabled.")
-	case errors.Is(err, kms.ErrKeyPendingDeletion):
+	case errors.Is(err, ErrKMSKeyPendingDeletion):
 		writeError(w, r, http.StatusBadRequest, "KMS.InvalidStateException",
 			"The specified KMS key is pending deletion.")
 	default:

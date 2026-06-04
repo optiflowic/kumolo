@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -12,6 +13,27 @@ import (
 	"github.com/optiflowic/kumolo/internal/s3"
 	"github.com/optiflowic/kumolo/internal/sts"
 )
+
+// kmsAdapter adapts kms.Storage to the s3.KMSService interface, translating
+// kms-package error sentinels into the S3-owned equivalents so that the s3
+// package does not need to import internal/kms.
+type kmsAdapter struct{ s *kms.Storage }
+
+func (a *kmsAdapter) ResolveKeyForEncryption(keyRef string) (string, error) {
+	arn, err := a.s.ResolveKeyForEncryption(keyRef)
+	if err != nil {
+		switch {
+		case errors.Is(err, kms.ErrKeyNotFound):
+			return "", s3.ErrKMSKeyNotFound
+		case errors.Is(err, kms.ErrKeyDisabled):
+			return "", s3.ErrKMSKeyDisabled
+		case errors.Is(err, kms.ErrKeyPendingDeletion):
+			return "", s3.ErrKMSKeyPendingDeletion
+		}
+		return "", err
+	}
+	return arn, nil
+}
 
 func NewMux(
 	ctx context.Context,
@@ -34,7 +56,7 @@ func NewMux(
 		return nil, nil, err
 	}
 
-	s3Router := s3.NewRouter(s3Storage, kmsStorage)
+	s3Router := s3.NewRouter(s3Storage, &kmsAdapter{s: kmsStorage})
 	dynamoRouter := dynamodb.NewRouter(dynamoStorage)
 	dynamoStreamsRouter := dynamodb.NewStreamsRouter(dynamoStorage)
 	stsRouter := sts.NewRouter()

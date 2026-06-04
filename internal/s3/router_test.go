@@ -17,7 +17,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/optiflowic/kumolo/internal/kms"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -9690,17 +9689,17 @@ func TestSSEKMSIntegration(t *testing.T) {
 	kmsOK := &mockKMSService{}
 	kmsDisabled := &mockKMSService{
 		resolveKeyForEncryptionFn: func(string) (string, error) {
-			return "", kms.ErrKeyDisabled
+			return "", ErrKMSKeyDisabled
 		},
 	}
 	kmsNotFound := &mockKMSService{
 		resolveKeyForEncryptionFn: func(string) (string, error) {
-			return "", kms.ErrKeyNotFound
+			return "", ErrKMSKeyNotFound
 		},
 	}
 	kmsPendingDeletion := &mockKMSService{
 		resolveKeyForEncryptionFn: func(string) (string, error) {
-			return "", kms.ErrKeyPendingDeletion
+			return "", ErrKMSKeyPendingDeletion
 		},
 	}
 

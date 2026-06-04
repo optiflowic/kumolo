@@ -209,8 +209,10 @@ type objectLegalHoldStore interface {
 }
 
 // KMSService is the subset of KMS used by S3 for SSE-KMS key resolution.
-// ResolveKeyForEncryption resolves keyRef to a canonical key ARN and validates
-// the key is Enabled. Empty keyRef resolves to alias/aws/s3.
+// Implementations must map key-state errors to the S3-owned sentinels defined
+// in this package: ErrKMSKeyNotFound, ErrKMSKeyDisabled, ErrKMSKeyPendingDeletion.
 type KMSService interface {
+	// ResolveKeyForEncryption resolves keyRef to a canonical key ARN and
+	// validates the key is Enabled. Empty keyRef resolves to alias/aws/s3.
 	ResolveKeyForEncryption(keyRef string) (string, error)
 }

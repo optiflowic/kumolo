@@ -23,6 +23,11 @@ var (
 	ErrObjectAlreadyExists = errors.New("object already exists")
 	ErrInvalidBucketState  = errors.New("invalid bucket state")
 	ErrEntityTooSmall      = errors.New("part too small")
+
+	// KMS error sentinels returned by KMSService.ResolveKeyForEncryption.
+	ErrKMSKeyNotFound        = errors.New("kms: key not found")
+	ErrKMSKeyDisabled        = errors.New("kms: key disabled")
+	ErrKMSKeyPendingDeletion = errors.New("kms: key pending deletion")
 )
 
 // DeleteMarkerError is returned when a get/head operation resolves to a delete marker.
