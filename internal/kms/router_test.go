@@ -4454,9 +4454,7 @@ func TestHandleGenerateDataKeyPair(t *testing.T) {
 		var decResp map[string]any
 		require.NoError(t, json.Unmarshal(dw.Body.Bytes(), &decResp))
 
-		ptJSON, _ := json.Marshal(genResp["PrivateKeyPlaintext"])
-		decJSON, _ := json.Marshal(decResp["Plaintext"])
-		assert.Equal(t, ptJSON, decJSON)
+		assert.Equal(t, genResp["PrivateKeyPlaintext"], decResp["Plaintext"])
 	})
 
 	t.Run("with EncryptionContext", func(t *testing.T) {
@@ -4544,11 +4542,81 @@ func TestHandleGenerateDataKeyPair(t *testing.T) {
 		assertErrType(t, w, "InvalidKeyUsageException")
 	})
 
+	t.Run("400 when key is pending deletion", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		require.Equal(
+			t,
+			http.StatusOK,
+			kmsReq(
+				t,
+				ro,
+				"ScheduleKeyDeletion",
+				`{"KeyId":"`+keyID+`","PendingWindowInDays":7}`,
+			).Code,
+		)
+		body, _ := json.Marshal(map[string]any{"KeyId": keyID, "KeyPairSpec": "ECC_NIST_P256"})
+		w := kmsReq(t, ro, "GenerateDataKeyPair", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "KMSInvalidStateException")
+	})
+
+	t.Run("400 for invalid request body", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "GenerateDataKeyPair", "not-valid-json")
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 for EncryptionContext key too large", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":             keyID,
+			"KeyPairSpec":       "ECC_NIST_P256",
+			"EncryptionContext": map[string]string{string(make([]byte, 2049)): "v"},
+		})
+		w := kmsReq(t, ro, "GenerateDataKeyPair", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 for non-symmetric ENCRYPT_DECRYPT key", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{"KeySpec":"RSA_2048","KeyUsage":"ENCRYPT_DECRYPT"}`)
+		body, _ := json.Marshal(map[string]any{"KeyId": keyID, "KeyPairSpec": "ECC_NIST_P256"})
+		w := kmsReq(t, ro, "GenerateDataKeyPair", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "InvalidKeyUsageException")
+	})
+
 	t.Run("500 when key pair generation fails", func(t *testing.T) {
 		ro := newTestRouter(t)
 		keyID := mustCreateKey(t, ro, `{}`)
 		genErr := errors.New("simulated key gen failure")
 		ro.generateEphemeralKeyPairFn = func(string) ([]byte, error) { return nil, genErr }
+		body, _ := json.Marshal(map[string]any{"KeyId": keyID, "KeyPairSpec": "ECC_NIST_P256"})
+		w := kmsReq(t, ro, "GenerateDataKeyPair", string(body))
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assertErrType(t, w, "KMSInternalException")
+	})
+
+	t.Run("500 when extractPublicKeyDER fails (injected invalid DER)", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		ro.generateEphemeralKeyPairFn = func(string) ([]byte, error) {
+			return []byte("not-valid-der"), nil
+		}
+		body, _ := json.Marshal(map[string]any{"KeyId": keyID, "KeyPairSpec": "ECC_NIST_P256"})
+		w := kmsReq(t, ro, "GenerateDataKeyPair", string(body))
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assertErrType(t, w, "KMSInternalException")
+	})
+
+	t.Run("500 when rand read fails", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		ro.randRead = func([]byte) (int, error) { return 0, errors.New("rand failed") }
 		body, _ := json.Marshal(map[string]any{"KeyId": keyID, "KeyPairSpec": "ECC_NIST_P256"})
 		w := kmsReq(t, ro, "GenerateDataKeyPair", string(body))
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
@@ -4607,5 +4675,24 @@ func TestHandleGenerateDataKeyPairWithoutPlaintext(t *testing.T) {
 		w := kmsReq(t, ro, "GenerateDataKeyPairWithoutPlaintext", string(body))
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assertErrType(t, w, "UnsupportedOperationException")
+	})
+
+	t.Run("400 when key is pending deletion", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		require.Equal(
+			t,
+			http.StatusOK,
+			kmsReq(
+				t,
+				ro,
+				"ScheduleKeyDeletion",
+				`{"KeyId":"`+keyID+`","PendingWindowInDays":7}`,
+			).Code,
+		)
+		body, _ := json.Marshal(map[string]any{"KeyId": keyID, "KeyPairSpec": "ECC_NIST_P256"})
+		w := kmsReq(t, ro, "GenerateDataKeyPairWithoutPlaintext", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "KMSInvalidStateException")
 	})
 }

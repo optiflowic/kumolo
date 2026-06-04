@@ -54,3 +54,4 @@ RSA_2048, RSA_3072, RSA_4096, ECC_NIST_P256, ECC_NIST_P384, ECC_NIST_P521, ECC_S
 - `GrantTokens`, `DryRun`, and `Recipient` are silently ignored.
 - Private key ciphertext uses the same kumolo envelope format as Encrypt/GenerateDataKey.
 - ECC_SECG_P256K1 and SM2 return UnsupportedOperationException.
+- `KeyMaterialId` is a kumolo-specific response field (not returned by real AWS); it is a 64-char hex identifier of the symmetric key material used to encrypt the private key.
