@@ -31,6 +31,47 @@ func resolveSSEAlgorithm(w http.ResponseWriter, r *http.Request) (string, bool) 
 	}
 }
 
+// resolveSSE returns the SSE algorithm, KMS key ID, and bucket-key-enabled flag.
+// Explicit request headers take priority; when the X-Amz-Server-Side-Encryption
+// header is absent the bucket's stored default encryption config is applied.
+// Returns ok=false (after writing a 400) only when an explicit header is invalid.
+func (ro *Router) resolveSSE(
+	w http.ResponseWriter,
+	r *http.Request,
+	bucket string,
+) (alg, keyID string, bucketKeyEnabled, ok bool) {
+	if r.Header.Get(amzSSE) != "" {
+		alg, ok = resolveSSEAlgorithm(w, r)
+		if !ok {
+			return
+		}
+		keyID = r.Header.Get(amzSSEKMSKeyID)
+		bucketKeyEnabled, ok = parseBucketKeyEnabled(w, r, alg)
+		return
+	}
+
+	xmlBody, err := ro.storage.GetBucketEncryption(bucket)
+	if err != nil || xmlBody == "" {
+		return "", "", false, true
+	}
+
+	var conf xmlSSEConfiguration
+	xmlErr := xml.Unmarshal( //nolint:gosec // G709: data from kumolo internal storage, not user input
+		[]byte(xmlBody),
+		&conf,
+	)
+	if xmlErr != nil || len(conf.Rules) == 0 {
+		return "", "", false, true
+	}
+
+	rule := conf.Rules[0]
+	alg = rule.Apply.SSEAlgorithm
+	keyID = rule.Apply.KMSMasterKeyID
+	bucketKeyEnabled = rule.BucketKeyEnabled && isKMSAlgorithm(alg)
+	ok = true
+	return
+}
+
 // extractUserMetadata collects all x-amz-meta-* headers from h and returns
 // them as a map keyed by the suffix after the prefix (lowercased). Returns nil
 // if no such headers are present.
@@ -90,12 +131,7 @@ func (ro *Router) handleCopyObject(
 			userMetadata = map[string]string{}
 		}
 	}
-	sseAlgorithm, ok := resolveSSEAlgorithm(w, r)
-	if !ok {
-		return
-	}
-	sseKMSKeyID := r.Header.Get(amzSSEKMSKeyID)
-	sseBucketKeyEnabled, ok := parseBucketKeyEnabled(w, r, sseAlgorithm)
+	sseAlgorithm, sseKMSKeyID, sseBucketKeyEnabled, ok := ro.resolveSSE(w, r, dstBucket)
 	if !ok {
 		return
 	}
@@ -227,12 +263,7 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 		contentType = "application/octet-stream"
 	}
 	userMetadata := extractUserMetadata(r.Header)
-	sseAlgorithm, ok := resolveSSEAlgorithm(w, r)
-	if !ok {
-		return
-	}
-	sseKMSKeyID := r.Header.Get(amzSSEKMSKeyID)
-	sseBucketKeyEnabled, ok := parseBucketKeyEnabled(w, r, sseAlgorithm)
+	sseAlgorithm, sseKMSKeyID, sseBucketKeyEnabled, ok := ro.resolveSSE(w, r, bucket)
 	if !ok {
 		return
 	}
