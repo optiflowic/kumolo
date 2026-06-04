@@ -1436,6 +1436,92 @@ func TestEnsureAwsS3Key(t *testing.T) {
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "create aws/s3 managed key")
 	})
+
+	t.Run("CreateAlias unexpected error is propagated", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		origListDir := s.listDirFn
+		s.listDirFn = func(name string) ([]os.DirEntry, error) {
+			if name == "aliases" {
+				return nil, errors.New("simulated listDir failure")
+			}
+			return origListDir(name)
+		}
+		_, err := s.EnsureAwsS3Key()
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "create alias/aws/s3")
+	})
+
+	t.Run("CreateAlias ErrAliasAlreadyExists race: ResolveAlias fails", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		origStat := s.statFn
+		s.statFn = func(name string) (os.FileInfo, error) {
+			if name == aliasPath("alias/aws/s3") {
+				return nil, nil // simulate "file already exists" inside CreateAlias
+			}
+			return origStat(name)
+		}
+		_, err := s.EnsureAwsS3Key()
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "resolve alias/aws/s3 after race")
+	})
+
+	t.Run("CreateAlias ErrAliasAlreadyExists race: GetKeyMetadata fails", func(t *testing.T) {
+		s, dir := newTestStorage(t)
+		// Alias points to a nonexistent key; GetKeyMetadata will return ErrKeyNotFound.
+		entry := AliasEntry{
+			AliasName:   "alias/aws/s3",
+			AliasArn:    aliasARN("alias/aws/s3"),
+			TargetKeyId: "00000000-0000-0000-0000-000000000000",
+		}
+		aliasJSON, err := json.Marshal(entry)
+		require.NoError(t, err)
+		aliasFile := filepath.Join(dir, "kms", aliasPath("alias/aws/s3"))
+		origStat := s.statFn
+		s.statFn = func(name string) (os.FileInfo, error) {
+			if name == aliasPath("alias/aws/s3") {
+				if werr := os.WriteFile(aliasFile, aliasJSON, 0o600); werr != nil {
+					t.Errorf("write alias file: %v", werr)
+				}
+				return nil, nil
+			}
+			return origStat(name)
+		}
+		_, err = s.EnsureAwsS3Key()
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrKeyNotFound)
+	})
+
+	t.Run("CreateAlias ErrAliasAlreadyExists race: resolves to winner ARN", func(t *testing.T) {
+		s, dir := newTestStorage(t)
+		// Pre-create the "race winner" key K1.
+		k1, err := s.CreateKey(CreateKeyInput{
+			KeySpec:  keySpecSymmetricDefault,
+			KeyUsage: "ENCRYPT_DECRYPT",
+			Origin:   "AWS_KMS",
+		})
+		require.NoError(t, err)
+		entry := AliasEntry{
+			AliasName:   "alias/aws/s3",
+			AliasArn:    aliasARN("alias/aws/s3"),
+			TargetKeyId: k1.KeyID,
+		}
+		aliasJSON, err := json.Marshal(entry)
+		require.NoError(t, err)
+		aliasFile := filepath.Join(dir, "kms", aliasPath("alias/aws/s3"))
+		origStat := s.statFn
+		s.statFn = func(name string) (os.FileInfo, error) {
+			if name == aliasPath("alias/aws/s3") {
+				if werr := os.WriteFile(aliasFile, aliasJSON, 0o600); werr != nil {
+					t.Errorf("write alias file: %v", werr)
+				}
+				return nil, nil
+			}
+			return origStat(name)
+		}
+		arn, err := s.EnsureAwsS3Key()
+		require.NoError(t, err)
+		assert.Equal(t, k1.Arn, arn)
+	})
 }
 
 func TestResolveKeyForEncryption(t *testing.T) {

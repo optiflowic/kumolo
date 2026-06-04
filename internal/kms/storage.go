@@ -487,12 +487,10 @@ func (s *Storage) EnsureAwsS3Key() (string, error) {
 
 	if aliasErr := s.CreateAlias("alias/aws/s3", meta.KeyID); aliasErr != nil {
 		if !errors.Is(aliasErr, ErrAliasAlreadyExists) {
-			// untestable: CreateAlias returns an unexpected error (not ErrAliasAlreadyExists).
 			return "", fmt.Errorf("create alias/aws/s3: %w", aliasErr)
 		}
-		// untestable: race — another goroutine created alias/aws/s3 between our
-		// ErrAliasNotFound check and our CreateAlias call; impossible to trigger
-		// in single-threaded tests without OS-level synchronization.
+		// Race: another writer created alias/aws/s3 between our ErrAliasNotFound
+		// check and CreateAlias. Resolve the winner's key and return its ARN.
 		raceKeyID, resolveErr := s.ResolveAlias("alias/aws/s3")
 		if resolveErr != nil {
 			return "", fmt.Errorf("resolve alias/aws/s3 after race: %w", resolveErr)
