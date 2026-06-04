@@ -9811,4 +9811,19 @@ func TestSSEKMSIntegration(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Equal(t, "AES256", ms.capturedPutObjectSSEAlg)
 	})
+
+	t.Run("unexpected KMS error returns 500 KMS.KMSInternalException", func(t *testing.T) {
+		kmsInternal := &mockKMSService{
+			resolveKeyForEncryptionFn: func(string) (string, error) {
+				return "", errors.New("unexpected internal error")
+			},
+		}
+		ro := newRouterWithMockKMS(&mockStore{}, kmsInternal)
+		req := httptest.NewRequest(http.MethodPut, "/b/k", strings.NewReader("data"))
+		req.Header.Set(amzSSE, "aws:kms")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assert.Contains(t, w.Body.String(), "KMS.KMSInternalException")
+	})
 }

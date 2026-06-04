@@ -1530,4 +1530,18 @@ func TestResolveKeyForEncryption(t *testing.T) {
 		require.Error(t, err)
 		assert.NotErrorIs(t, err, ErrKeyNotFound)
 	})
+
+	t.Run("ARN-form alias/aws/s3 auto-creates managed key", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		arn, err := s.ResolveKeyForEncryption("arn:aws:kms:us-east-1:000000000000:alias/aws/s3")
+		require.NoError(t, err)
+		assert.Contains(t, arn, ":key/")
+	})
+
+	t.Run("malformed key ARN returns ErrKeyNotFound", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		// ARN without :key/ segment — not an alias ref, fails resolveKeyID.
+		_, err := s.ResolveKeyForEncryption("arn:aws:kms:us-east-1:000000000000:bogus/foo")
+		assert.ErrorIs(t, err, ErrKeyNotFound)
+	})
 }
