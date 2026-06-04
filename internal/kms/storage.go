@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -1087,6 +1088,175 @@ func (s *Storage) UntagResource(keyID string, tagKeys []string) error {
 		delete(existing, k)
 	}
 	return s.writeJSON(filepath.Join("keys", keyID, "tags.json"), existing)
+}
+
+const maxOnDemandRotations = 25
+
+func (s *Storage) RotateKeyOnDemand(keyID string) (KeyMetadata, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	meta, err := s.readKeyMeta(keyID)
+	if err != nil {
+		return KeyMetadata{}, err
+	}
+	if meta.KeyState == keyStatePendingDeletion {
+		return KeyMetadata{}, ErrInvalidKeyState
+	}
+	if meta.KeyState != keyStateEnabled {
+		return KeyMetadata{}, ErrKeyDisabled
+	}
+	if meta.KeySpec != keySpecSymmetricDefault {
+		return KeyMetadata{}, ErrUnsupportedOp
+	}
+
+	history, err := s.readRotationHistoryLocked(keyID)
+	if err != nil {
+		return KeyMetadata{}, fmt.Errorf("read rotation history: %w", err)
+	}
+	onDemandCount := 0
+	for _, r := range history {
+		if r.RotationType == "ON_DEMAND" {
+			onDemandCount++
+		}
+	}
+	if onDemandCount >= maxOnDemandRotations {
+		return KeyMetadata{}, ErrOnDemandRotationLimit
+	}
+
+	curMat, err := readJSON[KeyMaterial](s, filepath.Join("keys", keyID, "material.json"))
+	if err != nil {
+		return KeyMetadata{}, fmt.Errorf("read current material: %w", err)
+	}
+
+	materialsDir := filepath.Join("keys", keyID, "materials")
+	if mkErr := s.mkdirFn(materialsDir, 0o750); mkErr != nil && !errors.Is(mkErr, os.ErrExist) {
+		return KeyMetadata{}, fmt.Errorf("create materials dir: %w", mkErr)
+	}
+	if err := s.writeJSON(filepath.Join(materialsDir, curMat.KeyMaterialID+".json"), curMat); err != nil {
+		return KeyMetadata{}, fmt.Errorf("save previous material: %w", err)
+	}
+
+	newKeyBytes := make([]byte, 32)
+	if _, err := s.randRead(newKeyBytes); err != nil {
+		return KeyMetadata{}, fmt.Errorf("generate new key bytes: %w", err)
+	}
+	var matIDBytes [32]byte
+	if _, err := s.randRead(matIDBytes[:]); err != nil {
+		return KeyMetadata{}, fmt.Errorf("generate new material ID: %w", err)
+	}
+	newMat := KeyMaterial{
+		KeyBytes:      newKeyBytes,
+		KeyMaterialID: fmt.Sprintf("%x", matIDBytes),
+	}
+	if err := s.writeJSON(filepath.Join("keys", keyID, "material.json"), newMat); err != nil {
+		return KeyMetadata{}, fmt.Errorf("write new material: %w", err)
+	}
+
+	record := RotationRecord{
+		KeyID:        meta.Arn,
+		RotationDate: nowUnix(),
+		RotationType: "ON_DEMAND",
+	}
+	history = append(history, record)
+	if err := s.writeJSON(filepath.Join("keys", keyID, "rotation_history.json"), history); err != nil {
+		return KeyMetadata{}, fmt.Errorf("write rotation history: %w", err)
+	}
+
+	return meta, nil
+}
+
+func (s *Storage) ListKeyRotations(
+	keyID string,
+	limit int,
+	marker string,
+) ([]RotationRecord, string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	meta, err := s.readKeyMeta(keyID)
+	if err != nil {
+		return nil, "", err
+	}
+	if meta.KeyState == keyStatePendingDeletion {
+		return nil, "", ErrInvalidKeyState
+	}
+	if meta.KeySpec != keySpecSymmetricDefault {
+		return nil, "", ErrUnsupportedOp
+	}
+
+	history, err := s.readRotationHistoryLocked(keyID)
+	if err != nil {
+		return nil, "", fmt.Errorf("read rotation history: %w", err)
+	}
+
+	startIdx := 0
+	if marker != "" {
+		idx, err := strconv.Atoi(marker)
+		if err != nil || idx < 0 || idx >= len(history) {
+			return nil, "", ErrInvalidMarker
+		}
+		startIdx = idx + 1
+	}
+	history = history[startIdx:]
+
+	truncated := len(history) > limit
+	if truncated {
+		history = history[:limit]
+	}
+
+	var nextMarker string
+	if truncated && len(history) > 0 {
+		nextMarker = strconv.Itoa(startIdx + len(history) - 1)
+	}
+
+	return history, nextMarker, nil
+}
+
+func (s *Storage) GetPreviousKeyMaterials(keyID string) ([]KeyMaterial, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if err := s.keyExistsLocked(keyID); err != nil {
+		return nil, err
+	}
+	materialsDir := filepath.Join("keys", keyID, "materials")
+	entries, err := s.listDirFn(materialsDir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("list materials dir: %w", err)
+	}
+
+	var mats []KeyMaterial
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if len(name) < 5 || name[len(name)-5:] != ".json" {
+			continue
+		}
+		mat, err := readJSON[KeyMaterial](s, filepath.Join(materialsDir, name))
+		if err != nil {
+			slog.Warn("kms: skipping unreadable material file", "file", name, "err", err)
+			continue
+		}
+		mats = append(mats, mat)
+	}
+	return mats, nil
+}
+
+func (s *Storage) readRotationHistoryLocked(keyID string) ([]RotationRecord, error) {
+	history, err := readJSON[[]RotationRecord](
+		s,
+		filepath.Join("keys", keyID, "rotation_history.json"),
+	)
+	if errors.Is(err, os.ErrNotExist) {
+		return []RotationRecord{}, nil
+	}
+	return history, err
 }
 
 func (s *Storage) newKeyID() (string, error) {

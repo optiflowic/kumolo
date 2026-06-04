@@ -460,6 +460,19 @@ func (ro *Router) handleDecrypt(w http.ResponseWriter, body []byte) {
 
 	_, plaintext, err := openEnvelope(req.CiphertextBlob, mat, req.EncryptionContext)
 	if err != nil {
+		// Try previous key material versions retained after on-demand rotation.
+		if prevMats, prevErr := ro.storage.GetPreviousKeyMaterials(keyID); prevErr == nil {
+			for _, prev := range prevMats {
+				if _, pt, tryErr := openEnvelope(req.CiphertextBlob, prev, req.EncryptionContext); tryErr == nil {
+					plaintext = pt
+					mat = prev
+					err = nil
+					break
+				}
+			}
+		}
+	}
+	if err != nil {
 		slog.Debug("KMS Decrypt: open envelope failed", "err", err)
 		writeError(w, http.StatusBadRequest, "InvalidCiphertextException",
 			"ciphertext is invalid or the encryption context does not match")
@@ -609,6 +622,19 @@ func (ro *Router) handleReEncrypt(w http.ResponseWriter, body []byte) {
 		return
 	}
 	_, plaintext, err := openEnvelope(req.CiphertextBlob, srcMat, req.SourceEncryptionContext)
+	if err != nil {
+		// Try previous key material versions retained after on-demand rotation.
+		if prevMats, prevErr := ro.storage.GetPreviousKeyMaterials(srcKeyID); prevErr == nil {
+			for _, prev := range prevMats {
+				if _, pt, tryErr := openEnvelope(req.CiphertextBlob, prev, req.SourceEncryptionContext); tryErr == nil {
+					plaintext = pt
+					srcMat = prev
+					err = nil
+					break
+				}
+			}
+		}
+	}
 	if err != nil {
 		slog.Debug("KMS ReEncrypt: open envelope failed", "err", err)
 		writeError(w, http.StatusBadRequest, "InvalidCiphertextException",

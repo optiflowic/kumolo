@@ -227,6 +227,14 @@ func keyAgreementAlgorithmsForKey(spec, usage string) []string {
 	return nil // unreachable: handler validates spec/usage before calling
 }
 
+// RotationRecord records a single key rotation event in the rotation history.
+// Stored as a JSON array in keys/{id}/rotation_history.json.
+type RotationRecord struct {
+	KeyID        string  `json:"KeyId"`
+	RotationDate float64 `json:"RotationDate"`
+	RotationType string  `json:"RotationType"` // "AUTOMATIC" or "ON_DEMAND"
+}
+
 // TagEntry is one key/value tag on a KMS key.
 type TagEntry struct {
 	TagKey   string `json:"TagKey"`

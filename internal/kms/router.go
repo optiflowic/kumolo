@@ -28,6 +28,9 @@ type store interface {
 	EnableKeyRotation(keyID string, rotationPeriodInDays int) error
 	DisableKeyRotation(keyID string) error
 	GetKeyRotationStatus(keyID string) (KeyMetadata, KeyRotationConfig, error)
+	RotateKeyOnDemand(keyID string) (KeyMetadata, error)
+	ListKeyRotations(keyID string, limit int, marker string) ([]RotationRecord, string, error)
+	GetPreviousKeyMaterials(keyID string) ([]KeyMaterial, error)
 	GetTags(keyID string) ([]TagEntry, error)
 	TagResource(keyID string, tags []TagEntry) error
 	UntagResource(keyID string, tagKeys []string) error
@@ -128,6 +131,10 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ro.handleDisableKeyRotation(w, body)
 	case "GetKeyRotationStatus":
 		ro.handleGetKeyRotationStatus(w, body)
+	case "RotateKeyOnDemand":
+		ro.handleRotateKeyOnDemand(w, body)
+	case "ListKeyRotations":
+		ro.handleListKeyRotations(w, body)
 	case "GetPublicKey":
 		ro.handleGetPublicKey(w, body)
 	case "ListResourceTags":
