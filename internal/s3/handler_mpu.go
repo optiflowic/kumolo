@@ -29,6 +29,10 @@ func (ro *Router) handleCreateMultipartUpload(
 		return
 	}
 	sseKMSKeyID := r.Header.Get(amzSSEKMSKeyID)
+	sseBucketKeyEnabled, ok := parseBucketKeyEnabled(w, r, sseAlgorithm)
+	if !ok {
+		return
+	}
 	retention, legalHold, ok := parseObjectLockHeaders(w, r)
 	if !ok {
 		return
@@ -40,6 +44,7 @@ func (ro *Router) handleCreateMultipartUpload(
 		contentType,
 		sseAlgorithm,
 		sseKMSKeyID,
+		sseBucketKeyEnabled,
 		retention,
 		legalHold,
 		storageClass,
@@ -82,7 +87,14 @@ func (ro *Router) handleCreateMultipartUpload(
 		"uploadId",
 		uploadID,
 	)
-	setSSEHeaders(w, ObjectMetadata{SSEAlgorithm: sseAlgorithm, SSEKMSKeyID: sseKMSKeyID})
+	setSSEHeaders(
+		w,
+		ObjectMetadata{
+			SSEAlgorithm:        sseAlgorithm,
+			SSEKMSKeyID:         sseKMSKeyID,
+			SSEBucketKeyEnabled: sseBucketKeyEnabled,
+		},
+	)
 	writeXML(w, http.StatusOK, initiateMultipartUploadResult{
 		Bucket:   bucket,
 		Key:      key,

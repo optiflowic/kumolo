@@ -49,6 +49,7 @@ Returns the same metadata as GetObject but without the body.
 | `x-amz-meta-*` | User metadata |
 | `x-amz-server-side-encryption` | When SSE was specified |
 | `x-amz-server-side-encryption-aws-kms-key-id` | When KMS key ID was specified |
+| `x-amz-server-side-encryption-bucket-key-enabled` | `true` when BucketKeyEnabled was set and algorithm is `aws:kms` or `aws:kms:dsse` |
 | `x-amz-storage-class` | When non-STANDARD storage class |
 | `x-amz-tagging-count` | When the object has tags |
 | `x-amz-object-lock-mode` | When Object Lock retention is set |

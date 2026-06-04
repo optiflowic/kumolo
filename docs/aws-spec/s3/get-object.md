@@ -52,6 +52,7 @@
 | `x-amz-meta-*` | User metadata set at upload |
 | `x-amz-server-side-encryption` | When SSE was specified on upload |
 | `x-amz-server-side-encryption-aws-kms-key-id` | When KMS key ID was specified |
+| `x-amz-server-side-encryption-bucket-key-enabled` | `true` when BucketKeyEnabled was set and algorithm is `aws:kms` or `aws:kms:dsse` |
 | `x-amz-storage-class` | When a non-STANDARD storage class was set |
 | `x-amz-tagging-count` | When the object has tags |
 | `x-amz-object-lock-mode` | When Object Lock retention is set |

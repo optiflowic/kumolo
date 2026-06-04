@@ -23,6 +23,7 @@ Source may include a `?versionId=<id>` query string to copy a specific version.
 | `x-amz-meta-*` | Only applied when `x-amz-metadata-directive: REPLACE` |
 | `x-amz-server-side-encryption` | Stored as metadata on the destination |
 | `x-amz-server-side-encryption-aws-kms-key-id` | Stored as metadata on the destination |
+| `x-amz-server-side-encryption-bucket-key-enabled` | Stored as metadata; only meaningful for `aws:kms` / `aws:kms:dsse` — see `sse-bucket-key-enabled.md` |
 | `x-amz-storage-class` | Storage class for the destination object |
 | `x-amz-object-lock-mode` | GOVERNANCE or COMPLIANCE |
 | `x-amz-object-lock-retain-until-date` | RFC3339 timestamp |
@@ -52,6 +53,7 @@ Source may include a `?versionId=<id>` query string to copy a specific version.
 | `x-amz-version-id` | When versioning is enabled on the destination bucket |
 | `x-amz-server-side-encryption` | When SSE header was provided |
 | `x-amz-server-side-encryption-aws-kms-key-id` | When KMS key ID was provided |
+| `x-amz-server-side-encryption-bucket-key-enabled` | `true` when BucketKeyEnabled was set and algorithm is `aws:kms` or `aws:kms:dsse` |
 
 ## Errors
 

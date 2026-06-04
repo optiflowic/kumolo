@@ -23,6 +23,7 @@ type objectStore interface {
 		contentType string,
 		userMetadata map[string]string,
 		sseAlgorithm, sseKMSKeyID string,
+		sseBucketKeyEnabled bool,
 		retention *ObjectRetention,
 		legalHold *ObjectLegalHold,
 		storageClass string,
@@ -33,6 +34,7 @@ type objectStore interface {
 		contentType string,
 		userMetadata map[string]string,
 		sseAlgorithm, sseKMSKeyID string,
+		sseBucketKeyEnabled bool,
 		retention *ObjectRetention,
 		legalHold *ObjectLegalHold,
 		storageClass string,
@@ -44,6 +46,7 @@ type objectStore interface {
 		contentType string,
 		userMetadata map[string]string,
 		sseAlgorithm, sseKMSKeyID string,
+		sseBucketKeyEnabled bool,
 		retention *ObjectRetention,
 		legalHold *ObjectLegalHold,
 		storageClass string,
@@ -68,6 +71,7 @@ type objectStore interface {
 type multipartStore interface {
 	CreateMultipartUpload(
 		bucket, key, contentType, sseAlgorithm, sseKMSKeyID string,
+		sseBucketKeyEnabled bool,
 		retention *ObjectRetention,
 		legalHold *ObjectLegalHold,
 		storageClass string,

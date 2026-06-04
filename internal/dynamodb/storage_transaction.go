@@ -353,7 +353,7 @@ func (s *Storage) checkTransactActionCondLocked(
 		}
 		return current, evalCondition(current, action.ConditionCheck.Cond)
 	}
-	return nil, nil // unreachable: Phase 0 ensures exactly one action field is non-nil
+	return nil, nil
 }
 
 // applyTransactActionLocked applies the write for a single action (no condition checks).
@@ -455,7 +455,7 @@ func (s *Storage) applyTransactActionLocked(action TransactWriteAction) error {
 				if err := applyNestedRemove(item, op.segs); err != nil { // unreachable: applyNestedRemove always returns nil
 					return fmt.Errorf("%w: %v", ErrValidationException, err)
 				}
-			default: // unreachable: parseUpdateExpression only produces the sentinel types above
+			default:
 				item[attr] = val
 			}
 		}

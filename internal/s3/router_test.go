@@ -410,6 +410,7 @@ func (m *mockStore) PutObject(
 	_ string,
 	_ map[string]string,
 	_, _ string,
+	_ bool,
 	_ *ObjectRetention,
 	_ *ObjectLegalHold,
 	_ string,
@@ -423,6 +424,7 @@ func (m *mockStore) PutObjectIfNotExists(
 	_ string,
 	_ map[string]string,
 	_, _ string,
+	_ bool,
 	_ *ObjectRetention,
 	_ *ObjectLegalHold,
 	_ string,
@@ -445,6 +447,7 @@ func (m *mockStore) CopyObject(
 	_, _, _, _, _, _ string,
 	_ map[string]string,
 	_, _ string,
+	_ bool,
 	_ *ObjectRetention,
 	_ *ObjectLegalHold,
 	_ string,
@@ -476,6 +479,7 @@ func (m *mockStore) ListObjectVersions(_ string) ([]VersionInfo, []DeleteMarkerI
 
 func (m *mockStore) CreateMultipartUpload(
 	_, _, _, _, _ string,
+	_ bool,
 	_ *ObjectRetention,
 	_ *ObjectLegalHold,
 	_ string,
@@ -8002,6 +8006,211 @@ func TestSSEResponseHeaders(t *testing.T) {
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, "AES256", w.Header().Get(amzSSE))
 	})
+}
+
+func TestSSEBucketKeyEnabled(t *testing.T) {
+	tests := []struct {
+		name        string
+		method      string
+		url         string
+		reqHeaders  map[string]string
+		body        string
+		respMeta    ObjectMetadata
+		wantPresent bool
+	}{
+		{
+			name:   "PutObject with aws:kms and BucketKeyEnabled=true emits header",
+			method: http.MethodPut,
+			url:    "/b/k",
+			reqHeaders: map[string]string{
+				amzSSE:                 "aws:kms",
+				amzSSEBucketKeyEnabled: "true",
+			},
+			body:        "data",
+			respMeta:    ObjectMetadata{SSEAlgorithm: "aws:kms", SSEBucketKeyEnabled: true},
+			wantPresent: true,
+		},
+		{
+			name:   "PutObject with aws:kms and BucketKeyEnabled=false does not emit header",
+			method: http.MethodPut,
+			url:    "/b/k",
+			reqHeaders: map[string]string{
+				amzSSE:                 "aws:kms",
+				amzSSEBucketKeyEnabled: "false",
+			},
+			body:        "data",
+			respMeta:    ObjectMetadata{SSEAlgorithm: "aws:kms", SSEBucketKeyEnabled: false},
+			wantPresent: false,
+		},
+		{
+			name:   "PutObject with AES256 and BucketKeyEnabled=true does not emit header",
+			method: http.MethodPut,
+			url:    "/b/k",
+			reqHeaders: map[string]string{
+				amzSSE:                 "AES256",
+				amzSSEBucketKeyEnabled: "true",
+			},
+			body: "data",
+			// Metadata has SSEBucketKeyEnabled=true to verify setSSEHeaders suppresses
+			// the response header for non-KMS algorithms regardless of stored value.
+			respMeta:    ObjectMetadata{SSEAlgorithm: "AES256", SSEBucketKeyEnabled: true},
+			wantPresent: false,
+		},
+		{
+			name:   "GetObject with BucketKeyEnabled=true in metadata emits header",
+			method: http.MethodGet,
+			url:    "/b/k",
+			respMeta: ObjectMetadata{
+				SSEAlgorithm:        "aws:kms:dsse",
+				SSEBucketKeyEnabled: true,
+			},
+			wantPresent: true,
+		},
+		{
+			name:   "GetObject with AES256 and BucketKeyEnabled=true in metadata does not emit header",
+			method: http.MethodGet,
+			url:    "/b/k",
+			respMeta: ObjectMetadata{
+				SSEAlgorithm:        "AES256",
+				SSEBucketKeyEnabled: true,
+			},
+			wantPresent: false,
+		},
+		{
+			name:   "HeadObject with BucketKeyEnabled=true in metadata emits header",
+			method: http.MethodHead,
+			url:    "/b/k",
+			respMeta: ObjectMetadata{
+				SSEAlgorithm:        "aws:kms",
+				SSEBucketKeyEnabled: true,
+			},
+			wantPresent: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ms := &mockStore{
+				putObjectMeta:  tt.respMeta,
+				getObjectMeta:  tt.respMeta,
+				headObjectMeta: tt.respMeta,
+			}
+			ro := newRouterWithMock(ms)
+			var bodyReader io.Reader
+			if tt.body != "" {
+				bodyReader = strings.NewReader(tt.body)
+			}
+			req := httptest.NewRequest(tt.method, tt.url, bodyReader)
+			for k, v := range tt.reqHeaders {
+				req.Header.Set(k, v)
+			}
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			if tt.wantPresent {
+				assert.Equal(t, "true", w.Header().Get(amzSSEBucketKeyEnabled))
+			} else {
+				assert.Empty(t, w.Header().Get(amzSSEBucketKeyEnabled))
+			}
+		})
+	}
+
+	t.Run("CopyObject with BucketKeyEnabled=true emits header in response", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			copyObjectMeta: ObjectMetadata{SSEAlgorithm: "aws:kms", SSEBucketKeyEnabled: true},
+		})
+		req := httptest.NewRequest(http.MethodPut, "/dst/k", nil)
+		req.Header.Set(amzCopySource, "/src/k")
+		req.Header.Set(amzSSE, "aws:kms")
+		req.Header.Set(amzSSEBucketKeyEnabled, "true")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "true", w.Header().Get(amzSSEBucketKeyEnabled))
+	})
+
+	t.Run("CreateMultipartUpload with BucketKeyEnabled=true emits header", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{createMultipartUploadID: "uid-bke"})
+		req := httptest.NewRequest(http.MethodPost, "/b/k?uploads", nil)
+		req.Header.Set(amzSSE, "aws:kms")
+		req.Header.Set(amzSSEBucketKeyEnabled, "true")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "true", w.Header().Get(amzSSEBucketKeyEnabled))
+	})
+
+	t.Run(
+		"CreateMultipartUpload with AES256 and BucketKeyEnabled=true does not emit header",
+		func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{createMultipartUploadID: "uid-aes"})
+			req := httptest.NewRequest(http.MethodPost, "/b/k?uploads", nil)
+			req.Header.Set(amzSSE, "AES256")
+			req.Header.Set(amzSSEBucketKeyEnabled, "true")
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Empty(t, w.Header().Get(amzSSEBucketKeyEnabled))
+		},
+	)
+
+	t.Run(
+		"CompleteMultipartUpload with BucketKeyEnabled=true in metadata emits header",
+		func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{
+				completeMultipartUploadMeta: ObjectMetadata{
+					SSEAlgorithm:        "aws:kms",
+					SSEBucketKeyEnabled: true,
+				},
+			})
+			body := `<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>"abc"</ETag></Part></CompleteMultipartUpload>`
+			req := httptest.NewRequest(
+				http.MethodPost,
+				"/b/k?uploadId=uid123",
+				strings.NewReader(body),
+			)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Equal(t, "true", w.Header().Get(amzSSEBucketKeyEnabled))
+		},
+	)
+
+	for _, op := range []struct {
+		name   string
+		method string
+		url    string
+		body   string
+		extra  map[string]string
+	}{
+		{name: "PutObject", method: http.MethodPut, url: "/b/k", body: "data"},
+		{name: "CopyObject", method: http.MethodPut, url: "/dst/k", extra: map[string]string{amzCopySource: "/src/k"}},
+		{name: "CreateMultipartUpload", method: http.MethodPost, url: "/b/k?uploads"},
+	} {
+		op := op
+		for _, alg := range []string{"aws:kms", "aws:kms:dsse"} {
+			alg := alg
+			t.Run(
+				op.name+" with "+alg+" and invalid BucketKeyEnabled returns 400",
+				func(t *testing.T) {
+					ro := newRouterWithMock(&mockStore{})
+					var bodyReader io.Reader
+					if op.body != "" {
+						bodyReader = strings.NewReader(op.body)
+					}
+					req := httptest.NewRequest(op.method, op.url, bodyReader)
+					req.Header.Set(amzSSE, alg)
+					req.Header.Set(amzSSEBucketKeyEnabled, "TRUE")
+					for k, v := range op.extra {
+						req.Header.Set(k, v)
+					}
+					w := httptest.NewRecorder()
+					ro.ServeHTTP(w, req)
+					assert.Equal(t, http.StatusBadRequest, w.Code)
+					assert.Contains(t, w.Body.String(), "InvalidArgument")
+				},
+			)
+		}
+	}
 }
 
 func TestSSEAlgorithmValidation(t *testing.T) {

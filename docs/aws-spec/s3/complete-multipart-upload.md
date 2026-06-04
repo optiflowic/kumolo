@@ -56,6 +56,7 @@ The ETag format for multipart objects is `"<md5>-<partCount>"`.
 | `x-amz-version-id` | When versioning is enabled |
 | `x-amz-server-side-encryption` | When SSE was specified at upload initiation |
 | `x-amz-server-side-encryption-aws-kms-key-id` | When KMS key ID was specified |
+| `x-amz-server-side-encryption-bucket-key-enabled` | `true` when BucketKeyEnabled was set and algorithm is `aws:kms` or `aws:kms:dsse` |
 
 ## Errors
 
