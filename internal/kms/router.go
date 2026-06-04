@@ -44,8 +44,9 @@ const (
 
 // Router handles KMS API requests dispatched via the X-Amz-Target header.
 type Router struct {
-	storage  store
-	randRead func([]byte) (int, error)
+	storage                    store
+	randRead                   func([]byte) (int, error)
+	generateEphemeralKeyPairFn func(keySpec string) (privKeyDER []byte, err error)
 }
 
 func NewRouter(s store) *Router {
@@ -53,7 +54,11 @@ func NewRouter(s store) *Router {
 }
 
 func newRouterWithRand(s store, randRead func([]byte) (int, error)) *Router {
-	return &Router{storage: s, randRead: randRead}
+	return &Router{
+		storage:                    s,
+		randRead:                   randRead,
+		generateEphemeralKeyPairFn: generateKeyPair,
+	}
 }
 
 func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -85,6 +90,10 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ro.handleGenerateDataKey(w, body)
 	case "GenerateDataKeyWithoutPlaintext":
 		ro.handleGenerateDataKeyWithoutPlaintext(w, body)
+	case "GenerateDataKeyPair":
+		ro.handleGenerateDataKeyPair(w, body)
+	case "GenerateDataKeyPairWithoutPlaintext":
+		ro.handleGenerateDataKeyPairWithoutPlaintext(w, body)
 	case opGenerateRandom:
 		ro.handleGenerateRandom(w, body)
 	case opReEncrypt:

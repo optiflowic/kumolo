@@ -4400,3 +4400,212 @@ func TestResolveAndValidateSignKey_materialStorageError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 	assertErrType(t, w, "KMSInternalException")
 }
+
+// ---- GenerateDataKeyPair ---------------------------------------------------
+
+func TestHandleGenerateDataKeyPair(t *testing.T) {
+	t.Run(
+		"ECC_NIST_P256 returns plaintext public key, plaintext private key, and ciphertext",
+		func(t *testing.T) {
+			ro := newTestRouter(t)
+			keyID := mustCreateKey(t, ro, `{}`)
+			body, _ := json.Marshal(map[string]any{"KeyId": keyID, "KeyPairSpec": "ECC_NIST_P256"})
+			w := kmsReq(t, ro, "GenerateDataKeyPair", string(body))
+			require.Equal(t, http.StatusOK, w.Code)
+			var resp map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+			assert.Equal(t, keyARN(keyID), resp["KeyId"])
+			assert.Equal(t, "ECC_NIST_P256", resp["KeyPairSpec"])
+			assert.NotEmpty(t, resp["PublicKey"])
+			assert.NotEmpty(t, resp["PrivateKeyPlaintext"])
+			assert.NotEmpty(t, resp["PrivateKeyCiphertextBlob"])
+			assert.NotEmpty(t, resp["KeyMaterialId"])
+		},
+	)
+
+	t.Run("RSA_2048 happy path", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{"KeyId": keyID, "KeyPairSpec": "RSA_2048"})
+		w := kmsReq(t, ro, "GenerateDataKeyPair", string(body))
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, "RSA_2048", resp["KeyPairSpec"])
+		assert.NotEmpty(t, resp["PublicKey"])
+		assert.NotEmpty(t, resp["PrivateKeyPlaintext"])
+		assert.NotEmpty(t, resp["PrivateKeyCiphertextBlob"])
+	})
+
+	t.Run("encrypted private key can be decrypted to recover private key", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{"KeyId": keyID, "KeyPairSpec": "ECC_NIST_P256"})
+		w := kmsReq(t, ro, "GenerateDataKeyPair", string(body))
+		require.Equal(t, http.StatusOK, w.Code)
+		var genResp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &genResp))
+
+		decBody, _ := json.Marshal(
+			map[string]any{"CiphertextBlob": genResp["PrivateKeyCiphertextBlob"]},
+		)
+		dw := kmsReq(t, ro, "Decrypt", string(decBody))
+		require.Equal(t, http.StatusOK, dw.Code)
+		var decResp map[string]any
+		require.NoError(t, json.Unmarshal(dw.Body.Bytes(), &decResp))
+
+		ptJSON, _ := json.Marshal(genResp["PrivateKeyPlaintext"])
+		decJSON, _ := json.Marshal(decResp["Plaintext"])
+		assert.Equal(t, ptJSON, decJSON)
+	})
+
+	t.Run("with EncryptionContext", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":             keyID,
+			"KeyPairSpec":       "ECC_NIST_P256",
+			"EncryptionContext": map[string]string{"purpose": "test"},
+		})
+		w := kmsReq(t, ro, "GenerateDataKeyPair", string(body))
+		require.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("400 for missing KeyId", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "GenerateDataKeyPair", `{"KeyPairSpec":"ECC_NIST_P256"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 for missing KeyPairSpec", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{"KeyId": keyID})
+		w := kmsReq(t, ro, "GenerateDataKeyPair", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 for invalid KeyPairSpec", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{"KeyId": keyID, "KeyPairSpec": "AES_256"})
+		w := kmsReq(t, ro, "GenerateDataKeyPair", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 for unsupported KeyPairSpec ECC_SECG_P256K1", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{"KeyId": keyID, "KeyPairSpec": "ECC_SECG_P256K1"})
+		w := kmsReq(t, ro, "GenerateDataKeyPair", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "UnsupportedOperationException")
+	})
+
+	t.Run("400 for unsupported KeyPairSpec SM2", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{"KeyId": keyID, "KeyPairSpec": "SM2"})
+		w := kmsReq(t, ro, "GenerateDataKeyPair", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "UnsupportedOperationException")
+	})
+
+	t.Run("400 for non-existent key", func(t *testing.T) {
+		ro := newTestRouter(t)
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":       "00000000-0000-0000-0000-000000000000",
+			"KeyPairSpec": "ECC_NIST_P256",
+		})
+		w := kmsReq(t, ro, "GenerateDataKeyPair", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "NotFoundException")
+	})
+
+	t.Run("400 when key is disabled", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		kmsReq(t, ro, "DisableKey", `{"KeyId":"`+keyID+`"}`)
+		body, _ := json.Marshal(map[string]any{"KeyId": keyID, "KeyPairSpec": "ECC_NIST_P256"})
+		w := kmsReq(t, ro, "GenerateDataKeyPair", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "DisabledException")
+	})
+
+	t.Run("400 when key is not ENCRYPT_DECRYPT", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{"KeySpec":"RSA_2048","KeyUsage":"SIGN_VERIFY"}`)
+		body, _ := json.Marshal(map[string]any{"KeyId": keyID, "KeyPairSpec": "ECC_NIST_P256"})
+		w := kmsReq(t, ro, "GenerateDataKeyPair", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "InvalidKeyUsageException")
+	})
+
+	t.Run("500 when key pair generation fails", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		genErr := errors.New("simulated key gen failure")
+		ro.generateEphemeralKeyPairFn = func(string) ([]byte, error) { return nil, genErr }
+		body, _ := json.Marshal(map[string]any{"KeyId": keyID, "KeyPairSpec": "ECC_NIST_P256"})
+		w := kmsReq(t, ro, "GenerateDataKeyPair", string(body))
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assertErrType(t, w, "KMSInternalException")
+	})
+}
+
+// ---- GenerateDataKeyPairWithoutPlaintext -----------------------------------
+
+func TestHandleGenerateDataKeyPairWithoutPlaintext(t *testing.T) {
+	t.Run("returns public key and ciphertext but no plaintext private key", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{"KeyId": keyID, "KeyPairSpec": "ECC_NIST_P256"})
+		w := kmsReq(t, ro, "GenerateDataKeyPairWithoutPlaintext", string(body))
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, keyARN(keyID), resp["KeyId"])
+		assert.Equal(t, "ECC_NIST_P256", resp["KeyPairSpec"])
+		assert.NotEmpty(t, resp["PublicKey"])
+		assert.NotEmpty(t, resp["PrivateKeyCiphertextBlob"])
+		assert.NotEmpty(t, resp["KeyMaterialId"])
+		assert.Nil(t, resp["PrivateKeyPlaintext"])
+	})
+
+	t.Run("encrypted private key can be decrypted", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{"KeyId": keyID, "KeyPairSpec": "ECC_NIST_P256"})
+		w := kmsReq(t, ro, "GenerateDataKeyPairWithoutPlaintext", string(body))
+		require.Equal(t, http.StatusOK, w.Code)
+		var genResp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &genResp))
+
+		decBody, _ := json.Marshal(
+			map[string]any{"CiphertextBlob": genResp["PrivateKeyCiphertextBlob"]},
+		)
+		dw := kmsReq(t, ro, "Decrypt", string(decBody))
+		require.Equal(t, http.StatusOK, dw.Code)
+	})
+
+	t.Run("400 for missing KeyPairSpec", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{"KeyId": keyID})
+		w := kmsReq(t, ro, "GenerateDataKeyPairWithoutPlaintext", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 for unsupported KeyPairSpec", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{"KeyId": keyID, "KeyPairSpec": "ECC_SECG_P256K1"})
+		w := kmsReq(t, ro, "GenerateDataKeyPairWithoutPlaintext", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "UnsupportedOperationException")
+	})
+}
