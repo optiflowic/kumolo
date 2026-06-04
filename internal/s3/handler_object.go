@@ -56,7 +56,10 @@ func (ro *Router) resolveSSE(
 	}
 
 	var conf xmlSSEConfiguration
-	xmlErr := xml.Unmarshal([]byte(xmlBody), &conf) //nolint:gosec // G709: internal storage data
+	xmlErr := xml.Unmarshal( //nolint:gosec // G709: data from kumolo internal storage, not user input
+		[]byte(xmlBody),
+		&conf,
+	)
 	if xmlErr != nil || len(conf.Rules) == 0 {
 		return "", "", false, true
 	}

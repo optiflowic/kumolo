@@ -51,8 +51,8 @@ Source may include a `?versionId=<id>` query string to copy a specific version.
 | Header | Condition |
 |---|---|
 | `x-amz-version-id` | When versioning is enabled on the destination bucket |
-| `x-amz-server-side-encryption` | When SSE header was provided |
-| `x-amz-server-side-encryption-aws-kms-key-id` | When KMS key ID was provided |
+| `x-amz-server-side-encryption` | When SSE is applied (explicit header or bucket default encryption) |
+| `x-amz-server-side-encryption-aws-kms-key-id` | When KMS key ID is applied (explicit header or bucket default encryption) |
 | `x-amz-server-side-encryption-bucket-key-enabled` | `true` when BucketKeyEnabled was set and algorithm is `aws:kms` or `aws:kms:dsse` |
 
 ## Errors

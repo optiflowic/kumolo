@@ -392,14 +392,15 @@ type mockStore struct {
 	getObjectLegalHoldResult  string
 	getObjectLegalHoldErr     error
 
-	capturedPutObjectSSEAlg           string
-	capturedPutObjectSSEKeyID         string
-	capturedPutObjectBucketKeyEnabled bool
-	capturedCopyObjectSSEAlg          string
-	capturedCopyObjectSSEKeyID        string
-	capturedCreateMPUSSEAlg           string
-	capturedCreateMPUSSEKeyID         string
-	capturedCreateMPUBucketKeyEnabled bool
+	capturedPutObjectSSEAlg            string
+	capturedPutObjectSSEKeyID          string
+	capturedPutObjectBucketKeyEnabled  bool
+	capturedCopyObjectSSEAlg           string
+	capturedCopyObjectSSEKeyID         string
+	capturedCopyObjectBucketKeyEnabled bool
+	capturedCreateMPUSSEAlg            string
+	capturedCreateMPUSSEKeyID          string
+	capturedCreateMPUBucketKeyEnabled  bool
 }
 
 func (m *mockStore) ListBuckets() ([]BucketInfo, error) { return nil, m.listBucketsErr }
@@ -459,13 +460,14 @@ func (m *mockStore) CopyObject(
 	_, _, _, _, _, _ string,
 	_ map[string]string,
 	sseAlgorithm, sseKMSKeyID string,
-	_ bool,
+	sseBucketKeyEnabled bool,
 	_ *ObjectRetention,
 	_ *ObjectLegalHold,
 	_ string,
 ) (ObjectMetadata, error) {
 	m.capturedCopyObjectSSEAlg = sseAlgorithm
 	m.capturedCopyObjectSSEKeyID = sseKMSKeyID
+	m.capturedCopyObjectBucketKeyEnabled = sseBucketKeyEnabled
 	return m.copyObjectMeta, m.copyObjectErr
 }
 func (m *mockStore) DeleteObject(_ string, _ string, _ bool) error { return m.deleteObjectErr }
@@ -8459,6 +8461,7 @@ func TestSSEBucketDefaultEncryption(t *testing.T) {
 			ro.ServeHTTP(httptest.NewRecorder(), req)
 			assert.Equal(t, "aws:kms", ms.capturedCopyObjectSSEAlg)
 			assert.Equal(t, "my-kms-key", ms.capturedCopyObjectSSEKeyID)
+			assert.True(t, ms.capturedCopyObjectBucketKeyEnabled)
 		},
 	)
 

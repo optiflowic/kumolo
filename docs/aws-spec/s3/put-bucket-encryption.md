@@ -25,4 +25,4 @@ Stores a `ServerSideEncryptionConfiguration` XML document. The configuration is 
 
 ## Kumolo deviations
 
-- Encryption configuration is stored but not enforced — objects are not encrypted at rest.
+- Encryption configuration is stored and applied as SSE metadata default for PutObject, CopyObject, and CreateMultipartUpload when no explicit SSE header is present. Actual at-rest encryption is not performed.

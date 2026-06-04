@@ -47,8 +47,8 @@ Initiates a multipart upload and returns an `UploadId`.
 
 | Header | Condition |
 |---|---|
-| `x-amz-server-side-encryption` | When SSE header was provided |
-| `x-amz-server-side-encryption-aws-kms-key-id` | When KMS key ID was provided |
+| `x-amz-server-side-encryption` | When SSE is applied (explicit header or bucket default encryption) |
+| `x-amz-server-side-encryption-aws-kms-key-id` | When KMS key ID is applied (explicit header or bucket default encryption) |
 | `x-amz-server-side-encryption-bucket-key-enabled` | `true` when BucketKeyEnabled was set and algorithm is `aws:kms` or `aws:kms:dsse` |
 
 ## Errors
