@@ -482,46 +482,7 @@ func (ro *Router) handleListKeyRotations(w http.ResponseWriter, body []byte) {
 
 	records, nextMarker, err := ro.storage.ListKeyRotations(keyID, limit, req.Marker)
 	if err != nil {
-		switch {
-		case errors.Is(err, ErrKeyNotFound):
-			slog.Debug("KMS ListKeyRotations: key not found", "keyID", keyID)
-			writeError(w, http.StatusBadRequest, "NotFoundException",
-				fmt.Sprintf("Invalid keyId %s", keyID))
-		case errors.Is(err, ErrInvalidKeyState):
-			slog.Debug("KMS ListKeyRotations: invalid key state", "keyID", keyID)
-			writeError(
-				w,
-				http.StatusBadRequest,
-				"KMSInvalidStateException",
-				fmt.Sprintf(
-					"KMS key %s is in a state that is not compatible with this operation",
-					keyID,
-				),
-			)
-		case errors.Is(err, ErrUnsupportedOp):
-			slog.Debug("KMS ListKeyRotations: unsupported operation", "keyID", keyID)
-			writeError(
-				w,
-				http.StatusBadRequest,
-				"UnsupportedOperationException",
-				fmt.Sprintf(
-					"Key %s does not support this operation; only SYMMETRIC_DEFAULT keys support key rotation",
-					keyID,
-				),
-			)
-		case errors.Is(err, ErrInvalidMarker):
-			slog.Debug("KMS ListKeyRotations: invalid marker", "keyID", keyID)
-			writeError(w, http.StatusBadRequest, "InvalidMarkerException",
-				fmt.Sprintf("The marker %s is not valid", req.Marker))
-		default:
-			slog.Error("KMS ListKeyRotations storage failure", "keyID", keyID, "err", err)
-			writeError(
-				w,
-				http.StatusInternalServerError,
-				"KMSInternalException",
-				"internal server error",
-			)
-		}
+		writeListKeyRotationsError(w, keyID, req.Marker, err)
 		return
 	}
 
@@ -539,6 +500,50 @@ func (ro *Router) handleListKeyRotations(w http.ResponseWriter, body []byte) {
 
 	slog.Debug("KMS ListKeyRotations", "keyID", keyID, "count", len(records))
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// writeListKeyRotationsError handles errors specific to ListKeyRotations.
+func writeListKeyRotationsError(w http.ResponseWriter, keyID, marker string, err error) {
+	switch {
+	case errors.Is(err, ErrKeyNotFound):
+		slog.Debug("KMS ListKeyRotations: key not found", "keyID", keyID)
+		writeError(w, http.StatusBadRequest, "NotFoundException",
+			fmt.Sprintf("Invalid keyId %s", keyID))
+	case errors.Is(err, ErrInvalidKeyState):
+		slog.Debug("KMS ListKeyRotations: invalid key state", "keyID", keyID)
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"KMSInvalidStateException",
+			fmt.Sprintf(
+				"KMS key %s is in a state that is not compatible with this operation",
+				keyID,
+			),
+		)
+	case errors.Is(err, ErrUnsupportedOp):
+		slog.Debug("KMS ListKeyRotations: unsupported operation", "keyID", keyID)
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"UnsupportedOperationException",
+			fmt.Sprintf(
+				"Key %s does not support this operation; only SYMMETRIC_DEFAULT keys support key rotation",
+				keyID,
+			),
+		)
+	case errors.Is(err, ErrInvalidMarker):
+		slog.Debug("KMS ListKeyRotations: invalid marker", "keyID", keyID)
+		writeError(w, http.StatusBadRequest, "InvalidMarkerException",
+			fmt.Sprintf("The marker %s is not valid", marker))
+	default:
+		slog.Error("KMS ListKeyRotations storage failure", "keyID", keyID, "err", err)
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			"KMSInternalException",
+			"internal server error",
+		)
+	}
 }
 
 // writeOnDemandRotationError handles errors specific to RotateKeyOnDemand.
