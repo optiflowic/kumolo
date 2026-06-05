@@ -247,6 +247,35 @@ type GrantConstraints struct {
 	EncryptionContextSubset map[string]string `json:"EncryptionContextSubset,omitempty"`
 }
 
+// grantListEntry is the AWS GrantListEntry shape returned by ListGrants and
+// ListRetirableGrants. It mirrors Grant but omits GrantToken, which real AWS
+// does not include in list responses (GrantToken is only returned by CreateGrant).
+type grantListEntry struct {
+	GrantId           string            `json:"GrantId"`
+	KeyId             string            `json:"KeyId"`
+	GranteePrincipal  string            `json:"GranteePrincipal"`
+	RetiringPrincipal string            `json:"RetiringPrincipal,omitempty"`
+	Operations        []string          `json:"Operations"`
+	Constraints       *GrantConstraints `json:"Constraints,omitempty"`
+	Name              string            `json:"Name,omitempty"`
+	IssuingAccount    string            `json:"IssuingAccount"`
+	CreationDate      float64           `json:"CreationDate"`
+}
+
+func toGrantListEntry(g Grant) grantListEntry {
+	return grantListEntry{
+		GrantId:           g.GrantId,
+		KeyId:             g.KeyId,
+		GranteePrincipal:  g.GranteePrincipal,
+		RetiringPrincipal: g.RetiringPrincipal,
+		Operations:        g.Operations,
+		Constraints:       g.Constraints,
+		Name:              g.Name,
+		IssuingAccount:    g.IssuingAccount,
+		CreationDate:      g.CreationDate,
+	}
+}
+
 // CreateGrantInput carries the parameters for a CreateGrant call.
 type CreateGrantInput struct {
 	GranteePrincipal  string

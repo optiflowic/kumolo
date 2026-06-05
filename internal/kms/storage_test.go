@@ -2075,3 +2075,47 @@ func TestListGrantsForKeyLocked_skipsSubdirAndNonJson(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, grants, 1)
 }
+
+func TestListKeyIDsLocked_statError(t *testing.T) {
+	s, dir := newTestStorage(t)
+	keyID := newSymmetricKey(t, s)
+
+	statErr := errors.New("permission denied")
+	origStat := s.statFn
+	s.statFn = func(name string) (os.FileInfo, error) {
+		metaPath := filepath.Join("keys", keyID, "meta.json")
+		if name == metaPath {
+			return nil, statErr
+		}
+		return origStat(name)
+	}
+	_, _, err := s.ListRetirableGrants("arn:aws:iam::000000000000:role/r", 50, "")
+	require.ErrorContains(t, err, "stat key meta")
+	_ = dir
+}
+
+func TestListKeyIDsLocked_skipsNonDirAndMissingMeta(t *testing.T) {
+	s, dir := newTestStorage(t)
+	keyID := newSymmetricKey(t, s)
+	mustCreateGrantStorage(t, s, keyID)
+
+	keysDir := filepath.Join(dir, "kms", "keys")
+	// Non-directory file in keys/ — should be skipped.
+	require.NoError(t, os.WriteFile(filepath.Join(keysDir, "not-a-dir.json"), []byte("x"), 0o600))
+	// Key directory without meta.json — should be skipped (ErrNotExist path).
+	require.NoError(t, os.MkdirAll(filepath.Join(keysDir, "orphan-key"), 0o750))
+
+	// ListRetirableGrants calls listKeyIDsLocked internally and should still
+	// return only grants from the valid key.
+	retiringPrincipal := "arn:aws:iam::000000000000:role/admin"
+	_, err := s.CreateGrant(keyID, CreateGrantInput{
+		GranteePrincipal:  "arn:aws:iam::000000000000:role/r",
+		Operations:        []string{"Decrypt"},
+		RetiringPrincipal: retiringPrincipal,
+	})
+	require.NoError(t, err)
+
+	result, _, err := s.ListRetirableGrants(retiringPrincipal, 50, "")
+	require.NoError(t, err)
+	assert.Len(t, result, 1)
+}

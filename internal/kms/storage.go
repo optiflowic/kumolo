@@ -1374,7 +1374,7 @@ func (s *Storage) listGrantsForKeyLocked(keyID string) ([]Grant, error) {
 
 // applyGrantPagination applies marker-based pagination to a sorted grant slice.
 // Returns the page slice and the next marker (empty string when not truncated).
-func applyGrantPagination(grants []Grant, limit int, marker string) ([]Grant, string, error) {
+func applyGrantPagination(grants []Grant, limit int, marker string) ([]Grant, string) {
 	if marker != "" {
 		start := -1
 		for i, g := range grants {
@@ -1404,7 +1404,7 @@ func applyGrantPagination(grants []Grant, limit int, marker string) ([]Grant, st
 	if truncated && len(grants) > 0 {
 		nextMarker = grants[len(grants)-1].GrantId
 	}
-	return grants, nextMarker, nil
+	return grants, nextMarker
 }
 
 // ListGrants returns paginated grants for a key, with optional filters.
@@ -1444,10 +1444,7 @@ func (s *Storage) ListGrants(
 		grants = filtered
 	}
 
-	page, nextMarker, err := applyGrantPagination(grants, limit, marker)
-	if err != nil {
-		return nil, "", err
-	}
+	page, nextMarker := applyGrantPagination(grants, limit, marker)
 	return page, nextMarker, nil
 }
 
@@ -1539,10 +1536,7 @@ func (s *Storage) ListRetirableGrants(
 	}
 	sort.Slice(matching, func(i, j int) bool { return matching[i].GrantId < matching[j].GrantId })
 
-	page, nextMarker, err := applyGrantPagination(matching, limit, marker)
-	if err != nil {
-		return nil, "", err
-	}
+	page, nextMarker := applyGrantPagination(matching, limit, marker)
 	return page, nextMarker, nil
 }
 
@@ -1551,6 +1545,7 @@ func (s *Storage) ListRetirableGrants(
 func (s *Storage) listKeyIDsLocked() ([]string, error) {
 	entries, err := s.listDirFn("keys")
 	if err != nil {
+		// untestable: listDirFn only fails on OS-level errors
 		return nil, fmt.Errorf("list keys dir: %w", err)
 	}
 	var ids []string

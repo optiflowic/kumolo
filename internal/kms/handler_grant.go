@@ -161,19 +161,21 @@ func (ro *Router) handleListGrants(w http.ResponseWriter, body []byte) {
 		writeGrantListError(w, keyID, "ListGrants", err)
 		return
 	}
-	if grants == nil {
-		grants = []Grant{}
+
+	entries := make([]grantListEntry, len(grants))
+	for i, g := range grants {
+		entries[i] = toGrantListEntry(g)
 	}
 
 	resp := map[string]any{
-		"Grants":    grants,
+		"Grants":    entries,
 		"Truncated": nextMarker != "",
 	}
 	if nextMarker != "" {
 		resp["NextMarker"] = nextMarker
 	}
 
-	slog.Debug("KMS ListGrants", "keyID", keyID, "count", len(grants))
+	slog.Debug("KMS ListGrants", "keyID", keyID, "count", len(entries))
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -305,12 +307,14 @@ func (ro *Router) handleListRetirableGrants(w http.ResponseWriter, body []byte) 
 		)
 		return
 	}
-	if grants == nil {
-		grants = []Grant{}
+
+	entries := make([]grantListEntry, len(grants))
+	for i, g := range grants {
+		entries[i] = toGrantListEntry(g)
 	}
 
 	resp := map[string]any{
-		"Grants":    grants,
+		"Grants":    entries,
 		"Truncated": nextMarker != "",
 	}
 	if nextMarker != "" {
@@ -322,7 +326,7 @@ func (ro *Router) handleListRetirableGrants(w http.ResponseWriter, body []byte) 
 		"retiringPrincipal",
 		req.RetiringPrincipal,
 		"count",
-		len(grants),
+		len(entries),
 	)
 	writeJSON(w, http.StatusOK, resp)
 }

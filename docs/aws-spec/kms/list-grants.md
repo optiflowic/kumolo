@@ -25,18 +25,21 @@
 
 ### Grant entry fields
 
-`GrantId`, `GrantToken`, `KeyId` (ARN), `GranteePrincipal`, `RetiringPrincipal`, `Operations`,
+`GrantId`, `KeyId` (ARN), `GranteePrincipal`, `RetiringPrincipal`, `Operations`,
 `Constraints`, `Name`, `IssuingAccount`, `CreationDate`
+
+Note: `GrantToken` is NOT included in list entries — it matches the real AWS `GrantListEntry` shape.
 
 ## Implemented Errors
 
 | Error                    | HTTP | Condition                        |
 |--------------------------|------|----------------------------------|
 | ValidationException      | 400  | Missing KeyId or invalid Limit   |
-| InvalidMarkerException   | 400  | Marker is not a valid grant ID   |
 | NotFoundException        | 400  | Key does not exist               |
 | KMSInvalidStateException | 400  | Key is pending deletion          |
 | KMSInternalException     | 500  | Storage failure                  |
+
+Note: `InvalidMarkerException` is **not** returned — stale markers are silently advanced via binary search.
 
 ## Behavior
 

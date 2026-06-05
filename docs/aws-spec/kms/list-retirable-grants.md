@@ -26,8 +26,9 @@
 | Error                 | HTTP | Condition                                |
 |-----------------------|------|------------------------------------------|
 | ValidationException   | 400  | Missing RetiringPrincipal or invalid Limit |
-| InvalidMarkerException| 400  | Marker is not a valid grant ID           |
 | KMSInternalException  | 500  | Storage failure                          |
+
+Note: `InvalidMarkerException` is **not** returned — stale markers are silently advanced via binary search.
 
 ## Behavior
 
