@@ -313,9 +313,10 @@ func (ro *Router) handleUploadPartCopy(w http.ResponseWriter, r *http.Request, b
 		return
 	}
 
-	// Head the source to validate SSE-C and/or evaluate copy-source-if-* conditions.
-	// Not required when neither applies; ErrObjectNotFound is left for UploadPartCopy.
-	if hasCopySourceConditions(r) || srcSSECKeyMD5 != "" {
+	// Head the source to validate SSE-C key and/or evaluate copy-source-if-* conditions.
+	// Always performed so SSE-C objects require the key even when no conditions are set.
+	// ErrObjectNotFound is left for UploadPartCopy to report as NoSuchKey.
+	{
 		var srcMeta ObjectMetadata
 		var headErr error
 		if srcVersionID != "" {
@@ -354,7 +355,6 @@ func (ro *Router) handleUploadPartCopy(w http.ResponseWriter, r *http.Request, b
 				return
 			}
 		}
-		// headErr == ErrObjectNotFound: let UploadPartCopy return the canonical NoSuchKey error.
 	}
 
 	etag, lastModified, copySourceVersionID, err := ro.storage.UploadPartCopy(
