@@ -24,6 +24,7 @@ var (
 	ErrInvalidSignature      = errors.New("invalid signature")
 	ErrOnDemandRotationLimit = errors.New("on-demand rotation limit exceeded (max 25)")
 	ErrInvalidMarker         = errors.New("invalid pagination marker")
+	ErrGrantNotFound         = errors.New("grant not found")
 )
 
 type errResponse struct {

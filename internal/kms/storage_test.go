@@ -1858,3 +1858,220 @@ func TestGetPreviousKeyMaterials_skipsUnreadableJson(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, mats)
 }
+
+// ---- Grant storage tests ----------------------------------------------------
+
+func mustCreateGrantStorage(t *testing.T, s *Storage, keyID string) Grant {
+	t.Helper()
+	g, err := s.CreateGrant(keyID, CreateGrantInput{
+		GranteePrincipal: "arn:aws:iam::000000000000:role/tester",
+		Operations:       []string{"Decrypt"},
+	})
+	require.NoError(t, err)
+	return g
+}
+
+func TestCreateGrant_basic(t *testing.T) {
+	s, _ := newTestStorage(t)
+	keyID := newSymmetricKey(t, s)
+	g, err := s.CreateGrant(keyID, CreateGrantInput{
+		GranteePrincipal:  "arn:aws:iam::000000000000:role/tester",
+		Operations:        []string{"Decrypt", "Encrypt"},
+		RetiringPrincipal: "arn:aws:iam::000000000000:role/admin",
+		Name:              "my-grant",
+	})
+	require.NoError(t, err)
+	assert.NotEmpty(t, g.GrantId)
+	assert.NotEmpty(t, g.GrantToken)
+	assert.Equal(t, "arn:aws:iam::000000000000:role/tester", g.GranteePrincipal)
+	assert.Equal(t, "arn:aws:iam::000000000000:role/admin", g.RetiringPrincipal)
+	assert.Equal(t, fixedAccount, g.IssuingAccount)
+	assert.NotZero(t, g.CreationDate)
+}
+
+func TestCreateGrant_disabledKey(t *testing.T) {
+	s, _ := newTestStorage(t)
+	keyID := newSymmetricKey(t, s)
+	require.NoError(t, s.DisableKey(keyID))
+	_, err := s.CreateGrant(keyID, CreateGrantInput{
+		GranteePrincipal: "arn:aws:iam::000000000000:role/r",
+		Operations:       []string{"Decrypt"},
+	})
+	require.ErrorIs(t, err, ErrKeyDisabled)
+}
+
+func TestCreateGrant_pendingDeletion(t *testing.T) {
+	s, _ := newTestStorage(t)
+	keyID := newSymmetricKey(t, s)
+	_, err := s.ScheduleKeyDeletion(keyID, 7)
+	require.NoError(t, err)
+	_, err = s.CreateGrant(keyID, CreateGrantInput{
+		GranteePrincipal: "arn:aws:iam::000000000000:role/r",
+		Operations:       []string{"Decrypt"},
+	})
+	require.ErrorIs(t, err, ErrInvalidKeyState)
+}
+
+func TestListGrants_empty(t *testing.T) {
+	s, _ := newTestStorage(t)
+	keyID := newSymmetricKey(t, s)
+	grants, nextMarker, err := s.ListGrants(keyID, "", "", 50, "")
+	require.NoError(t, err)
+	assert.Empty(t, grants)
+	assert.Empty(t, nextMarker)
+}
+
+func TestListGrants_filterGrantId(t *testing.T) {
+	s, _ := newTestStorage(t)
+	keyID := newSymmetricKey(t, s)
+	g1 := mustCreateGrantStorage(t, s, keyID)
+	mustCreateGrantStorage(t, s, keyID)
+
+	grants, _, err := s.ListGrants(keyID, g1.GrantId, "", 50, "")
+	require.NoError(t, err)
+	require.Len(t, grants, 1)
+	assert.Equal(t, g1.GrantId, grants[0].GrantId)
+}
+
+func TestListGrants_filterGranteePrincipal(t *testing.T) {
+	s, _ := newTestStorage(t)
+	keyID := newSymmetricKey(t, s)
+	g1, err := s.CreateGrant(keyID, CreateGrantInput{
+		GranteePrincipal: "arn:aws:iam::000000000000:role/a",
+		Operations:       []string{"Decrypt"},
+	})
+	require.NoError(t, err)
+	_, err = s.CreateGrant(keyID, CreateGrantInput{
+		GranteePrincipal: "arn:aws:iam::000000000000:role/b",
+		Operations:       []string{"Encrypt"},
+	})
+	require.NoError(t, err)
+
+	grants, _, err := s.ListGrants(keyID, "", "arn:aws:iam::000000000000:role/a", 50, "")
+	require.NoError(t, err)
+	require.Len(t, grants, 1)
+	assert.Equal(t, g1.GrantId, grants[0].GrantId)
+}
+
+func TestListGrants_pendingDeletion(t *testing.T) {
+	s, _ := newTestStorage(t)
+	keyID := newSymmetricKey(t, s)
+	_, err := s.ScheduleKeyDeletion(keyID, 7)
+	require.NoError(t, err)
+	_, _, err = s.ListGrants(keyID, "", "", 50, "")
+	require.ErrorIs(t, err, ErrInvalidKeyState)
+}
+
+func TestListGrants_staleMarker(t *testing.T) {
+	s, _ := newTestStorage(t)
+	keyID := newSymmetricKey(t, s)
+	mustCreateGrantStorage(t, s, keyID)
+	mustCreateGrantStorage(t, s, keyID)
+
+	// All-zeros UUID sorts before all random UUIDs; binary search returns start=0.
+	grants, _, err := s.ListGrants(keyID, "", "", 50, "00000000-0000-0000-0000-000000000000")
+	require.NoError(t, err)
+	assert.Len(t, grants, 2)
+}
+
+func TestListGrants_markerPastEnd(t *testing.T) {
+	s, _ := newTestStorage(t)
+	keyID := newSymmetricKey(t, s)
+	mustCreateGrantStorage(t, s, keyID)
+
+	// "ffffffff-..." sorts after all random UUIDs; binary search returns start=len.
+	grants, _, err := s.ListGrants(keyID, "", "", 50, "ffffffff-ffff-ffff-ffff-ffffffffffff")
+	require.NoError(t, err)
+	assert.Empty(t, grants)
+}
+
+func TestRevokeGrant_basic(t *testing.T) {
+	s, _ := newTestStorage(t)
+	keyID := newSymmetricKey(t, s)
+	g := mustCreateGrantStorage(t, s, keyID)
+	require.NoError(t, s.RevokeGrant(keyID, g.GrantId))
+
+	grants, _, err := s.ListGrants(keyID, "", "", 50, "")
+	require.NoError(t, err)
+	assert.Empty(t, grants)
+}
+
+func TestRevokeGrant_notFound(t *testing.T) {
+	s, _ := newTestStorage(t)
+	keyID := newSymmetricKey(t, s)
+	err := s.RevokeGrant(keyID, "00000000-0000-0000-0000-000000000000")
+	require.ErrorIs(t, err, ErrGrantNotFound)
+}
+
+func TestRevokeGrant_pendingDeletion(t *testing.T) {
+	s, _ := newTestStorage(t)
+	keyID := newSymmetricKey(t, s)
+	g := mustCreateGrantStorage(t, s, keyID)
+	_, err := s.ScheduleKeyDeletion(keyID, 7)
+	require.NoError(t, err)
+	err = s.RevokeGrant(keyID, g.GrantId)
+	require.ErrorIs(t, err, ErrInvalidKeyState)
+}
+
+func TestRetireGrantByToken_basic(t *testing.T) {
+	s, _ := newTestStorage(t)
+	keyID := newSymmetricKey(t, s)
+	g := mustCreateGrantStorage(t, s, keyID)
+	require.NoError(t, s.RetireGrantByToken(g.GrantToken))
+
+	grants, _, err := s.ListGrants(keyID, "", "", 50, "")
+	require.NoError(t, err)
+	assert.Empty(t, grants)
+}
+
+func TestRetireGrantByToken_notFound(t *testing.T) {
+	s, _ := newTestStorage(t)
+	err := s.RetireGrantByToken("00000000-0000-0000-0000-000000000000")
+	require.ErrorIs(t, err, ErrGrantNotFound)
+}
+
+func TestListRetirableGrants_basic(t *testing.T) {
+	s, _ := newTestStorage(t)
+	key1 := newSymmetricKey(t, s)
+	key2 := newSymmetricKey(t, s)
+	retiring := "arn:aws:iam::000000000000:role/admin"
+
+	g1, err := s.CreateGrant(key1, CreateGrantInput{
+		GranteePrincipal:  "arn:aws:iam::000000000000:role/r",
+		Operations:        []string{"Decrypt"},
+		RetiringPrincipal: retiring,
+	})
+	require.NoError(t, err)
+	g2, err := s.CreateGrant(key2, CreateGrantInput{
+		GranteePrincipal:  "arn:aws:iam::000000000000:role/r",
+		Operations:        []string{"Encrypt"},
+		RetiringPrincipal: retiring,
+	})
+	require.NoError(t, err)
+	// Grant without RetiringPrincipal should NOT appear.
+	mustCreateGrantStorage(t, s, key1)
+
+	grants, _, err := s.ListRetirableGrants(retiring, 50, "")
+	require.NoError(t, err)
+	require.Len(t, grants, 2)
+	ids := []string{grants[0].GrantId, grants[1].GrantId}
+	assert.ElementsMatch(t, []string{g1.GrantId, g2.GrantId}, ids)
+}
+
+func TestListGrantsForKeyLocked_skipsSubdirAndNonJson(t *testing.T) {
+	s, dir := newTestStorage(t)
+	keyID := newSymmetricKey(t, s)
+	mustCreateGrantStorage(t, s, keyID)
+
+	gDir := filepath.Join(dir, "kms", "keys", keyID, "grants")
+	// Create a subdirectory — should be skipped.
+	require.NoError(t, os.MkdirAll(filepath.Join(gDir, "subdir"), 0o750))
+	// Create a non-.json file — should be skipped.
+	require.NoError(t, os.WriteFile(filepath.Join(gDir, "readme.txt"), []byte("hi"), 0o600))
+	// Create a corrupt .json file — should be skipped with a warning.
+	require.NoError(t, os.WriteFile(filepath.Join(gDir, "corrupt.json"), []byte("{bad}"), 0o600))
+
+	grants, _, err := s.ListGrants(keyID, "", "", 50, "")
+	require.NoError(t, err)
+	assert.Len(t, grants, 1)
+}

@@ -702,6 +702,26 @@ func (a *alwaysFailStore) GetPreviousKeyMaterials(string) ([]KeyMaterial, error)
 	return nil, errors.New("storage error")
 }
 
+func (a *alwaysFailStore) CreateGrant(string, CreateGrantInput) (Grant, error) {
+	return Grant{}, errors.New("storage error")
+}
+
+func (a *alwaysFailStore) ListGrants(string, string, string, int, string) ([]Grant, string, error) {
+	return nil, "", errors.New("storage error")
+}
+
+func (a *alwaysFailStore) RevokeGrant(string, string) error { return errors.New("storage error") }
+
+func (a *alwaysFailStore) RetireGrantByToken(string) error { return errors.New("storage error") }
+
+func (a *alwaysFailStore) RetireGrantByID(string, string) error {
+	return errors.New("storage error")
+}
+
+func (a *alwaysFailStore) ListRetirableGrants(string, int, string) ([]Grant, string, error) {
+	return nil, "", errors.New("storage error")
+}
+
 func newFailRouter() *Router {
 	return &Router{storage: &alwaysFailStore{}, randRead: func(b []byte) (int, error) {
 		return 0, errors.New("rand error")
@@ -1841,6 +1861,35 @@ func (p *partialFailStore) GetPreviousKeyMaterials(keyID string) ([]KeyMaterial,
 	return p.inner.GetPreviousKeyMaterials(keyID)
 }
 
+func (p *partialFailStore) CreateGrant(keyID string, in CreateGrantInput) (Grant, error) {
+	return p.inner.CreateGrant(keyID, in)
+}
+
+func (p *partialFailStore) ListGrants(
+	keyID, fID, fP string,
+	limit int,
+	marker string,
+) ([]Grant, string, error) {
+	return p.inner.ListGrants(keyID, fID, fP, limit, marker)
+}
+func (p *partialFailStore) RevokeGrant(keyID, grantID string) error {
+	return p.inner.RevokeGrant(keyID, grantID)
+}
+func (p *partialFailStore) RetireGrantByToken(token string) error {
+	return p.inner.RetireGrantByToken(token)
+}
+func (p *partialFailStore) RetireGrantByID(keyID, grantID string) error {
+	return p.inner.RetireGrantByID(keyID, grantID)
+}
+
+func (p *partialFailStore) ListRetirableGrants(
+	rp string,
+	limit int,
+	marker string,
+) ([]Grant, string, error) {
+	return p.inner.ListRetirableGrants(rp, limit, marker)
+}
+
 func TestLoadSymmetricMaterial_storageError(t *testing.T) {
 	dir := t.TempDir()
 	s, err := newStorage(dir, os.OpenRoot)
@@ -2033,6 +2082,35 @@ func (a *aliasFailStore) ListKeyRotations(
 
 func (a *aliasFailStore) GetPreviousKeyMaterials(keyID string) ([]KeyMaterial, error) {
 	return a.inner.GetPreviousKeyMaterials(keyID)
+}
+
+func (a *aliasFailStore) CreateGrant(keyID string, in CreateGrantInput) (Grant, error) {
+	return a.inner.CreateGrant(keyID, in)
+}
+
+func (a *aliasFailStore) ListGrants(
+	keyID, fID, fP string,
+	limit int,
+	marker string,
+) ([]Grant, string, error) {
+	return a.inner.ListGrants(keyID, fID, fP, limit, marker)
+}
+func (a *aliasFailStore) RevokeGrant(keyID, grantID string) error {
+	return a.inner.RevokeGrant(keyID, grantID)
+}
+func (a *aliasFailStore) RetireGrantByToken(token string) error {
+	return a.inner.RetireGrantByToken(token)
+}
+func (a *aliasFailStore) RetireGrantByID(keyID, grantID string) error {
+	return a.inner.RetireGrantByID(keyID, grantID)
+}
+
+func (a *aliasFailStore) ListRetirableGrants(
+	rp string,
+	limit int,
+	marker string,
+) ([]Grant, string, error) {
+	return a.inner.ListRetirableGrants(rp, limit, marker)
 }
 
 // makeAliasRouter creates a Router backed by aliasFailStore with a real storage as inner.
