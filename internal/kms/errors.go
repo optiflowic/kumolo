@@ -13,15 +13,17 @@ var (
 	ErrKeyMaterialCorrupted = errors.New(
 		"HMAC key material size mismatch: key was likely created before a version upgrade; recreate the key",
 	)
-	ErrAliasNotFound      = errors.New("alias not found")
-	ErrAliasAlreadyExists = errors.New("alias already exists")
-	ErrAliasLimitExceeded = errors.New("alias limit exceeded")
-	ErrKeyDisabled        = errors.New("key is disabled")
-	ErrKeyPendingDeletion = errors.New("key is pending deletion")
-	ErrInvalidKeyState    = errors.New("invalid key state for this operation")
-	ErrUnsupportedOp      = errors.New("unsupported operation for this key type")
-	ErrTagLimitExceeded   = errors.New("tag limit exceeded")
-	ErrInvalidSignature   = errors.New("invalid signature")
+	ErrAliasNotFound         = errors.New("alias not found")
+	ErrAliasAlreadyExists    = errors.New("alias already exists")
+	ErrAliasLimitExceeded    = errors.New("alias limit exceeded")
+	ErrKeyDisabled           = errors.New("key is disabled")
+	ErrKeyPendingDeletion    = errors.New("key is pending deletion")
+	ErrInvalidKeyState       = errors.New("invalid key state for this operation")
+	ErrUnsupportedOp         = errors.New("unsupported operation for this key type")
+	ErrTagLimitExceeded      = errors.New("tag limit exceeded")
+	ErrInvalidSignature      = errors.New("invalid signature")
+	ErrOnDemandRotationLimit = errors.New("on-demand rotation limit exceeded (max 25)")
+	ErrInvalidMarker         = errors.New("invalid pagination marker")
 )
 
 type errResponse struct {

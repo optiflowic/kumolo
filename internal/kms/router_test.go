@@ -690,6 +690,18 @@ func (a *alwaysFailStore) UntagResource(
 	return errors.New("storage error")
 }
 
+func (a *alwaysFailStore) RotateKeyOnDemand(string) (KeyMetadata, error) {
+	return KeyMetadata{}, errors.New("storage error")
+}
+
+func (a *alwaysFailStore) ListKeyRotations(string, int, string) ([]RotationRecord, string, error) {
+	return nil, "", errors.New("storage error")
+}
+
+func (a *alwaysFailStore) GetPreviousKeyMaterials(string) ([]KeyMaterial, error) {
+	return nil, errors.New("storage error")
+}
+
 func newFailRouter() *Router {
 	return &Router{storage: &alwaysFailStore{}, randRead: func(b []byte) (int, error) {
 		return 0, errors.New("rand error")
@@ -1813,6 +1825,22 @@ func (p *partialFailStore) UntagResource(keyID string, tagKeys []string) error {
 	return p.inner.UntagResource(keyID, tagKeys)
 }
 
+func (p *partialFailStore) RotateKeyOnDemand(keyID string) (KeyMetadata, error) {
+	return p.inner.RotateKeyOnDemand(keyID)
+}
+
+func (p *partialFailStore) ListKeyRotations(
+	keyID string,
+	limit int,
+	marker string,
+) ([]RotationRecord, string, error) {
+	return p.inner.ListKeyRotations(keyID, limit, marker)
+}
+
+func (p *partialFailStore) GetPreviousKeyMaterials(keyID string) ([]KeyMaterial, error) {
+	return p.inner.GetPreviousKeyMaterials(keyID)
+}
+
 func TestLoadSymmetricMaterial_storageError(t *testing.T) {
 	dir := t.TempDir()
 	s, err := newStorage(dir, os.OpenRoot)
@@ -1989,6 +2017,22 @@ func (a *aliasFailStore) TagResource(keyID string, tags []TagEntry) error {
 }
 func (a *aliasFailStore) UntagResource(keyID string, tagKeys []string) error {
 	return a.inner.UntagResource(keyID, tagKeys)
+}
+
+func (a *aliasFailStore) RotateKeyOnDemand(keyID string) (KeyMetadata, error) {
+	return a.inner.RotateKeyOnDemand(keyID)
+}
+
+func (a *aliasFailStore) ListKeyRotations(
+	keyID string,
+	limit int,
+	marker string,
+) ([]RotationRecord, string, error) {
+	return a.inner.ListKeyRotations(keyID, limit, marker)
+}
+
+func (a *aliasFailStore) GetPreviousKeyMaterials(keyID string) ([]KeyMaterial, error) {
+	return a.inner.GetPreviousKeyMaterials(keyID)
 }
 
 // makeAliasRouter creates a Router backed by aliasFailStore with a real storage as inner.

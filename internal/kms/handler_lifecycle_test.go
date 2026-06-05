@@ -1,9 +1,12 @@
 package kms
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -1198,6 +1201,348 @@ func TestTagRoundtrip(t *testing.T) {
 	assert.Equal(t, "myapp", tags[0].(map[string]any)["TagValue"])
 }
 
+// ---- RotateKeyOnDemand -------------------------------------------------------
+
+// mustRotateKeyOnDemand rotates a key via the API and fails the test if it does not succeed.
+func mustRotateKeyOnDemand(t *testing.T, ro *Router, keyID string) {
+	t.Helper()
+	body, _ := json.Marshal(map[string]any{"KeyId": keyID})
+	w := kmsReq(t, ro, "RotateKeyOnDemand", string(body))
+	require.Equal(t, http.StatusOK, w.Code, "RotateKeyOnDemand should succeed")
+}
+
+func TestHandleRotateKeyOnDemand(t *testing.T) {
+	t.Run("200 rotates key and returns ARN", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+
+		w := kmsReq(t, ro, "RotateKeyOnDemand", `{"KeyId":"`+keyID+`"}`)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Contains(t, resp["KeyId"], keyID)
+	})
+
+	t.Run("200 via alias", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		body, _ := json.Marshal(map[string]any{"AliasName": "alias/mykey", "TargetKeyId": keyID})
+		w := kmsReq(t, ro, "CreateAlias", string(body))
+		require.Equal(t, http.StatusOK, w.Code)
+
+		w2 := kmsReq(t, ro, "RotateKeyOnDemand", `{"KeyId":"alias/mykey"}`)
+		assert.Equal(t, http.StatusOK, w2.Code)
+	})
+
+	t.Run("400 for missing KeyId", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "RotateKeyOnDemand", `{}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 for invalid JSON", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "RotateKeyOnDemand", `{bad json}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 NotFoundException for non-existent key", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "RotateKeyOnDemand", `{"KeyId":"00000000-0000-0000-0000-000000000000"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "NotFoundException")
+	})
+
+	t.Run("400 DisabledException for disabled key", func(t *testing.T) {
+		dir := t.TempDir()
+		s, err := newStorage(dir, os.OpenRoot)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = s.Close() })
+		ro := NewRouter(s)
+
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustDisableKey(t, s, keyID)
+
+		w := kmsReq(t, ro, "RotateKeyOnDemand", `{"KeyId":"`+keyID+`"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "DisabledException")
+	})
+
+	t.Run("400 KMSInvalidStateException for PendingDeletion key", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustScheduleKeyDeletion(t, ro, keyID)
+
+		w := kmsReq(t, ro, "RotateKeyOnDemand", `{"KeyId":"`+keyID+`"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "KMSInvalidStateException")
+	})
+
+	t.Run("400 UnsupportedOperationException for non-SYMMETRIC key", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{"KeySpec":"RSA_2048","KeyUsage":"SIGN_VERIFY"}`)
+
+		w := kmsReq(t, ro, "RotateKeyOnDemand", `{"KeyId":"`+keyID+`"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "UnsupportedOperationException")
+	})
+
+	t.Run("400 LimitExceededException after 25 on-demand rotations", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+
+		for i := range 25 {
+			w := kmsReq(t, ro, "RotateKeyOnDemand", `{"KeyId":"`+keyID+`"}`)
+			require.Equal(t, http.StatusOK, w.Code, "rotation %d should succeed", i+1)
+		}
+
+		w := kmsReq(t, ro, "RotateKeyOnDemand", `{"KeyId":"`+keyID+`"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "LimitExceededException")
+	})
+
+	t.Run("400 for alias not found", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "RotateKeyOnDemand", `{"KeyId":"alias/nonexistent"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "NotFoundException")
+	})
+
+	t.Run("500 on storage failure", func(t *testing.T) {
+		ro := newFailRouter()
+		w := kmsReq(t, ro, "RotateKeyOnDemand", `{"KeyId":"00000000-0000-0000-0000-000000000001"}`)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assertErrType(t, w, "KMSInternalException")
+	})
+}
+
+// ---- ListKeyRotations --------------------------------------------------------
+
+func TestHandleListKeyRotations(t *testing.T) {
+	t.Run("200 empty history for new key", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+
+		w := kmsReq(t, ro, "ListKeyRotations", `{"KeyId":"`+keyID+`"}`)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, false, resp["Truncated"])
+		assert.Nil(t, resp["NextMarker"])
+		rotations := resp["Rotations"].([]any)
+		assert.Empty(t, rotations)
+	})
+
+	t.Run("200 ON_DEMAND record appears after rotation", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustRotateKeyOnDemand(t, ro, keyID)
+
+		w := kmsReq(t, ro, "ListKeyRotations", `{"KeyId":"`+keyID+`"}`)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		rotations := resp["Rotations"].([]any)
+		require.Len(t, rotations, 1)
+		rec := rotations[0].(map[string]any)
+		assert.Equal(t, "ON_DEMAND", rec["RotationType"])
+		assert.Contains(t, rec["KeyId"], keyID)
+		assert.NotZero(t, rec["RotationDate"])
+	})
+
+	t.Run("200 multiple rotations in insertion order", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustRotateKeyOnDemand(t, ro, keyID)
+		mustRotateKeyOnDemand(t, ro, keyID)
+		mustRotateKeyOnDemand(t, ro, keyID)
+
+		w := kmsReq(t, ro, "ListKeyRotations", `{"KeyId":"`+keyID+`"}`)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		rotations := resp["Rotations"].([]any)
+		assert.Len(t, rotations, 3)
+		for _, r := range rotations {
+			assert.Equal(t, "ON_DEMAND", r.(map[string]any)["RotationType"])
+		}
+	})
+
+	t.Run("200 pagination with Limit and Marker", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustRotateKeyOnDemand(t, ro, keyID)
+		mustRotateKeyOnDemand(t, ro, keyID)
+		mustRotateKeyOnDemand(t, ro, keyID)
+
+		// Page 1: limit 2
+		body, _ := json.Marshal(map[string]any{"KeyId": keyID, "Limit": 2})
+		w := kmsReq(t, ro, "ListKeyRotations", string(body))
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var page1 map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &page1))
+		assert.Equal(t, true, page1["Truncated"])
+		assert.Len(t, page1["Rotations"].([]any), 2)
+		nextMarker := page1["NextMarker"].(string)
+		assert.NotEmpty(t, nextMarker)
+
+		// Page 2 using NextMarker
+		body2, _ := json.Marshal(map[string]any{"KeyId": keyID, "Marker": nextMarker})
+		w2 := kmsReq(t, ro, "ListKeyRotations", string(body2))
+		require.Equal(t, http.StatusOK, w2.Code)
+
+		var page2 map[string]any
+		require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &page2))
+		assert.Equal(t, false, page2["Truncated"])
+		assert.Len(t, page2["Rotations"].([]any), 1)
+		assert.Nil(t, page2["NextMarker"])
+	})
+
+	t.Run("400 for missing KeyId", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "ListKeyRotations", `{}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 for invalid JSON", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "ListKeyRotations", `{bad json}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run("400 ValidationException for Limit out of range", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+
+		for _, limit := range []int{0, 1001} {
+			body, _ := json.Marshal(map[string]any{"KeyId": keyID, "Limit": limit})
+			w := kmsReq(t, ro, "ListKeyRotations", string(body))
+			assert.Equal(t, http.StatusBadRequest, w.Code, "limit=%d", limit)
+			assertErrType(t, w, "ValidationException")
+		}
+	})
+
+	t.Run("400 NotFoundException for non-existent key", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "ListKeyRotations", `{"KeyId":"00000000-0000-0000-0000-000000000000"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "NotFoundException")
+	})
+
+	t.Run("400 KMSInvalidStateException for PendingDeletion key", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustScheduleKeyDeletion(t, ro, keyID)
+
+		w := kmsReq(t, ro, "ListKeyRotations", `{"KeyId":"`+keyID+`"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "KMSInvalidStateException")
+	})
+
+	t.Run("400 UnsupportedOperationException for non-SYMMETRIC key", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{"KeySpec":"RSA_2048","KeyUsage":"SIGN_VERIFY"}`)
+
+		w := kmsReq(t, ro, "ListKeyRotations", `{"KeyId":"`+keyID+`"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "UnsupportedOperationException")
+	})
+
+	t.Run("400 InvalidMarkerException for unknown marker", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		mustRotateKeyOnDemand(t, ro, keyID)
+
+		body, _ := json.Marshal(map[string]any{"KeyId": keyID, "Marker": "not-a-real-marker"})
+		w := kmsReq(t, ro, "ListKeyRotations", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "InvalidMarkerException")
+	})
+
+	t.Run("400 for alias not found", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "ListKeyRotations", `{"KeyId":"alias/nonexistent"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "NotFoundException")
+	})
+
+	t.Run("500 on storage failure", func(t *testing.T) {
+		ro := newFailRouter()
+		w := kmsReq(t, ro, "ListKeyRotations", `{"KeyId":"00000000-0000-0000-0000-000000000001"}`)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assertErrType(t, w, "KMSInternalException")
+	})
+}
+
+// ---- Decrypt and ReEncrypt with rotated key material -------------------------
+
+func TestDecrypt_afterRotation(t *testing.T) {
+	ro := newTestRouter(t)
+	keyID := mustCreateKey(t, ro, `{}`)
+
+	// Encrypt with original key material.
+	cipherBlob := mustEncrypt(t, ro, keyID, []byte("rotate-test"))
+
+	// Rotate the key.
+	mustRotateKeyOnDemand(t, ro, keyID)
+
+	// Decrypt must still succeed using the retained old material.
+	body, _ := json.Marshal(map[string]any{"CiphertextBlob": cipherBlob})
+	w := kmsReq(t, ro, "Decrypt", string(body))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.NotNil(t, resp["Plaintext"])
+	got, err := base64.StdEncoding.DecodeString(resp["Plaintext"].(string))
+	require.NoError(t, err)
+	assert.Equal(t, []byte("rotate-test"), got)
+}
+
+func TestReEncrypt_afterRotation(t *testing.T) {
+	ro := newTestRouter(t)
+	srcKeyID := mustCreateKey(t, ro, `{}`)
+	dstKeyID := mustCreateKey(t, ro, `{}`)
+
+	cipherBlob := mustEncrypt(t, ro, srcKeyID, []byte("reencrypt-rotate-test"))
+
+	// Rotate the source key.
+	mustRotateKeyOnDemand(t, ro, srcKeyID)
+
+	// ReEncrypt from old-material ciphertext to dstKey must succeed.
+	body, _ := json.Marshal(map[string]any{
+		"CiphertextBlob":   cipherBlob,
+		"DestinationKeyId": dstKeyID,
+	})
+	w := kmsReq(t, ro, "ReEncrypt", string(body))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var reEncResp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &reEncResp))
+	newCipherBlob := reEncResp["CiphertextBlob"].(string)
+
+	// Decrypt the re-encrypted ciphertext and verify plaintext integrity.
+	decBody, _ := json.Marshal(map[string]any{"CiphertextBlob": newCipherBlob, "KeyId": dstKeyID})
+	decW := kmsReq(t, ro, "Decrypt", string(decBody))
+	require.Equal(t, http.StatusOK, decW.Code)
+
+	var decResp map[string]any
+	require.NoError(t, json.Unmarshal(decW.Body.Bytes(), &decResp))
+	require.NotNil(t, decResp["Plaintext"])
+	got, err := base64.StdEncoding.DecodeString(decResp["Plaintext"].(string))
+	require.NoError(t, err)
+	assert.Equal(t, []byte("reencrypt-rotate-test"), got)
+}
+
 func TestKeyLifecycle_scheduleAndCancelRoundtrip(t *testing.T) {
 	ro := newTestRouter(t)
 	keyID := mustCreateKey(t, ro, `{}`)
@@ -1222,4 +1567,77 @@ func TestKeyLifecycle_scheduleAndCancelRoundtrip(t *testing.T) {
 	var desc3 map[string]any
 	require.NoError(t, json.Unmarshal(w3.Body.Bytes(), &desc3))
 	assert.Equal(t, "Disabled", desc3["KeyMetadata"].(map[string]any)["KeyState"])
+}
+
+// ---- Decrypt / ReEncrypt fallback with GetPreviousKeyMaterials error --------
+
+// prevMatsErrStore wraps *Storage but makes GetPreviousKeyMaterials always fail.
+type prevMatsErrStore struct {
+	*Storage
+}
+
+func (p *prevMatsErrStore) GetPreviousKeyMaterials(string) ([]KeyMaterial, error) {
+	return nil, errors.New("storage error")
+}
+
+func TestDecrypt_prevMatsStorageError(t *testing.T) {
+	s, _ := newTestStorage(t)
+	ro := NewRouter(&prevMatsErrStore{s})
+
+	keyID := mustCreateKey(t, ro, `{}`)
+	cipherBlob := mustEncrypt(t, ro, keyID, []byte("test"))
+
+	// Rotate so the current material is replaced; old ciphertext will fail openEnvelope.
+	mustRotateKeyOnDemand(t, ro, keyID)
+
+	// Decrypt triggers the fallback, GetPreviousKeyMaterials returns error (warn path),
+	// and the original openEnvelope failure is preserved → InvalidCiphertextException.
+	body, _ := json.Marshal(map[string]any{"CiphertextBlob": cipherBlob})
+	w := kmsReq(t, ro, "Decrypt", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, "InvalidCiphertextException")
+}
+
+func TestReEncrypt_prevMatsStorageError(t *testing.T) {
+	s, _ := newTestStorage(t)
+	ro := NewRouter(&prevMatsErrStore{s})
+
+	srcKeyID := mustCreateKey(t, ro, `{}`)
+	dstKeyID := mustCreateKey(t, ro, `{}`)
+	cipherBlob := mustEncrypt(t, ro, srcKeyID, []byte("test"))
+
+	mustRotateKeyOnDemand(t, ro, srcKeyID)
+
+	body, _ := json.Marshal(map[string]any{
+		"CiphertextBlob":   cipherBlob,
+		"DestinationKeyId": dstKeyID,
+	})
+	w := kmsReq(t, ro, "ReEncrypt", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, "InvalidCiphertextException")
+}
+
+// ---- ListKeyRotations null history edge case --------------------------------
+
+func TestHandleListKeyRotations_nullHistoryReturnsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	s, err := newStorage(dir, os.OpenRoot)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	ro := NewRouter(s)
+
+	keyID := mustCreateKey(t, ro, `{}`)
+
+	// Write literal JSON null to simulate a nil slice from readRotationHistoryLocked.
+	histPath := filepath.Join(dir, "kms", "keys", keyID, "rotation_history.json")
+	require.NoError(t, os.WriteFile(histPath, []byte("null"), 0o600))
+
+	w := kmsReq(t, ro, "ListKeyRotations", `{"KeyId":"`+keyID+`"}`)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	rotations := resp["Rotations"].([]any)
+	assert.Empty(t, rotations)
+	assert.Equal(t, false, resp["Truncated"])
 }

@@ -1727,3 +1727,134 @@ func TestResolveKeyForEncryption(t *testing.T) {
 		assert.ErrorIs(t, err, ErrKeyNotFound)
 	})
 }
+
+// ---- RotateKeyOnDemand error paths ------------------------------------------
+
+func TestRotateKeyOnDemand_historyReadError(t *testing.T) {
+	s, dir := newTestStorage(t)
+	keyID := newSymmetricKey(t, s)
+	histPath := filepath.Join(dir, "kms", "keys", keyID, "rotation_history.json")
+	require.NoError(t, os.WriteFile(histPath, []byte("{bad json}"), 0o600))
+	_, err := s.RotateKeyOnDemand(keyID)
+	require.Error(t, err)
+}
+
+func TestRotateKeyOnDemand_materialReadError(t *testing.T) {
+	s, dir := newTestStorage(t)
+	keyID := newSymmetricKey(t, s)
+	matPath := filepath.Join(dir, "kms", "keys", keyID, "material.json")
+	require.NoError(t, os.Remove(matPath))
+	_, err := s.RotateKeyOnDemand(keyID)
+	require.Error(t, err)
+}
+
+func TestRotateKeyOnDemand_mkdirFnFailure(t *testing.T) {
+	s, _ := newTestStorage(t)
+	keyID := newSymmetricKey(t, s)
+	s.mkdirFn = func(string, os.FileMode) error { return errors.New("mkdir fail") }
+	_, err := s.RotateKeyOnDemand(keyID)
+	require.Error(t, err)
+}
+
+func TestRotateKeyOnDemand_randReadFailures(t *testing.T) {
+	t.Run("first randRead failure", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		keyID := newSymmetricKey(t, s)
+		callCount := 0
+		orig := s.randRead
+		s.randRead = func(b []byte) (int, error) {
+			callCount++
+			if callCount == 1 {
+				return 0, errors.New("rand fail")
+			}
+			return orig(b)
+		}
+		_, err := s.RotateKeyOnDemand(keyID)
+		require.Error(t, err)
+	})
+
+	t.Run("second randRead failure", func(t *testing.T) {
+		s, _ := newTestStorage(t)
+		keyID := newSymmetricKey(t, s)
+		callCount := 0
+		orig := s.randRead
+		s.randRead = func(b []byte) (int, error) {
+			callCount++
+			if callCount == 2 {
+				return 0, errors.New("rand fail")
+			}
+			return orig(b)
+		}
+		_, err := s.RotateKeyOnDemand(keyID)
+		require.Error(t, err)
+	})
+}
+
+// ---- ListKeyRotations error paths -------------------------------------------
+
+func TestListKeyRotations_historyReadError(t *testing.T) {
+	s, dir := newTestStorage(t)
+	keyID := newSymmetricKey(t, s)
+	histPath := filepath.Join(dir, "kms", "keys", keyID, "rotation_history.json")
+	require.NoError(t, os.WriteFile(histPath, []byte("{bad json}"), 0o600))
+	_, _, err := s.ListKeyRotations(keyID, 100, "")
+	require.Error(t, err)
+}
+
+// ---- GetPreviousKeyMaterials error paths ------------------------------------
+
+func TestGetPreviousKeyMaterials_keyNotFound(t *testing.T) {
+	s, _ := newTestStorage(t)
+	_, err := s.GetPreviousKeyMaterials("00000000-0000-0000-0000-000000000000")
+	require.ErrorIs(t, err, ErrKeyNotFound)
+}
+
+func TestGetPreviousKeyMaterials_listDirFnFailure(t *testing.T) {
+	s, _ := newTestStorage(t)
+	keyID := newSymmetricKey(t, s)
+	_, err := s.RotateKeyOnDemand(keyID)
+	require.NoError(t, err)
+	orig := s.listDirFn
+	expectedPath := filepath.Join("keys", keyID, "materials")
+	s.listDirFn = func(name string) ([]os.DirEntry, error) {
+		if name == expectedPath {
+			return nil, errors.New("list fail")
+		}
+		return orig(name)
+	}
+	_, err = s.GetPreviousKeyMaterials(keyID)
+	require.Error(t, err)
+}
+
+func TestGetPreviousKeyMaterials_skipsDirEntry(t *testing.T) {
+	s, dir := newTestStorage(t)
+	keyID := newSymmetricKey(t, s)
+	matDir := filepath.Join(dir, "kms", "keys", keyID, "materials")
+	require.NoError(t, os.MkdirAll(matDir, 0o750))
+	require.NoError(t, os.Mkdir(filepath.Join(matDir, "subdir"), 0o750))
+	mats, err := s.GetPreviousKeyMaterials(keyID)
+	require.NoError(t, err)
+	assert.Empty(t, mats)
+}
+
+func TestGetPreviousKeyMaterials_skipsNonJsonFile(t *testing.T) {
+	s, dir := newTestStorage(t)
+	keyID := newSymmetricKey(t, s)
+	matDir := filepath.Join(dir, "kms", "keys", keyID, "materials")
+	require.NoError(t, os.MkdirAll(matDir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(matDir, "readme.txt"), []byte("hello"), 0o600))
+	mats, err := s.GetPreviousKeyMaterials(keyID)
+	require.NoError(t, err)
+	assert.Empty(t, mats)
+}
+
+func TestGetPreviousKeyMaterials_skipsUnreadableJson(t *testing.T) {
+	s, dir := newTestStorage(t)
+	keyID := newSymmetricKey(t, s)
+	matDir := filepath.Join(dir, "kms", "keys", keyID, "materials")
+	require.NoError(t, os.MkdirAll(matDir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(matDir, "bad.json"), []byte("{corrupt}"), 0o600))
+	mats, err := s.GetPreviousKeyMaterials(keyID)
+	require.NoError(t, err)
+	assert.Empty(t, mats)
+}
