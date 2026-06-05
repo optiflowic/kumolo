@@ -1314,7 +1314,6 @@ func (s *Storage) CreateGrant(keyID string, in CreateGrantInput) (Grant, error) 
 
 	existing, err := s.listDirFn(grantsDir(keyID))
 	if err != nil {
-		// untestable: listDirFn only fails on OS-level errors
 		return Grant{}, fmt.Errorf("count grants: %w", err)
 	}
 	grantCount := 0
@@ -1365,7 +1364,6 @@ func (s *Storage) listGrantsForKeyLocked(keyID string) ([]Grant, error) {
 		return nil, nil
 	}
 	if err != nil {
-		// untestable: listDirFn only fails on OS-level errors beyond ErrNotExist
 		return nil, fmt.Errorf("list grants dir: %w", err)
 	}
 
@@ -1486,7 +1484,6 @@ func (s *Storage) RevokeGrant(keyID, grantID string) error {
 		if errors.Is(err, os.ErrNotExist) {
 			return ErrGrantNotFound
 		}
-		// untestable: removeFile only fails on OS-level errors beyond ErrNotExist
 		return fmt.Errorf("remove grant: %w", err)
 	}
 	return nil
@@ -1499,19 +1496,16 @@ func (s *Storage) RetireGrantByToken(grantToken string) error {
 
 	keyIDs, err := s.listKeyIDsLocked()
 	if err != nil {
-		// untestable: listKeyIDsLocked only fails on OS-level errors
 		return fmt.Errorf("list keys: %w", err)
 	}
 	for _, keyID := range keyIDs {
 		grants, err := s.listGrantsForKeyLocked(keyID)
 		if err != nil {
-			// untestable: listGrantsForKeyLocked only fails on OS-level errors
 			return err
 		}
 		for _, g := range grants {
 			if g.GrantToken == grantToken {
 				if err := s.removeFile(grantPath(keyID, g.GrantId)); err != nil {
-					// untestable: removeFile only fails on OS-level errors
 					return fmt.Errorf("remove grant: %w", err)
 				}
 				return nil

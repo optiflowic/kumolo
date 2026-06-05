@@ -1936,6 +1936,24 @@ func TestCreateGrant_limitExceeded(t *testing.T) {
 	require.ErrorIs(t, err, ErrGrantLimitExceeded)
 }
 
+func TestCreateGrant_listDirError(t *testing.T) {
+	s, _ := newTestStorage(t)
+	keyID := newSymmetricKey(t, s)
+	origListDir := s.listDirFn
+	s.listDirFn = func(name string) ([]os.DirEntry, error) {
+		if name == grantsDir(keyID) {
+			return nil, errors.New("simulated list failure")
+		}
+		return origListDir(name)
+	}
+	_, err := s.CreateGrant(keyID, CreateGrantInput{
+		GranteePrincipal: "arn:aws:iam::000000000000:role/tester",
+		Operations:       []string{"Decrypt"},
+	})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "count grants")
+}
+
 // fakeDirEntry is a minimal os.DirEntry for injection in tests.
 type fakeDirEntry struct{ filename string }
 
@@ -2035,6 +2053,26 @@ func TestRevokeGrant_notFound(t *testing.T) {
 	require.ErrorIs(t, err, ErrGrantNotFound)
 }
 
+func TestRevokeGrant_removeRace(t *testing.T) {
+	// Simulate the file disappearing between stat and removeFile (TOCTOU).
+	s, _ := newTestStorage(t)
+	keyID := newSymmetricKey(t, s)
+	g := mustCreateGrantStorage(t, s, keyID)
+	s.removeFile = func(string) error { return os.ErrNotExist }
+	err := s.RevokeGrant(keyID, g.GrantId)
+	require.ErrorIs(t, err, ErrGrantNotFound)
+}
+
+func TestRevokeGrant_removeFails(t *testing.T) {
+	s, _ := newTestStorage(t)
+	keyID := newSymmetricKey(t, s)
+	g := mustCreateGrantStorage(t, s, keyID)
+	s.removeFile = func(string) error { return errors.New("disk full") }
+	err := s.RevokeGrant(keyID, g.GrantId)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "remove grant")
+}
+
 func TestRevokeGrant_pendingDeletion(t *testing.T) {
 	s, _ := newTestStorage(t)
 	keyID := newSymmetricKey(t, s)
@@ -2060,6 +2098,40 @@ func TestRetireGrantByToken_notFound(t *testing.T) {
 	s, _ := newTestStorage(t)
 	err := s.RetireGrantByToken("00000000-0000-0000-0000-000000000000")
 	require.ErrorIs(t, err, ErrGrantNotFound)
+}
+
+func TestRetireGrantByToken_listKeysError(t *testing.T) {
+	s, _ := newTestStorage(t)
+	s.listDirFn = func(string) ([]os.DirEntry, error) { return nil, errors.New("list failed") }
+	err := s.RetireGrantByToken("00000000-0000-0000-0000-000000000000")
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "list keys")
+}
+
+func TestRetireGrantByToken_listGrantsError(t *testing.T) {
+	s, _ := newTestStorage(t)
+	keyID := newSymmetricKey(t, s)
+	mustCreateGrantStorage(t, s, keyID)
+	origListDir := s.listDirFn
+	s.listDirFn = func(name string) ([]os.DirEntry, error) {
+		if name == grantsDir(keyID) {
+			return nil, errors.New("grants list failed")
+		}
+		return origListDir(name)
+	}
+	err := s.RetireGrantByToken("00000000-0000-0000-0000-000000000000")
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "grants list failed")
+}
+
+func TestRetireGrantByToken_removeFails(t *testing.T) {
+	s, _ := newTestStorage(t)
+	keyID := newSymmetricKey(t, s)
+	g := mustCreateGrantStorage(t, s, keyID)
+	s.removeFile = func(string) error { return errors.New("disk full") }
+	err := s.RetireGrantByToken(g.GrantToken)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "remove grant")
 }
 
 func TestRetireGrantByID_basic(t *testing.T) {
