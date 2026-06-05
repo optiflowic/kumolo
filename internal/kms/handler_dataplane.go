@@ -461,7 +461,9 @@ func (ro *Router) handleDecrypt(w http.ResponseWriter, body []byte) {
 	_, plaintext, err := openEnvelope(req.CiphertextBlob, mat, req.EncryptionContext)
 	if err != nil {
 		// Try previous key material versions retained after on-demand rotation.
-		if prevMats, prevErr := ro.storage.GetPreviousKeyMaterials(keyID); prevErr == nil {
+		if prevMats, prevErr := ro.storage.GetPreviousKeyMaterials(keyID); prevErr != nil {
+			slog.Warn("kms: GetPreviousKeyMaterials failed", "keyID", keyID, "err", prevErr)
+		} else {
 			for _, prev := range prevMats {
 				if _, pt, tryErr := openEnvelope(req.CiphertextBlob, prev, req.EncryptionContext); tryErr == nil {
 					plaintext = pt
@@ -624,7 +626,9 @@ func (ro *Router) handleReEncrypt(w http.ResponseWriter, body []byte) {
 	_, plaintext, err := openEnvelope(req.CiphertextBlob, srcMat, req.SourceEncryptionContext)
 	if err != nil {
 		// Try previous key material versions retained after on-demand rotation.
-		if prevMats, prevErr := ro.storage.GetPreviousKeyMaterials(srcKeyID); prevErr == nil {
+		if prevMats, prevErr := ro.storage.GetPreviousKeyMaterials(srcKeyID); prevErr != nil {
+			slog.Warn("kms: GetPreviousKeyMaterials failed", "keyID", srcKeyID, "err", prevErr)
+		} else {
 			for _, prev := range prevMats {
 				if _, pt, tryErr := openEnvelope(req.CiphertextBlob, prev, req.SourceEncryptionContext); tryErr == nil {
 					plaintext = pt

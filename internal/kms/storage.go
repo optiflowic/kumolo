@@ -1134,6 +1134,7 @@ func (s *Storage) RotateKeyOnDemand(keyID string) (KeyMetadata, error) {
 		return KeyMetadata{}, fmt.Errorf("create materials dir: %w", mkErr)
 	}
 	if err := s.writeJSON(filepath.Join(materialsDir, curMat.KeyMaterialID+".json"), curMat); err != nil {
+		// untestable: writeJSON failure requires OS-level I/O error simulation
 		return KeyMetadata{}, fmt.Errorf("save previous material: %w", err)
 	}
 
@@ -1150,6 +1151,7 @@ func (s *Storage) RotateKeyOnDemand(keyID string) (KeyMetadata, error) {
 		KeyMaterialID: fmt.Sprintf("%x", matIDBytes),
 	}
 	if err := s.writeJSON(filepath.Join("keys", keyID, "material.json"), newMat); err != nil {
+		// untestable: writeJSON failure requires OS-level I/O error simulation
 		return KeyMetadata{}, fmt.Errorf("write new material: %w", err)
 	}
 
@@ -1160,6 +1162,7 @@ func (s *Storage) RotateKeyOnDemand(keyID string) (KeyMetadata, error) {
 	}
 	history = append(history, record)
 	if err := s.writeJSON(filepath.Join("keys", keyID, "rotation_history.json"), history); err != nil {
+		// untestable: writeJSON failure requires OS-level I/O error simulation
 		return KeyMetadata{}, fmt.Errorf("write rotation history: %w", err)
 	}
 
@@ -1206,7 +1209,7 @@ func (s *Storage) ListKeyRotations(
 	}
 
 	var nextMarker string
-	if truncated && len(history) > 0 {
+	if truncated {
 		nextMarker = strconv.Itoa(startIdx + len(history) - 1)
 	}
 

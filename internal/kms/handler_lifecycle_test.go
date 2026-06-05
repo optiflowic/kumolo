@@ -2,8 +2,10 @@ package kms
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -1545,4 +1547,77 @@ func TestKeyLifecycle_scheduleAndCancelRoundtrip(t *testing.T) {
 	var desc3 map[string]any
 	require.NoError(t, json.Unmarshal(w3.Body.Bytes(), &desc3))
 	assert.Equal(t, "Disabled", desc3["KeyMetadata"].(map[string]any)["KeyState"])
+}
+
+// ---- Decrypt / ReEncrypt fallback with GetPreviousKeyMaterials error --------
+
+// prevMatsErrStore wraps *Storage but makes GetPreviousKeyMaterials always fail.
+type prevMatsErrStore struct {
+	*Storage
+}
+
+func (p *prevMatsErrStore) GetPreviousKeyMaterials(string) ([]KeyMaterial, error) {
+	return nil, errors.New("storage error")
+}
+
+func TestDecrypt_prevMatsStorageError(t *testing.T) {
+	s, _ := newTestStorage(t)
+	ro := NewRouter(&prevMatsErrStore{s})
+
+	keyID := mustCreateKey(t, ro, `{}`)
+	cipherBlob := mustEncrypt(t, ro, keyID, []byte("test"))
+
+	// Rotate so the current material is replaced; old ciphertext will fail openEnvelope.
+	mustRotateKeyOnDemand(t, ro, keyID)
+
+	// Decrypt triggers the fallback, GetPreviousKeyMaterials returns error (warn path),
+	// and the original openEnvelope failure is preserved → InvalidCiphertextException.
+	body, _ := json.Marshal(map[string]any{"CiphertextBlob": cipherBlob})
+	w := kmsReq(t, ro, "Decrypt", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, "InvalidCiphertextException")
+}
+
+func TestReEncrypt_prevMatsStorageError(t *testing.T) {
+	s, _ := newTestStorage(t)
+	ro := NewRouter(&prevMatsErrStore{s})
+
+	srcKeyID := mustCreateKey(t, ro, `{}`)
+	dstKeyID := mustCreateKey(t, ro, `{}`)
+	cipherBlob := mustEncrypt(t, ro, srcKeyID, []byte("test"))
+
+	mustRotateKeyOnDemand(t, ro, srcKeyID)
+
+	body, _ := json.Marshal(map[string]any{
+		"CiphertextBlob":   cipherBlob,
+		"DestinationKeyId": dstKeyID,
+	})
+	w := kmsReq(t, ro, "ReEncrypt", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, "InvalidCiphertextException")
+}
+
+// ---- ListKeyRotations null history edge case --------------------------------
+
+func TestHandleListKeyRotations_nullHistoryReturnsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	s, err := newStorage(dir, os.OpenRoot)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	ro := NewRouter(s)
+
+	keyID := mustCreateKey(t, ro, `{}`)
+
+	// Write literal JSON null to simulate a nil slice from readRotationHistoryLocked.
+	histPath := filepath.Join(dir, "kms", "keys", keyID, "rotation_history.json")
+	require.NoError(t, os.WriteFile(histPath, []byte("null"), 0o600))
+
+	w := kmsReq(t, ro, "ListKeyRotations", `{"KeyId":"`+keyID+`"}`)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	rotations := resp["Rotations"].([]any)
+	assert.Empty(t, rotations)
+	assert.Equal(t, false, resp["Truncated"])
 }
