@@ -62,6 +62,31 @@ func sealEnvelope(
 	return out, nil
 }
 
+// tryDecryptWithFallback attempts envelope decryption with mat, then retries with
+// previously rotated materials if the initial attempt fails.
+func (ro *Router) tryDecryptWithFallback(
+	ciphertext []byte,
+	mat KeyMaterial,
+	encCtx map[string]string,
+	keyID string,
+) (KeyMaterial, []byte, error) {
+	_, pt, err := openEnvelope(ciphertext, mat, encCtx)
+	if err == nil {
+		return mat, pt, nil
+	}
+	prevMats, prevErr := ro.storage.GetPreviousKeyMaterials(keyID)
+	if prevErr != nil {
+		slog.Debug("kms: GetPreviousKeyMaterials failed", "keyID", keyID, "err", prevErr)
+		return mat, nil, err
+	}
+	for _, prev := range prevMats {
+		if _, pt, tryErr := openEnvelope(ciphertext, prev, encCtx); tryErr == nil {
+			return prev, pt, nil
+		}
+	}
+	return mat, nil, err
+}
+
 // openEnvelope parses a kumolo ciphertext envelope and decrypts it.
 // Returns the embedded keyID, decrypted plaintext, or an error.
 func openEnvelope(
@@ -458,22 +483,12 @@ func (ro *Router) handleDecrypt(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	_, plaintext, err := openEnvelope(req.CiphertextBlob, mat, req.EncryptionContext)
-	if err != nil {
-		// Try previous key material versions retained after on-demand rotation.
-		if prevMats, prevErr := ro.storage.GetPreviousKeyMaterials(keyID); prevErr != nil {
-			slog.Warn("kms: GetPreviousKeyMaterials failed", "keyID", keyID, "err", prevErr)
-		} else {
-			for _, prev := range prevMats {
-				if _, pt, tryErr := openEnvelope(req.CiphertextBlob, prev, req.EncryptionContext); tryErr == nil {
-					plaintext = pt
-					mat = prev
-					err = nil
-					break
-				}
-			}
-		}
-	}
+	mat, plaintext, err := ro.tryDecryptWithFallback(
+		req.CiphertextBlob,
+		mat,
+		req.EncryptionContext,
+		keyID,
+	)
 	if err != nil {
 		slog.Debug("KMS Decrypt: open envelope failed", "err", err)
 		writeError(w, http.StatusBadRequest, "InvalidCiphertextException",
@@ -623,22 +638,12 @@ func (ro *Router) handleReEncrypt(w http.ResponseWriter, body []byte) {
 	if !ok {
 		return
 	}
-	_, plaintext, err := openEnvelope(req.CiphertextBlob, srcMat, req.SourceEncryptionContext)
-	if err != nil {
-		// Try previous key material versions retained after on-demand rotation.
-		if prevMats, prevErr := ro.storage.GetPreviousKeyMaterials(srcKeyID); prevErr != nil {
-			slog.Warn("kms: GetPreviousKeyMaterials failed", "keyID", srcKeyID, "err", prevErr)
-		} else {
-			for _, prev := range prevMats {
-				if _, pt, tryErr := openEnvelope(req.CiphertextBlob, prev, req.SourceEncryptionContext); tryErr == nil {
-					plaintext = pt
-					srcMat = prev
-					err = nil
-					break
-				}
-			}
-		}
-	}
+	srcMat, plaintext, err := ro.tryDecryptWithFallback(
+		req.CiphertextBlob,
+		srcMat,
+		req.SourceEncryptionContext,
+		srcKeyID,
+	)
 	if err != nil {
 		slog.Debug("KMS ReEncrypt: open envelope failed", "err", err)
 		writeError(w, http.StatusBadRequest, "InvalidCiphertextException",

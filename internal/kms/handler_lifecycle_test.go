@@ -1,6 +1,7 @@
 package kms
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -1501,7 +1502,10 @@ func TestDecrypt_afterRotation(t *testing.T) {
 
 	var resp map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	assert.NotNil(t, resp["Plaintext"])
+	require.NotNil(t, resp["Plaintext"])
+	got, err := base64.StdEncoding.DecodeString(resp["Plaintext"].(string))
+	require.NoError(t, err)
+	assert.Equal(t, []byte("rotate-test"), got)
 }
 
 func TestReEncrypt_afterRotation(t *testing.T) {
@@ -1521,6 +1525,22 @@ func TestReEncrypt_afterRotation(t *testing.T) {
 	})
 	w := kmsReq(t, ro, "ReEncrypt", string(body))
 	require.Equal(t, http.StatusOK, w.Code)
+
+	var reEncResp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &reEncResp))
+	newCipherBlob := reEncResp["CiphertextBlob"].(string)
+
+	// Decrypt the re-encrypted ciphertext and verify plaintext integrity.
+	decBody, _ := json.Marshal(map[string]any{"CiphertextBlob": newCipherBlob, "KeyId": dstKeyID})
+	decW := kmsReq(t, ro, "Decrypt", string(decBody))
+	require.Equal(t, http.StatusOK, decW.Code)
+
+	var decResp map[string]any
+	require.NoError(t, json.Unmarshal(decW.Body.Bytes(), &decResp))
+	require.NotNil(t, decResp["Plaintext"])
+	got, err := base64.StdEncoding.DecodeString(decResp["Plaintext"].(string))
+	require.NoError(t, err)
+	assert.Equal(t, []byte("reencrypt-rotate-test"), got)
 }
 
 func TestKeyLifecycle_scheduleAndCancelRoundtrip(t *testing.T) {
