@@ -2077,7 +2077,7 @@ func TestListGrantsForKeyLocked_skipsSubdirAndNonJson(t *testing.T) {
 }
 
 func TestListKeyIDsLocked_statError(t *testing.T) {
-	s, dir := newTestStorage(t)
+	s, _ := newTestStorage(t)
 	keyID := newSymmetricKey(t, s)
 
 	statErr := errors.New("permission denied")
@@ -2091,7 +2091,6 @@ func TestListKeyIDsLocked_statError(t *testing.T) {
 	}
 	_, _, err := s.ListRetirableGrants("arn:aws:iam::000000000000:role/r", 50, "")
 	require.ErrorContains(t, err, "stat key meta")
-	_ = dir
 }
 
 func TestListKeyIDsLocked_skipsNonDirAndMissingMeta(t *testing.T) {
