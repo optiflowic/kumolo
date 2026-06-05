@@ -1092,6 +1092,8 @@ func (s *Storage) UntagResource(keyID string, tagKeys []string) error {
 
 const maxOnDemandRotations = 25
 
+const maxGrantsPerKey = 50000
+
 func (s *Storage) RotateKeyOnDemand(keyID string) (KeyMetadata, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1273,4 +1275,306 @@ func (s *Storage) newKeyID() (string, error) {
 		"%08x-%04x-%04x-%04x-%012x",
 		b[0:4], b[4:6], b[6:8], b[8:10], b[10:16],
 	), nil
+}
+
+// newGrantID generates a UUID v4 to use as a grant ID.
+func (s *Storage) newGrantID() (string, error) { return s.newKeyID() }
+
+// newGrantToken generates a UUID v4 to use as an opaque grant token.
+func (s *Storage) newGrantToken() (string, error) { return s.newKeyID() }
+
+// grantsDir returns the path of the grants subdirectory for the given key.
+func grantsDir(keyID string) string { return filepath.Join("keys", keyID, "grants") }
+
+// grantPath returns the path for a single grant file.
+func grantPath(keyID, grantID string) string {
+	return filepath.Join(grantsDir(keyID), grantID+".json")
+}
+
+// CreateGrant stores a new grant under keys/{keyID}/grants/{grantID}.json.
+func (s *Storage) CreateGrant(keyID string, in CreateGrantInput) (Grant, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	meta, err := s.readKeyMeta(keyID)
+	if err != nil {
+		return Grant{}, err
+	}
+	switch meta.KeyState {
+	case keyStateDisabled:
+		return Grant{}, ErrKeyDisabled
+	case keyStatePendingDeletion:
+		return Grant{}, ErrInvalidKeyState
+	}
+
+	if mkErr := s.mkdirFn(grantsDir(keyID), 0o750); mkErr != nil && !errors.Is(mkErr, os.ErrExist) {
+		// untestable: s.root.Mkdir only fails on OS-level errors that cannot be simulated
+		return Grant{}, fmt.Errorf("create grants dir: %w", mkErr)
+	}
+
+	existing, err := s.listDirFn(grantsDir(keyID))
+	if err != nil {
+		return Grant{}, fmt.Errorf("count grants: %w", err)
+	}
+	grantCount := 0
+	for _, e := range existing {
+		if !e.IsDir() && len(e.Name()) >= 6 && e.Name()[len(e.Name())-5:] == ".json" {
+			grantCount++
+		}
+	}
+	if grantCount >= maxGrantsPerKey {
+		return Grant{}, ErrGrantLimitExceeded
+	}
+
+	grantID, err := s.newGrantID()
+	if err != nil {
+		// untestable: newGrantID delegates to randRead which only fails via injected error; the path is covered in CreateKey tests
+		return Grant{}, fmt.Errorf("generate grant ID: %w", err)
+	}
+	token, err := s.newGrantToken()
+	if err != nil {
+		// untestable: newGrantToken delegates to randRead; error covered at CreateKey level
+		return Grant{}, fmt.Errorf("generate grant token: %w", err)
+	}
+
+	g := Grant{
+		GrantId:           grantID,
+		GrantToken:        token,
+		KeyId:             meta.Arn,
+		GranteePrincipal:  in.GranteePrincipal,
+		RetiringPrincipal: in.RetiringPrincipal,
+		Operations:        in.Operations,
+		Constraints:       in.Constraints,
+		Name:              in.Name,
+		IssuingAccount:    fixedAccount,
+		CreationDate:      nowUnix(),
+	}
+	if err := s.writeJSON(grantPath(keyID, grantID), g); err != nil {
+		// untestable: writeJSON only fails on OS-level I/O errors
+		return Grant{}, fmt.Errorf("write grant: %w", err)
+	}
+	return g, nil
+}
+
+// listGrantsForKeyLocked reads all grant files for a key and returns them sorted by GrantId.
+// Caller must hold at least a read lock.
+func (s *Storage) listGrantsForKeyLocked(keyID string) ([]Grant, error) {
+	entries, err := s.listDirFn(grantsDir(keyID))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("list grants dir: %w", err)
+	}
+
+	var grants []Grant
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if len(name) < 6 || name[len(name)-5:] != ".json" {
+			continue
+		}
+		g, err := readJSON[Grant](s, filepath.Join(grantsDir(keyID), name))
+		if err != nil {
+			slog.Warn("kms: skipping unreadable grant file", "file", name, "err", err)
+			continue
+		}
+		grants = append(grants, g)
+	}
+	sort.Slice(grants, func(i, j int) bool { return grants[i].GrantId < grants[j].GrantId })
+	return grants, nil
+}
+
+// applyGrantPagination applies marker-based pagination to a sorted grant slice.
+// Returns the page slice and the next marker (empty string when not truncated).
+func applyGrantPagination(grants []Grant, limit int, marker string) ([]Grant, string) {
+	if marker != "" {
+		start := -1
+		for i, g := range grants {
+			if g.GrantId == marker {
+				start = i + 1
+				break
+			}
+		}
+		if start == -1 {
+			// Stale marker: advance via binary search.
+			start = sort.Search(len(grants), func(i int) bool {
+				return grants[i].GrantId >= marker
+			})
+		}
+		if start < len(grants) {
+			grants = grants[start:]
+		} else {
+			grants = nil
+		}
+	}
+
+	truncated := len(grants) > limit
+	if truncated {
+		grants = grants[:limit]
+	}
+	var nextMarker string
+	if truncated && len(grants) > 0 {
+		nextMarker = grants[len(grants)-1].GrantId
+	}
+	return grants, nextMarker
+}
+
+// ListGrants returns paginated grants for a key, with optional filters.
+func (s *Storage) ListGrants(
+	keyID, filterGrantID, filterGranteePrincipal string,
+	limit int,
+	marker string,
+) ([]Grant, string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	meta, err := s.readKeyMeta(keyID)
+	if err != nil {
+		return nil, "", err
+	}
+	if meta.KeyState == keyStatePendingDeletion {
+		return nil, "", ErrInvalidKeyState
+	}
+
+	grants, err := s.listGrantsForKeyLocked(keyID)
+	if err != nil {
+		// untestable: listGrantsForKeyLocked only fails on OS-level errors
+		return nil, "", err
+	}
+
+	if filterGrantID != "" || filterGranteePrincipal != "" {
+		filtered := grants[:0]
+		for _, g := range grants {
+			if filterGrantID != "" && g.GrantId != filterGrantID {
+				continue
+			}
+			if filterGranteePrincipal != "" && g.GranteePrincipal != filterGranteePrincipal {
+				continue
+			}
+			filtered = append(filtered, g)
+		}
+		grants = filtered
+	}
+
+	page, nextMarker := applyGrantPagination(grants, limit, marker)
+	return page, nextMarker, nil
+}
+
+// RevokeGrant deletes a grant by ID.
+func (s *Storage) RevokeGrant(keyID, grantID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	meta, err := s.readKeyMeta(keyID)
+	if err != nil {
+		return err
+	}
+	if meta.KeyState == keyStatePendingDeletion {
+		return ErrInvalidKeyState
+	}
+
+	path := grantPath(keyID, grantID)
+	if _, err := s.statFn(path); errors.Is(err, os.ErrNotExist) {
+		return ErrGrantNotFound
+	}
+	if err := s.removeFile(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return ErrGrantNotFound
+		}
+		return fmt.Errorf("remove grant: %w", err)
+	}
+	return nil
+}
+
+// RetireGrantByToken finds and deletes the grant with the given GrantToken across all keys.
+func (s *Storage) RetireGrantByToken(grantToken string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	keyIDs, err := s.listKeyIDsLocked()
+	if err != nil {
+		return fmt.Errorf("list keys: %w", err)
+	}
+	for _, keyID := range keyIDs {
+		grants, err := s.listGrantsForKeyLocked(keyID)
+		if err != nil {
+			return err
+		}
+		for _, g := range grants {
+			if g.GrantToken == grantToken {
+				if err := s.removeFile(grantPath(keyID, g.GrantId)); err != nil {
+					return fmt.Errorf("remove grant: %w", err)
+				}
+				return nil
+			}
+		}
+	}
+	return ErrGrantNotFound
+}
+
+// RetireGrantByID deletes a grant by key ID and grant ID.
+func (s *Storage) RetireGrantByID(keyID, grantID string) error {
+	return s.RevokeGrant(keyID, grantID)
+}
+
+// ListRetirableGrants returns paginated grants across all keys where RetiringPrincipal matches.
+func (s *Storage) ListRetirableGrants(
+	retiringPrincipal string,
+	limit int,
+	marker string,
+) ([]Grant, string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	keyIDs, err := s.listKeyIDsLocked()
+	if err != nil {
+		// untestable: listKeyIDsLocked only fails on OS-level errors
+		return nil, "", fmt.Errorf("list keys: %w", err)
+	}
+
+	var matching []Grant
+	for _, keyID := range keyIDs {
+		grants, err := s.listGrantsForKeyLocked(keyID)
+		if err != nil {
+			// untestable: listGrantsForKeyLocked only fails on OS-level errors
+			return nil, "", err
+		}
+		for _, g := range grants {
+			if g.RetiringPrincipal == retiringPrincipal {
+				matching = append(matching, g)
+			}
+		}
+	}
+	sort.Slice(matching, func(i, j int) bool { return matching[i].GrantId < matching[j].GrantId })
+
+	page, nextMarker := applyGrantPagination(matching, limit, marker)
+	return page, nextMarker, nil
+}
+
+// listKeyIDsLocked returns the IDs of all keys that have a valid meta.json.
+// Caller must hold a lock.
+func (s *Storage) listKeyIDsLocked() ([]string, error) {
+	entries, err := s.listDirFn("keys")
+	if err != nil {
+		// untestable: listDirFn only fails on OS-level errors
+		return nil, fmt.Errorf("list keys dir: %w", err)
+	}
+	var ids []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		metaPath := filepath.Join("keys", e.Name(), "meta.json")
+		if _, err := s.statFn(metaPath); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return nil, fmt.Errorf("stat key meta %s: %w", metaPath, err)
+		}
+		ids = append(ids, e.Name())
+	}
+	return ids, nil
 }

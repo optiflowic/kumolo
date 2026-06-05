@@ -227,6 +227,85 @@ func keyAgreementAlgorithmsForKey(spec, usage string) []string {
 	return nil // unreachable: handler validates spec/usage before calling
 }
 
+// Grant represents a KMS grant stored under keys/{id}/grants/{grantID}.json.
+type Grant struct {
+	GrantId           string            `json:"GrantId"`
+	GrantToken        string            `json:"GrantToken"`
+	KeyId             string            `json:"KeyId"` // ARN of the key
+	GranteePrincipal  string            `json:"GranteePrincipal"`
+	RetiringPrincipal string            `json:"RetiringPrincipal,omitempty"`
+	Operations        []string          `json:"Operations"`
+	Constraints       *GrantConstraints `json:"Constraints,omitempty"`
+	Name              string            `json:"Name,omitempty"`
+	IssuingAccount    string            `json:"IssuingAccount"`
+	CreationDate      float64           `json:"CreationDate"`
+}
+
+// GrantConstraints holds encryption context constraints for a grant.
+type GrantConstraints struct {
+	EncryptionContextEquals map[string]string `json:"EncryptionContextEquals,omitempty"`
+	EncryptionContextSubset map[string]string `json:"EncryptionContextSubset,omitempty"`
+}
+
+// grantListEntry is the AWS GrantListEntry shape returned by ListGrants and
+// ListRetirableGrants. It mirrors Grant but omits GrantToken, which real AWS
+// does not include in list responses (GrantToken is only returned by CreateGrant).
+type grantListEntry struct {
+	GrantId           string            `json:"GrantId"`
+	KeyId             string            `json:"KeyId"`
+	GranteePrincipal  string            `json:"GranteePrincipal"`
+	RetiringPrincipal string            `json:"RetiringPrincipal,omitempty"`
+	Operations        []string          `json:"Operations"`
+	Constraints       *GrantConstraints `json:"Constraints,omitempty"`
+	Name              string            `json:"Name,omitempty"`
+	IssuingAccount    string            `json:"IssuingAccount"`
+	CreationDate      float64           `json:"CreationDate"`
+}
+
+func toGrantListEntry(g Grant) grantListEntry {
+	return grantListEntry{
+		GrantId:           g.GrantId,
+		KeyId:             g.KeyId,
+		GranteePrincipal:  g.GranteePrincipal,
+		RetiringPrincipal: g.RetiringPrincipal,
+		Operations:        g.Operations,
+		Constraints:       g.Constraints,
+		Name:              g.Name,
+		IssuingAccount:    g.IssuingAccount,
+		CreationDate:      g.CreationDate,
+	}
+}
+
+// CreateGrantInput carries the parameters for a CreateGrant call.
+type CreateGrantInput struct {
+	GranteePrincipal  string
+	Operations        []string
+	RetiringPrincipal string
+	Constraints       *GrantConstraints
+	Name              string
+}
+
+// validGrantOperations is the set of KMS operations that can appear in a grant's Operations list.
+var validGrantOperations = map[string]bool{
+	"CreateGrant":                         true,
+	"Decrypt":                             true,
+	"DescribeKey":                         true,
+	"Encrypt":                             true,
+	"GenerateDataKey":                     true,
+	"GenerateDataKeyPair":                 true,
+	"GenerateDataKeyPairWithoutPlaintext": true,
+	"GenerateDataKeyWithoutPlaintext":     true,
+	"GenerateMac":                         true,
+	"GetPublicKey":                        true,
+	"ReEncryptFrom":                       true,
+	"ReEncryptTo":                         true,
+	"RetireGrant":                         true,
+	"Sign":                                true,
+	"Verify":                              true,
+	"VerifyMac":                           true,
+	"DeriveSharedSecret":                  true,
+}
+
 // RotationRecord records a single key rotation event in the rotation history.
 // Stored as a JSON array in keys/{id}/rotation_history.json.
 type RotationRecord struct {

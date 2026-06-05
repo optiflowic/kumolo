@@ -34,6 +34,16 @@ type store interface {
 	GetTags(keyID string) ([]TagEntry, error)
 	TagResource(keyID string, tags []TagEntry) error
 	UntagResource(keyID string, tagKeys []string) error
+	CreateGrant(keyID string, in CreateGrantInput) (Grant, error)
+	ListGrants(
+		keyID, filterGrantID, filterGranteePrincipal string,
+		limit int,
+		marker string,
+	) ([]Grant, string, error)
+	RevokeGrant(keyID, grantID string) error
+	RetireGrantByToken(grantToken string) error
+	RetireGrantByID(keyID, grantID string) error
+	ListRetirableGrants(retiringPrincipal string, limit int, marker string) ([]Grant, string, error)
 }
 
 const (
@@ -143,6 +153,16 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ro.handleTagResource(w, body)
 	case "UntagResource":
 		ro.handleUntagResource(w, body)
+	case "CreateGrant":
+		ro.handleCreateGrant(w, body)
+	case "ListGrants":
+		ro.handleListGrants(w, body)
+	case "RevokeGrant":
+		ro.handleRevokeGrant(w, body)
+	case "RetireGrant":
+		ro.handleRetireGrant(w, body)
+	case "ListRetirableGrants":
+		ro.handleListRetirableGrants(w, body)
 	default:
 		slog.Debug( // #nosec G706 -- target comes from the X-Amz-Target header; log injection risk accepted for a local dev emulator
 			"KMS operation not implemented",
