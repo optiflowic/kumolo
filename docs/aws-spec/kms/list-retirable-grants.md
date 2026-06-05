@@ -2,7 +2,7 @@
 
 **Official URL:** https://docs.aws.amazon.com/kms/latest/APIReference/API_ListRetirableGrants.html  
 **SDK input:** `kms.ListRetirableGrantsInput`  
-**SDK output:** `kms.ListGrantsResponse`  
+**SDK output:** `kms.ListRetirableGrantsOutput`  
 **Last verified:** 2026-06-05
 
 ## Request Parameters

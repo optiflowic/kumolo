@@ -109,6 +109,10 @@ func writeGrantCreateError(w http.ResponseWriter, keyID string, err error) {
 				keyID,
 			),
 		)
+	case errors.Is(err, ErrGrantLimitExceeded):
+		slog.Debug("KMS CreateGrant: grant limit exceeded", "keyID", keyID)
+		writeError(w, http.StatusBadRequest, "LimitExceededException",
+			fmt.Sprintf("Grant limit exceeded for key %s", keyID))
 	default:
 		slog.Error("KMS CreateGrant storage failure", "keyID", keyID, "err", err)
 		writeError(

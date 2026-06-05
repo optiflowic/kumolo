@@ -1912,6 +1912,38 @@ func TestCreateGrant_pendingDeletion(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidKeyState)
 }
 
+func TestCreateGrant_limitExceeded(t *testing.T) {
+	s, _ := newTestStorage(t)
+	keyID := newSymmetricKey(t, s)
+
+	// Simulate grants directory at capacity using a fake DirEntry slice.
+	fakeEntries := make([]os.DirEntry, maxGrantsPerKey)
+	for i := range fakeEntries {
+		fakeEntries[i] = fakeDirEntry{filename: "00000000-0000-0000-0000-000000000000.json"}
+	}
+	origListDir := s.listDirFn
+	s.listDirFn = func(name string) ([]os.DirEntry, error) {
+		if name == grantsDir(keyID) {
+			return fakeEntries, nil
+		}
+		return origListDir(name)
+	}
+
+	_, err := s.CreateGrant(keyID, CreateGrantInput{
+		GranteePrincipal: "arn:aws:iam::000000000000:role/tester",
+		Operations:       []string{"Decrypt"},
+	})
+	require.ErrorIs(t, err, ErrGrantLimitExceeded)
+}
+
+// fakeDirEntry is a minimal os.DirEntry for injection in tests.
+type fakeDirEntry struct{ filename string }
+
+func (f fakeDirEntry) Name() string               { return f.filename }
+func (f fakeDirEntry) IsDir() bool                { return false }
+func (f fakeDirEntry) Type() os.FileMode          { return 0 }
+func (f fakeDirEntry) Info() (os.FileInfo, error) { return nil, nil }
+
 func TestListGrants_empty(t *testing.T) {
 	s, _ := newTestStorage(t)
 	keyID := newSymmetricKey(t, s)
@@ -2027,6 +2059,24 @@ func TestRetireGrantByToken_basic(t *testing.T) {
 func TestRetireGrantByToken_notFound(t *testing.T) {
 	s, _ := newTestStorage(t)
 	err := s.RetireGrantByToken("00000000-0000-0000-0000-000000000000")
+	require.ErrorIs(t, err, ErrGrantNotFound)
+}
+
+func TestRetireGrantByID_basic(t *testing.T) {
+	s, _ := newTestStorage(t)
+	keyID := newSymmetricKey(t, s)
+	g := mustCreateGrantStorage(t, s, keyID)
+	require.NoError(t, s.RetireGrantByID(keyID, g.GrantId))
+
+	grants, _, err := s.ListGrants(keyID, "", "", 50, "")
+	require.NoError(t, err)
+	assert.Empty(t, grants)
+}
+
+func TestRetireGrantByID_notFound(t *testing.T) {
+	s, _ := newTestStorage(t)
+	keyID := newSymmetricKey(t, s)
+	err := s.RetireGrantByID(keyID, "00000000-0000-0000-0000-000000000000")
 	require.ErrorIs(t, err, ErrGrantNotFound)
 }
 

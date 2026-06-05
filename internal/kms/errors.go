@@ -25,6 +25,7 @@ var (
 	ErrOnDemandRotationLimit = errors.New("on-demand rotation limit exceeded (max 25)")
 	ErrInvalidMarker         = errors.New("invalid pagination marker")
 	ErrGrantNotFound         = errors.New("grant not found")
+	ErrGrantLimitExceeded    = errors.New("grant limit exceeded (max 50000)")
 )
 
 type errResponse struct {

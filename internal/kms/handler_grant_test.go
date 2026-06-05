@@ -211,6 +211,27 @@ func TestHandleCreateGrant(t *testing.T) {
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 		assertErrType(t, w, "KMSInternalException")
 	})
+
+	t.Run("400 LimitExceededException when grant limit reached", func(t *testing.T) {
+		ro := newTestRouter(t)
+		keyID := mustCreateKey(t, ro, `{}`)
+		ro.storage = &grantLimitStore{ro.storage}
+		body, _ := json.Marshal(map[string]any{
+			"KeyId":            keyID,
+			"GranteePrincipal": "arn:aws:iam::000000000000:role/r",
+			"Operations":       []string{"Decrypt"},
+		})
+		w := kmsReq(t, ro, "CreateGrant", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "LimitExceededException")
+	})
+}
+
+// grantLimitStore wraps a store but returns ErrGrantLimitExceeded from CreateGrant.
+type grantLimitStore struct{ store }
+
+func (g *grantLimitStore) CreateGrant(_ string, _ CreateGrantInput) (Grant, error) {
+	return Grant{}, ErrGrantLimitExceeded
 }
 
 // ---- ListGrants -------------------------------------------------------------
@@ -258,6 +279,13 @@ func TestHandleListGrants(t *testing.T) {
 			grants[1].(map[string]any)["GrantId"].(string),
 		}
 		assert.ElementsMatch(t, []string{grantID1, grantID2}, ids)
+		for _, g := range grants {
+			assert.Empty(
+				t,
+				g.(map[string]any)["GrantToken"],
+				"GrantToken must not appear in ListGrants response",
+			)
+		}
 	})
 
 	t.Run("200 filter by GrantId", func(t *testing.T) {
@@ -714,6 +742,13 @@ func TestHandleListRetirableGrants(t *testing.T) {
 			grants[1].(map[string]any)["GrantId"].(string),
 		}
 		assert.ElementsMatch(t, []string{grantID1, grantID2}, ids)
+		for _, g := range grants {
+			assert.Empty(
+				t,
+				g.(map[string]any)["GrantToken"],
+				"GrantToken must not appear in ListRetirableGrants response",
+			)
+		}
 	})
 
 	t.Run("200 pagination with Limit and Marker", func(t *testing.T) {

@@ -1092,6 +1092,8 @@ func (s *Storage) UntagResource(keyID string, tagKeys []string) error {
 
 const maxOnDemandRotations = 25
 
+const maxGrantsPerKey = 50000
+
 func (s *Storage) RotateKeyOnDemand(keyID string) (KeyMetadata, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1310,6 +1312,21 @@ func (s *Storage) CreateGrant(keyID string, in CreateGrantInput) (Grant, error) 
 		return Grant{}, fmt.Errorf("create grants dir: %w", mkErr)
 	}
 
+	existing, err := s.listDirFn(grantsDir(keyID))
+	if err != nil {
+		// untestable: listDirFn only fails on OS-level errors
+		return Grant{}, fmt.Errorf("count grants: %w", err)
+	}
+	grantCount := 0
+	for _, e := range existing {
+		if !e.IsDir() && len(e.Name()) >= 6 && e.Name()[len(e.Name())-5:] == ".json" {
+			grantCount++
+		}
+	}
+	if grantCount >= maxGrantsPerKey {
+		return Grant{}, ErrGrantLimitExceeded
+	}
+
 	grantID, err := s.newGrantID()
 	if err != nil {
 		// untestable: newGrantID delegates to randRead which only fails via injected error; the path is covered in CreateKey tests
@@ -1466,7 +1483,10 @@ func (s *Storage) RevokeGrant(keyID, grantID string) error {
 		return ErrGrantNotFound
 	}
 	if err := s.removeFile(path); err != nil {
-		// untestable: removeFile only fails on OS-level errors
+		if errors.Is(err, os.ErrNotExist) {
+			return ErrGrantNotFound
+		}
+		// untestable: removeFile only fails on OS-level errors beyond ErrNotExist
 		return fmt.Errorf("remove grant: %w", err)
 	}
 	return nil
