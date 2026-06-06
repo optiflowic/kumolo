@@ -1922,7 +1922,7 @@ func (s *Storage) GetUploadMeta(uploadID string) (uploadMeta, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			return uploadMeta{}, ErrUploadNotFound
 		}
-		return uploadMeta{}, err
+		return uploadMeta{}, err // untestable: real-filesystem I/O errors on upload.json cannot be injected via the current test helpers
 	}
 	return meta, nil
 }

@@ -10136,3 +10136,158 @@ func TestSSEC(t *testing.T) {
 		},
 	)
 }
+
+func TestSSECCoverage(t *testing.T) {
+	t.Run("GetObject rejects invalid SSE-C headers (partial set)", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			getObjectMeta: ObjectMetadata{},
+		})
+		req := httptest.NewRequest(http.MethodGet, "/b/k", nil)
+		req.Header.Set(amzSSECAlgorithm, "AES256") // key and MD5 missing
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidArgument")
+	})
+
+	t.Run("HeadObject rejects invalid SSE-C headers (partial set)", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			headObjectMeta: ObjectMetadata{},
+		})
+		req := httptest.NewRequest(http.MethodHead, "/b/k", nil)
+		req.Header.Set(amzSSECAlgorithm, "AES256") // key and MD5 missing
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("CopyObject rejects invalid source SSE-C headers", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{})
+		req := httptest.NewRequest(http.MethodPut, "/dst/key", nil)
+		req.Header.Set(amzCopySource, "/src/obj")
+		req.Header.Set(amzCopySourceSSECAlgorithm, "AES256") // key and MD5 missing
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidArgument")
+	})
+
+	t.Run("CopyObject returns 400 when source is SSE-C but no source headers", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			headObjectMeta: ObjectMetadata{SSECKeyMD5: ssecMD5()},
+		})
+		req := httptest.NewRequest(http.MethodPut, "/dst/key", nil)
+		req.Header.Set(amzCopySource, "/src/obj")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidRequest")
+	})
+
+	t.Run("CopyObject returns 403 when source SSE-C key MD5 mismatch", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			headObjectMeta: ObjectMetadata{SSECKeyMD5: "wrongMD5="},
+		})
+		req := httptest.NewRequest(http.MethodPut, "/dst/key", nil)
+		req.Header.Set(amzCopySource, "/src/obj")
+		for k, v := range map[string]string{
+			amzCopySourceSSECAlgorithm: validSSECHeaders()[amzSSECAlgorithm],
+			amzCopySourceSSECKey:       validSSECHeaders()[amzSSECKey],
+			amzCopySourceSSECKeyMD5:    validSSECHeaders()[amzSSECKeyMD5],
+		} {
+			req.Header.Set(k, v)
+		}
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusForbidden, w.Code)
+		assert.Contains(t, w.Body.String(), "AccessDenied")
+	})
+
+	t.Run("UploadPart rejects invalid SSE-C headers (partial set)", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			listPartsUploadMeta: uploadMeta{},
+		})
+		req := httptest.NewRequest(http.MethodPut, "/b/k?uploadId=uid&partNumber=1",
+			strings.NewReader("data"))
+		req.Header.Set(amzSSECAlgorithm, "AES256") // key and MD5 missing
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidArgument")
+	})
+
+	t.Run(
+		"UploadPart returns 500 when GetUploadMeta fails with internal error",
+		func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{
+				listPartsErr: errors.New("disk failure"),
+			})
+			req := httptest.NewRequest(http.MethodPut, "/b/k?uploadId=uid&partNumber=1",
+				strings.NewReader("data"))
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusInternalServerError, w.Code)
+		},
+	)
+
+	t.Run(
+		"UploadPart returns 404 when UploadPart storage call fails with ErrUploadNotFound",
+		func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{
+				listPartsUploadMeta: uploadMeta{},
+				uploadPartErr:       ErrUploadNotFound,
+			})
+			req := httptest.NewRequest(http.MethodPut, "/b/k?uploadId=uid&partNumber=1",
+				strings.NewReader("data"))
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusNotFound, w.Code)
+			assert.Contains(t, w.Body.String(), "NoSuchUpload")
+		},
+	)
+
+	t.Run("UploadPartCopy rejects invalid source SSE-C headers", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{})
+		req := httptest.NewRequest(http.MethodPut, "/b/k?uploadId=uid&partNumber=1", nil)
+		req.Header.Set(amzCopySource, "/src/obj")
+		req.Header.Set(amzCopySourceSSECAlgorithm, "AES256") // key and MD5 missing
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidArgument")
+	})
+
+	t.Run(
+		"UploadPartCopy returns 400 when source is SSE-C but no source headers provided",
+		func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{
+				headObjectMeta: ObjectMetadata{SSECKeyMD5: ssecMD5()},
+			})
+			req := httptest.NewRequest(http.MethodPut, "/b/k?uploadId=uid&partNumber=1", nil)
+			req.Header.Set(amzCopySource, "/src/obj")
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Contains(t, w.Body.String(), "InvalidRequest")
+		},
+	)
+
+	t.Run("UploadPartCopy returns 403 when source SSE-C key MD5 mismatch", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			headObjectMeta: ObjectMetadata{SSECKeyMD5: "wrongMD5="},
+		})
+		req := httptest.NewRequest(http.MethodPut, "/b/k?uploadId=uid&partNumber=1", nil)
+		req.Header.Set(amzCopySource, "/src/obj")
+		for k, v := range map[string]string{
+			amzCopySourceSSECAlgorithm: validSSECHeaders()[amzSSECAlgorithm],
+			amzCopySourceSSECKey:       validSSECHeaders()[amzSSECKey],
+			amzCopySourceSSECKeyMD5:    validSSECHeaders()[amzSSECKeyMD5],
+		} {
+			req.Header.Set(k, v)
+		}
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusForbidden, w.Code)
+		assert.Contains(t, w.Body.String(), "AccessDenied")
+	})
+}
