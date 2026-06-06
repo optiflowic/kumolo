@@ -691,7 +691,7 @@ func pqStorageErrToBatchError(err error) *batchStmtError {
 	default:
 		return &batchStmtError{
 			Code:    "InternalServerError",
-			Message: err.Error(),
+			Message: "Internal server error",
 		}
 	}
 }
