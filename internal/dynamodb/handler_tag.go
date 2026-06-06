@@ -19,7 +19,7 @@ func (ro *Router) handleTagResource(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"invalid request body",
 		)
 		return
@@ -28,7 +28,7 @@ func (ro *Router) handleTagResource(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"ResourceArn is required",
 		)
 		return
@@ -43,7 +43,7 @@ func (ro *Router) handleTagResource(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+				ErrTypeResourceNotFoundException,
 				"Requested resource not found: "+req.ResourceArn,
 			)
 			return
@@ -52,7 +52,7 @@ func (ro *Router) handleTagResource(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"com.amazonaws.dynamodb.v20120810#InternalServerError",
+			ErrTypeInternalServerError,
 			"internal server error",
 		)
 		return
@@ -70,7 +70,7 @@ func (ro *Router) handleUntagResource(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"invalid request body",
 		)
 		return
@@ -79,7 +79,7 @@ func (ro *Router) handleUntagResource(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"ResourceArn is required",
 		)
 		return
@@ -90,7 +90,7 @@ func (ro *Router) handleUntagResource(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+				ErrTypeResourceNotFoundException,
 				"Requested resource not found: "+req.ResourceArn,
 			)
 			return
@@ -99,7 +99,7 @@ func (ro *Router) handleUntagResource(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"com.amazonaws.dynamodb.v20120810#InternalServerError",
+			ErrTypeInternalServerError,
 			"internal server error",
 		)
 		return
@@ -116,7 +116,7 @@ func (ro *Router) handleListTagsOfResource(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"invalid request body",
 		)
 		return
@@ -125,7 +125,7 @@ func (ro *Router) handleListTagsOfResource(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"ResourceArn is required",
 		)
 		return
@@ -137,7 +137,7 @@ func (ro *Router) handleListTagsOfResource(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+				ErrTypeResourceNotFoundException,
 				"Requested resource not found: "+req.ResourceArn,
 			)
 			return
@@ -146,7 +146,7 @@ func (ro *Router) handleListTagsOfResource(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"com.amazonaws.dynamodb.v20120810#InternalServerError",
+			ErrTypeInternalServerError,
 			"internal server error",
 		)
 		return
@@ -171,7 +171,7 @@ func (ro *Router) handleUpdateTimeToLive(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"invalid request body",
 		)
 		return
@@ -180,7 +180,7 @@ func (ro *Router) handleUpdateTimeToLive(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"TableName is required",
 		)
 		return
@@ -195,7 +195,7 @@ func (ro *Router) handleUpdateTimeToLive(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+				ErrTypeResourceNotFoundException,
 				"Requested resource not found: Table: "+req.TableName+" not found",
 			)
 			return
@@ -204,7 +204,7 @@ func (ro *Router) handleUpdateTimeToLive(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"com.amazonaws.dynamodb.v20120810#InternalServerError",
+			ErrTypeInternalServerError,
 			"internal server error",
 		)
 		return
@@ -226,7 +226,7 @@ func (ro *Router) handleDescribeTimeToLive(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"invalid request body",
 		)
 		return
@@ -235,7 +235,7 @@ func (ro *Router) handleDescribeTimeToLive(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"TableName is required",
 		)
 		return
@@ -247,7 +247,7 @@ func (ro *Router) handleDescribeTimeToLive(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+				ErrTypeResourceNotFoundException,
 				"Requested resource not found: Table: "+req.TableName+" not found",
 			)
 			return
@@ -256,7 +256,7 @@ func (ro *Router) handleDescribeTimeToLive(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"com.amazonaws.dynamodb.v20120810#InternalServerError",
+			ErrTypeInternalServerError,
 			"internal server error",
 		)
 		return

@@ -195,7 +195,7 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"failed to read request body",
 		)
 		return
@@ -252,6 +252,12 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ro.handleEnableKinesisStreamingDestination(w, body)
 	case "DisableKinesisStreamingDestination":
 		ro.handleDisableKinesisStreamingDestination(w, body)
+	case "ExecuteStatement":
+		ro.handleExecuteStatement(w, body)
+	case "BatchExecuteStatement":
+		ro.handleBatchExecuteStatement(w, body)
+	case "ExecuteTransaction":
+		ro.handleExecuteTransaction(w, body)
 	case "DescribeLimits":
 		ro.handleDescribeLimits(w)
 	case "DescribeEndpoints":
@@ -265,7 +271,7 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(
 			w,
 			http.StatusNotImplemented,
-			"com.amazonaws.dynamodb.v20120810#NotImplemented",
+			ErrTypeNotImplemented,
 			"Operation not implemented: "+op,
 		)
 	}

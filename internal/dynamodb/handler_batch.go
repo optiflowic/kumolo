@@ -20,7 +20,7 @@ func (ro *Router) handleBatchGetItem(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"invalid request body",
 		)
 		return
@@ -29,7 +29,7 @@ func (ro *Router) handleBatchGetItem(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"RequestItems is required",
 		)
 		return
@@ -42,7 +42,7 @@ func (ro *Router) handleBatchGetItem(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"Too many items requested for the BatchGetItem call",
 		)
 		return
@@ -57,7 +57,7 @@ func (ro *Router) handleBatchGetItem(w http.ResponseWriter, body []byte) {
 			tableReq.ProjectionExpression,
 		); err != nil {
 			writeError(w, http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ValidationException", err.Error())
+				ErrTypeValidationException, err.Error())
 			return
 		}
 		items, err := ro.storage.BatchGetItems(tableName, tableReq.Keys)
@@ -67,7 +67,7 @@ func (ro *Router) handleBatchGetItem(w http.ResponseWriter, body []byte) {
 				writeError(
 					w,
 					http.StatusBadRequest,
-					"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+					ErrTypeResourceNotFoundException,
 					"Requested resource not found: Table: "+tableName+" not found",
 				)
 				return
@@ -77,7 +77,7 @@ func (ro *Router) handleBatchGetItem(w http.ResponseWriter, body []byte) {
 				writeError(
 					w,
 					http.StatusBadRequest,
-					"com.amazonaws.dynamodb.v20120810#ValidationException",
+					ErrTypeValidationException,
 					err.Error(),
 				)
 				return
@@ -86,7 +86,7 @@ func (ro *Router) handleBatchGetItem(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusInternalServerError,
-				"com.amazonaws.dynamodb.v20120810#InternalServerError",
+				ErrTypeInternalServerError,
 				"internal server error",
 			)
 			return
@@ -112,7 +112,7 @@ func (ro *Router) handleBatchGetItem(w http.ResponseWriter, body []byte) {
 				writeError(
 					w,
 					http.StatusBadRequest,
-					"com.amazonaws.dynamodb.v20120810#ValidationException",
+					ErrTypeValidationException,
 					projErr.Error(),
 				)
 				return
@@ -151,7 +151,7 @@ func (ro *Router) handleBatchWriteItem(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"invalid request body",
 		)
 		return
@@ -160,7 +160,7 @@ func (ro *Router) handleBatchWriteItem(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"RequestItems is required",
 		)
 		return
@@ -173,7 +173,7 @@ func (ro *Router) handleBatchWriteItem(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"Too many items requested for the BatchWriteItem call",
 		)
 		return
@@ -197,7 +197,7 @@ func (ro *Router) handleBatchWriteItem(w http.ResponseWriter, body []byte) {
 				writeError(
 					w,
 					http.StatusBadRequest,
-					"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+					ErrTypeResourceNotFoundException,
 					"Requested resource not found: Table: "+tableName+" not found",
 				)
 				return
@@ -207,7 +207,7 @@ func (ro *Router) handleBatchWriteItem(w http.ResponseWriter, body []byte) {
 				writeError(
 					w,
 					http.StatusBadRequest,
-					"com.amazonaws.dynamodb.v20120810#ValidationException",
+					ErrTypeValidationException,
 					err.Error(),
 				)
 				return
@@ -216,7 +216,7 @@ func (ro *Router) handleBatchWriteItem(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusInternalServerError,
-				"com.amazonaws.dynamodb.v20120810#InternalServerError",
+				ErrTypeInternalServerError,
 				"internal server error",
 			)
 			return

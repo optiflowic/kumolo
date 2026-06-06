@@ -414,7 +414,7 @@ func TestHandleScanWithFilterExpression(t *testing.T) {
 			"ExpressionAttributeValues":{":val":{"S":"x"}}
 		}`)
 		assert.Equal(t, 400, w.Code)
-		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+		assertErrorType(t, w, ErrTypeValidationException)
 	})
 
 	t.Run("missing val ref on non-empty table returns 400", func(t *testing.T) {
@@ -426,7 +426,7 @@ func TestHandleScanWithFilterExpression(t *testing.T) {
 			"ExpressionAttributeValues":{":active":{"S":"active"}}
 		}`)
 		assert.Equal(t, 400, w.Code)
-		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+		assertErrorType(t, w, ErrTypeValidationException)
 	})
 
 	t.Run("missing val ref on empty table returns 400", func(t *testing.T) {
@@ -439,7 +439,7 @@ func TestHandleScanWithFilterExpression(t *testing.T) {
 			"ExpressionAttributeValues":{":active":{"S":"active"}}
 		}`)
 		assert.Equal(t, 400, w.Code)
-		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+		assertErrorType(t, w, ErrTypeValidationException)
 	})
 
 	t.Run("missing name ref on non-empty table returns 400", func(t *testing.T) {
@@ -450,7 +450,7 @@ func TestHandleScanWithFilterExpression(t *testing.T) {
 			"ExpressionAttributeValues":{":active":{"S":"active"}}
 		}`)
 		assert.Equal(t, 400, w.Code)
-		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+		assertErrorType(t, w, ErrTypeValidationException)
 	})
 
 	t.Run("missing name ref on empty table returns 400", func(t *testing.T) {
@@ -462,7 +462,7 @@ func TestHandleScanWithFilterExpression(t *testing.T) {
 			"ExpressionAttributeValues":{":active":{"S":"active"}}
 		}`)
 		assert.Equal(t, 400, w.Code)
-		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+		assertErrorType(t, w, ErrTypeValidationException)
 	})
 }
 
@@ -580,7 +580,7 @@ func TestHandleQueryWithFilterExpression(t *testing.T) {
 			"ExpressionAttributeValues":{":uid":{"S":"u1"},":val":{"S":"x"}}
 		}`)
 		assert.Equal(t, 400, w.Code)
-		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+		assertErrorType(t, w, ErrTypeValidationException)
 	})
 
 	t.Run("missing val ref when key matches no items returns 400", func(t *testing.T) {
@@ -593,7 +593,7 @@ func TestHandleQueryWithFilterExpression(t *testing.T) {
 			"ExpressionAttributeValues":{":uid":{"S":"no-such-user"}}
 		}`)
 		assert.Equal(t, 400, w.Code)
-		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+		assertErrorType(t, w, ErrTypeValidationException)
 	})
 
 	t.Run("missing name ref when key matches no items returns 400", func(t *testing.T) {
@@ -605,7 +605,7 @@ func TestHandleQueryWithFilterExpression(t *testing.T) {
 			"ExpressionAttributeValues":{":uid":{"S":"no-such-user"},":active":{"S":"active"}}
 		}`)
 		assert.Equal(t, 400, w.Code)
-		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+		assertErrorType(t, w, ErrTypeValidationException)
 	})
 }
 

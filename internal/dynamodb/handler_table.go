@@ -36,7 +36,7 @@ func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"invalid request body",
 		)
 		return
@@ -45,7 +45,7 @@ func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"TableName is required",
 		)
 		return
@@ -60,14 +60,14 @@ func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 	if req.StreamSpecification != nil {
 		if req.StreamSpecification.StreamEnabled == nil {
 			writeError(w, http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				ErrTypeValidationException,
 				"StreamEnabled is required in StreamSpecification")
 			return
 		}
 		if *req.StreamSpecification.StreamEnabled {
 			if err := validateStreamViewType(req.StreamSpecification.StreamViewType); err != nil {
 				writeError(w, http.StatusBadRequest,
-					"com.amazonaws.dynamodb.v20120810#ValidationException", err.Error())
+					ErrTypeValidationException, err.Error())
 				return
 			}
 		}
@@ -96,7 +96,7 @@ func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			err.Error(),
 		)
 		return
@@ -107,7 +107,7 @@ func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ResourceInUseException",
+				ErrTypeResourceInUseException,
 				"Table already exists: "+req.TableName,
 			)
 			return
@@ -116,7 +116,7 @@ func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"com.amazonaws.dynamodb.v20120810#InternalServerError",
+			ErrTypeInternalServerError,
 			"internal server error",
 		)
 		return
@@ -127,7 +127,7 @@ func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"com.amazonaws.dynamodb.v20120810#InternalServerError",
+			ErrTypeInternalServerError,
 			"internal server error",
 		)
 		return
@@ -144,7 +144,7 @@ func (ro *Router) handleDeleteTable(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"invalid request body",
 		)
 		return
@@ -153,7 +153,7 @@ func (ro *Router) handleDeleteTable(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"TableName is required",
 		)
 		return
@@ -165,7 +165,7 @@ func (ro *Router) handleDeleteTable(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+				ErrTypeResourceNotFoundException,
 				"Requested resource not found: Table: "+req.TableName+" not found",
 			)
 			return
@@ -174,7 +174,7 @@ func (ro *Router) handleDeleteTable(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"com.amazonaws.dynamodb.v20120810#InternalServerError",
+			ErrTypeInternalServerError,
 			"internal server error",
 		)
 		return
@@ -184,7 +184,7 @@ func (ro *Router) handleDeleteTable(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"com.amazonaws.dynamodb.v20120810#InternalServerError",
+			ErrTypeInternalServerError,
 			"internal server error",
 		)
 		return
@@ -203,7 +203,7 @@ func (ro *Router) handleDescribeTable(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"invalid request body",
 		)
 		return
@@ -212,7 +212,7 @@ func (ro *Router) handleDescribeTable(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"TableName is required",
 		)
 		return
@@ -224,7 +224,7 @@ func (ro *Router) handleDescribeTable(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+				ErrTypeResourceNotFoundException,
 				"Requested resource not found: Table: "+req.TableName+" not found",
 			)
 			return
@@ -233,7 +233,7 @@ func (ro *Router) handleDescribeTable(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"com.amazonaws.dynamodb.v20120810#InternalServerError",
+			ErrTypeInternalServerError,
 			"internal server error",
 		)
 		return
@@ -251,7 +251,7 @@ func (ro *Router) handleListTables(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"invalid request body",
 		)
 		return
@@ -262,7 +262,7 @@ func (ro *Router) handleListTables(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				ErrTypeValidationException,
 				fmt.Sprintf(
 					"Value %d at 'limit' failed to satisfy constraint: Member must have value between 1 and 100, inclusive",
 					*req.Limit,
@@ -278,7 +278,7 @@ func (ro *Router) handleListTables(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"com.amazonaws.dynamodb.v20120810#InternalServerError",
+			ErrTypeInternalServerError,
 			"internal server error",
 		)
 		return
@@ -352,7 +352,7 @@ func (ro *Router) handleUpdateTable(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"invalid request body",
 		)
 		return
@@ -361,7 +361,7 @@ func (ro *Router) handleUpdateTable(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"TableName is required",
 		)
 		return
@@ -374,14 +374,14 @@ func (ro *Router) handleUpdateTable(w http.ResponseWriter, body []byte) {
 	if req.StreamSpecification != nil {
 		if req.StreamSpecification.StreamEnabled == nil {
 			writeError(w, http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				ErrTypeValidationException,
 				"StreamEnabled is required in StreamSpecification")
 			return
 		}
 		if *req.StreamSpecification.StreamEnabled {
 			if err := validateStreamViewType(req.StreamSpecification.StreamViewType); err != nil {
 				writeError(w, http.StatusBadRequest,
-					"com.amazonaws.dynamodb.v20120810#ValidationException", err.Error())
+					ErrTypeValidationException, err.Error())
 				return
 			}
 		}
@@ -431,7 +431,7 @@ func (ro *Router) handleUpdateTable(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+				ErrTypeResourceNotFoundException,
 				"Requested resource not found: Table: "+req.TableName+" not found",
 			)
 			return
@@ -440,7 +440,7 @@ func (ro *Router) handleUpdateTable(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"com.amazonaws.dynamodb.v20120810#InternalServerError",
+			ErrTypeInternalServerError,
 			"internal server error",
 		)
 		return

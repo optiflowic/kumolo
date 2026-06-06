@@ -25,7 +25,7 @@ func (ro *Router) handleTransactGetItems(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"invalid request body",
 		)
 		return
@@ -34,7 +34,7 @@ func (ro *Router) handleTransactGetItems(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"TransactItems is required",
 		)
 		return
@@ -43,7 +43,7 @@ func (ro *Router) handleTransactGetItems(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			fmt.Sprintf(
 				"Member must have length less than or equal to 100, but received length %d",
 				len(req.TransactItems),
@@ -64,7 +64,7 @@ func (ro *Router) handleTransactGetItems(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				ErrTypeValidationException,
 				"each TransactItems entry must contain a Get",
 			)
 			return
@@ -74,7 +74,7 @@ func (ro *Router) handleTransactGetItems(w http.ResponseWriter, body []byte) {
 			ti.Get.ProjectionExpression,
 		); err != nil {
 			writeError(w, http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ValidationException", err.Error())
+				ErrTypeValidationException, err.Error())
 			return
 		}
 		gets[i] = TransactGetInput{
@@ -91,7 +91,7 @@ func (ro *Router) handleTransactGetItems(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+				ErrTypeResourceNotFoundException,
 				"Requested resource not found",
 			)
 			return
@@ -101,7 +101,7 @@ func (ro *Router) handleTransactGetItems(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				ErrTypeValidationException,
 				err.Error(),
 			)
 			return
@@ -110,7 +110,7 @@ func (ro *Router) handleTransactGetItems(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"com.amazonaws.dynamodb.v20120810#InternalServerError",
+			ErrTypeInternalServerError,
 			"internal server error",
 		)
 		return
@@ -129,7 +129,7 @@ func (ro *Router) handleTransactGetItems(w http.ResponseWriter, body []byte) {
 				writeError(
 					w,
 					http.StatusBadRequest,
-					"com.amazonaws.dynamodb.v20120810#ValidationException",
+					ErrTypeValidationException,
 					projErr.Error(),
 				)
 				return
@@ -196,7 +196,7 @@ func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"invalid request body",
 		)
 		return
@@ -205,7 +205,7 @@ func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"TransactItems is required",
 		)
 		return
@@ -214,7 +214,7 @@ func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			fmt.Sprintf(
 				"Member must have length less than or equal to 100, but received length %d",
 				len(req.TransactItems),
@@ -235,7 +235,7 @@ func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 				ti.Put.ConditionExpression,
 			); err != nil {
 				writeError(w, http.StatusBadRequest,
-					"com.amazonaws.dynamodb.v20120810#ValidationException", err.Error())
+					ErrTypeValidationException, err.Error())
 				return
 			}
 			var cond *ConditionCheck
@@ -261,7 +261,7 @@ func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 				ti.Delete.ConditionExpression,
 			); err != nil {
 				writeError(w, http.StatusBadRequest,
-					"com.amazonaws.dynamodb.v20120810#ValidationException", err.Error())
+					ErrTypeValidationException, err.Error())
 				return
 			}
 			var cond *ConditionCheck
@@ -287,7 +287,7 @@ func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 				ti.Update.UpdateExpression, ti.Update.ConditionExpression,
 			); err != nil {
 				writeError(w, http.StatusBadRequest,
-					"com.amazonaws.dynamodb.v20120810#ValidationException", err.Error())
+					ErrTypeValidationException, err.Error())
 				return
 			}
 			updates, err := parseUpdateExpression(
@@ -300,7 +300,7 @@ func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 				writeError(
 					w,
 					http.StatusBadRequest,
-					"com.amazonaws.dynamodb.v20120810#ValidationException",
+					ErrTypeValidationException,
 					err.Error(),
 				)
 				return
@@ -328,7 +328,7 @@ func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 				writeError(
 					w,
 					http.StatusBadRequest,
-					"com.amazonaws.dynamodb.v20120810#ValidationException",
+					ErrTypeValidationException,
 					"ConditionExpression is required for ConditionCheck",
 				)
 				return
@@ -338,7 +338,7 @@ func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 				ti.ConditionCheck.ConditionExpression,
 			); err != nil {
 				writeError(w, http.StatusBadRequest,
-					"com.amazonaws.dynamodb.v20120810#ValidationException", err.Error())
+					ErrTypeValidationException, err.Error())
 				return
 			}
 			cond := &ConditionCheck{
@@ -359,7 +359,7 @@ func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				ErrTypeValidationException,
 				"each TransactItems entry must contain Put, Delete, Update, or ConditionCheck",
 			)
 			return
@@ -383,7 +383,7 @@ func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 			w.Header().Set("Content-Type", "application/x-amz-json-1.0")
 			w.WriteHeader(http.StatusBadRequest)
 			if encErr := json.NewEncoder(w).Encode(cancelResp{
-				Type: "com.amazonaws.dynamodb.v20120810#TransactionCanceledException",
+				Type: ErrTypeTransactionCanceledException,
 				Message: "Transaction cancelled, please refer cancellation reasons for specific reasons [" +
 					strings.Join(codes, ", ") + "]",
 				CancellationReasons: txErr.Reasons,
@@ -401,7 +401,7 @@ func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+				ErrTypeResourceNotFoundException,
 				"Requested resource not found",
 			)
 			return
@@ -411,7 +411,7 @@ func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				ErrTypeValidationException,
 				err.Error(),
 			)
 			return
@@ -420,7 +420,7 @@ func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"com.amazonaws.dynamodb.v20120810#InternalServerError",
+			ErrTypeInternalServerError,
 			"internal server error",
 		)
 		return

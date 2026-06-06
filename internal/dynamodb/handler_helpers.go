@@ -49,7 +49,7 @@ func validateReturnConsumedCapacity(w http.ResponseWriter, mode string) bool {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"Value '"+mode+"' at 'returnConsumedCapacity' failed to satisfy constraint: Member must satisfy enum value set: [INDEXES, NONE, TOTAL]",
 		)
 		return false
@@ -64,27 +64,27 @@ func validateSelectCommon(w http.ResponseWriter, selectVal, projExpr string) boo
 	case "ALL_ATTRIBUTES":
 		if projExpr != "" {
 			writeError(w, http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				ErrTypeValidationException,
 				"Select type ALL_ATTRIBUTES is not allowed with a ProjectionExpression")
 			return false
 		}
 	case "COUNT":
 		if projExpr != "" {
 			writeError(w, http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				ErrTypeValidationException,
 				"Select type COUNT is not allowed with a ProjectionExpression")
 			return false
 		}
 	case "SPECIFIC_ATTRIBUTES":
 		if projExpr == "" {
 			writeError(w, http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				ErrTypeValidationException,
 				"Select type SPECIFIC_ATTRIBUTES is not compatible with the operation specified.")
 			return false
 		}
 	default:
 		writeError(w, http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			fmt.Sprintf(
 				"Value '%s' at 'select' failed to satisfy constraint: Member must satisfy enum value set: [ALL_ATTRIBUTES, ALL_PROJECTED_ATTRIBUTES, SPECIFIC_ATTRIBUTES, COUNT]",
 				selectVal,
