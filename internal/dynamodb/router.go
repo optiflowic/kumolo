@@ -252,6 +252,12 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ro.handleEnableKinesisStreamingDestination(w, body)
 	case "DisableKinesisStreamingDestination":
 		ro.handleDisableKinesisStreamingDestination(w, body)
+	case "ExecuteStatement":
+		ro.handleExecuteStatement(w, body)
+	case "BatchExecuteStatement":
+		ro.handleBatchExecuteStatement(w, body)
+	case "ExecuteTransaction":
+		ro.handleExecuteTransaction(w, body)
 	case "DescribeLimits":
 		ro.handleDescribeLimits(w)
 	case "DescribeEndpoints":
