@@ -240,7 +240,9 @@ func parsePartiQL(stmt string, params []map[string]any) (*pqStmt, error) {
 
 func (p *pqParser) peek() pqTok {
 	if p.pos >= len(p.toks) {
-		return pqTok{kind: pqTokEOF}
+		return pqTok{
+			kind: pqTokEOF,
+		} // unreachable: EOF token is always appended and consume bounds-checks pos
 	}
 	return p.toks[p.pos]
 }

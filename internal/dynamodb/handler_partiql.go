@@ -435,7 +435,11 @@ func (ro *Router) executePartiQLSelect(
 		if filterExpr != "" {
 			filtered, ferr := applyFilterExpression(items, filterExpr, names, values)
 			if ferr != nil {
-				return nil, "", fmt.Errorf("%w: %v", ErrValidationException, ferr)
+				return nil, "", fmt.Errorf(
+					"%w: %v",
+					ErrValidationException,
+					ferr,
+				) // untestable: pqCondsToFilterExpr always generates valid DynamoDB filter expressions
 			}
 			items = filtered
 		}
@@ -575,7 +579,7 @@ func pqEncodeToken(lek map[string]any) (string, error) {
 	}
 	data, err := json.Marshal(lek)
 	if err != nil {
-		return "", err
+		return "", err // untestable: json.Marshal of DynamoDB-typed map[string]any never fails
 	}
 	return base64.StdEncoding.EncodeToString(data), nil
 }
