@@ -797,11 +797,23 @@ func TestPQCondsToFilterExpr(t *testing.T) {
 
 func TestPQMinLimit(t *testing.T) {
 	n5, n10 := 5, 10
-	assert.Equal(t, &n5, pqMinLimit(&n5, &n10))
-	assert.Equal(t, &n5, pqMinLimit(&n10, &n5))
-	assert.Equal(t, &n5, pqMinLimit(&n5, nil))
-	assert.Equal(t, &n5, pqMinLimit(nil, &n5))
-	assert.Nil(t, pqMinLimit(nil, nil))
+	tests := []struct {
+		name string
+		a    *int
+		b    *int
+		want *int
+	}{
+		{"both non-nil, a smaller", &n5, &n10, &n5},
+		{"both non-nil, b smaller", &n10, &n5, &n5},
+		{"a non-nil, b nil", &n5, nil, &n5},
+		{"a nil, b non-nil", nil, &n5, &n5},
+		{"both nil", nil, nil, nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, pqMinLimit(tc.a, tc.b))
+		})
+	}
 }
 
 // ---- tokenizer edge cases ----
@@ -865,6 +877,20 @@ func TestPQTokenize_EdgeCases(t *testing.T) {
 			pqTokLBrack, pqTokRBrack,
 			pqTokColon, pqTokQ, pqTokDot,
 		}, kinds)
+	})
+	t.Run("escaped single-quote '' in string literal", func(t *testing.T) {
+		toks, err := pqTokenize(`'it''s'`)
+		require.NoError(t, err)
+		require.Len(t, toks, 2) // string token + EOF
+		assert.Equal(t, pqTokStr, toks[0].kind)
+		assert.Equal(t, "it's", toks[0].strVal)
+	})
+	t.Run("multi-dot number stops at second dot", func(t *testing.T) {
+		toks, err := pqTokenize("1.2.3")
+		require.NoError(t, err)
+		// "1.2" is the number token; ".3" produces a dot + "3" number token
+		assert.Equal(t, pqTokNum, toks[0].kind)
+		assert.Equal(t, "1.2", toks[0].val)
 	})
 }
 
@@ -1262,6 +1288,41 @@ func TestBatchExecuteStatement_AdditionalCoverage(t *testing.T) {
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		assert.NotNil(t, resp["ConsumedCapacity"])
 	})
+
+	t.Run(
+		"batch SELECT without exact key equality returns per-statement ValidationException",
+		func(t *testing.T) {
+			// AWS requires exact hash key equality; a full-scan SELECT must be rejected.
+			w := dynamo(t, ro, "BatchExecuteStatement", `{
+			"Statements": [
+				{"Statement": "SELECT * FROM \"t\""}
+			]
+		}`)
+			assert.Equal(t, http.StatusOK, w.Code) // batch always returns 200
+			var resp map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+			r := resp["Responses"].([]any)[0].(map[string]any)
+			require.NotNil(t, r["Error"])
+			assert.Equal(t, "ValidationException", r["Error"].(map[string]any)["Code"])
+		},
+	)
+
+	t.Run(
+		"batch SELECT on unknown table returns per-statement ResourceNotFoundException",
+		func(t *testing.T) {
+			w := dynamo(t, ro, "BatchExecuteStatement", `{
+			"Statements": [
+				{"Statement": "SELECT * FROM \"nosuch\" WHERE pk = ?", "Parameters": [{"S":"k"}]}
+			]
+		}`)
+			assert.Equal(t, http.StatusOK, w.Code)
+			var resp map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+			r := resp["Responses"].([]any)[0].(map[string]any)
+			require.NotNil(t, r["Error"])
+			assert.Equal(t, "ResourceNotFoundException", r["Error"].(map[string]any)["Code"])
+		},
+	)
 }
 
 // ---- ExecuteTransaction additional coverage ----
