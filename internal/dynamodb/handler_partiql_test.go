@@ -1377,6 +1377,36 @@ func TestPQStorageErrToBatchError(t *testing.T) {
 // errUnexpected is a sentinel for "none of the above" error branches.
 var errUnexpected = fmt.Errorf("unexpected storage failure")
 
+// TestExecutePartiQLSelect_ScanError uses a mockStore to trigger the storage error
+// path (handler_partiql.go:428-430) that fires when Scan/Query/GetItem itself fails.
+func TestExecutePartiQLSelect_ScanError(t *testing.T) {
+	meta := TableMetadata{
+		Name:      "t",
+		KeySchema: []KeySchemaElement{{AttributeName: "pk", KeyType: "HASH"}},
+		Status:    "ACTIVE",
+	}
+	mock := &mockStore{
+		describeTableFn: func(string) (TableMetadata, error) { return meta, nil },
+		scanFn: func(string, ScanOptions) ([]map[string]any, map[string]any, error) {
+			return nil, nil, fmt.Errorf("simulated scan failure")
+		},
+	}
+	ro := &Router{storage: mock}
+	// SELECT * FROM "t" → no WHERE → Scan path; Scan returns error → 428-430
+	w := dynamo(t, ro, "ExecuteStatement", `{"Statement":"SELECT * FROM \"t\""}`)
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+// TestParseOneSet_ParseNameError covers partiql.go:636-638 (parseName failure in
+// parseOneSet when the SET clause has no attribute name, e.g. "SET = ?").
+func TestParseOneSet_ParseNameError(t *testing.T) {
+	_, err := parsePartiQL(
+		`UPDATE "t" SET = ? WHERE pk = ?`,
+		[]map[string]any{{"S": "v"}, {"S": "k"}},
+	)
+	require.Error(t, err)
+}
+
 // ---- parser error path coverage ----
 
 func TestParsePartiQL_ErrorPaths(t *testing.T) {

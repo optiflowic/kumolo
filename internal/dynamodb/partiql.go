@@ -594,7 +594,7 @@ func (p *pqParser) parseDocMap() (map[string]any, error) {
 // parseList parses [val, val, ...] and returns []any (each element is a DynamoDB typed value).
 func (p *pqParser) parseList() ([]any, error) {
 	if err := p.expectPunct(pqTokLBrack, "'['"); err != nil {
-		return nil, err
+		return nil, err // unreachable: parseValue only calls parseList after confirming pqTokLBrack
 	}
 	var items []any
 	for p.peek().kind != pqTokRBrack && p.peek().kind != pqTokEOF {
