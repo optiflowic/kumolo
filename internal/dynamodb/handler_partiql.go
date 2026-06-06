@@ -194,6 +194,18 @@ func (ro *Router) handleBatchExecuteStatement(w http.ResponseWriter, body []byte
 
 		switch stmt.kind {
 		case pqSelect:
+			// AWS requires exact key equality for batch SELECT (point lookup only).
+			meta, descErr := ro.storage.DescribeTable(stmt.tableName)
+			if descErr != nil {
+				resp.Error = pqStorageErrToBatchError(descErr)
+				responses[i] = resp
+				continue
+			}
+			if _, keyErr := extractExactKey(stmt.where, meta); keyErr != nil {
+				resp.Error = pqStorageErrToBatchError(keyErr)
+				responses[i] = resp
+				continue
+			}
 			items, _, err := ro.executePartiQLSelect(stmt, nil, "")
 			if err != nil {
 				resp.Error = pqStorageErrToBatchError(err)
