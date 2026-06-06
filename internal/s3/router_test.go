@@ -10330,9 +10330,10 @@ func TestSSECCoverage(t *testing.T) {
 	})
 
 	t.Run("CopyObject succeeds with correct source SSE-C headers", func(t *testing.T) {
+		// Source-only SSE-C: destination is not re-encrypted with SSE-C,
+		// so no destination SSE-C response headers should be set.
 		ro := newRouterWithMock(&mockStore{
 			headObjectMeta: ObjectMetadata{SSECKeyMD5: ssecMD5()},
-			copyObjectMeta: ObjectMetadata{SSECKeyMD5: ssecMD5()},
 		})
 		req := httptest.NewRequest(http.MethodPut, "/dst/key", nil)
 		req.Header.Set(amzCopySource, "/src/obj")
@@ -10342,9 +10343,33 @@ func TestSSECCoverage(t *testing.T) {
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Equal(t, "AES256", w.Header().Get(amzSSECAlgorithm))
-		assert.Equal(t, ssecMD5(), w.Header().Get(amzSSECKeyMD5))
+		assert.Empty(t, w.Header().Get(amzSSECAlgorithm))
+		assert.Empty(t, w.Header().Get(amzSSECKeyMD5))
 	})
+
+	t.Run(
+		"CopyObject propagates destination SSE-C key MD5 in response headers",
+		func(t *testing.T) {
+			// Both source and destination SSE-C: response must carry destination SSE-C headers.
+			ro := newRouterWithMock(&mockStore{
+				headObjectMeta: ObjectMetadata{SSECKeyMD5: ssecMD5()},
+				copyObjectMeta: ObjectMetadata{SSECKeyMD5: ssecMD5()},
+			})
+			req := httptest.NewRequest(http.MethodPut, "/dst/key", nil)
+			req.Header.Set(amzCopySource, "/src/obj")
+			req.Header.Set(amzCopySourceSSECAlgorithm, validSSECHeaders()[amzSSECAlgorithm])
+			req.Header.Set(amzCopySourceSSECKey, validSSECHeaders()[amzSSECKey])
+			req.Header.Set(amzCopySourceSSECKeyMD5, validSSECHeaders()[amzSSECKeyMD5])
+			for k, v := range validSSECHeaders() {
+				req.Header.Set(k, v)
+			}
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Equal(t, "AES256", w.Header().Get(amzSSECAlgorithm))
+			assert.Equal(t, ssecMD5(), w.Header().Get(amzSSECKeyMD5))
+		},
+	)
 
 	t.Run("UploadPartCopy succeeds with correct source SSE-C headers", func(t *testing.T) {
 		ro := newRouterWithMock(&mockStore{
