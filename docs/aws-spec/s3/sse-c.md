@@ -3,6 +3,7 @@
 **Official URL**: https://docs.aws.amazon.com/AmazonS3/latest/userguide/ServerSideEncryptionCustomerKeys.html
 
 ## SDK Structs
+
 `s3.PutObjectInput.SSECustomerAlgorithm`, `SSECustomerKey`, `SSECustomerKeyMD5`
 Copy-source variants: `CopySourceSSECustomerAlgorithm`, `CopySourceSSECustomerKey`, `CopySourceSSECustomerKeyMD5`
 
@@ -67,11 +68,12 @@ Stores `SSECKeyMD5 string` in `ObjectMetadata`; uses it for key MD5 validation o
 |---|---|---|
 | `InvalidArgument` | 400 | Missing/invalid SSE-C headers or conflict with SSE headers |
 | `InvalidRequest` | 400 | SSE-C object accessed without providing SSE-C headers |
-| `AccessDenied` | 403 | Key MD5 mismatch |
+| `AccessDenied` | 403 | Key MD5 mismatch, or SSE-C headers provided for object without stored SSE-C metadata |
 
 ## Deviations from AWS
 
 - Bytes are not actually encrypted; only key MD5 is stored and validated.
 
 ## Last Verified
+
 2026-06-06

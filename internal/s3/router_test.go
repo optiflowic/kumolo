@@ -10135,6 +10135,44 @@ func TestSSEC(t *testing.T) {
 			assert.Empty(t, meta.SSEAlgorithm)
 		},
 	)
+
+	t.Run(
+		"SSE-C multipart E2E: CreateMultipartUpload persists key MD5 and UploadPart validates it",
+		func(t *testing.T) {
+			ro := newTestRouter(t)
+
+			wc := httptest.NewRecorder()
+			ro.ServeHTTP(wc, httptest.NewRequest(http.MethodPut, "/b", nil))
+			require.Equal(t, http.StatusOK, wc.Code)
+
+			reqCMU := httptest.NewRequest(http.MethodPost, "/b/k?uploads", nil)
+			for k, v := range validSSECHeaders() {
+				reqCMU.Header.Set(k, v)
+			}
+			wCMU := httptest.NewRecorder()
+			ro.ServeHTTP(wCMU, reqCMU)
+			require.Equal(t, http.StatusOK, wCMU.Code)
+			assert.Equal(t, ssecMD5(), wCMU.Header().Get(amzSSECKeyMD5))
+
+			var initResult initiateMultipartUploadResult
+			require.NoError(t, xml.NewDecoder(wCMU.Body).Decode(&initResult))
+			uploadID := initResult.UploadID
+			require.NotEmpty(t, uploadID)
+
+			// UploadPart with the same SSE-C key must succeed
+			reqUP := httptest.NewRequest(
+				http.MethodPut,
+				"/b/k?uploadId="+uploadID+"&partNumber=1",
+				strings.NewReader(strings.Repeat("a", minPartSize+1)),
+			)
+			for k, v := range validSSECHeaders() {
+				reqUP.Header.Set(k, v)
+			}
+			wUP := httptest.NewRecorder()
+			ro.ServeHTTP(wUP, reqUP)
+			assert.Equal(t, http.StatusOK, wUP.Code)
+		},
+	)
 }
 
 func TestSSECCoverage(t *testing.T) {
@@ -10289,5 +10327,37 @@ func TestSSECCoverage(t *testing.T) {
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusForbidden, w.Code)
 		assert.Contains(t, w.Body.String(), "AccessDenied")
+	})
+
+	t.Run("CopyObject succeeds with correct source SSE-C headers", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			headObjectMeta: ObjectMetadata{SSECKeyMD5: ssecMD5()},
+			copyObjectMeta: ObjectMetadata{SSECKeyMD5: ssecMD5()},
+		})
+		req := httptest.NewRequest(http.MethodPut, "/dst/key", nil)
+		req.Header.Set(amzCopySource, "/src/obj")
+		req.Header.Set(amzCopySourceSSECAlgorithm, validSSECHeaders()[amzSSECAlgorithm])
+		req.Header.Set(amzCopySourceSSECKey, validSSECHeaders()[amzSSECKey])
+		req.Header.Set(amzCopySourceSSECKeyMD5, validSSECHeaders()[amzSSECKeyMD5])
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "AES256", w.Header().Get(amzSSECAlgorithm))
+		assert.Equal(t, ssecMD5(), w.Header().Get(amzSSECKeyMD5))
+	})
+
+	t.Run("UploadPartCopy succeeds with correct source SSE-C headers", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			headObjectMeta:     ObjectMetadata{SSECKeyMD5: ssecMD5()},
+			uploadPartCopyETag: `"etag"`,
+		})
+		req := httptest.NewRequest(http.MethodPut, "/b/k?uploadId=uid&partNumber=1", nil)
+		req.Header.Set(amzCopySource, "/src/obj")
+		req.Header.Set(amzCopySourceSSECAlgorithm, validSSECHeaders()[amzSSECAlgorithm])
+		req.Header.Set(amzCopySourceSSECKey, validSSECHeaders()[amzSSECKey])
+		req.Header.Set(amzCopySourceSSECKeyMD5, validSSECHeaders()[amzSSECKeyMD5])
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
 	})
 }

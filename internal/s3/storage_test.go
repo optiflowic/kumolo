@@ -755,6 +755,20 @@ func TestPutObject(t *testing.T) {
 		assert.True(t, got.SSEBucketKeyEnabled)
 	})
 
+	t.Run("SSECKeyMD5 round-trips through PutObject", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("b", "", false))
+		meta, err := s.PutObject("b", "k", strings.NewReader("x"), "text/plain", nil,
+			"", "", false, ssecMD5(), nil, nil, "")
+		require.NoError(t, err)
+		assert.Equal(t, ssecMD5(), meta.SSECKeyMD5)
+		assert.Empty(t, meta.SSEAlgorithm)
+
+		got, err := s.HeadObject("b", "k")
+		require.NoError(t, err)
+		assert.Equal(t, ssecMD5(), got.SSECKeyMD5)
+	})
+
 	t.Run("SSEBucketKeyEnabled round-trips through CopyObject", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateBucket("b", "", false))
@@ -782,6 +796,52 @@ func TestPutObject(t *testing.T) {
 		got, err := s.HeadObject("b", "dst")
 		require.NoError(t, err)
 		assert.True(t, got.SSEBucketKeyEnabled)
+	})
+
+	t.Run("SSECKeyMD5 round-trips through CopyObject", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("b", "", false))
+		_, err := s.PutObject("b", "src", strings.NewReader("x"), "text/plain", nil,
+			"", "", false, ssecMD5(), nil, nil, "")
+		require.NoError(t, err)
+		meta, err := s.CopyObject("b", "src", "", "b", "dst", "",
+			nil, "", "", false, ssecMD5(), nil, nil, "")
+		require.NoError(t, err)
+		assert.Equal(t, ssecMD5(), meta.SSECKeyMD5)
+		assert.Empty(t, meta.SSEAlgorithm)
+
+		got, err := s.HeadObject("b", "dst")
+		require.NoError(t, err)
+		assert.Equal(t, ssecMD5(), got.SSECKeyMD5)
+	})
+
+	t.Run("SSECKeyMD5 round-trips through multipart upload", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("b", "", false))
+		uploadID, err := s.CreateMultipartUpload(
+			"b", "k", "text/plain", "", "", false, ssecMD5(), nil, nil, "",
+		)
+		require.NoError(t, err)
+
+		uploadMetaResult, err := s.GetUploadMeta(uploadID)
+		require.NoError(t, err)
+		assert.Equal(t, ssecMD5(), uploadMetaResult.SSECKeyMD5)
+		assert.Empty(t, uploadMetaResult.SSEAlgorithm)
+
+		etag, err := s.UploadPart(
+			uploadID, 1, strings.NewReader(strings.Repeat("a", 5*1024*1024+1)),
+		)
+		require.NoError(t, err)
+		meta, err := s.CompleteMultipartUpload(
+			uploadID, []CompletePart{{PartNumber: 1, ETag: etag}},
+		)
+		require.NoError(t, err)
+		assert.Equal(t, ssecMD5(), meta.SSECKeyMD5)
+		assert.Empty(t, meta.SSEAlgorithm)
+
+		got, err := s.HeadObject("b", "k")
+		require.NoError(t, err)
+		assert.Equal(t, ssecMD5(), got.SSECKeyMD5)
 	})
 
 	t.Run("SSEBucketKeyEnabled round-trips through multipart upload", func(t *testing.T) {
