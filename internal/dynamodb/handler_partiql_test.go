@@ -1576,6 +1576,261 @@ func TestValidatePQBatchKind_EmptySlice(t *testing.T) {
 
 // ---- pqDecodeToken coverage ----
 
+// ---- comprehensive coverage tests for remaining gaps ----
+
+func TestParsePartiQL_AllRemainingErrors(t *testing.T) {
+	// parser WHERE-required guards (these were genuinely not tested before)
+	t.Run("UPDATE without WHERE clause fails", func(t *testing.T) {
+		_, err := parsePartiQL(`UPDATE "t" SET col = ?`, []map[string]any{{"S": "v"}})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "WHERE")
+	})
+	t.Run("DELETE without WHERE clause fails", func(t *testing.T) {
+		_, err := parsePartiQL(`DELETE FROM "t"`, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "WHERE")
+	})
+
+	// SELECT missing FROM
+	t.Run("SELECT without FROM fails", func(t *testing.T) {
+		_, err := parsePartiQL(`SELECT *`, nil)
+		require.Error(t, err)
+	})
+
+	// SELECT ORDER BY — missing BY keyword
+	t.Run("SELECT ORDER without BY fails", func(t *testing.T) {
+		_, err := parsePartiQL(`SELECT * FROM "t" ORDER 42`, nil)
+		require.Error(t, err)
+	})
+
+	// LIMIT with decimal — strconv.Atoi fails on "1.5"
+	t.Run("SELECT LIMIT with decimal fails", func(t *testing.T) {
+		_, err := parsePartiQL(`SELECT * FROM "t" LIMIT 1.5`, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "LIMIT")
+	})
+
+	// INSERT VALUE with non-{ token
+	t.Run("INSERT VALUE with ? instead of { fails", func(t *testing.T) {
+		_, err := parsePartiQL(`INSERT INTO "t" VALUE ?`, []map[string]any{{"S": "k"}})
+		require.Error(t, err)
+	})
+
+	// parseDocMap with numeric key (parseName fails on pqTokNum)
+	t.Run("doc map with numeric key fails", func(t *testing.T) {
+		_, err := parsePartiQL(`INSERT INTO "t" VALUE {42: ?}`, []map[string]any{{"S": "v"}})
+		require.Error(t, err)
+	})
+
+	// parseConditions: error in second AND condition
+	t.Run("WHERE second AND condition parse error", func(t *testing.T) {
+		_, err := parsePartiQL(`SELECT * FROM "t" WHERE pk = ? AND 42`,
+			[]map[string]any{{"S": "k"}})
+		require.Error(t, err)
+	})
+
+	// BETWEEN lo parse error
+	t.Run("BETWEEN lo parse error fails", func(t *testing.T) {
+		_, err := parsePartiQL(`SELECT * FROM "t" WHERE pk BETWEEN = ?`,
+			[]map[string]any{{"S": "k"}})
+		require.Error(t, err)
+	})
+
+	// BETWEEN AND error (no AND keyword after lo)
+	t.Run("BETWEEN without AND fails", func(t *testing.T) {
+		_, err := parsePartiQL(`SELECT * FROM "t" WHERE pk BETWEEN ? WRONG ?`,
+			[]map[string]any{{"S": "k"}, {"S": "v"}})
+		require.Error(t, err)
+	})
+
+	// BETWEEN hi parse error
+	t.Run("BETWEEN hi parse error fails", func(t *testing.T) {
+		_, err := parsePartiQL(`SELECT * FROM "t" WHERE pk BETWEEN ? AND =`,
+			[]map[string]any{{"S": "k"}})
+		require.Error(t, err)
+	})
+
+	// IN list expectPunct(')') error: list not closed, hits EOF
+	t.Run("IN list not closed at EOF fails", func(t *testing.T) {
+		_, err := parsePartiQL(`SELECT * FROM "t" WHERE pk IN (?`,
+			[]map[string]any{{"S": "k"}})
+		require.Error(t, err)
+	})
+
+	// parseValue: nested docmap error propagates through parseValue
+	t.Run("nested doc map with bad key propagates error", func(t *testing.T) {
+		_, err := parsePartiQL(`INSERT INTO "t" VALUE {'pk': ?, 'meta': {42: ?}}`,
+			[]map[string]any{{"S": "k"}, {"S": "v"}})
+		require.Error(t, err)
+	})
+
+	// parseList: value parse error in list
+	t.Run("list with invalid value fails", func(t *testing.T) {
+		_, err := parsePartiQL(`INSERT INTO "t" VALUE {'pk': ?, 'items': [=]}`,
+			[]map[string]any{{"S": "k"}})
+		require.Error(t, err)
+	})
+
+	// parseOneSet: expectPunct('=') error
+	t.Run("SET assignment with != instead of = fails", func(t *testing.T) {
+		_, err := parsePartiQL(`UPDATE "t" SET col!= ? WHERE pk = ?`,
+			[]map[string]any{{"S": "v"}, {"S": "k"}})
+		require.Error(t, err)
+	})
+}
+
+func TestHandlerPartiQL_RemainingCoverage(t *testing.T) {
+	ro := setup(t)
+
+	// Batch: invalid ReturnConsumedCapacity
+	t.Run("batch 400 on invalid ReturnConsumedCapacity", func(t *testing.T) {
+		w := dynamo(t, ro, "BatchExecuteStatement", `{
+			"Statements": [{"Statement": "SELECT * FROM \"t\" WHERE pk = ?", "Parameters": [{"S":"k"}]}],
+			"ReturnConsumedCapacity": "INVALID"
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	// Batch SELECT error (SELECT from non-existent table hits executePartiQLSelect DescribeTable error)
+	t.Run("batch SELECT from non-existent table returns per-item error", func(t *testing.T) {
+		w := dynamo(t, ro, "BatchExecuteStatement", `{
+			"Statements": [
+				{"Statement": "SELECT * FROM \"nosuchtable\" WHERE pk = ?", "Parameters": [{"S":"k"}]}
+			]
+		}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		r := resp["Responses"].([]any)[0].(map[string]any)
+		assert.NotNil(t, r["Error"])
+	})
+
+	// Batch DELETE error (DELETE from non-existent table)
+	t.Run("batch DELETE from non-existent table returns per-item error", func(t *testing.T) {
+		w := dynamo(t, ro, "BatchExecuteStatement", `{
+			"Statements": [
+				{"Statement": "DELETE FROM \"nosuchtable\" WHERE pk = ?", "Parameters": [{"S":"k"}]}
+			]
+		}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		r := resp["Responses"].([]any)[0].(map[string]any)
+		assert.NotNil(t, r["Error"])
+	})
+
+	// ExecuteTransaction: invalid ReturnConsumedCapacity
+	t.Run("executeTransaction 400 on invalid ReturnConsumedCapacity", func(t *testing.T) {
+		w := dynamo(t, ro, "ExecuteTransaction", `{
+			"TransactStatements": [{"Statement": "INSERT INTO \"t\" VALUE {'pk': 'x'}"}],
+			"ReturnConsumedCapacity": "INVALID"
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	// ExecuteStatement SELECT from non-existent table → executePartiQLSelect DescribeTable error
+	t.Run("executeStatement SELECT from non-existent table 400", func(t *testing.T) {
+		w := dynamo(t, ro, "ExecuteStatement", `{
+			"Statement": "SELECT * FROM \"nosuchtable\" WHERE pk = ?",
+			"Parameters": [{"S":"k"}]
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ResourceNotFoundException")
+	})
+
+	// ExecuteStatement UPDATE from non-existent table → executePartiQLUpdate DescribeTable error
+	t.Run("executeStatement UPDATE from non-existent table 400", func(t *testing.T) {
+		w := dynamo(t, ro, "ExecuteStatement", `{
+			"Statement": "UPDATE \"nosuchtable\" SET val = ? WHERE pk = ?",
+			"Parameters": [{"S":"v"}, {"S":"k"}]
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ResourceNotFoundException")
+	})
+
+	// ExecuteStatement DELETE with non-key WHERE → executePartiQLDelete extractExactKey error
+	t.Run("executeStatement DELETE with non-key WHERE 400", func(t *testing.T) {
+		w := dynamo(t, ro, "ExecuteStatement", `{
+			"Statement": "DELETE FROM \"t\" WHERE val = ?",
+			"Parameters": [{"S":"k"}]
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	// ExecuteTransaction reads with non-key WHERE → extractExactKey error
+	t.Run("executeTransaction reads with non-key WHERE 400", func(t *testing.T) {
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "ExecuteStatement", `{
+			"Statement": "INSERT INTO \"t\" VALUE {'pk': 'txrk1'}"
+		}`).Code)
+		w := dynamo(t, ro, "ExecuteTransaction", `{
+			"TransactStatements": [
+				{"Statement": "SELECT * FROM \"t\" WHERE val = ?", "Parameters": [{"S":"k"}]}
+			]
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+
+	// ExecuteTransaction writes DELETE from non-existent table → DescribeTable error
+	t.Run("executeTransaction DELETE from non-existent table 400", func(t *testing.T) {
+		w := dynamo(t, ro, "ExecuteTransaction", `{
+			"TransactStatements": [
+				{"Statement": "DELETE FROM \"nosuchtable\" WHERE pk = ?", "Parameters": [{"S":"k"}]}
+			]
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ResourceNotFoundException")
+	})
+
+	// ExecuteTransaction writes DELETE with non-key WHERE → extractExactKey error
+	t.Run("executeTransaction DELETE with non-key WHERE 400", func(t *testing.T) {
+		w := dynamo(t, ro, "ExecuteTransaction", `{
+			"TransactStatements": [
+				{"Statement": "DELETE FROM \"t\" WHERE val = ?", "Parameters": [{"S":"k"}]}
+			]
+		}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+	})
+}
+
+// ---- pqCondsToFilterExpr != normalization ----
+
+func TestPQCondsToFilterExpr_NEOperator(t *testing.T) {
+	// When the operator is "!=", pqCondsToFilterExpr normalizes it to "<>"
+	conds := []pqCond{{attr: "status", op: "!=", val: map[string]any{"S": "deleted"}}}
+	expr, names, values := pqCondsToFilterExpr(conds)
+	assert.Contains(t, expr, "<>")
+	assert.NotContains(t, expr, "!=")
+	assert.Equal(t, "status", names["#pqf0"])
+	assert.Equal(t, map[string]any{"S": "deleted"}, values[":pqf0"])
+}
+
+// ---- pqCondsToFilterExpr IN covers branch via SELECT filter path ----
+
+func TestExecuteStatement_SELECT_FilterWithNE(t *testing.T) {
+	ro := setup(t)
+	for _, b := range []string{
+		`{"Statement":"INSERT INTO \"t2\" VALUE {'pk': 'p', 'sk': 10, 'data': 'ten'}"}`,
+		`{"Statement":"INSERT INTO \"t2\" VALUE {'pk': 'p', 'sk': 20, 'data': 'twenty'}"}`,
+	} {
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "ExecuteStatement", b).Code)
+	}
+
+	// WHERE pk = ? AND sk != ? → sk != ends up in filterConds with op "!="
+	// pqCondsToFilterExpr normalizes != to <> — covers lines 712-714
+	w := dynamo(t, ro, "ExecuteStatement", `{
+		"Statement": "SELECT * FROM \"t2\" WHERE pk = ? AND sk != ?",
+		"Parameters": [{"S":"p"}, {"N":"10"}]
+	}`)
+	assert.Equal(t, http.StatusOK, w.Code)
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	items := resp["Items"].([]any)
+	assert.Len(t, items, 1) // only sk=20 returned
+}
+
 func TestPQDecodeToken(t *testing.T) {
 	t.Run("invalid base64 returns error", func(t *testing.T) {
 		_, err := pqDecodeToken("!!!not-base64!!!")

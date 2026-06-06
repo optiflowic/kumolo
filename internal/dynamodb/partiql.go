@@ -307,7 +307,7 @@ func (p *pqParser) parseStatement() (*pqStmt, error) {
 
 func (p *pqParser) parseSelect() (*pqStmt, error) {
 	if err := p.expectIdent("SELECT"); err != nil {
-		return nil, err
+		return nil, err // unreachable: parseStatement pre-checks keyword before calling parseSelect
 	}
 	// skip projection clause (* or column list) until FROM
 	for p.peek().kind != pqTokEOF && !strings.EqualFold(p.peek().val, "FROM") {
@@ -360,7 +360,7 @@ func (p *pqParser) parseSelect() (*pqStmt, error) {
 
 func (p *pqParser) parseInsert() (*pqStmt, error) {
 	if err := p.expectIdent("INSERT"); err != nil {
-		return nil, err
+		return nil, err // unreachable: parseStatement pre-checks keyword before calling parseInsert
 	}
 	if err := p.expectIdent("INTO"); err != nil {
 		return nil, err
@@ -381,7 +381,7 @@ func (p *pqParser) parseInsert() (*pqStmt, error) {
 
 func (p *pqParser) parseUpdate() (*pqStmt, error) {
 	if err := p.expectIdent("UPDATE"); err != nil {
-		return nil, err
+		return nil, err // unreachable: parseStatement pre-checks keyword before calling parseUpdate
 	}
 	tableName, err := p.parseName()
 	if err != nil {
@@ -408,7 +408,7 @@ func (p *pqParser) parseUpdate() (*pqStmt, error) {
 
 func (p *pqParser) parseDelete() (*pqStmt, error) {
 	if err := p.expectIdent("DELETE"); err != nil {
-		return nil, err
+		return nil, err // unreachable: parseStatement pre-checks keyword before calling parseDelete
 	}
 	if err := p.expectIdent("FROM"); err != nil {
 		return nil, err
