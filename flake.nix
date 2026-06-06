@@ -34,7 +34,6 @@
         # Used only in the default (local dev) shell so CI is unaffected.
         pkgsWithUnfree = import nixpkgs {
           inherit system;
-          overlays = [ goOverlay ];
           config.allowUnfreePredicate = pkg: builtins.elem (pkgs.lib.getName pkg) [ "terraform" ];
         };
         # Packages shared between both shells.
