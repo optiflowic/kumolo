@@ -155,15 +155,25 @@ func pqTokenize(s string) ([]pqTok, error) {
 				return nil, fmt.Errorf("unexpected character '!' at position %d", i)
 			}
 		case '\'':
-			// single-quoted string literal
+			// single-quoted string literal; '' is an escaped single quote (SQL standard)
+			var sb strings.Builder
 			j := i + 1
-			for j < len(s) && s[j] != '\'' {
+			for j < len(s) {
+				if s[j] == '\'' {
+					if j+1 < len(s) && s[j+1] == '\'' {
+						sb.WriteByte('\'')
+						j += 2
+						continue
+					}
+					break
+				}
+				sb.WriteByte(s[j])
 				j++
 			}
 			if j >= len(s) {
 				return nil, fmt.Errorf("unterminated string literal at position %d", i)
 			}
-			toks = append(toks, pqTok{kind: pqTokStr, val: s[i : j+1], strVal: s[i+1 : j]})
+			toks = append(toks, pqTok{kind: pqTokStr, val: s[i : j+1], strVal: sb.String()})
 			i = j + 1
 		case '"':
 			// double-quoted identifier
@@ -190,7 +200,11 @@ func pqTokenize(s string) ([]pqTok, error) {
 		default:
 			if unicode.IsDigit(rune(c)) {
 				j := i
-				for j < len(s) && (unicode.IsDigit(rune(s[j])) || s[j] == '.') {
+				hasDot := false
+				for j < len(s) && (unicode.IsDigit(rune(s[j])) || (s[j] == '.' && !hasDot)) {
+					if s[j] == '.' {
+						hasDot = true
+					}
 					j++
 				}
 				toks = append(toks, pqTok{kind: pqTokNum, val: s[i:j]})
@@ -198,7 +212,11 @@ func pqTokenize(s string) ([]pqTok, error) {
 			} else if c == '-' && i+1 < len(s) && unicode.IsDigit(rune(s[i+1])) {
 				// negative number literal
 				j := i + 1
-				for j < len(s) && (unicode.IsDigit(rune(s[j])) || s[j] == '.') {
+				hasDot := false
+				for j < len(s) && (unicode.IsDigit(rune(s[j])) || (s[j] == '.' && !hasDot)) {
+					if s[j] == '.' {
+						hasDot = true
+					}
 					j++
 				}
 				toks = append(toks, pqTok{kind: pqTokNum, val: s[i:j]})
