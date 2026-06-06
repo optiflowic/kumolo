@@ -32,7 +32,7 @@
 
 | Field | Notes |
 |-------|-------|
-| Item | Result item; nil when item not found |
+| Item | Result item; omitted (empty object `{}`) when item not found |
 
 ## Limits
 
@@ -48,8 +48,6 @@
 | ValidationException | 400 |
 | ResourceNotFoundException | 400 |
 | TransactionCanceledException | 400 — with CancellationReasons |
-| IdempotentParameterMismatchException | 400 |
-| TransactionInProgressException | 400 |
 | InternalServerError | 500 |
 
 ## Kumolo deviations

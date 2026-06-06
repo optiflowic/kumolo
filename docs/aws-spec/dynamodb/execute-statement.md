@@ -50,7 +50,6 @@
 | ValidationException | 400 |
 | ResourceNotFoundException | 400 |
 | ConditionalCheckFailedException | 400 |
-| TransactionConflictException | 400 |
 | InternalServerError | 500 |
 
 ## Kumolo deviations
@@ -60,3 +59,4 @@
 - `NextToken` is encoded as base64(JSON(LastEvaluatedKey)).
 - Literal values in PartiQL statements (non-`?`) are supported for strings, numbers, booleans, NULL. Complex literals (list `<<...>>`, nested maps) may not be supported.
 - WHERE filter conditions that cannot be satisfied by key-based lookup are evaluated in-memory using DynamoDB filter expression evaluation.
+- Non-equality conditions on the hash key (e.g. `pk > ?`) fall through to a full Scan with in-memory filtering, which is more permissive than real AWS (real AWS rejects these for Query).
