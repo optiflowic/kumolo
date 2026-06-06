@@ -29,6 +29,18 @@ var (
 	ErrKinesisDestinationNotFound = errors.New("kinesis destination not found")
 )
 
+// ConditionalCheckFailedError is returned by write operations when a ConditionExpression
+// fails. It carries the item state at check time so handlers can include it in the
+// ConditionalCheckFailedException response when ReturnValuesOnConditionCheckFailure=ALL_OLD.
+type ConditionalCheckFailedError struct {
+	Item map[string]any // nil when the item did not exist at check time
+}
+
+func (e *ConditionalCheckFailedError) Error() string { return ErrConditionalCheckFailed.Error() }
+func (e *ConditionalCheckFailedError) Is(target error) bool {
+	return target == ErrConditionalCheckFailed
+}
+
 type CancellationReason struct {
 	Code    string         `json:"Code"`
 	Message string         `json:"Message,omitempty"`

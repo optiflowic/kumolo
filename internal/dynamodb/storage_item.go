@@ -189,7 +189,7 @@ func (s *Storage) PutItem(
 			return nil, fmt.Errorf("%w: %v", ErrValidationException, err)
 		}
 		if !ok {
-			return nil, ErrConditionalCheckFailed
+			return nil, &ConditionalCheckFailedError{Item: old}
 		}
 	}
 	if err := s.writeJSON(path, item); err != nil {
@@ -266,7 +266,7 @@ func (s *Storage) DeleteItem(
 			return nil, fmt.Errorf("%w: %v", ErrValidationException, err)
 		}
 		if !ok {
-			return nil, ErrConditionalCheckFailed
+			return nil, &ConditionalCheckFailedError{Item: old}
 		}
 	}
 	if err := s.removeFile(path); err != nil {
@@ -334,7 +334,7 @@ func (s *Storage) UpdateItem(
 			return nil, nil, fmt.Errorf("%w: %v", ErrValidationException, err)
 		}
 		if !ok {
-			return nil, nil, ErrConditionalCheckFailed
+			return nil, nil, &ConditionalCheckFailedError{Item: before}
 		}
 	}
 	for attr, val := range updates {
