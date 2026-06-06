@@ -850,6 +850,17 @@ func TestPQTokenize_EdgeCases(t *testing.T) {
 		}
 		assert.True(t, found)
 	})
+	t.Run("negative float literal", func(t *testing.T) {
+		toks, err := pqTokenize("sk = -3.14")
+		require.NoError(t, err)
+		found := false
+		for _, tok := range toks {
+			if tok.kind == pqTokNum && tok.val == "-3.14" {
+				found = true
+			}
+		}
+		assert.True(t, found)
+	})
 	t.Run("!= operator produces Ne token", func(t *testing.T) {
 		toks, err := pqTokenize("a != b")
 		require.NoError(t, err)
@@ -1456,6 +1467,34 @@ func TestExecutePartiQLSelect_ScanError(t *testing.T) {
 	// SELECT * FROM "t" → no WHERE → Scan path; Scan returns error → 428-430
 	w := dynamo(t, ro, "ExecuteStatement", `{"Statement":"SELECT * FROM \"t\""}`)
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+// TestBatchExecuteStatement_SelectQueryError covers handler_partiql.go:210-212,
+// the error path when executePartiQLSelect fails after key validation passes.
+func TestBatchExecuteStatement_SelectQueryError(t *testing.T) {
+	meta := TableMetadata{
+		Name:      "t",
+		KeySchema: []KeySchemaElement{{AttributeName: "pk", KeyType: "HASH"}},
+		Status:    "ACTIVE",
+	}
+	mock := &mockStore{
+		describeTableFn: func(string) (TableMetadata, error) { return meta, nil },
+		queryFn: func(string, string, any) ([]map[string]any, error) {
+			return nil, fmt.Errorf("simulated query failure")
+		},
+	}
+	ro := &Router{storage: mock}
+	w := dynamo(t, ro, "BatchExecuteStatement", `{
+		"Statements": [
+			{"Statement": "SELECT * FROM \"t\" WHERE pk = ?", "Parameters": [{"S":"k"}]}
+		]
+	}`)
+	assert.Equal(t, http.StatusOK, w.Code) // batch always returns 200
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	r := resp["Responses"].([]any)[0].(map[string]any)
+	require.NotNil(t, r["Error"])
+	assert.Equal(t, "InternalServerError", r["Error"].(map[string]any)["Code"])
 }
 
 // TestParseOneSet_ParseNameError covers partiql.go:636-638 (parseName failure in
