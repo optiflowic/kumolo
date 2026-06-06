@@ -2055,13 +2055,15 @@ func TestExecuteStatement_ReturnValuesOnConditionCheckFailure(t *testing.T) {
 	setup := func(t *testing.T) *Router {
 		t.Helper()
 		ro := newTestRouter(t)
-		dynamo(t, ro, "CreateTable", createTableBody)
-		dynamo(
+		w := dynamo(t, ro, "CreateTable", createTableBody)
+		require.Equal(t, http.StatusOK, w.Code)
+		w = dynamo(
 			t,
 			ro,
 			"PutItem",
 			`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"v":{"N":"1"}}}`,
 		)
+		require.Equal(t, http.StatusOK, w.Code)
 		return ro
 	}
 
@@ -2098,8 +2100,15 @@ func TestExecuteStatement_ReturnValuesOnConditionCheckFailure(t *testing.T) {
 
 func TestBatchExecuteStatement_ReturnValuesOnConditionCheckFailure(t *testing.T) {
 	ro := newTestRouter(t)
-	dynamo(t, ro, "CreateTable", createTableBody)
-	dynamo(t, ro, "PutItem", `{"TableName":"test-table","Item":{"pk":{"S":"k1"},"v":{"N":"1"}}}`)
+	w := dynamo(t, ro, "CreateTable", createTableBody)
+	require.Equal(t, http.StatusOK, w.Code)
+	w = dynamo(
+		t,
+		ro,
+		"PutItem",
+		`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"v":{"N":"1"}}}`,
+	)
+	require.Equal(t, http.StatusOK, w.Code)
 
 	t.Run("INSERT ALL_OLD includes item in batch error", func(t *testing.T) {
 		body := `{
@@ -2144,8 +2153,15 @@ func TestBatchExecuteStatement_ReturnValuesOnConditionCheckFailure(t *testing.T)
 
 func TestExecuteTransaction_ReturnValuesOnConditionCheckFailure(t *testing.T) {
 	ro := newTestRouter(t)
-	dynamo(t, ro, "CreateTable", createTableBody)
-	dynamo(t, ro, "PutItem", `{"TableName":"test-table","Item":{"pk":{"S":"k1"},"v":{"N":"1"}}}`)
+	w := dynamo(t, ro, "CreateTable", createTableBody)
+	require.Equal(t, http.StatusOK, w.Code)
+	w = dynamo(
+		t,
+		ro,
+		"PutItem",
+		`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"v":{"N":"1"}}}`,
+	)
+	require.Equal(t, http.StatusOK, w.Code)
 
 	t.Run("INSERT ALL_OLD includes item in cancellation reason", func(t *testing.T) {
 		body := `{
