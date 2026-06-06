@@ -24,7 +24,11 @@ func (ro *Router) handleCreateMultipartUpload(
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
-	sseAlgorithm, sseKMSKeyID, sseBucketKeyEnabled, ok := ro.resolveSSE(w, r, bucket)
+	sseAlgorithm, sseKMSKeyID, ssecKeyMD5, sseBucketKeyEnabled, ok := ro.resolveSSEWithSSEC(
+		w,
+		r,
+		bucket,
+	)
 	if !ok {
 		return
 	}
@@ -40,6 +44,7 @@ func (ro *Router) handleCreateMultipartUpload(
 		sseAlgorithm,
 		sseKMSKeyID,
 		sseBucketKeyEnabled,
+		ssecKeyMD5,
 		retention,
 		legalHold,
 		storageClass,
@@ -88,6 +93,7 @@ func (ro *Router) handleCreateMultipartUpload(
 			SSEAlgorithm:        sseAlgorithm,
 			SSEKMSKeyID:         sseKMSKeyID,
 			SSEBucketKeyEnabled: sseBucketKeyEnabled,
+			SSECKeyMD5:          ssecKeyMD5,
 		},
 	)
 	writeXML(w, http.StatusOK, initiateMultipartUploadResult{
@@ -114,6 +120,23 @@ func (ro *Router) handleUploadPart(w http.ResponseWriter, r *http.Request, bucke
 			"InvalidArgument",
 			"partNumber must be an integer between 1 and 10000.",
 		)
+		return
+	}
+	ssecKeyMD5, ok := parseSSECHeaders(w, r, amzSSECAlgorithm, amzSSECKey, amzSSECKeyMD5)
+	if !ok {
+		return
+	}
+	umeta, err := ro.storage.GetUploadMeta(uploadID)
+	if err != nil {
+		if errors.Is(err, ErrUploadNotFound) {
+			writeError(w, r, http.StatusNotFound, "NoSuchUpload",
+				"The specified upload does not exist.")
+		} else {
+			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+	if !validateSSECOnRead(w, r, ObjectMetadata{SSECKeyMD5: umeta.SSECKeyMD5}, ssecKeyMD5) {
 		return
 	}
 	expected, ok := parseContentMD5Header(w, r)
@@ -279,8 +302,21 @@ func (ro *Router) handleUploadPartCopy(w http.ResponseWriter, r *http.Request, b
 		}
 	}
 
-	// Evaluate x-amz-copy-source-if-* preconditions against source object metadata.
-	if hasCopySourceConditions(r) {
+	srcSSECKeyMD5, ok := parseSSECHeaders(
+		w,
+		r,
+		amzCopySourceSSECAlgorithm,
+		amzCopySourceSSECKey,
+		amzCopySourceSSECKeyMD5,
+	)
+	if !ok {
+		return
+	}
+
+	// Head the source to validate SSE-C key and/or evaluate copy-source-if-* conditions.
+	// Always performed so SSE-C objects require the key even when no conditions are set.
+	// ErrObjectNotFound is left for UploadPartCopy to report as NoSuchKey.
+	{
 		var srcMeta ObjectMetadata
 		var headErr error
 		if srcVersionID != "" {
@@ -290,7 +326,7 @@ func (ro *Router) handleUploadPartCopy(w http.ResponseWriter, r *http.Request, b
 		}
 		if headErr != nil && !errors.Is(headErr, ErrObjectNotFound) {
 			slog.Error( // #nosec G706 -- srcBucket/srcKey come from header; log injection risk accepted for a local dev emulator
-				"failed to head source object for precondition check",
+				"failed to head source object",
 				"srcBucket",
 				srcBucket,
 				"srcKey",
@@ -302,19 +338,23 @@ func (ro *Router) handleUploadPartCopy(w http.ResponseWriter, r *http.Request, b
 				"We encountered an internal error. Please try again.")
 			return
 		}
-		if headErr == nil && !checkCopySourceConditions(r, srcMeta) {
-			slog.Debug( // #nosec G706 -- srcBucket/srcKey come from header; log injection risk accepted for a local dev emulator
-				"copy source precondition failed",
-				"srcBucket",
-				srcBucket,
-				"srcKey",
-				srcKey,
-			)
-			writeError(w, r, http.StatusPreconditionFailed, "PreconditionFailed",
-				"At least one of the pre-conditions you specified did not hold")
-			return
+		if headErr == nil {
+			if !validateSSECOnRead(w, r, srcMeta, srcSSECKeyMD5) {
+				return
+			}
+			if hasCopySourceConditions(r) && !checkCopySourceConditions(r, srcMeta) {
+				slog.Debug( // #nosec G706 -- srcBucket/srcKey come from header; log injection risk accepted for a local dev emulator
+					"copy source precondition failed",
+					"srcBucket",
+					srcBucket,
+					"srcKey",
+					srcKey,
+				)
+				writeError(w, r, http.StatusPreconditionFailed, "PreconditionFailed",
+					"At least one of the pre-conditions you specified did not hold")
+				return
+			}
 		}
-		// headErr is ErrObjectNotFound: let UploadPartCopy return the canonical NoSuchKey error.
 	}
 
 	etag, lastModified, copySourceVersionID, err := ro.storage.UploadPartCopy(

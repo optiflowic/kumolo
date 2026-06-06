@@ -203,6 +203,7 @@ func (s *Storage) PutObject(
 	userMetadata map[string]string,
 	sseAlgorithm, sseKMSKeyID string,
 	sseBucketKeyEnabled bool,
+	ssecKeyMD5 string,
 	retention *ObjectRetention,
 	legalHold *ObjectLegalHold,
 	storageClass string,
@@ -247,6 +248,7 @@ func (s *Storage) PutObject(
 		sseAlgorithm,
 		sseKMSKeyID,
 		sseBucketKeyEnabled,
+		ssecKeyMD5,
 		retention,
 		legalHold,
 		storageClass,
@@ -261,6 +263,7 @@ func (s *Storage) PutObjectIfNotExists(
 	userMetadata map[string]string,
 	sseAlgorithm, sseKMSKeyID string,
 	sseBucketKeyEnabled bool,
+	ssecKeyMD5 string,
 	retention *ObjectRetention,
 	legalHold *ObjectLegalHold,
 	storageClass string,
@@ -313,6 +316,7 @@ func (s *Storage) PutObjectIfNotExists(
 		sseAlgorithm,
 		sseKMSKeyID,
 		sseBucketKeyEnabled,
+		ssecKeyMD5,
 		retention,
 		legalHold,
 		storageClass,
@@ -331,6 +335,7 @@ func (s *Storage) writeObject(
 	versionID string,
 	sseAlgorithm, sseKMSKeyID string,
 	sseBucketKeyEnabled bool,
+	ssecKeyMD5 string,
 	retention *ObjectRetention,
 	legalHold *ObjectLegalHold,
 	storageClass string,
@@ -369,6 +374,7 @@ func (s *Storage) writeObject(
 		SSEAlgorithm:        sseAlgorithm,
 		SSEKMSKeyID:         sseKMSKeyID,
 		SSEBucketKeyEnabled: sseBucketKeyEnabled,
+		SSECKeyMD5:          ssecKeyMD5,
 		StorageClass:        storageClass,
 		Retention:           retention,
 		LegalHold:           legalHold,
@@ -421,6 +427,7 @@ func (s *Storage) CopyObject(
 	userMetadata map[string]string,
 	sseAlgorithm, sseKMSKeyID string,
 	sseBucketKeyEnabled bool,
+	ssecKeyMD5 string,
 	retention *ObjectRetention,
 	legalHold *ObjectLegalHold,
 	storageClass string,
@@ -514,6 +521,7 @@ func (s *Storage) CopyObject(
 		meta.SSEAlgorithm = sseAlgorithm
 		meta.SSEKMSKeyID = sseKMSKeyID
 		meta.SSEBucketKeyEnabled = sseBucketKeyEnabled
+		meta.SSECKeyMD5 = ssecKeyMD5
 		meta.StorageClass = storageClass
 		meta.Retention = retention
 		meta.LegalHold = legalHold
@@ -545,6 +553,7 @@ func (s *Storage) CopyObject(
 		sseAlgorithm,
 		sseKMSKeyID,
 		sseBucketKeyEnabled,
+		ssecKeyMD5,
 		retention,
 		legalHold,
 		storageClass,
@@ -1526,6 +1535,7 @@ type uploadMeta struct {
 	SSEAlgorithm        string           `json:"sseAlgorithm,omitempty"`
 	SSEKMSKeyID         string           `json:"sseKmsKeyId,omitempty"`
 	SSEBucketKeyEnabled bool             `json:"sseBucketKeyEnabled,omitempty"`
+	SSECKeyMD5          string           `json:"ssecKeyMd5,omitempty"`
 	StorageClass        string           `json:"storageClass,omitempty"`
 	Retention           *ObjectRetention `json:"retention,omitempty"`
 	LegalHold           *ObjectLegalHold `json:"legalHold,omitempty"`
@@ -1542,6 +1552,7 @@ const mpuDir = ".mpu"
 func (s *Storage) CreateMultipartUpload(
 	bucket, key, contentType, sseAlgorithm, sseKMSKeyID string,
 	sseBucketKeyEnabled bool,
+	ssecKeyMD5 string,
 	retention *ObjectRetention,
 	legalHold *ObjectLegalHold,
 	storageClass string,
@@ -1571,6 +1582,7 @@ func (s *Storage) CreateMultipartUpload(
 		SSEAlgorithm:        sseAlgorithm,
 		SSEKMSKeyID:         sseKMSKeyID,
 		SSEBucketKeyEnabled: sseBucketKeyEnabled,
+		SSECKeyMD5:          ssecKeyMD5,
 		StorageClass:        storageClass,
 		Retention:           retention,
 		LegalHold:           legalHold,
@@ -1865,6 +1877,7 @@ func (s *Storage) CompleteMultipartUpload(
 		umeta.SSEAlgorithm,
 		umeta.SSEKMSKeyID,
 		umeta.SSEBucketKeyEnabled,
+		umeta.SSECKeyMD5,
 		umeta.Retention,
 		umeta.LegalHold,
 		umeta.StorageClass,
@@ -1899,6 +1912,19 @@ func (s *Storage) AbortMultipartUpload(uploadID string) error {
 
 func (s *Storage) readUploadMeta(uploadID string) (uploadMeta, error) {
 	return readJSON[uploadMeta](s, filepath.Join(mpuDir, uploadID, "upload.json"))
+}
+
+func (s *Storage) GetUploadMeta(uploadID string) (uploadMeta, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	meta, err := s.readUploadMeta(uploadID)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return uploadMeta{}, ErrUploadNotFound
+		}
+		return uploadMeta{}, err // untestable: real-filesystem I/O errors on upload.json cannot be injected via the current test helpers
+	}
+	return meta, nil
 }
 
 func (s *Storage) readPartMeta(uploadID string, partNumber int) (partMeta, error) {

@@ -31,6 +31,12 @@ const (
 	amzSSE                         = "X-Amz-Server-Side-Encryption"
 	amzSSEKMSKeyID                 = "X-Amz-Server-Side-Encryption-Aws-Kms-Key-Id"
 	amzSSEBucketKeyEnabled         = "X-Amz-Server-Side-Encryption-Bucket-Key-Enabled"
+	amzSSECAlgorithm               = "X-Amz-Server-Side-Encryption-Customer-Algorithm"
+	amzSSECKey                     = "X-Amz-Server-Side-Encryption-Customer-Key" //nolint:gosec // HTTP header name, not a credential
+	amzSSECKeyMD5                  = "X-Amz-Server-Side-Encryption-Customer-Key-Md5"
+	amzCopySourceSSECAlgorithm     = "X-Amz-Copy-Source-Server-Side-Encryption-Customer-Algorithm"
+	amzCopySourceSSECKey           = "X-Amz-Copy-Source-Server-Side-Encryption-Customer-Key" //nolint:gosec // HTTP header name, not a credential
+	amzCopySourceSSECKeyMD5        = "X-Amz-Copy-Source-Server-Side-Encryption-Customer-Key-Md5"
 	amzStorageClass                = "X-Amz-Storage-Class"
 	amzMetadataDirective           = "X-Amz-Metadata-Directive"
 	amzCopySourceRange             = "X-Amz-Copy-Source-Range"

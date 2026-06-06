@@ -18,6 +18,99 @@ import (
 	"unicode/utf8"
 )
 
+// parseSSECHeaders validates an SSE-C header triple (algorithm, key, key-MD5) and
+// returns the base64-encoded key MD5. Returns ("", true) when all three headers are
+// absent (not an SSE-C request). Writes a 400 and returns ("", false) on any error.
+func parseSSECHeaders(
+	w http.ResponseWriter,
+	r *http.Request,
+	algHeader, keyHeader, keyMD5Header string,
+) (keyMD5 string, ok bool) {
+	alg := r.Header.Get(algHeader)
+	key := r.Header.Get(keyHeader)
+	md5val := r.Header.Get(keyMD5Header)
+	if alg == "" && key == "" && md5val == "" {
+		return "", true
+	}
+	if alg == "" || key == "" || md5val == "" {
+		writeError(w, r, http.StatusBadRequest, "InvalidArgument",
+			"All three SSE-C headers (algorithm, key, and key MD5) must be provided together.")
+		return "", false
+	}
+	if alg != "AES256" {
+		writeError(w, r, http.StatusBadRequest, "InvalidArgument",
+			"The encryption algorithm specified is not supported.")
+		return "", false
+	}
+	keyBytes, decErr := base64.StdEncoding.DecodeString(key)
+	if decErr != nil || len(keyBytes) != 32 {
+		writeError(w, r, http.StatusBadRequest, "InvalidArgument",
+			"The secret key was invalid for the specified algorithm.")
+		return "", false
+	}
+	h := md5.New() //nolint:gosec // MD5 required by S3 spec for SSE-C key validation
+	_, _ = h.Write(keyBytes)
+	if base64.StdEncoding.EncodeToString(h.Sum(nil)) != md5val {
+		writeError(w, r, http.StatusBadRequest, "InvalidArgument",
+			"The calculated MD5 hash of the key did not match the hash that was provided.")
+		return "", false
+	}
+	return md5val, true
+}
+
+// resolveSSEWithSSEC resolves SSE settings for write operations.
+// If SSE-C headers are present, returns (ssecKeyMD5, "", "", false, true).
+// If X-Amz-Server-Side-Encryption is present, delegates to resolveSSE.
+// Returns an error if both SSE-C and SSE-S3/KMS headers coexist.
+func (ro *Router) resolveSSEWithSSEC(
+	w http.ResponseWriter,
+	r *http.Request,
+	bucket string,
+) (sseAlg, sseKMSKeyID, ssecKeyMD5 string, sseBucketKeyEnabled, ok bool) {
+	ssecKeyMD5, ok = parseSSECHeaders(w, r, amzSSECAlgorithm, amzSSECKey, amzSSECKeyMD5)
+	if !ok {
+		return
+	}
+	if ssecKeyMD5 != "" {
+		if r.Header.Get(amzSSE) != "" {
+			writeError(w, r, http.StatusBadRequest, "InvalidArgument",
+				"Server-side encryption headers are mutually exclusive.")
+			ok = false
+			return
+		}
+		ok = true
+		return
+	}
+	sseAlg, sseKMSKeyID, sseBucketKeyEnabled, ok = ro.resolveSSE(w, r, bucket)
+	return
+}
+
+// validateSSECOnRead checks SSE-C key consistency for read operations (GetObject, HeadObject).
+// requestKeyMD5 is empty when no SSE-C headers were provided.
+// Returns false after writing an error when access must be denied.
+func validateSSECOnRead(
+	w http.ResponseWriter,
+	r *http.Request,
+	meta ObjectMetadata,
+	requestKeyMD5 string,
+) bool {
+	if meta.SSECKeyMD5 != "" && requestKeyMD5 == "" {
+		writeError(
+			w,
+			r,
+			http.StatusBadRequest,
+			"InvalidRequest",
+			"The object was stored using a form of Server Side Encryption. The correct parameters must be provided to retrieve the object.",
+		)
+		return false
+	}
+	if requestKeyMD5 != "" && requestKeyMD5 != meta.SSECKeyMD5 {
+		writeError(w, r, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return false
+	}
+	return true
+}
+
 // resolveSSEAlgorithm returns the SSE algorithm header value; empty (absent) is valid, unknown values write 400 and return false.
 func resolveSSEAlgorithm(w http.ResponseWriter, r *http.Request) (string, bool) {
 	alg := r.Header.Get(amzSSE)
@@ -176,9 +269,37 @@ func (ro *Router) handleCopyObject(
 			userMetadata = map[string]string{}
 		}
 	}
-	sseAlgorithm, sseKMSKeyID, sseBucketKeyEnabled, ok := ro.resolveSSE(w, r, dstBucket)
+	srcSSECKeyMD5, ok := parseSSECHeaders(
+		w,
+		r,
+		amzCopySourceSSECAlgorithm,
+		amzCopySourceSSECKey,
+		amzCopySourceSSECKeyMD5,
+	)
 	if !ok {
 		return
+	}
+	sseAlgorithm, sseKMSKeyID, dstSSECKeyMD5, sseBucketKeyEnabled, ok := ro.resolveSSEWithSSEC(
+		w,
+		r,
+		dstBucket,
+	)
+	if !ok {
+		return
+	}
+	// Validate source SSE-C: head the source to check its stored key MD5.
+	// Only short-circuit on validation failure; not-found errors are left to CopyObject.
+	{
+		var srcMeta ObjectMetadata
+		var headErr error
+		if srcVersionID != "" {
+			srcMeta, headErr = ro.storage.HeadObjectVersion(srcBucket, srcKey, srcVersionID)
+		} else {
+			srcMeta, headErr = ro.storage.HeadObject(srcBucket, srcKey)
+		}
+		if headErr == nil && !validateSSECOnRead(w, r, srcMeta, srcSSECKeyMD5) {
+			return
+		}
 	}
 	retention, legalHold, ok := parseObjectLockHeaders(w, r)
 	if !ok {
@@ -196,6 +317,7 @@ func (ro *Router) handleCopyObject(
 		sseAlgorithm,
 		sseKMSKeyID,
 		sseBucketKeyEnabled,
+		dstSSECKeyMD5,
 		retention,
 		legalHold,
 		storageClass,
@@ -263,6 +385,11 @@ func (ro *Router) handleCopyObject(
 
 // setSSEHeaders writes SSE response headers derived from object metadata.
 func setSSEHeaders(w http.ResponseWriter, meta ObjectMetadata) {
+	if meta.SSECKeyMD5 != "" {
+		w.Header().Set(amzSSECAlgorithm, "AES256")
+		w.Header().Set(amzSSECKeyMD5, meta.SSECKeyMD5)
+		return
+	}
 	if meta.SSEAlgorithm != "" {
 		w.Header().Set(amzSSE, meta.SSEAlgorithm)
 	}
@@ -308,7 +435,11 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 		contentType = "application/octet-stream"
 	}
 	userMetadata := extractUserMetadata(r.Header)
-	sseAlgorithm, sseKMSKeyID, sseBucketKeyEnabled, ok := ro.resolveSSE(w, r, bucket)
+	sseAlgorithm, sseKMSKeyID, ssecKeyMD5, sseBucketKeyEnabled, ok := ro.resolveSSEWithSSEC(
+		w,
+		r,
+		bucket,
+	)
 	if !ok {
 		return
 	}
@@ -347,6 +478,7 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 		sseAlgorithm,
 		sseKMSKeyID,
 		sseBucketKeyEnabled,
+		ssecKeyMD5,
 		retention,
 		legalHold,
 		storageClass,
@@ -606,6 +738,13 @@ func (ro *Router) handleHeadObject(w http.ResponseWriter, r *http.Request, bucke
 		}
 		return
 	}
+	ssecKeyMD5, ok := parseSSECHeaders(w, r, amzSSECAlgorithm, amzSSECKey, amzSSECKeyMD5)
+	if !ok {
+		return
+	}
+	if !validateSSECOnRead(w, r, meta, ssecKeyMD5) {
+		return
+	}
 	w.Header().Set("Content-Type", meta.ContentType)
 	w.Header().Set("Content-Length", strconv.FormatInt(meta.Size, 10))
 	w.Header().Set("ETag", meta.ETag)
@@ -829,6 +968,13 @@ func (ro *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 		return
 	}
 	defer func() { _ = f.Close() }()
+	ssecKeyMD5, ok := parseSSECHeaders(w, r, amzSSECAlgorithm, amzSSECKey, amzSSECKeyMD5)
+	if !ok {
+		return
+	}
+	if !validateSSECOnRead(w, r, meta, ssecKeyMD5) {
+		return
+	}
 	if isArchiveStorageClass(meta.StorageClass) && !meta.RestoreInitiated {
 		slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
 			"object not restored",

@@ -38,6 +38,7 @@ type ObjectMetadata struct {
 	SSEAlgorithm        string            `json:"sseAlgorithm,omitempty"`
 	SSEKMSKeyID         string            `json:"sseKmsKeyId,omitempty"`
 	SSEBucketKeyEnabled bool              `json:"sseBucketKeyEnabled,omitempty"`
+	SSECKeyMD5          string            `json:"ssecKeyMd5,omitempty"`
 	StorageClass        string            `json:"storageClass,omitempty"`
 	RestoreInitiated    bool              `json:"restoreInitiated,omitempty"`
 	Retention           *ObjectRetention  `json:"retention,omitempty"`
