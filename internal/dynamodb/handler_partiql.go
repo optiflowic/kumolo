@@ -368,7 +368,7 @@ func (ro *Router) executePartiQLSelect(
 		switch {
 		case c.attr == hashKeyName && c.op == "=":
 			hashEqCond = c
-		case sortKeyName != "" && c.attr == sortKeyName:
+		case sortKeyName != "" && c.attr == sortKeyName && pqCondToSortKey(c) != nil:
 			sortCond = c
 		default:
 			filterConds = append(filterConds, *c)
@@ -434,9 +434,10 @@ func (ro *Router) executePartiQLSelect(
 		filterExpr, names, values := pqCondsToFilterExpr(filterConds)
 		if filterExpr != "" {
 			filtered, ferr := applyFilterExpression(items, filterExpr, names, values)
-			if ferr == nil {
-				items = filtered
+			if ferr != nil {
+				return nil, "", fmt.Errorf("%w: %v", ErrValidationException, ferr)
 			}
+			items = filtered
 		}
 	}
 

@@ -392,13 +392,14 @@ func (p *pqParser) parseUpdate() (*pqStmt, error) {
 	if err != nil {
 		return nil, err
 	}
+	if p.peek().kind != pqTokIdent || !strings.EqualFold(p.peek().val, "WHERE") {
+		return nil, fmt.Errorf("UPDATE statement requires a WHERE clause")
+	}
+	p.consume()
 	stmt := &pqStmt{kind: pqUpdate, tableName: tableName, sets: sets}
-	if p.peek().kind == pqTokIdent && strings.EqualFold(p.peek().val, "WHERE") {
-		p.consume()
-		stmt.where, err = p.parseConditions()
-		if err != nil {
-			return nil, err
-		}
+	stmt.where, err = p.parseConditions()
+	if err != nil {
+		return nil, err
 	}
 	return stmt, nil
 }
@@ -414,14 +415,14 @@ func (p *pqParser) parseDelete() (*pqStmt, error) {
 	if err != nil {
 		return nil, err
 	}
+	if p.peek().kind != pqTokIdent || !strings.EqualFold(p.peek().val, "WHERE") {
+		return nil, fmt.Errorf("DELETE statement requires a WHERE clause")
+	}
+	p.consume()
 	stmt := &pqStmt{kind: pqDelete, tableName: tableName}
-	if p.peek().kind == pqTokIdent && strings.EqualFold(p.peek().val, "WHERE") {
-		p.consume()
-		var err error
-		stmt.where, err = p.parseConditions()
-		if err != nil {
-			return nil, err
-		}
+	stmt.where, err = p.parseConditions()
+	if err != nil {
+		return nil, err
 	}
 	return stmt, nil
 }
