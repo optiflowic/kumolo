@@ -4640,7 +4640,7 @@ func TestHandleTransactGetItems(t *testing.T) {
 		require.Equal(t, http.StatusBadRequest, w.Code)
 		var resp map[string]any
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-		assert.Contains(t, resp["__type"], "ValidationException")
+		assert.Equal(t, ErrTypeValidationException, resp["__type"])
 	})
 
 	t.Run("400 ValidationException for malformed key", func(t *testing.T) {
@@ -4654,7 +4654,7 @@ func TestHandleTransactGetItems(t *testing.T) {
 		require.Equal(t, http.StatusBadRequest, w.Code)
 		var resp map[string]any
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-		assert.Contains(t, resp["__type"], "ValidationException")
+		assert.Equal(t, ErrTypeValidationException, resp["__type"])
 	})
 }
 
@@ -4876,7 +4876,7 @@ func TestHandleTransactWriteItems(t *testing.T) {
 		require.Equal(t, http.StatusBadRequest, w.Code)
 		var resp map[string]any
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-		assert.Contains(t, resp["__type"], "ValidationException")
+		assert.Equal(t, ErrTypeValidationException, resp["__type"])
 	})
 
 	t.Run(
