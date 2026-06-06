@@ -195,7 +195,7 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"failed to read request body",
 		)
 		return
@@ -271,7 +271,7 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(
 			w,
 			http.StatusNotImplemented,
-			"com.amazonaws.dynamodb.v20120810#NotImplemented",
+			ErrTypeNotImplemented,
 			"Operation not implemented: "+op,
 		)
 	}

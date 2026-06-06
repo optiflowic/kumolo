@@ -21,7 +21,7 @@ func (ro *Router) handlePutItem(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"invalid request body",
 		)
 		return
@@ -30,7 +30,7 @@ func (ro *Router) handlePutItem(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"TableName is required",
 		)
 		return
@@ -41,7 +41,7 @@ func (ro *Router) handlePutItem(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"Value '"+req.ReturnValues+"' at 'returnValues' failed to satisfy constraint: Member must satisfy enum value set: [ALL_OLD, NONE]",
 		)
 		return
@@ -54,7 +54,7 @@ func (ro *Router) handlePutItem(w http.ResponseWriter, body []byte) {
 		req.ConditionExpression,
 	); err != nil {
 		writeError(w, http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException", err.Error())
+			ErrTypeValidationException, err.Error())
 		return
 	}
 	var cond *ConditionCheck
@@ -72,7 +72,7 @@ func (ro *Router) handlePutItem(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ConditionalCheckFailedException",
+				ErrTypeConditionalCheckFailedException,
 				"The conditional request failed",
 			)
 			return
@@ -82,7 +82,7 @@ func (ro *Router) handlePutItem(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+				ErrTypeResourceNotFoundException,
 				"Requested resource not found: Table: "+req.TableName+" not found",
 			)
 			return
@@ -92,7 +92,7 @@ func (ro *Router) handlePutItem(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				ErrTypeValidationException,
 				err.Error(),
 			)
 			return
@@ -101,7 +101,7 @@ func (ro *Router) handlePutItem(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"com.amazonaws.dynamodb.v20120810#InternalServerError",
+			ErrTypeInternalServerError,
 			"internal server error",
 		)
 		return
@@ -129,7 +129,7 @@ func (ro *Router) handleGetItem(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"invalid request body",
 		)
 		return
@@ -138,7 +138,7 @@ func (ro *Router) handleGetItem(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"TableName is required",
 		)
 		return
@@ -151,7 +151,7 @@ func (ro *Router) handleGetItem(w http.ResponseWriter, body []byte) {
 		req.ProjectionExpression,
 	); err != nil {
 		writeError(w, http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException", err.Error())
+			ErrTypeValidationException, err.Error())
 		return
 	}
 	item, err := ro.storage.GetItem(req.TableName, req.Key)
@@ -161,7 +161,7 @@ func (ro *Router) handleGetItem(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+				ErrTypeResourceNotFoundException,
 				"Requested resource not found: Table: "+req.TableName+" not found",
 			)
 			return
@@ -171,7 +171,7 @@ func (ro *Router) handleGetItem(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				ErrTypeValidationException,
 				err.Error(),
 			)
 			return
@@ -180,7 +180,7 @@ func (ro *Router) handleGetItem(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"com.amazonaws.dynamodb.v20120810#InternalServerError",
+			ErrTypeInternalServerError,
 			"internal server error",
 		)
 		return
@@ -203,7 +203,7 @@ func (ro *Router) handleGetItem(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				ErrTypeValidationException,
 				projErr.Error(),
 			)
 			return
@@ -234,7 +234,7 @@ func (ro *Router) handleDeleteItem(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"invalid request body",
 		)
 		return
@@ -243,7 +243,7 @@ func (ro *Router) handleDeleteItem(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"TableName is required",
 		)
 		return
@@ -254,7 +254,7 @@ func (ro *Router) handleDeleteItem(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"Value '"+req.ReturnValues+"' at 'returnValues' failed to satisfy constraint: Member must satisfy enum value set: [ALL_OLD, NONE]",
 		)
 		return
@@ -267,7 +267,7 @@ func (ro *Router) handleDeleteItem(w http.ResponseWriter, body []byte) {
 		req.ConditionExpression,
 	); err != nil {
 		writeError(w, http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException", err.Error())
+			ErrTypeValidationException, err.Error())
 		return
 	}
 	var cond *ConditionCheck
@@ -285,7 +285,7 @@ func (ro *Router) handleDeleteItem(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ConditionalCheckFailedException",
+				ErrTypeConditionalCheckFailedException,
 				"The conditional request failed",
 			)
 			return
@@ -295,7 +295,7 @@ func (ro *Router) handleDeleteItem(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+				ErrTypeResourceNotFoundException,
 				"Requested resource not found: Table: "+req.TableName+" not found",
 			)
 			return
@@ -305,7 +305,7 @@ func (ro *Router) handleDeleteItem(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				ErrTypeValidationException,
 				err.Error(),
 			)
 			return
@@ -314,7 +314,7 @@ func (ro *Router) handleDeleteItem(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"com.amazonaws.dynamodb.v20120810#InternalServerError",
+			ErrTypeInternalServerError,
 			"internal server error",
 		)
 		return
@@ -349,7 +349,7 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"invalid request body",
 		)
 		return
@@ -358,7 +358,7 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"TableName is required",
 		)
 		return
@@ -370,7 +370,7 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"Value '"+req.ReturnValues+"' at 'returnValues' failed to satisfy constraint: Member must satisfy enum value set: [ALL_NEW, UPDATED_OLD, ALL_OLD, NONE, UPDATED_NEW]",
 		)
 		return
@@ -384,7 +384,7 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 		req.UpdateExpression, req.ConditionExpression,
 	); err != nil {
 		writeError(w, http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException", err.Error())
+			ErrTypeValidationException, err.Error())
 		return
 	}
 	var updates map[string]any
@@ -401,7 +401,7 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				ErrTypeValidationException,
 				err.Error(),
 			)
 			return
@@ -418,7 +418,7 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 				writeError(
 					w,
 					http.StatusBadRequest,
-					"com.amazonaws.dynamodb.v20120810#ValidationException",
+					ErrTypeValidationException,
 					"unsupported AttributeUpdates Action: "+au.Action,
 				)
 				return
@@ -443,7 +443,7 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ConditionalCheckFailedException",
+				ErrTypeConditionalCheckFailedException,
 				"The conditional request failed",
 			)
 			return
@@ -453,7 +453,7 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+				ErrTypeResourceNotFoundException,
 				"Requested resource not found: Table: "+req.TableName+" not found",
 			)
 			return
@@ -463,7 +463,7 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				ErrTypeValidationException,
 				err.Error(),
 			)
 			return
@@ -472,7 +472,7 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"com.amazonaws.dynamodb.v20120810#InternalServerError",
+			ErrTypeInternalServerError,
 			"internal server error",
 		)
 		return

@@ -21,7 +21,7 @@ func (ro *Router) handleDescribeContinuousBackups(w http.ResponseWriter, body []
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"invalid request body",
 		)
 		return
@@ -30,7 +30,7 @@ func (ro *Router) handleDescribeContinuousBackups(w http.ResponseWriter, body []
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"TableName is required",
 		)
 		return
@@ -42,7 +42,7 @@ func (ro *Router) handleDescribeContinuousBackups(w http.ResponseWriter, body []
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#TableNotFoundException",
+				ErrTypeTableNotFoundException,
 				"Table not found: "+req.TableName,
 			)
 			return
@@ -51,7 +51,7 @@ func (ro *Router) handleDescribeContinuousBackups(w http.ResponseWriter, body []
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"com.amazonaws.dynamodb.v20120810#InternalServerError",
+			ErrTypeInternalServerError,
 			"internal server error",
 		)
 		return
@@ -73,7 +73,7 @@ func (ro *Router) handleUpdateContinuousBackups(w http.ResponseWriter, body []by
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"invalid request body",
 		)
 		return
@@ -82,7 +82,7 @@ func (ro *Router) handleUpdateContinuousBackups(w http.ResponseWriter, body []by
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"TableName is required",
 		)
 		return
@@ -91,7 +91,7 @@ func (ro *Router) handleUpdateContinuousBackups(w http.ResponseWriter, body []by
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"PointInTimeRecoverySpecification is required",
 		)
 		return
@@ -106,7 +106,7 @@ func (ro *Router) handleUpdateContinuousBackups(w http.ResponseWriter, body []by
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#TableNotFoundException",
+				ErrTypeTableNotFoundException,
 				"Table not found: "+req.TableName,
 			)
 			return
@@ -115,7 +115,7 @@ func (ro *Router) handleUpdateContinuousBackups(w http.ResponseWriter, body []by
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"com.amazonaws.dynamodb.v20120810#InternalServerError",
+			ErrTypeInternalServerError,
 			"internal server error",
 		)
 		return
@@ -161,7 +161,7 @@ func (ro *Router) handleDescribeKinesisStreamingDestination(w http.ResponseWrite
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"invalid request body",
 		)
 		return
@@ -170,7 +170,7 @@ func (ro *Router) handleDescribeKinesisStreamingDestination(w http.ResponseWrite
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"TableName is required",
 		)
 		return
@@ -186,7 +186,7 @@ func (ro *Router) handleDescribeKinesisStreamingDestination(w http.ResponseWrite
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+				ErrTypeResourceNotFoundException,
 				"Requested resource not found: Table: "+req.TableName+" not found",
 			)
 			return
@@ -195,7 +195,7 @@ func (ro *Router) handleDescribeKinesisStreamingDestination(w http.ResponseWrite
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"com.amazonaws.dynamodb.v20120810#InternalServerError",
+			ErrTypeInternalServerError,
 			"internal server error",
 		)
 		return
@@ -223,7 +223,7 @@ func (ro *Router) handleEnableKinesisStreamingDestination(w http.ResponseWriter,
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"invalid request body",
 		)
 		return
@@ -232,7 +232,7 @@ func (ro *Router) handleEnableKinesisStreamingDestination(w http.ResponseWriter,
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"TableName is required",
 		)
 		return
@@ -241,7 +241,7 @@ func (ro *Router) handleEnableKinesisStreamingDestination(w http.ResponseWriter,
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"StreamArn is required",
 		)
 		return
@@ -250,7 +250,7 @@ func (ro *Router) handleEnableKinesisStreamingDestination(w http.ResponseWriter,
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"Invalid StreamArn",
 		)
 		return
@@ -263,7 +263,7 @@ func (ro *Router) handleEnableKinesisStreamingDestination(w http.ResponseWriter,
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				ErrTypeValidationException,
 				"ApproximateCreationDateTimePrecision must be MILLISECOND or MICROSECOND",
 			)
 			return
@@ -281,7 +281,7 @@ func (ro *Router) handleEnableKinesisStreamingDestination(w http.ResponseWriter,
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+				ErrTypeResourceNotFoundException,
 				"Requested resource not found: Table: "+req.TableName+" not found",
 			)
 			return
@@ -291,7 +291,7 @@ func (ro *Router) handleEnableKinesisStreamingDestination(w http.ResponseWriter,
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#LimitExceededException",
+				ErrTypeLimitExceededException,
 				"you can enable at most 2 kinesis destinations per table",
 			)
 			return
@@ -300,7 +300,7 @@ func (ro *Router) handleEnableKinesisStreamingDestination(w http.ResponseWriter,
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"com.amazonaws.dynamodb.v20120810#InternalServerError",
+			ErrTypeInternalServerError,
 			"internal server error",
 		)
 		return
@@ -335,7 +335,7 @@ func (ro *Router) handleDisableKinesisStreamingDestination(w http.ResponseWriter
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"invalid request body",
 		)
 		return
@@ -344,7 +344,7 @@ func (ro *Router) handleDisableKinesisStreamingDestination(w http.ResponseWriter
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"TableName is required",
 		)
 		return
@@ -353,7 +353,7 @@ func (ro *Router) handleDisableKinesisStreamingDestination(w http.ResponseWriter
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"StreamArn is required",
 		)
 		return
@@ -362,7 +362,7 @@ func (ro *Router) handleDisableKinesisStreamingDestination(w http.ResponseWriter
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"Invalid StreamArn",
 		)
 		return
@@ -378,7 +378,7 @@ func (ro *Router) handleDisableKinesisStreamingDestination(w http.ResponseWriter
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+				ErrTypeResourceNotFoundException,
 				"Requested resource not found: Table: "+req.TableName+" not found",
 			)
 			return
@@ -394,7 +394,7 @@ func (ro *Router) handleDisableKinesisStreamingDestination(w http.ResponseWriter
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+				ErrTypeResourceNotFoundException,
 				"Kinesis destination not found: "+req.StreamArn,
 			)
 			return
@@ -403,7 +403,7 @@ func (ro *Router) handleDisableKinesisStreamingDestination(w http.ResponseWriter
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"com.amazonaws.dynamodb.v20120810#InternalServerError",
+			ErrTypeInternalServerError,
 			"internal server error",
 		)
 		return

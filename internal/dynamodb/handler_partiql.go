@@ -24,23 +24,23 @@ func (ro *Router) handleExecuteStatement(w http.ResponseWriter, body []byte) {
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(w, http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException", "invalid request body")
+			ErrTypeValidationException, "invalid request body")
 		return
 	}
 	if req.Statement == "" {
 		writeError(w, http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException", "Statement is required")
+			ErrTypeValidationException, "Statement is required")
 		return
 	}
 	if len(req.Statement) > 8192 {
 		writeError(w, http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"Statement length exceeds maximum of 8192 characters")
 		return
 	}
 	if req.Limit != nil && *req.Limit < 1 {
 		writeError(w, http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			fmt.Sprintf(
 				"Value %d at 'limit' failed to satisfy constraint: Member must have value greater than or equal to 1",
 				*req.Limit,
@@ -55,7 +55,7 @@ func (ro *Router) handleExecuteStatement(w http.ResponseWriter, body []byte) {
 	if err != nil {
 		slog.Debug("ExecuteStatement: parse error", "err", err)
 		writeError(w, http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException", err.Error())
+			ErrTypeValidationException, err.Error())
 		return
 	}
 
@@ -141,18 +141,18 @@ func (ro *Router) handleBatchExecuteStatement(w http.ResponseWriter, body []byte
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(w, http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException", "invalid request body")
+			ErrTypeValidationException, "invalid request body")
 		return
 	}
 	if len(req.Statements) == 0 {
 		writeError(w, http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"Statements is required and must contain at least 1 item")
 		return
 	}
 	if len(req.Statements) > 25 {
 		writeError(w, http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			fmt.Sprintf(
 				"Member must have length less than or equal to 25, but received length %d",
 				len(req.Statements),
@@ -169,7 +169,7 @@ func (ro *Router) handleBatchExecuteStatement(w http.ResponseWriter, body []byte
 		stmt, err := parsePartiQL(s.Statement, s.Parameters)
 		if err != nil {
 			writeError(w, http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				ErrTypeValidationException,
 				fmt.Sprintf("statement %d: %v", i, err))
 			return
 		}
@@ -177,7 +177,7 @@ func (ro *Router) handleBatchExecuteStatement(w http.ResponseWriter, body []byte
 	}
 	if err := validatePQBatchKind(stmts); err != nil {
 		writeError(w, http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException", err.Error())
+			ErrTypeValidationException, err.Error())
 		return
 	}
 
@@ -261,18 +261,18 @@ func (ro *Router) handleExecuteTransaction(w http.ResponseWriter, body []byte) {
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(w, http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException", "invalid request body")
+			ErrTypeValidationException, "invalid request body")
 		return
 	}
 	if len(req.TransactStatements) == 0 {
 		writeError(w, http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"TransactStatements is required and must contain at least 1 item")
 		return
 	}
 	if len(req.TransactStatements) > 100 {
 		writeError(w, http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			fmt.Sprintf(
 				"Member must have length less than or equal to 100, but received length %d",
 				len(req.TransactStatements),
@@ -288,7 +288,7 @@ func (ro *Router) handleExecuteTransaction(w http.ResponseWriter, body []byte) {
 		stmt, err := parsePartiQL(s.Statement, s.Parameters)
 		if err != nil {
 			writeError(w, http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				ErrTypeValidationException,
 				fmt.Sprintf("statement %d: %v", i, err))
 			return
 		}
@@ -296,7 +296,7 @@ func (ro *Router) handleExecuteTransaction(w http.ResponseWriter, body []byte) {
 	}
 	if err := validatePQBatchKind(stmts); err != nil {
 		writeError(w, http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException", err.Error())
+			ErrTypeValidationException, err.Error())
 		return
 	}
 
@@ -617,22 +617,22 @@ func pqWriteStorageError(w http.ResponseWriter, op string, err error) {
 	case errors.Is(err, ErrTableNotFound):
 		slog.Debug(op + ": table not found")
 		writeError(w, http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+			ErrTypeResourceNotFoundException,
 			"Requested resource not found")
 	case errors.Is(err, ErrConditionalCheckFailed):
 		slog.Debug(op + ": condition check failed")
 		writeError(w, http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ConditionalCheckFailedException",
+			ErrTypeConditionalCheckFailedException,
 			"The conditional request failed")
 	case errors.Is(err, ErrValidationException):
 		slog.Debug(op+": validation error", "err", err)
 		writeError(w, http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			err.Error())
 	default:
 		slog.Error(op+" failed", "err", err)
 		writeError(w, http.StatusInternalServerError,
-			"com.amazonaws.dynamodb.v20120810#InternalServerError",
+			ErrTypeInternalServerError,
 			"internal server error")
 	}
 }
@@ -654,7 +654,7 @@ func pqWriteTransactError(w http.ResponseWriter, err error) {
 		w.Header().Set("Content-Type", "application/x-amz-json-1.0")
 		w.WriteHeader(http.StatusBadRequest)
 		if encErr := json.NewEncoder(w).Encode(cancelResp{
-			Type: "com.amazonaws.dynamodb.v20120810#TransactionCanceledException",
+			Type: ErrTypeTransactionCanceledException,
 			Message: "Transaction cancelled, please refer cancellation reasons for specific reasons [" +
 				strings.Join(codes, ", ") + "]",
 			CancellationReasons: txErr.Reasons,

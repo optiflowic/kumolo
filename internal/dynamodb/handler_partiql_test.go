@@ -259,7 +259,7 @@ func TestExecuteStatement_INSERT(t *testing.T) {
 	t.Run("400 on missing Statement", func(t *testing.T) {
 		w := dynamo(t, ro, "ExecuteStatement", `{}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+		assertErrorType(t, w, ErrTypeValidationException)
 	})
 
 	t.Run("400 on invalid JSON", func(t *testing.T) {
@@ -270,7 +270,7 @@ func TestExecuteStatement_INSERT(t *testing.T) {
 	t.Run("400 on parse error", func(t *testing.T) {
 		w := dynamo(t, ro, "ExecuteStatement", `{"Statement":"BADOP FROM t"}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+		assertErrorType(t, w, ErrTypeValidationException)
 	})
 
 	t.Run("400 on table not found", func(t *testing.T) {
@@ -278,7 +278,7 @@ func TestExecuteStatement_INSERT(t *testing.T) {
 			"Statement": "INSERT INTO \"nosuchtable\" VALUE {'pk': 'x'}"
 		}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ResourceNotFoundException")
+		assertErrorType(t, w, ErrTypeResourceNotFoundException)
 	})
 
 	t.Run("400 on invalid Limit", func(t *testing.T) {
@@ -287,7 +287,7 @@ func TestExecuteStatement_INSERT(t *testing.T) {
 			"Limit": 0
 		}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+		assertErrorType(t, w, ErrTypeValidationException)
 	})
 }
 
@@ -456,7 +456,7 @@ func TestExecuteStatement_UPDATE(t *testing.T) {
 			"Parameters": [{"S":"x"}, {"S":"y"}]
 		}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+		assertErrorType(t, w, ErrTypeValidationException)
 	})
 }
 
@@ -569,7 +569,7 @@ func TestBatchExecuteStatement_Reads(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{"Statements": stmts})
 		w := dynamo(t, ro, "BatchExecuteStatement", string(body))
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+		assertErrorType(t, w, ErrTypeValidationException)
 	})
 
 	t.Run("400 on mixed reads and writes", func(t *testing.T) {
@@ -580,7 +580,7 @@ func TestBatchExecuteStatement_Reads(t *testing.T) {
 			]
 		}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+		assertErrorType(t, w, ErrTypeValidationException)
 	})
 }
 
@@ -704,7 +704,7 @@ func TestExecuteTransaction_Writes(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{"TransactStatements": stmts})
 		w := dynamo(t, ro, "ExecuteTransaction", string(body))
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+		assertErrorType(t, w, ErrTypeValidationException)
 	})
 
 	t.Run("400 on mixed reads and writes", func(t *testing.T) {
@@ -715,7 +715,7 @@ func TestExecuteTransaction_Writes(t *testing.T) {
 			]
 		}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+		assertErrorType(t, w, ErrTypeValidationException)
 	})
 }
 
@@ -1051,7 +1051,7 @@ func TestExecuteStatement_AdditionalErrorPaths(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{"Statement": stmt})
 		w := dynamo(t, ro, "ExecuteStatement", string(body))
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+		assertErrorType(t, w, ErrTypeValidationException)
 	})
 
 	t.Run("400 on invalid NextToken", func(t *testing.T) {
@@ -1060,7 +1060,7 @@ func TestExecuteStatement_AdditionalErrorPaths(t *testing.T) {
 			"NextToken": "!!!not-valid-base64!!!"
 		}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+		assertErrorType(t, w, ErrTypeValidationException)
 	})
 
 	t.Run("400 on table not found for DELETE", func(t *testing.T) {
@@ -1069,7 +1069,7 @@ func TestExecuteStatement_AdditionalErrorPaths(t *testing.T) {
 			"Parameters": [{"S":"k"}]
 		}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ResourceNotFoundException")
+		assertErrorType(t, w, ErrTypeResourceNotFoundException)
 	})
 
 	t.Run("ConsumedCapacity returned for INSERT", func(t *testing.T) {
@@ -1200,7 +1200,7 @@ func TestExecuteTransaction_WritesCoverage(t *testing.T) {
 			]
 		}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ResourceNotFoundException")
+		assertErrorType(t, w, ErrTypeResourceNotFoundException)
 	})
 
 	t.Run("transact reads with non-existent table returns error", func(t *testing.T) {
@@ -1211,7 +1211,7 @@ func TestExecuteTransaction_WritesCoverage(t *testing.T) {
 			]
 		}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ResourceNotFoundException")
+		assertErrorType(t, w, ErrTypeResourceNotFoundException)
 	})
 }
 
@@ -1399,7 +1399,7 @@ func TestPQWriteTransactError(t *testing.T) {
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		assert.Equal(
 			t,
-			"com.amazonaws.dynamodb.v20120810#TransactionCanceledException",
+			ErrTypeTransactionCanceledException,
 			resp["__type"],
 		)
 		reasons := resp["CancellationReasons"].([]any)
@@ -1410,7 +1410,7 @@ func TestPQWriteTransactError(t *testing.T) {
 		w := httptest.NewRecorder()
 		pqWriteTransactError(w, ErrTableNotFound)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ResourceNotFoundException")
+		assertErrorType(t, w, ErrTypeResourceNotFoundException)
 	})
 }
 
@@ -1419,14 +1419,14 @@ func TestPQWriteStorageError(t *testing.T) {
 		w := httptest.NewRecorder()
 		pqWriteStorageError(w, "op", ErrConditionalCheckFailed)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ConditionalCheckFailedException")
+		assertErrorType(t, w, ErrTypeConditionalCheckFailedException)
 	})
 
 	t.Run("InternalServerError for unknown errors", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		pqWriteStorageError(w, "op", errUnexpected)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
-		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#InternalServerError")
+		assertErrorType(t, w, ErrTypeInternalServerError)
 	})
 }
 
@@ -1690,7 +1690,7 @@ func TestExecuteTransaction_TransactWritesValidationError(t *testing.T) {
 			]
 		}`)
 			assert.Equal(t, http.StatusBadRequest, w.Code)
-			assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+			assertErrorType(t, w, ErrTypeValidationException)
 		},
 	)
 }
@@ -1865,7 +1865,7 @@ func TestHandlerPartiQL_RemainingCoverage(t *testing.T) {
 			"Parameters": [{"S":"k"}]
 		}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ResourceNotFoundException")
+		assertErrorType(t, w, ErrTypeResourceNotFoundException)
 	})
 
 	// ExecuteStatement UPDATE from non-existent table → executePartiQLUpdate DescribeTable error
@@ -1875,7 +1875,7 @@ func TestHandlerPartiQL_RemainingCoverage(t *testing.T) {
 			"Parameters": [{"S":"v"}, {"S":"k"}]
 		}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ResourceNotFoundException")
+		assertErrorType(t, w, ErrTypeResourceNotFoundException)
 	})
 
 	// ExecuteStatement DELETE with non-key WHERE → executePartiQLDelete extractExactKey error
@@ -1885,7 +1885,7 @@ func TestHandlerPartiQL_RemainingCoverage(t *testing.T) {
 			"Parameters": [{"S":"k"}]
 		}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+		assertErrorType(t, w, ErrTypeValidationException)
 	})
 
 	// ExecuteTransaction reads with non-key WHERE → extractExactKey error
@@ -1899,7 +1899,7 @@ func TestHandlerPartiQL_RemainingCoverage(t *testing.T) {
 			]
 		}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+		assertErrorType(t, w, ErrTypeValidationException)
 	})
 
 	// ExecuteTransaction writes DELETE from non-existent table → DescribeTable error
@@ -1910,7 +1910,7 @@ func TestHandlerPartiQL_RemainingCoverage(t *testing.T) {
 			]
 		}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ResourceNotFoundException")
+		assertErrorType(t, w, ErrTypeResourceNotFoundException)
 	})
 
 	// ExecuteTransaction writes DELETE with non-key WHERE → extractExactKey error
@@ -1921,7 +1921,7 @@ func TestHandlerPartiQL_RemainingCoverage(t *testing.T) {
 			]
 		}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrorType(t, w, "com.amazonaws.dynamodb.v20120810#ValidationException")
+		assertErrorType(t, w, ErrTypeValidationException)
 	})
 }
 

@@ -26,7 +26,7 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"invalid request body",
 		)
 		return
@@ -35,7 +35,7 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"TableName is required",
 		)
 		return
@@ -44,7 +44,7 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			fmt.Sprintf(
 				"Value %d at 'limit' failed to satisfy constraint: Member must have value greater than or equal to 1",
 				*req.Limit,
@@ -59,7 +59,7 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"Select ALL_PROJECTED_ATTRIBUTES is not allowed when scanning a table without an index",
 		)
 		return
@@ -68,7 +68,7 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"Segment and TotalSegments must both be specified for parallel scan",
 		)
 		return
@@ -81,7 +81,7 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				ErrTypeValidationException,
 				fmt.Sprintf(
 					"Value %d at 'segment' failed to satisfy constraint: Member must have value between 0 and 999999, inclusive",
 					seg,
@@ -92,7 +92,7 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				ErrTypeValidationException,
 				fmt.Sprintf(
 					"Value %d at 'totalSegments' failed to satisfy constraint: Member must have value between 1 and 1000000, inclusive",
 					total,
@@ -103,7 +103,7 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				ErrTypeValidationException,
 				fmt.Sprintf(
 					"Value %d at 'segment' failed to satisfy constraint: Member must have value less than TotalSegments (%d)",
 					seg,
@@ -121,7 +121,7 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 		req.FilterExpression, req.ProjectionExpression,
 	); err != nil {
 		writeError(w, http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException", err.Error())
+			ErrTypeValidationException, err.Error())
 		return
 	}
 	opts := ScanOptions{
@@ -137,7 +137,7 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+				ErrTypeResourceNotFoundException,
 				"Requested resource not found: Table: "+req.TableName+" not found",
 			)
 			return
@@ -147,7 +147,7 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				ErrTypeValidationException,
 				err.Error(),
 			)
 			return
@@ -156,7 +156,7 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"com.amazonaws.dynamodb.v20120810#InternalServerError",
+			ErrTypeInternalServerError,
 			"internal server error",
 		)
 		return
@@ -177,7 +177,7 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				ErrTypeValidationException,
 				err.Error(),
 			)
 			return
@@ -197,7 +197,7 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				ErrTypeValidationException,
 				err.Error(),
 			)
 			return
@@ -251,7 +251,7 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"invalid request body",
 		)
 		return
@@ -260,7 +260,7 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"TableName is required",
 		)
 		return
@@ -269,7 +269,7 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			"KeyConditionExpression is required",
 		)
 		return
@@ -283,7 +283,7 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 		req.KeyConditionExpression, req.FilterExpression, req.ProjectionExpression,
 	); err != nil {
 		writeError(w, http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException", err.Error())
+			ErrTypeValidationException, err.Error())
 		return
 	}
 	hashKeyName, hashKeyValue, skCond, err := parseKeyConditionExpression(
@@ -296,7 +296,7 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			err.Error(),
 		)
 		return
@@ -310,7 +310,7 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				ErrTypeValidationException,
 				"Select ALL_PROJECTED_ATTRIBUTES is not allowed when querying a table without an index",
 			)
 			return
@@ -319,7 +319,7 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				ErrTypeValidationException,
 				"Select type ALL_PROJECTED_ATTRIBUTES is not allowed with a ProjectionExpression",
 			)
 			return
@@ -329,7 +329,7 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusBadRequest,
-			"com.amazonaws.dynamodb.v20120810#ValidationException",
+			ErrTypeValidationException,
 			fmt.Sprintf(
 				"Value %d at 'limit' failed to satisfy constraint: Member must have value greater than or equal to 1",
 				*req.Limit,
@@ -361,7 +361,7 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException",
+				ErrTypeResourceNotFoundException,
 				"Requested resource not found: Table: "+req.TableName+" not found",
 			)
 			return
@@ -371,7 +371,7 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				ErrTypeValidationException,
 				err.Error(),
 			)
 			return
@@ -380,7 +380,7 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 		writeError(
 			w,
 			http.StatusInternalServerError,
-			"com.amazonaws.dynamodb.v20120810#InternalServerError",
+			ErrTypeInternalServerError,
 			"internal server error",
 		)
 		return
@@ -401,7 +401,7 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				ErrTypeValidationException,
 				err.Error(),
 			)
 			return
@@ -421,7 +421,7 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				"com.amazonaws.dynamodb.v20120810#ValidationException",
+				ErrTypeValidationException,
 				err.Error(),
 			)
 			return

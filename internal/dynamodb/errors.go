@@ -7,6 +7,19 @@ import (
 	"net/http"
 )
 
+// AWS DynamoDB error type strings used in __type response fields.
+const (
+	ErrTypeValidationException             = "com.amazonaws.dynamodb.v20120810#ValidationException"
+	ErrTypeResourceNotFoundException       = "com.amazonaws.dynamodb.v20120810#ResourceNotFoundException"
+	ErrTypeConditionalCheckFailedException = "com.amazonaws.dynamodb.v20120810#ConditionalCheckFailedException"
+	ErrTypeTransactionCanceledException    = "com.amazonaws.dynamodb.v20120810#TransactionCanceledException"
+	ErrTypeInternalServerError             = "com.amazonaws.dynamodb.v20120810#InternalServerError"
+	ErrTypeResourceInUseException          = "com.amazonaws.dynamodb.v20120810#ResourceInUseException"
+	ErrTypeTableNotFoundException          = "com.amazonaws.dynamodb.v20120810#TableNotFoundException"
+	ErrTypeLimitExceededException          = "com.amazonaws.dynamodb.v20120810#LimitExceededException"
+	ErrTypeNotImplemented                  = "com.amazonaws.dynamodb.v20120810#NotImplemented"
+)
+
 var (
 	ErrTableNotFound              = errors.New("table not found")
 	ErrTableAlreadyExists         = errors.New("table already exists")
