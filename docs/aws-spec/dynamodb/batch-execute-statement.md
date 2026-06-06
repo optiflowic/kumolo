@@ -55,5 +55,4 @@ Top-level HTTP errors:
 ## Kumolo deviations
 
 - `ConsistentRead` accepted but ignored.
-- `ReturnValuesOnConditionCheckFailure` accepted but not implemented.
 - Batch is non-transactional; each statement is executed independently.

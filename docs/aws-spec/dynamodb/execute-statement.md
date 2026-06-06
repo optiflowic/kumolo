@@ -55,7 +55,6 @@
 ## Kumolo deviations
 
 - `ConsistentRead` is accepted but ignored (storage is always consistent).
-- `ReturnValuesOnConditionCheckFailure` is accepted but not implemented.
 - `NextToken` is encoded as base64(JSON(LastEvaluatedKey)).
 - Literal values in PartiQL statements (non-`?`) are supported for strings, numbers, booleans, NULL. Complex literals (list `<<...>>`, nested maps) may not be supported.
 - WHERE filter conditions that cannot be satisfied by key-based lookup are evaluated in-memory using DynamoDB filter expression evaluation.
