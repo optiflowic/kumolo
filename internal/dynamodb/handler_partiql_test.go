@@ -1383,6 +1383,12 @@ func TestExecuteTransaction_AdditionalCoverage(t *testing.T) {
 	})
 }
 
+func TestConditionalCheckFailedError(t *testing.T) {
+	err := &ConditionalCheckFailedError{Item: map[string]any{"pk": map[string]any{"S": "k1"}}}
+	assert.Equal(t, ErrConditionalCheckFailed.Error(), err.Error())
+	assert.ErrorIs(t, err, ErrConditionalCheckFailed)
+}
+
 // ---- pqWriteTransactError / pqWriteStorageError / pqStorageErrToBatchError unit tests ----
 
 func TestPQWriteTransactError(t *testing.T) {
@@ -1712,6 +1718,19 @@ func TestExecuteStatement_SELECT_SortKeyInFilter(t *testing.T) {
 }
 
 // ---- executePartiQLTransactWrites ValidationException path ----
+
+func TestExecuteTransaction_TransactWritesTableNotFound(t *testing.T) {
+	ro := newTestRouter(t)
+	// No table created — INSERT in executePartiQLTransactWrites hits hashKeyName error path.
+	w := dynamo(t, ro, "ExecuteTransaction", `{
+		"TransactStatements": [
+			{"Statement": "INSERT INTO \"nosuchtable\" VALUE {'pk': ?}",
+			 "Parameters": [{"S":"k1"}]}
+		]
+	}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrorType(t, w, ErrTypeResourceNotFoundException)
+}
 
 func TestExecuteTransaction_TransactWritesValidationError(t *testing.T) {
 	ro := setup(t)

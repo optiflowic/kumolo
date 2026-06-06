@@ -467,23 +467,30 @@ func (ro *Router) executePartiQLSelect(
 	return items, outToken, nil
 }
 
-func (ro *Router) executePartiQLInsert(stmt *pqStmt) error {
-	meta, err := ro.storage.DescribeTable(stmt.tableName)
+// hashKeyName returns the HASH key attribute name for tableName.
+func (ro *Router) hashKeyName(tableName string) (string, error) {
+	meta, err := ro.storage.DescribeTable(tableName)
 	if err != nil {
-		return err
+		return "", err
 	}
-	var hashKeyName string
 	for _, k := range meta.KeySchema {
 		if k.KeyType == "HASH" {
-			hashKeyName = k.AttributeName
-			break
+			return k.AttributeName, nil
 		}
+	}
+	return "", nil // unreachable: every valid table has a HASH key
+}
+
+func (ro *Router) executePartiQLInsert(stmt *pqStmt) error {
+	hk, err := ro.hashKeyName(stmt.tableName)
+	if err != nil {
+		return err
 	}
 	// DynamoDB PartiQL INSERT is semantically equivalent to PutItem with an
 	// implicit attribute_not_exists condition on the primary key.
 	cond := &ConditionCheck{
 		Expr:  "attribute_not_exists(#pk)",
-		Names: map[string]string{"#pk": hashKeyName},
+		Names: map[string]string{"#pk": hk},
 	}
 	_, err = ro.storage.PutItem(stmt.tableName, stmt.item, cond)
 	return err
@@ -550,16 +557,9 @@ func (ro *Router) executePartiQLTransactWrites(
 		}
 		switch stmt.kind {
 		case pqInsert:
-			meta, err := ro.storage.DescribeTable(stmt.tableName)
+			hk, err := ro.hashKeyName(stmt.tableName)
 			if err != nil {
 				return err
-			}
-			var hashKeyName string
-			for _, k := range meta.KeySchema {
-				if k.KeyType == "HASH" {
-					hashKeyName = k.AttributeName
-					break
-				}
 			}
 			actions[i] = TransactWriteAction{
 				Put: &TransactPut{
@@ -567,7 +567,7 @@ func (ro *Router) executePartiQLTransactWrites(
 					Item:      stmt.item,
 					Cond: &ConditionCheck{
 						Expr:  "attribute_not_exists(#pk)",
-						Names: map[string]string{"#pk": hashKeyName},
+						Names: map[string]string{"#pk": hk},
 					},
 					ReturnValuesOnConditionFailure: rvocf,
 				},

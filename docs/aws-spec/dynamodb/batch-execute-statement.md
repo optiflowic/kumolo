@@ -33,7 +33,7 @@
 | Field | Notes |
 |-------|-------|
 | Item | Result item (SELECT only, if found) |
-| Error | BatchStatementError (Code + Message) if statement failed |
+| Error | BatchStatementError (Code + Message + optional Item) if statement failed |
 | TableName | Table name |
 
 ## Limits

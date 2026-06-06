@@ -39,7 +39,7 @@
 | SELECT with hash key equality | Query |
 | SELECT with hash+sort key equality | GetItem |
 | SELECT without key conditions | Scan |
-| INSERT | PutItem |
+| INSERT | PutItem with implicit `attribute_not_exists(hashKey)` condition |
 | UPDATE | UpdateItem (key from WHERE, SET → updates map) |
 | DELETE | DeleteItem (key from WHERE) |
 
