@@ -53,6 +53,5 @@
 ## Kumolo deviations
 
 - `ClientRequestToken` (idempotency) is accepted but not enforced.
-- `ReturnValuesOnConditionCheckFailure` accepted but not implemented.
 - Reads: translated to TransactGetItems.
 - Writes: translated to TransactWriteItems (existing transaction storage).

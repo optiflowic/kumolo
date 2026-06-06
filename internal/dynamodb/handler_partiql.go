@@ -65,7 +65,7 @@ func (ro *Router) handleExecuteStatement(w http.ResponseWriter, body []byte) {
 	case pqSelect:
 		items, nextToken, err := ro.executePartiQLSelect(stmt, req.Limit, req.NextToken)
 		if err != nil {
-			pqWriteStorageError(w, "ExecuteStatement", err)
+			pqWriteStorageError(w, "ExecuteStatement", err, "")
 			return
 		}
 		if items == nil {
@@ -82,7 +82,7 @@ func (ro *Router) handleExecuteStatement(w http.ResponseWriter, body []byte) {
 
 	case pqInsert:
 		if err := ro.executePartiQLInsert(stmt); err != nil {
-			pqWriteStorageError(w, "ExecuteStatement", err)
+			pqWriteStorageError(w, "ExecuteStatement", err, req.ReturnValuesOnConditionCheckFailure)
 			return
 		}
 		if cc := buildConsumedCapacity(stmt.tableName, req.ReturnConsumedCapacity); cc != nil {
@@ -92,7 +92,7 @@ func (ro *Router) handleExecuteStatement(w http.ResponseWriter, body []byte) {
 
 	case pqUpdate:
 		if err := ro.executePartiQLUpdate(stmt); err != nil {
-			pqWriteStorageError(w, "ExecuteStatement", err)
+			pqWriteStorageError(w, "ExecuteStatement", err, req.ReturnValuesOnConditionCheckFailure)
 			return
 		}
 		if cc := buildConsumedCapacity(stmt.tableName, req.ReturnConsumedCapacity); cc != nil {
@@ -102,7 +102,7 @@ func (ro *Router) handleExecuteStatement(w http.ResponseWriter, body []byte) {
 
 	case pqDelete:
 		if err := ro.executePartiQLDelete(stmt); err != nil {
-			pqWriteStorageError(w, "ExecuteStatement", err)
+			pqWriteStorageError(w, "ExecuteStatement", err, req.ReturnValuesOnConditionCheckFailure)
 			return
 		}
 		if cc := buildConsumedCapacity(stmt.tableName, req.ReturnConsumedCapacity); cc != nil {
@@ -124,8 +124,9 @@ type batchStmtReq struct {
 }
 
 type batchStmtError struct {
-	Code    string `json:"Code"`
-	Message string `json:"Message"`
+	Code    string         `json:"Code"`
+	Message string         `json:"Message"`
+	Item    map[string]any `json:"Item,omitempty"`
 }
 
 type batchStmtResp struct {
@@ -192,23 +193,24 @@ func (ro *Router) handleBatchExecuteStatement(w http.ResponseWriter, body []byte
 			consumedTables = append(consumedTables, stmt.tableName)
 		}
 
+		rvocf := req.Statements[i].ReturnValuesOnConditionCheckFailure
 		switch stmt.kind {
 		case pqSelect:
 			// AWS requires exact key equality for batch SELECT (point lookup only).
 			meta, descErr := ro.storage.DescribeTable(stmt.tableName)
 			if descErr != nil {
-				resp.Error = pqStorageErrToBatchError(descErr)
+				resp.Error = pqStorageErrToBatchError(descErr, "")
 				responses[i] = resp
 				continue
 			}
 			if _, keyErr := extractExactKey(stmt.where, meta); keyErr != nil {
-				resp.Error = pqStorageErrToBatchError(keyErr)
+				resp.Error = pqStorageErrToBatchError(keyErr, "")
 				responses[i] = resp
 				continue
 			}
 			items, _, err := ro.executePartiQLSelect(stmt, nil, "")
 			if err != nil {
-				resp.Error = pqStorageErrToBatchError(err)
+				resp.Error = pqStorageErrToBatchError(err, "")
 			} else {
 				if len(items) > 0 {
 					resp.Item = items[0]
@@ -216,15 +218,15 @@ func (ro *Router) handleBatchExecuteStatement(w http.ResponseWriter, body []byte
 			}
 		case pqInsert:
 			if err := ro.executePartiQLInsert(stmt); err != nil {
-				resp.Error = pqStorageErrToBatchError(err)
+				resp.Error = pqStorageErrToBatchError(err, rvocf)
 			}
 		case pqUpdate:
 			if err := ro.executePartiQLUpdate(stmt); err != nil {
-				resp.Error = pqStorageErrToBatchError(err)
+				resp.Error = pqStorageErrToBatchError(err, rvocf)
 			}
 		case pqDelete:
 			if err := ro.executePartiQLDelete(stmt); err != nil {
-				resp.Error = pqStorageErrToBatchError(err)
+				resp.Error = pqStorageErrToBatchError(err, rvocf)
 			}
 		}
 
@@ -320,7 +322,11 @@ func (ro *Router) handleExecuteTransaction(w http.ResponseWriter, body []byte) {
 		resp["Responses"] = responses
 	} else {
 		// All writes — translate to TransactWriteItems
-		if err := ro.executePartiQLTransactWrites(stmts); err != nil {
+		rvocf := make([]string, len(req.TransactStatements))
+		for i, s := range req.TransactStatements {
+			rvocf[i] = s.ReturnValuesOnConditionCheckFailure
+		}
+		if err := ro.executePartiQLTransactWrites(stmts, rvocf); err != nil {
 			pqWriteTransactError(w, err)
 			return
 		}
@@ -461,8 +467,32 @@ func (ro *Router) executePartiQLSelect(
 	return items, outToken, nil
 }
 
+// hashKeyName returns the HASH key attribute name for tableName.
+func (ro *Router) hashKeyName(tableName string) (string, error) {
+	meta, err := ro.storage.DescribeTable(tableName)
+	if err != nil {
+		return "", err
+	}
+	for _, k := range meta.KeySchema {
+		if k.KeyType == "HASH" {
+			return k.AttributeName, nil
+		}
+	}
+	return "", nil // unreachable: every valid table has a HASH key
+}
+
 func (ro *Router) executePartiQLInsert(stmt *pqStmt) error {
-	_, err := ro.storage.PutItem(stmt.tableName, stmt.item, nil)
+	hk, err := ro.hashKeyName(stmt.tableName)
+	if err != nil {
+		return err
+	}
+	// DynamoDB PartiQL INSERT is semantically equivalent to PutItem with an
+	// implicit attribute_not_exists condition on the primary key.
+	cond := &ConditionCheck{
+		Expr:  "attribute_not_exists(#pk)",
+		Names: map[string]string{"#pk": hk},
+	}
+	_, err = ro.storage.PutItem(stmt.tableName, stmt.item, cond)
 	return err
 }
 
@@ -514,13 +544,33 @@ func (ro *Router) executePartiQLTransactReads(stmts []*pqStmt) ([]map[string]any
 }
 
 // executePartiQLTransactWrites translates INSERT/UPDATE/DELETE statements to TransactWriteItems.
-func (ro *Router) executePartiQLTransactWrites(stmts []*pqStmt) error {
+// returnValuesOnFailure is a per-statement slice of ReturnValuesOnConditionCheckFailure values.
+func (ro *Router) executePartiQLTransactWrites(
+	stmts []*pqStmt,
+	returnValuesOnFailure []string,
+) error {
 	actions := make([]TransactWriteAction, len(stmts))
 	for i, stmt := range stmts {
+		rvocf := ""
+		if i < len(returnValuesOnFailure) {
+			rvocf = returnValuesOnFailure[i]
+		}
 		switch stmt.kind {
 		case pqInsert:
+			hk, err := ro.hashKeyName(stmt.tableName)
+			if err != nil {
+				return err
+			}
 			actions[i] = TransactWriteAction{
-				Put: &TransactPut{TableName: stmt.tableName, Item: stmt.item},
+				Put: &TransactPut{
+					TableName: stmt.tableName,
+					Item:      stmt.item,
+					Cond: &ConditionCheck{
+						Expr:  "attribute_not_exists(#pk)",
+						Names: map[string]string{"#pk": hk},
+					},
+					ReturnValuesOnConditionFailure: rvocf,
+				},
 			}
 		case pqUpdate:
 			meta, err := ro.storage.DescribeTable(stmt.tableName)
@@ -537,9 +587,10 @@ func (ro *Router) executePartiQLTransactWrites(stmts []*pqStmt) error {
 			}
 			actions[i] = TransactWriteAction{
 				Update: &TransactUpdate{
-					TableName: stmt.tableName,
-					Key:       key,
-					Updates:   updates,
+					TableName:                      stmt.tableName,
+					Key:                            key,
+					Updates:                        updates,
+					ReturnValuesOnConditionFailure: rvocf,
 				},
 			}
 		case pqDelete:
@@ -552,7 +603,11 @@ func (ro *Router) executePartiQLTransactWrites(stmts []*pqStmt) error {
 				return err
 			}
 			actions[i] = TransactWriteAction{
-				Delete: &TransactDelete{TableName: stmt.tableName, Key: key},
+				Delete: &TransactDelete{
+					TableName:                      stmt.tableName,
+					Key:                            key,
+					ReturnValuesOnConditionFailure: rvocf,
+				},
 			}
 		default:
 			// unreachable: validatePQBatchKind already rejected mixed batches
@@ -612,7 +667,14 @@ func pqDecodeToken(token string) (map[string]any, error) {
 
 // pqWriteStorageError writes the appropriate HTTP error for a storage-layer error
 // returned by a PartiQL execution helper.
-func pqWriteStorageError(w http.ResponseWriter, op string, err error) {
+// returnValuesOnFailure controls whether the old item is included in a
+// ConditionalCheckFailedException response when set to "ALL_OLD".
+func pqWriteStorageError(
+	w http.ResponseWriter,
+	op string,
+	err error,
+	returnValuesOnFailure string,
+) {
 	switch {
 	case errors.Is(err, ErrTableNotFound):
 		slog.Debug(op + ": table not found")
@@ -621,9 +683,14 @@ func pqWriteStorageError(w http.ResponseWriter, op string, err error) {
 			"Requested resource not found")
 	case errors.Is(err, ErrConditionalCheckFailed):
 		slog.Debug(op + ": condition check failed")
-		writeError(w, http.StatusBadRequest,
-			ErrTypeConditionalCheckFailedException,
-			"The conditional request failed")
+		var item map[string]any
+		if returnValuesOnFailure == "ALL_OLD" {
+			var ccErr *ConditionalCheckFailedError
+			if errors.As(err, &ccErr) {
+				item = ccErr.Item
+			}
+		}
+		writeConditionalCheckFailedError(w, item)
 	case errors.Is(err, ErrValidationException):
 		slog.Debug(op+": validation error", "err", err)
 		writeError(w, http.StatusBadRequest,
@@ -634,6 +701,29 @@ func pqWriteStorageError(w http.ResponseWriter, op string, err error) {
 		writeError(w, http.StatusInternalServerError,
 			ErrTypeInternalServerError,
 			"internal server error")
+	}
+}
+
+// writeConditionalCheckFailedError writes a ConditionalCheckFailedException response,
+// optionally including the old item when ALL_OLD was requested.
+func writeConditionalCheckFailedError(w http.ResponseWriter, item map[string]any) {
+	type resp struct {
+		Type    string         `json:"__type"`
+		Message string         `json:"message"`
+		Item    map[string]any `json:"Item,omitempty"`
+	}
+	w.Header().Set("Content-Type", "application/x-amz-json-1.0")
+	w.WriteHeader(http.StatusBadRequest)
+	if err := json.NewEncoder(w).Encode(resp{
+		Type:    ErrTypeConditionalCheckFailedException,
+		Message: "The conditional request failed",
+		Item:    item,
+	}); err != nil {
+		slog.Warn(
+			"failed to encode ConditionalCheckFailedException",
+			"err",
+			err,
+		) // untestable: resp contains no unencodable types
 	}
 }
 
@@ -667,11 +757,12 @@ func pqWriteTransactError(w http.ResponseWriter, err error) {
 		}
 		return
 	}
-	pqWriteStorageError(w, "ExecuteTransaction", err)
+	pqWriteStorageError(w, "ExecuteTransaction", err, "")
 }
 
 // pqStorageErrToBatchError converts a storage error to a BatchStatementError.
-func pqStorageErrToBatchError(err error) *batchStmtError {
+// returnValuesOnFailure controls whether the old item is included when set to "ALL_OLD".
+func pqStorageErrToBatchError(err error, returnValuesOnFailure string) *batchStmtError {
 	switch {
 	case errors.Is(err, ErrTableNotFound):
 		return &batchStmtError{
@@ -679,10 +770,17 @@ func pqStorageErrToBatchError(err error) *batchStmtError {
 			Message: "Requested resource not found",
 		}
 	case errors.Is(err, ErrConditionalCheckFailed):
-		return &batchStmtError{
+		e := &batchStmtError{
 			Code:    "ConditionalCheckFailed",
 			Message: "The conditional request failed",
 		}
+		if returnValuesOnFailure == "ALL_OLD" {
+			var ccErr *ConditionalCheckFailedError
+			if errors.As(err, &ccErr) {
+				e.Item = ccErr.Item
+			}
+		}
+		return e
 	case errors.Is(err, ErrValidationException):
 		return &batchStmtError{
 			Code:    "ValidationException",

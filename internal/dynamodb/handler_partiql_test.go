@@ -1383,6 +1383,12 @@ func TestExecuteTransaction_AdditionalCoverage(t *testing.T) {
 	})
 }
 
+func TestConditionalCheckFailedError(t *testing.T) {
+	err := &ConditionalCheckFailedError{Item: map[string]any{"pk": map[string]any{"S": "k1"}}}
+	assert.Equal(t, ErrConditionalCheckFailed.Error(), err.Error())
+	assert.ErrorIs(t, err, ErrConditionalCheckFailed)
+}
+
 // ---- pqWriteTransactError / pqWriteStorageError / pqStorageErrToBatchError unit tests ----
 
 func TestPQWriteTransactError(t *testing.T) {
@@ -1415,16 +1421,42 @@ func TestPQWriteTransactError(t *testing.T) {
 }
 
 func TestPQWriteStorageError(t *testing.T) {
-	t.Run("ConditionalCheckFailedException", func(t *testing.T) {
+	t.Run("ConditionalCheckFailedException without item", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		pqWriteStorageError(w, "op", ErrConditionalCheckFailed)
+		pqWriteStorageError(w, "op", ErrConditionalCheckFailed, "")
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assertErrorType(t, w, ErrTypeConditionalCheckFailedException)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Nil(t, resp["Item"])
 	})
+
+	t.Run("ConditionalCheckFailedException with ALL_OLD returns item", func(t *testing.T) {
+		oldItem := map[string]any{"pk": map[string]any{"S": "k1"}, "v": map[string]any{"N": "1"}}
+		w := httptest.NewRecorder()
+		pqWriteStorageError(w, "op", &ConditionalCheckFailedError{Item: oldItem}, "ALL_OLD")
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, ErrTypeConditionalCheckFailedException)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.NotNil(t, resp["Item"])
+	})
+
+	t.Run(
+		"ConditionalCheckFailedException with ALL_OLD but nil item omits field",
+		func(t *testing.T) {
+			w := httptest.NewRecorder()
+			pqWriteStorageError(w, "op", &ConditionalCheckFailedError{Item: nil}, "ALL_OLD")
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			var resp map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+			assert.Nil(t, resp["Item"])
+		},
+	)
 
 	t.Run("InternalServerError for unknown errors", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		pqWriteStorageError(w, "op", errUnexpected)
+		pqWriteStorageError(w, "op", errUnexpected, "")
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 		assertErrorType(t, w, ErrTypeInternalServerError)
 	})
@@ -1441,9 +1473,23 @@ func TestPQStorageErrToBatchError(t *testing.T) {
 		{errUnexpected, "InternalServerError"},
 	}
 	for _, tc := range tests {
-		be := pqStorageErrToBatchError(tc.err)
+		be := pqStorageErrToBatchError(tc.err, "")
 		assert.Equal(t, tc.wantCode, be.Code, "err=%v", tc.err)
 	}
+
+	t.Run("ConditionalCheckFailed with ALL_OLD includes item", func(t *testing.T) {
+		oldItem := map[string]any{"pk": map[string]any{"S": "k1"}}
+		be := pqStorageErrToBatchError(&ConditionalCheckFailedError{Item: oldItem}, "ALL_OLD")
+		assert.Equal(t, "ConditionalCheckFailed", be.Code)
+		assert.Equal(t, oldItem, be.Item)
+	})
+
+	t.Run("ConditionalCheckFailed without ALL_OLD omits item", func(t *testing.T) {
+		oldItem := map[string]any{"pk": map[string]any{"S": "k1"}}
+		be := pqStorageErrToBatchError(&ConditionalCheckFailedError{Item: oldItem}, "")
+		assert.Equal(t, "ConditionalCheckFailed", be.Code)
+		assert.Nil(t, be.Item)
+	})
 }
 
 // errUnexpected is a sentinel for "none of the above" error branches.
@@ -1672,6 +1718,19 @@ func TestExecuteStatement_SELECT_SortKeyInFilter(t *testing.T) {
 }
 
 // ---- executePartiQLTransactWrites ValidationException path ----
+
+func TestExecuteTransaction_TransactWritesTableNotFound(t *testing.T) {
+	ro := newTestRouter(t)
+	// No table created — INSERT in executePartiQLTransactWrites hits hashKeyName error path.
+	w := dynamo(t, ro, "ExecuteTransaction", `{
+		"TransactStatements": [
+			{"Statement": "INSERT INTO \"nosuchtable\" VALUE {'pk': ?}",
+			 "Parameters": [{"S":"k1"}]}
+		]
+	}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrorType(t, w, ErrTypeResourceNotFoundException)
+}
 
 func TestExecuteTransaction_TransactWritesValidationError(t *testing.T) {
 	ro := setup(t)
@@ -1987,5 +2046,159 @@ func TestPQDecodeToken(t *testing.T) {
 		token, err := pqEncodeToken(nil)
 		require.NoError(t, err)
 		assert.Empty(t, token)
+	})
+}
+
+// ---- ReturnValuesOnConditionCheckFailure integration tests ----
+
+func TestExecuteStatement_ReturnValuesOnConditionCheckFailure(t *testing.T) {
+	setup := func(t *testing.T) *Router {
+		t.Helper()
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "CreateTable", createTableBody)
+		require.Equal(t, http.StatusOK, w.Code)
+		w = dynamo(
+			t,
+			ro,
+			"PutItem",
+			`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"v":{"N":"1"}}}`,
+		)
+		require.Equal(t, http.StatusOK, w.Code)
+		return ro
+	}
+
+	t.Run("INSERT ALL_OLD includes old item when item already exists", func(t *testing.T) {
+		ro := setup(t)
+		body := `{
+			"Statement": "INSERT INTO \"test-table\" VALUE {'pk': ?, 'v': ?}",
+			"Parameters": [{"S":"k1"},{"N":"99"}],
+			"ReturnValuesOnConditionCheckFailure": "ALL_OLD"
+		}`
+		w := dynamo(t, ro, "ExecuteStatement", body)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, ErrTypeConditionalCheckFailedException)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		item := resp["Item"].(map[string]any)
+		assert.Equal(t, "k1", item["pk"].(map[string]any)["S"])
+	})
+
+	t.Run("INSERT without ALL_OLD omits item on condition failure", func(t *testing.T) {
+		ro := setup(t)
+		body := `{
+			"Statement": "INSERT INTO \"test-table\" VALUE {'pk': ?, 'v': ?}",
+			"Parameters": [{"S":"k1"},{"N":"99"}]
+		}`
+		w := dynamo(t, ro, "ExecuteStatement", body)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, ErrTypeConditionalCheckFailedException)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Nil(t, resp["Item"])
+	})
+}
+
+func TestBatchExecuteStatement_ReturnValuesOnConditionCheckFailure(t *testing.T) {
+	ro := newTestRouter(t)
+	w := dynamo(t, ro, "CreateTable", createTableBody)
+	require.Equal(t, http.StatusOK, w.Code)
+	w = dynamo(
+		t,
+		ro,
+		"PutItem",
+		`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"v":{"N":"1"}}}`,
+	)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	t.Run("INSERT ALL_OLD includes item in batch error", func(t *testing.T) {
+		body := `{
+			"Statements": [{
+				"Statement": "INSERT INTO \"test-table\" VALUE {'pk': ?, 'v': ?}",
+				"Parameters": [{"S":"k1"},{"N":"99"}],
+				"ReturnValuesOnConditionCheckFailure": "ALL_OLD"
+			}]
+		}`
+		w := dynamo(t, ro, "BatchExecuteStatement", body)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		responses := resp["Responses"].([]any)
+		require.Len(t, responses, 1)
+		r := responses[0].(map[string]any)
+		batchErr := r["Error"].(map[string]any)
+		assert.Equal(t, "ConditionalCheckFailed", batchErr["Code"])
+		item := batchErr["Item"].(map[string]any)
+		assert.Equal(t, "k1", item["pk"].(map[string]any)["S"])
+	})
+
+	t.Run("INSERT without ALL_OLD omits item in batch error", func(t *testing.T) {
+		body := `{
+			"Statements": [{
+				"Statement": "INSERT INTO \"test-table\" VALUE {'pk': ?, 'v': ?}",
+				"Parameters": [{"S":"k1"},{"N":"99"}]
+			}]
+		}`
+		w := dynamo(t, ro, "BatchExecuteStatement", body)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		responses := resp["Responses"].([]any)
+		require.Len(t, responses, 1)
+		r := responses[0].(map[string]any)
+		batchErr := r["Error"].(map[string]any)
+		assert.Equal(t, "ConditionalCheckFailed", batchErr["Code"])
+		assert.Nil(t, batchErr["Item"])
+	})
+}
+
+func TestExecuteTransaction_ReturnValuesOnConditionCheckFailure(t *testing.T) {
+	ro := newTestRouter(t)
+	w := dynamo(t, ro, "CreateTable", createTableBody)
+	require.Equal(t, http.StatusOK, w.Code)
+	w = dynamo(
+		t,
+		ro,
+		"PutItem",
+		`{"TableName":"test-table","Item":{"pk":{"S":"k1"},"v":{"N":"1"}}}`,
+	)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	t.Run("INSERT ALL_OLD includes item in cancellation reason", func(t *testing.T) {
+		body := `{
+			"TransactStatements": [{
+				"Statement": "INSERT INTO \"test-table\" VALUE {'pk': ?, 'v': ?}",
+				"Parameters": [{"S":"k1"},{"N":"99"}],
+				"ReturnValuesOnConditionCheckFailure": "ALL_OLD"
+			}]
+		}`
+		w := dynamo(t, ro, "ExecuteTransaction", body)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, ErrTypeTransactionCanceledException)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		reasons := resp["CancellationReasons"].([]any)
+		require.Len(t, reasons, 1)
+		reason := reasons[0].(map[string]any)
+		assert.Equal(t, "ConditionalCheckFailed", reason["Code"])
+		item := reason["Item"].(map[string]any)
+		assert.Equal(t, "k1", item["pk"].(map[string]any)["S"])
+	})
+
+	t.Run("INSERT without ALL_OLD omits item in cancellation reason", func(t *testing.T) {
+		body := `{
+			"TransactStatements": [{
+				"Statement": "INSERT INTO \"test-table\" VALUE {'pk': ?, 'v': ?}",
+				"Parameters": [{"S":"k1"},{"N":"99"}]
+			}]
+		}`
+		w := dynamo(t, ro, "ExecuteTransaction", body)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		reasons := resp["CancellationReasons"].([]any)
+		require.Len(t, reasons, 1)
+		reason := reasons[0].(map[string]any)
+		assert.Equal(t, "ConditionalCheckFailed", reason["Code"])
+		assert.Nil(t, reason["Item"])
 	})
 }

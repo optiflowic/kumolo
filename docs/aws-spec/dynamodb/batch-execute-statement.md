@@ -33,7 +33,7 @@
 | Field | Notes |
 |-------|-------|
 | Item | Result item (SELECT only, if found) |
-| Error | BatchStatementError (Code + Message) if statement failed |
+| Error | BatchStatementError (Code + Message + optional Item) if statement failed |
 | TableName | Table name |
 
 ## Limits
@@ -55,5 +55,4 @@ Top-level HTTP errors:
 ## Kumolo deviations
 
 - `ConsistentRead` accepted but ignored.
-- `ReturnValuesOnConditionCheckFailure` accepted but not implemented.
 - Batch is non-transactional; each statement is executed independently.
