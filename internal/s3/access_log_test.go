@@ -90,8 +90,9 @@ func TestFormatLogEntry_defaults(t *testing.T) {
 	assert.Contains(t, entry, "REST.GET.BUCKET")
 	// No key → dash
 	assert.Contains(t, entry, " - ")
-	// No bytes → dash
-	assert.Contains(t, entry, ` - - - "-" "-"`)
+	// Zero bytes → "0" (not "-"); unknown fields after bytes remain "-"
+	assert.Contains(t, entry, ` 200 - 0 - - - "-" "-"`)
+
 }
 
 func TestResponseRecorder(t *testing.T) {
@@ -113,6 +114,13 @@ func TestResponseRecorder(t *testing.T) {
 		rec := newResponseRecorder(httptest.NewRecorder())
 		assert.Equal(t, http.StatusOK, rec.status)
 		assert.Equal(t, int64(0), rec.bytesWritten)
+	})
+	t.Run("records only first WriteHeader call", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		rec := newResponseRecorder(w)
+		rec.WriteHeader(http.StatusInternalServerError)
+		rec.WriteHeader(http.StatusOK) // second call must not overwrite recorded status
+		assert.Equal(t, http.StatusInternalServerError, rec.status)
 	})
 	t.Run("flush forwarded", func(t *testing.T) {
 		w := httptest.NewRecorder()
@@ -226,8 +234,13 @@ func TestAppendAccessLog_emptyTargetBucket(t *testing.T) {
 
 	req = httptest.NewRequest(http.MethodGet, "/src", nil)
 	w := httptest.NewRecorder()
-	assert.NotPanics(t, func() { ro.ServeHTTP(w, req) })
+	ro.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Verify no log objects were written (empty TargetBucket must be skipped).
+	objects, err := ro.storage.ListObjects("src")
+	require.NoError(t, err)
+	assert.Empty(t, objects, "empty TargetBucket must not produce any log objects")
 }
 
 func TestFormatLogEntry_noPortInRemoteAddr(t *testing.T) {
@@ -275,7 +288,12 @@ func TestAppendAccessLog_rootRequest(t *testing.T) {
 	// Root-level requests (no bucket) must not trigger access logging.
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := httptest.NewRecorder()
-	assert.NotPanics(t, func() { ro.ServeHTTP(w, req) })
+	ro.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	// No buckets exist, so no log delivery could have been attempted.
+	buckets, err := ro.storage.ListBuckets()
+	require.NoError(t, err)
+	assert.Empty(t, buckets)
 }
 
 func TestAppendAccessLog_missingTargetBucket(t *testing.T) {

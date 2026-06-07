@@ -27,8 +27,9 @@ type loggingEnabled struct {
 // the number of bytes written to the response body.
 type responseRecorder struct {
 	http.ResponseWriter
-	status       int
-	bytesWritten int64
+	status        int
+	bytesWritten  int64
+	headerWritten bool
 }
 
 func newResponseRecorder(w http.ResponseWriter) *responseRecorder {
@@ -36,7 +37,10 @@ func newResponseRecorder(w http.ResponseWriter) *responseRecorder {
 }
 
 func (rr *responseRecorder) WriteHeader(status int) {
-	rr.status = status
+	if !rr.headerWritten {
+		rr.status = status
+		rr.headerWritten = true
+	}
 	rr.ResponseWriter.WriteHeader(status)
 }
 
@@ -80,7 +84,13 @@ func (ro *Router) appendAccessLog(r *http.Request, rec *responseRecorder, start 
 
 	entry := formatLogEntry(bucket, key, r, rec, start)
 	var nonce [4]byte
-	_, _ = rand.Read(nonce[:])
+	if _, err := rand.Read(nonce[:]); err != nil {
+		slog.Warn(
+			"failed to generate log object nonce",
+			"err",
+			err,
+		) // untestable: crypto/rand failure cannot be injected
+	}
 	objKey := logObjectKey(le.TargetPrefix, start, nonce)
 	if err := ro.storage.WriteAccessLog(le.TargetBucket, objKey, entry); err != nil {
 		slog.Warn( // #nosec G706 -- target_bucket is from stored config, not direct user input
@@ -126,10 +136,7 @@ func formatLogEntry(
 		userAgent = "-"
 	}
 
-	bytesStr := "-"
-	if rec.bytesWritten > 0 {
-		bytesStr = fmt.Sprintf("%d", rec.bytesWritten)
-	}
+	bytesStr := fmt.Sprintf("%d", rec.bytesWritten)
 
 	// Fields in AWS S3 server access log order:
 	// bucket-owner bucket time remote-ip requester request-id operation key

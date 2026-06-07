@@ -26,11 +26,11 @@ kumolo appends a server access log record to the target bucket after each reques
 
 ## Kumolo deviations
 
-- Log delivery errors (e.g. target bucket missing) are silently dropped; the
-  originating request is not affected.
+- Log delivery errors (e.g. target bucket missing) are logged via `slog.Warn`
+  and do not affect the originating HTTP request or response.
 - Each request produces exactly one log object (AWS batches multiple records per file).
 - Fields not tracked by kumolo (`bucket-owner`, `requester`, `request-id`,
-  `object-size`, `total-time`, `turn-around-time`, `version-id`, `host-id`,
+  `object-size`, `total-time`, `turnaround-time`, `version-id`, `host-id`,
   `sig-version`, `cipher`, `auth-type`, `host-name`, `tls-version`,
   `access-point`, `acl-required`) are emitted as `-`.
 - Log format: S3 server access log format
