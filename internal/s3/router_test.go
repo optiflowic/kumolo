@@ -623,6 +623,7 @@ func (m *mockStore) PutBucketLogging(_, _ string) error { return m.putBucketLogg
 func (m *mockStore) GetBucketLogging(_ string) (string, error) {
 	return m.getBucketLoggingResult, m.getBucketLoggingErr
 }
+func (m *mockStore) WriteAccessLog(_, _, _ string) error { return nil }
 
 func (m *mockStore) PutBucketAccelerate(_, _ string) error { return m.putBucketAccelerateErr }
 func (m *mockStore) GetBucketAccelerate(_ string) (string, error) {

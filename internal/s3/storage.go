@@ -2141,6 +2141,38 @@ func (s *Storage) GetBucketLogging(bucket string) (string, error) {
 	return s.getBucketConfigField(bucket, func(m bucketMeta) string { return m.Logging })
 }
 
+// WriteAccessLog writes a log record as a new S3 object at key inside
+// targetBucket. The object is plain text and has no versioning or encryption.
+func (s *Storage) WriteAccessLog(targetBucket, key, content string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.bucketExistsLocked(targetBucket) {
+		return ErrBucketNotFound
+	}
+	objPath := filepath.Join(targetBucket, key)
+	if dir := filepath.Dir(objPath); dir != targetBucket {
+		if err := s.root.MkdirAll(dir, 0o750); err != nil {
+			return err
+		}
+	}
+	_, err := s.writeObject(
+		objPath,
+		strings.NewReader(content),
+		"text/plain",
+		"",
+		nil,
+		"",
+		"",
+		"",
+		false,
+		"",
+		nil,
+		nil,
+		"STANDARD",
+	)
+	return err
+}
+
 func (s *Storage) PutBucketAccelerate(bucket, xmlBody string) error {
 	return s.putBucketConfigField(bucket, func(m *bucketMeta) { m.Accelerate = xmlBody })
 }

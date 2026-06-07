@@ -102,6 +102,13 @@ func NewRouter(storage *Storage, kms KMSService) *Router {
 }
 
 func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	rec := newResponseRecorder(w)
+	start := ro.now()
+	ro.serveHTTP(rec, r)
+	ro.appendAccessLog(r, rec, start)
+}
+
+func (ro *Router) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Has(amzQSignature) {
 		if status, code, msg := checkPresigned(r, ro.now()); status != 0 {
 			slog.Debug( // #nosec G706 -- path comes from URL; log injection risk accepted for a local dev emulator
