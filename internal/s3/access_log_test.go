@@ -131,7 +131,7 @@ func TestWriteAccessLog(t *testing.T) {
 
 		f, meta, err := s.GetObject("logs", "prefix/2026-06-07-record")
 		require.NoError(t, err)
-		defer f.Close()
+		t.Cleanup(func() { _ = f.Close() })
 
 		body, err := io.ReadAll(f)
 		require.NoError(t, err)

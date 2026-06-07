@@ -68,7 +68,8 @@ func (ro *Router) appendAccessLog(r *http.Request, rec *responseRecorder, start 
 	}
 
 	var ls bucketLoggingStatus
-	if err := xml.Unmarshal([]byte(logXML), &ls); err != nil || ls.LoggingEnabled == nil {
+	if err := xml.Unmarshal([]byte(logXML), &ls); err != nil ||
+		ls.LoggingEnabled == nil { //nolint:gosec // G709: logXML is config stored from a prior authenticated request, not direct user input
 		return
 	}
 	le := ls.LoggingEnabled
