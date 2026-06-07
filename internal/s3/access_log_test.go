@@ -197,6 +197,64 @@ func TestAppendAccessLog(t *testing.T) {
 	assert.True(t, found, "expected a log entry for the GET /src request")
 }
 
+func TestAppendAccessLog_malformedStoredXML(t *testing.T) {
+	ro := newTestRouter(t)
+
+	req := httptest.NewRequest(http.MethodPut, "/src", nil)
+	ro.ServeHTTP(httptest.NewRecorder(), req)
+
+	// Corrupt XML stored directly — simulates on-disk corruption.
+	require.NoError(t, ro.storage.PutBucketLogging("src", "<<<not-xml>>>"))
+
+	req = httptest.NewRequest(http.MethodGet, "/src", nil)
+	w := httptest.NewRecorder()
+	assert.NotPanics(t, func() { ro.ServeHTTP(w, req) })
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestAppendAccessLog_emptyTargetBucket(t *testing.T) {
+	ro := newTestRouter(t)
+
+	req := httptest.NewRequest(http.MethodPut, "/src", nil)
+	ro.ServeHTTP(httptest.NewRecorder(), req)
+
+	// LoggingEnabled present but TargetBucket is empty — no log should be written.
+	loggingXML := `<BucketLoggingStatus xmlns="http://doc.s3.amazonaws.com/2006-03-01">
+	<LoggingEnabled><TargetBucket></TargetBucket><TargetPrefix>logs/</TargetPrefix></LoggingEnabled>
+</BucketLoggingStatus>`
+	require.NoError(t, ro.storage.PutBucketLogging("src", loggingXML))
+
+	req = httptest.NewRequest(http.MethodGet, "/src", nil)
+	w := httptest.NewRecorder()
+	assert.NotPanics(t, func() { ro.ServeHTTP(w, req) })
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestFormatLogEntry_noPortInRemoteAddr(t *testing.T) {
+	ts := time.Date(2026, 6, 7, 12, 0, 0, 0, time.UTC)
+	req := httptest.NewRequest(http.MethodGet, "/bucket", nil)
+	req.RemoteAddr = "192.168.1.1" // no port — SplitHostPort will fail
+
+	rec := newResponseRecorder(httptest.NewRecorder())
+	rec.status = http.StatusOK
+
+	entry := formatLogEntry("bucket", "", req, rec, ts)
+	assert.Contains(t, entry, "192.168.1.1")
+}
+
+func TestFormatLogEntry_emptyRequestURI(t *testing.T) {
+	ts := time.Date(2026, 6, 7, 12, 0, 0, 0, time.UTC)
+	req := httptest.NewRequest(http.MethodGet, "/bucket/key", nil)
+	req.RequestURI = "" // cleared to trigger URL.RequestURI() fallback
+
+	rec := newResponseRecorder(httptest.NewRecorder())
+	rec.status = http.StatusOK
+
+	entry := formatLogEntry("bucket", "key", req, rec, ts)
+	assert.Contains(t, entry, "REST.GET.OBJECT")
+	assert.Contains(t, entry, "/bucket/key")
+}
+
 func TestAppendAccessLog_noLoggingConfigured(t *testing.T) {
 	ro := newTestRouter(t)
 

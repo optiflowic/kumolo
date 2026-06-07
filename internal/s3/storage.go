@@ -2152,7 +2152,7 @@ func (s *Storage) WriteAccessLog(targetBucket, key, content string) error {
 	objPath := filepath.Join(targetBucket, key)
 	if dir := filepath.Dir(objPath); dir != targetBucket {
 		if err := s.root.MkdirAll(dir, 0o750); err != nil {
-			return err
+			return err // untestable: s.root.MkdirAll failure cannot be injected
 		}
 	}
 	_, err := s.writeObject(
