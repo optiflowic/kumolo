@@ -1068,7 +1068,7 @@ func (s *Storage) SetObjectReplicationStatus(bucket, key, status string) error {
 		if errors.Is(err, os.ErrNotExist) {
 			return ErrObjectNotFound
 		}
-		return err
+		return err // untestable: non-ErrNotExist readMeta failure cannot be injected via current test helpers
 	}
 	meta.ReplicationStatus = status
 	return s.writeMeta(objPath, meta)

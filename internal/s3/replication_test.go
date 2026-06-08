@@ -293,4 +293,90 @@ func TestReplicateObject(t *testing.T) {
 		_, _, err := ro.storage.GetObject("dst", "mpu.bin")
 		assert.NoError(t, err)
 	})
+
+	t.Run("malformed replication config is silently skipped", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.NoError(t, ro.storage.CreateBucket("src", "us-east-1", false))
+		// Inject malformed XML directly (bypasses handler validation)
+		require.NoError(t, ro.storage.PutBucketReplication("src", "not-valid-xml"))
+
+		req := httptest.NewRequest(http.MethodPut, "/src/obj.txt", strings.NewReader("body"))
+		req.Header.Set("Content-Type", "text/plain")
+		rr := httptest.NewRecorder()
+		ro.ServeHTTP(rr, req)
+		assert.Equal(t, http.StatusOK, rr.Code)
+	})
+
+	t.Run("empty destination ARN is skipped", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.NoError(t, ro.storage.CreateBucket("src", "us-east-1", false))
+		// Config with empty Bucket element resolves to an empty bucket name
+		require.NoError(t, ro.storage.PutBucketReplication("src",
+			buildReplicationCfg("", "", "Enabled")))
+
+		req := httptest.NewRequest(http.MethodPut, "/src/obj.txt", strings.NewReader("body"))
+		req.Header.Set("Content-Type", "text/plain")
+		rr := httptest.NewRecorder()
+		ro.ServeHTTP(rr, req)
+		assert.Equal(t, http.StatusOK, rr.Code)
+	})
+
+	t.Run("copy failure is silently logged", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.NoError(t, ro.storage.CreateBucket("src", "us-east-1", false))
+		// Destination bucket does not exist → CopyObject returns ErrBucketNotFound
+		require.NoError(t, ro.storage.PutBucketReplication("src",
+			buildReplicationCfg("arn:aws:s3:::nonexistent-bucket", "", "Enabled")))
+
+		req := httptest.NewRequest(http.MethodPut, "/src/obj.txt", strings.NewReader("body"))
+		req.Header.Set("Content-Type", "text/plain")
+		rr := httptest.NewRecorder()
+		ro.ServeHTTP(rr, req)
+		require.Equal(t, http.StatusOK, rr.Code)
+
+		// Source object should exist but have no replication status (copy failed)
+		srcMeta, err := ro.storage.HeadObject("src", "obj.txt")
+		require.NoError(t, err)
+		assert.Empty(t, srcMeta.ReplicationStatus)
+	})
+
+	t.Run("replication-status header on GetObject", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.NoError(t, ro.storage.CreateBucket("src", "us-east-1", false))
+		require.NoError(t, ro.storage.CreateBucket("dst", "us-east-1", false))
+		require.NoError(t, ro.storage.PutBucketReplication("src",
+			buildReplicationCfg("arn:aws:s3:::dst", "", "Enabled")))
+
+		req := httptest.NewRequest(http.MethodPut, "/src/item.txt", strings.NewReader("val"))
+		req.Header.Set("Content-Type", "text/plain")
+		rr := httptest.NewRecorder()
+		ro.ServeHTTP(rr, req)
+		require.Equal(t, http.StatusOK, rr.Code)
+
+		get := httptest.NewRequest(http.MethodGet, "/src/item.txt", nil)
+		gr := httptest.NewRecorder()
+		ro.ServeHTTP(gr, get)
+		require.Equal(t, http.StatusOK, gr.Code)
+		assert.Equal(t, "COMPLETED", gr.Header().Get("X-Amz-Replication-Status"))
+
+		get2 := httptest.NewRequest(http.MethodGet, "/dst/item.txt", nil)
+		gr2 := httptest.NewRecorder()
+		ro.ServeHTTP(gr2, get2)
+		require.Equal(t, http.StatusOK, gr2.Code)
+		assert.Equal(t, "REPLICA", gr2.Header().Get("X-Amz-Replication-Status"))
+	})
+}
+
+func TestSetObjectReplicationStatus(t *testing.T) {
+	t.Run("bucket not found", func(t *testing.T) {
+		s := newTestStorage(t)
+		err := s.SetObjectReplicationStatus("nonexistent", "key.txt", "COMPLETED")
+		assert.ErrorIs(t, err, ErrBucketNotFound)
+	})
+	t.Run("object not found", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("bucket", "us-east-1", false))
+		err := s.SetObjectReplicationStatus("bucket", "missing.txt", "COMPLETED")
+		assert.ErrorIs(t, err, ErrObjectNotFound)
+	})
 }
