@@ -2142,8 +2142,9 @@ func (s *Storage) GetBucketLogging(bucket string) (string, error) {
 }
 
 // WriteAccessLog writes a log record as a new S3 object at key inside
-// targetBucket. The object is plain text with no encryption parameters.
-// Versioning is determined by the target bucket's configuration.
+// targetBucket. The object is plain text with no encryption or versioning
+// parameters (versionID is always empty; log keys include timestamps and nonces
+// to avoid collisions without requiring versioning).
 func (s *Storage) WriteAccessLog(targetBucket, key, content string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
