@@ -2,10 +2,12 @@ package s3
 
 import (
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -391,6 +393,39 @@ func TestReplicateObject(t *testing.T) {
 		require.Equal(t, http.StatusOK, gr2.Code)
 		assert.Equal(t, "REPLICA", gr2.Header().Get("X-Amz-Replication-Status"))
 	})
+}
+
+func TestReplicateObjectTagCopyFailure(t *testing.T) {
+	st, err := NewStorage(t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = st.Close() })
+
+	// Inject openFile to fail for dst tag writes only.
+	realOpenFile := st.openFile
+	st.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+		if strings.HasSuffix(name, ".tags.json") && strings.HasPrefix(name, "dst/") {
+			return nil, errors.New("simulated tag write failure")
+		}
+		return realOpenFile(name, flag, perm)
+	}
+
+	ro := NewRouter(st, nil)
+	require.NoError(t, st.CreateBucket("src", "us-east-1", false))
+	require.NoError(t, st.CreateBucket("dst", "us-east-1", false))
+	require.NoError(t, st.PutBucketReplication("src",
+		buildReplicationCfg("arn:aws:s3:::dst", "", "Enabled")))
+	_, err = st.PutObject("src", "obj.txt", strings.NewReader("data"),
+		"text/plain", nil, "", "", false, "", nil, nil, "")
+	require.NoError(t, err)
+	require.NoError(t, st.PutObjectTagging("src", "obj.txt", []Tag{{Key: "k", Value: "v"}}))
+
+	srcMeta, err := st.HeadObject("src", "obj.txt")
+	require.NoError(t, err)
+	ro.replicateObject("src", "obj.txt", srcMeta) // must not panic or propagate error
+
+	// Destination object should exist despite tag write failure.
+	_, _, err = st.GetObject("dst", "obj.txt")
+	assert.NoError(t, err)
 }
 
 func TestSetObjectReplicationStatus(t *testing.T) {
