@@ -80,7 +80,7 @@ func (ro *Router) replicateObject(bucket, key string, srcMeta ObjectMetadata) {
 			srcMeta.ContentType,
 			srcMeta.UserMetadata,
 			srcMeta.SSEAlgorithm, srcMeta.SSEKMSKeyID, srcMeta.SSEBucketKeyEnabled, "",
-			nil, nil,
+			srcMeta.Retention, srcMeta.LegalHold,
 			rule.Destination.StorageClass,
 		)
 		if copyErr != nil {

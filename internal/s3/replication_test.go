@@ -381,4 +381,10 @@ func TestSetObjectReplicationStatus(t *testing.T) {
 		err := s.SetObjectReplicationStatus("bucket", "missing.txt", ReplicationStatusCompleted)
 		assert.ErrorIs(t, err, ErrObjectNotFound)
 	})
+	t.Run("invalid status is rejected", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("bucket", "us-east-1", false))
+		err := s.SetObjectReplicationStatus("bucket", "key.txt", "INVALID")
+		assert.Error(t, err)
+	})
 }

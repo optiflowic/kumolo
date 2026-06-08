@@ -1057,6 +1057,10 @@ func (s *Storage) SetObjectRestoreInitiated(bucket, key string) error {
 // SetObjectReplicationStatus updates the ReplicationStatus field on the current
 // version of an object.
 func (s *Storage) SetObjectReplicationStatus(bucket, key, status string) error {
+	if status != ReplicationStatusCompleted && status != ReplicationStatusReplica &&
+		status != ReplicationStatusPending && status != ReplicationStatusFailed {
+		return fmt.Errorf("invalid replication status: %s", status)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.bucketExistsLocked(bucket) {
