@@ -170,10 +170,11 @@ type bucketWebsiteStore interface {
 	DeleteBucketWebsite(bucket string) error
 }
 
-// bucketLoggingStore handles logging configuration.
+// bucketLoggingStore handles logging configuration and access log delivery.
 type bucketLoggingStore interface {
 	PutBucketLogging(bucket, xmlBody string) error
 	GetBucketLogging(bucket string) (string, error)
+	WriteAccessLog(targetBucket, key, content string) error
 }
 
 // bucketAccelerateStore handles transfer acceleration configuration.
