@@ -36,7 +36,7 @@ After each successful `PutObject`, `CopyObject`, or `CompleteMultipartUpload`, k
 
 ## Kumolo deviations
 
-- Replication is synchronous (real AWS is asynchronous); the status is always `COMPLETED` or `REPLICA` — never `PENDING` or `FAILED`.
+- Replication is synchronous (real AWS is asynchronous); when `X-Amz-Replication-Status` is present, it is always `COMPLETED` or `REPLICA` — never `PENDING` or `FAILED`.
 - Same-instance replication only; cross-instance / real-AWS destination is not supported.
 - Delete marker replication is not implemented.
 - Tag-based filter rules (`Filter/Tag`, `Filter/And/Tag`) are ignored; only key prefix matching is applied.
