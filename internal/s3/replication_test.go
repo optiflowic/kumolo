@@ -342,6 +342,30 @@ func TestReplicateObject(t *testing.T) {
 		assert.Empty(t, srcMeta.ReplicationStatus)
 	})
 
+	t.Run("object tags are copied to destination", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.NoError(t, ro.storage.CreateBucket("src", "us-east-1", false))
+		require.NoError(t, ro.storage.CreateBucket("dst", "us-east-1", false))
+		require.NoError(t, ro.storage.PutBucketReplication("src",
+			buildReplicationCfg("arn:aws:s3:::dst", "", "Enabled")))
+
+		_, err := ro.storage.PutObject("src", "tagged.txt", strings.NewReader("data"),
+			"text/plain", nil, "", "", false, "", nil, nil, "")
+		require.NoError(t, err)
+		require.NoError(t, ro.storage.PutObjectTagging("src", "tagged.txt", []Tag{
+			{Key: "env", Value: "prod"},
+			{Key: "team", Value: "platform"},
+		}))
+
+		srcMeta, err := ro.storage.HeadObject("src", "tagged.txt")
+		require.NoError(t, err)
+		ro.replicateObject("src", "tagged.txt", srcMeta)
+
+		tags, err := ro.storage.GetObjectTagging("dst", "tagged.txt")
+		require.NoError(t, err)
+		assert.Equal(t, []Tag{{Key: "env", Value: "prod"}, {Key: "team", Value: "platform"}}, tags)
+	})
+
 	t.Run("replication-status header on GetObject", func(t *testing.T) {
 		ro := newTestRouter(t)
 		require.NoError(t, ro.storage.CreateBucket("src", "us-east-1", false))

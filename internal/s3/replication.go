@@ -98,6 +98,22 @@ func (ro *Router) replicateObject(bucket, key string, srcMeta ObjectMetadata) {
 			continue
 		}
 
+		if tags, err := ro.storage.GetObjectTagging(bucket, key); err == nil && len(tags) > 0 {
+			if tagErr := ro.storage.PutObjectTagging(destBucket, key, tags); tagErr != nil {
+				slog.Warn( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+					"replication: failed to copy tags",
+					"src_bucket",
+					bucket,
+					"dest_bucket",
+					destBucket,
+					"key",
+					key,
+					"err",
+					tagErr,
+				)
+			}
+		}
+
 		if err := ro.storage.SetObjectReplicationStatus(destBucket, key, ReplicationStatusReplica); err != nil {
 			// untestable: storage write failure after a successful copy cannot be injected via current test helpers
 			slog.Warn( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
