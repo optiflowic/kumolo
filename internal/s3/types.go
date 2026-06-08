@@ -5,6 +5,13 @@ import (
 	"time"
 )
 
+const (
+	ReplicationStatusCompleted = "COMPLETED"
+	ReplicationStatusReplica   = "REPLICA"
+	ReplicationStatusPending   = "PENDING"
+	ReplicationStatusFailed    = "FAILED"
+)
+
 // CORSRule represents a single CORS rule stored in bucket metadata.
 type CORSRule struct {
 	ID             string   `json:"id,omitempty"`

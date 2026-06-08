@@ -2,6 +2,7 @@ package s3
 
 import (
 	"encoding/xml"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -73,14 +74,12 @@ func TestRuleKeyPrefix(t *testing.T) {
 
 // cfgXML builds a minimal ReplicationConfiguration for a single rule.
 func buildReplicationCfg(destARN, prefix, status string) string {
-	return `<ReplicationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">` +
-		`<Role>arn:aws:iam::000000000000:role/replication-role</Role>` +
-		`<Rule>` +
-		`<Status>` + status + `</Status>` +
-		`<Filter><Prefix>` + prefix + `</Prefix></Filter>` +
-		`<Destination><Bucket>` + destARN + `</Bucket></Destination>` +
-		`</Rule>` +
-		`</ReplicationConfiguration>`
+	return fmt.Sprintf(
+		`<ReplicationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Role>arn:aws:iam::000000000000:role/replication-role</Role><Rule><Status>%s</Status><Filter><Prefix>%s</Prefix></Filter><Destination><Bucket>%s</Bucket></Destination></Rule></ReplicationConfiguration>`,
+		status,
+		prefix,
+		destARN,
+	)
 }
 
 func TestReplicateObject(t *testing.T) {
@@ -192,7 +191,10 @@ func TestReplicateObject(t *testing.T) {
 		_, err := ro.storage.PutObject("src", "replica.txt", strings.NewReader("x"),
 			"text/plain", nil, "", "", false, "", nil, nil, "")
 		require.NoError(t, err)
-		require.NoError(t, ro.storage.SetObjectReplicationStatus("src", "replica.txt", "REPLICA"))
+		require.NoError(
+			t,
+			ro.storage.SetObjectReplicationStatus("src", "replica.txt", ReplicationStatusReplica),
+		)
 
 		srcMeta, err := ro.storage.HeadObject("src", "replica.txt")
 		require.NoError(t, err)
@@ -370,13 +372,13 @@ func TestReplicateObject(t *testing.T) {
 func TestSetObjectReplicationStatus(t *testing.T) {
 	t.Run("bucket not found", func(t *testing.T) {
 		s := newTestStorage(t)
-		err := s.SetObjectReplicationStatus("nonexistent", "key.txt", "COMPLETED")
+		err := s.SetObjectReplicationStatus("nonexistent", "key.txt", ReplicationStatusCompleted)
 		assert.ErrorIs(t, err, ErrBucketNotFound)
 	})
 	t.Run("object not found", func(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateBucket("bucket", "us-east-1", false))
-		err := s.SetObjectReplicationStatus("bucket", "missing.txt", "COMPLETED")
+		err := s.SetObjectReplicationStatus("bucket", "missing.txt", ReplicationStatusCompleted)
 		assert.ErrorIs(t, err, ErrObjectNotFound)
 	})
 }

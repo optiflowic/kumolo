@@ -39,7 +39,7 @@ type replicationDest struct {
 // whose prefix filter matches key. Objects already marked as REPLICA are not re-replicated
 // to prevent cascading. Errors are logged and never propagated to the caller.
 func (ro *Router) replicateObject(bucket, key string, srcMeta ObjectMetadata) {
-	if srcMeta.ReplicationStatus == "REPLICA" {
+	if srcMeta.ReplicationStatus == ReplicationStatusReplica {
 		return
 	}
 
@@ -98,7 +98,7 @@ func (ro *Router) replicateObject(bucket, key string, srcMeta ObjectMetadata) {
 			continue
 		}
 
-		if err := ro.storage.SetObjectReplicationStatus(destBucket, key, "REPLICA"); err != nil {
+		if err := ro.storage.SetObjectReplicationStatus(destBucket, key, ReplicationStatusReplica); err != nil {
 			// untestable: storage write failure after a successful copy cannot be injected via current test helpers
 			slog.Warn( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
 				"replication: failed to set REPLICA status",
@@ -110,7 +110,7 @@ func (ro *Router) replicateObject(bucket, key string, srcMeta ObjectMetadata) {
 				err,
 			)
 		}
-		if err := ro.storage.SetObjectReplicationStatus(bucket, key, "COMPLETED"); err != nil {
+		if err := ro.storage.SetObjectReplicationStatus(bucket, key, ReplicationStatusCompleted); err != nil {
 			// untestable: storage write failure after a successful copy cannot be injected via current test helpers
 			slog.Warn( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
 				"replication: failed to set COMPLETED status",
@@ -147,11 +147,10 @@ func ruleKeyPrefix(rule replicationRule) string {
 }
 
 // bucketNameFromARN extracts the bucket name from an S3 ARN
-// (e.g. arn:aws:s3:::my-bucket → "my-bucket").
+// (e.g. "arn:aws:s3:::my-bucket" → "my-bucket").
 // Falls back to treating the input as a plain bucket name.
 func bucketNameFromARN(arn string) string {
-	// S3 bucket ARN format: arn:partition:s3:region:account:bucket-name
-	// For cross-account/global: arn:aws:s3:::bucket-name (5 leading colons)
+	// S3 bucket ARN format: arn:aws:s3:::bucket-name (5 colons total, 6 parts)
 	parts := strings.SplitN(arn, ":", 6)
 	if len(parts) == 6 {
 		return parts[5]
