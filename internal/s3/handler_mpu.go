@@ -615,6 +615,7 @@ func (ro *Router) handleCompleteMultipartUpload(
 		Key:      key,
 		ETag:     meta.ETag,
 	})
+	ro.replicateObject(bucket, key, meta)
 }
 
 func (ro *Router) handleAbortMultipartUpload(

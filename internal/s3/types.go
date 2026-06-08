@@ -44,7 +44,8 @@ type ObjectMetadata struct {
 	Retention           *ObjectRetention  `json:"retention,omitempty"`
 	LegalHold           *ObjectLegalHold  `json:"legalHold,omitempty"`
 	// Set when superseded; zero for versions predating lifecycle enforcement.
-	NoncurrentSince time.Time `json:"noncurrentSince,omitempty"`
+	NoncurrentSince   time.Time `json:"noncurrentSince,omitempty"`
+	ReplicationStatus string    `json:"replicationStatus,omitempty"`
 }
 
 // VersionInfo represents a non-delete-marker version of an object in a versioned bucket.

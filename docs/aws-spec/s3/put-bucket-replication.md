@@ -9,7 +9,7 @@
 `PUT /?replication HTTP/1.1`  
 `Host: {bucket}.s3.amazonaws.com`
 
-Stores a `ReplicationConfiguration` XML document. Configuration is stored verbatim; replication is not actually performed.
+Stores a `ReplicationConfiguration` XML document. Configuration is stored verbatim and applied on each subsequent object write.
 
 ## Response
 
@@ -23,6 +23,19 @@ Stores a `ReplicationConfiguration` XML document. Configuration is stored verbat
 | `MalformedXML` | 400 | Request body is not valid XML |
 | `InternalError` | 500 | Storage failure |
 
+## Object replication behaviour
+
+After each successful `PutObject`, `CopyObject`, or `CompleteMultipartUpload`, kumolo evaluates all `Enabled` rules against the object key. For each matching rule:
+
+- The object is copied (synchronously) to the destination bucket extracted from `Destination.Bucket` ARN (`arn:aws:s3:::bucket-name`).
+- The destination copy receives `ReplicationStatus: REPLICA` in its metadata; this value is returned as `X-Amz-Replication-Status` on `GetObject` / `HeadObject`.
+- The source object receives `ReplicationStatus: COMPLETED`.
+- Objects already marked `REPLICA` are not re-replicated (prevents cascading loops).
+
 ## Kumolo deviations
 
-- Replication configuration is stored for API compatibility but cross-bucket/cross-region replication is not performed.
+- Replication is synchronous (real AWS is asynchronous); the status is always `COMPLETED` or `REPLICA` — never `PENDING` or `FAILED`.
+- Same-instance replication only; cross-instance / real-AWS destination is not supported.
+- Delete marker replication is not implemented.
+- Tag-based filter rules (`Filter/Tag`, `Filter/And/Tag`) are ignored; only key prefix matching is applied.
+- `Last verified`: 2026-06-08

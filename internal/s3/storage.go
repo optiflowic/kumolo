@@ -1054,6 +1054,26 @@ func (s *Storage) SetObjectRestoreInitiated(bucket, key string) error {
 	return s.writeMeta(objPath, meta)
 }
 
+// SetObjectReplicationStatus updates the ReplicationStatus field on the current
+// version of an object.
+func (s *Storage) SetObjectReplicationStatus(bucket, key, status string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.bucketExistsLocked(bucket) {
+		return ErrBucketNotFound
+	}
+	objPath := filepath.Join(bucket, key)
+	meta, err := s.readMeta(objPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return ErrObjectNotFound
+		}
+		return err
+	}
+	meta.ReplicationStatus = status
+	return s.writeMeta(objPath, meta)
+}
+
 func (s *Storage) ListObjects(bucket string) ([]ObjectInfo, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
