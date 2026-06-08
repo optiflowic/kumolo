@@ -64,8 +64,12 @@ func (ro *Router) replicateObject(bucket, key string, srcMeta ObjectMetadata) {
 		}
 		destBucket := bucketNameFromARN(rule.Destination.Bucket)
 		if destBucket == "" {
-			slog.Warn("replication: invalid destination ARN",
-				"bucket", bucket, "arn", rule.Destination.Bucket,
+			slog.Warn( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"replication: invalid destination ARN",
+				"bucket",
+				bucket,
+				"arn",
+				rule.Destination.Bucket,
 			)
 			continue
 		}
@@ -80,8 +84,8 @@ func (ro *Router) replicateObject(bucket, key string, srcMeta ObjectMetadata) {
 			rule.Destination.StorageClass,
 		)
 		if copyErr != nil {
-			slog.Warn(
-				"replication: copy failed", // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			slog.Warn( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"replication: copy failed",
 				"src_bucket",
 				bucket,
 				"key",
@@ -95,8 +99,8 @@ func (ro *Router) replicateObject(bucket, key string, srcMeta ObjectMetadata) {
 		}
 
 		if err := ro.storage.SetObjectReplicationStatus(destBucket, key, "REPLICA"); err != nil {
-			slog.Warn(
-				"replication: failed to set REPLICA status", // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			slog.Warn( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"replication: failed to set REPLICA status",
 				"dest_bucket",
 				destBucket,
 				"key",
@@ -106,8 +110,8 @@ func (ro *Router) replicateObject(bucket, key string, srcMeta ObjectMetadata) {
 			)
 		}
 		if err := ro.storage.SetObjectReplicationStatus(bucket, key, "COMPLETED"); err != nil {
-			slog.Warn(
-				"replication: failed to set COMPLETED status", // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			slog.Warn( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"replication: failed to set COMPLETED status",
 				"bucket",
 				bucket,
 				"key",
@@ -116,8 +120,8 @@ func (ro *Router) replicateObject(bucket, key string, srcMeta ObjectMetadata) {
 				err,
 			)
 		}
-		slog.Info(
-			"replication: object replicated", // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+		slog.Info( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			"replication: object replicated",
 			"src_bucket",
 			bucket,
 			"dest_bucket",
