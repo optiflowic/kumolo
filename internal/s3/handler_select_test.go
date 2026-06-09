@@ -31,8 +31,8 @@ func parseEventStream(t *testing.T, data []byte) []struct{ kind, payload string 
 		)
 		require.GreaterOrEqual(
 			t,
-			uint32(len(data)),
-			totalLen, //nolint:gosec // test payloads are always < 4GB
+			uint32(len(data)), //nolint:gosec // test payloads are always < 4GB
+			totalLen,
 			"truncated event stream: have %d bytes, need %d",
 			len(data),
 			totalLen,
