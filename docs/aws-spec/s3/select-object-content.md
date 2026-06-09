@@ -7,7 +7,7 @@
 
 ## Request
 
-```
+```http
 POST /{Key+}?select&select-type=2 HTTP/1.1
 Host: {Bucket}.s3.amazonaws.com
 ```
@@ -51,7 +51,7 @@ Body is a series of binary event stream messages (see below).
 
 Each message:
 
-```
+```text
 [total_length: 4B big-endian]
 [headers_length: 4B big-endian]
 [prelude_crc: 4B CRC32/IEEE of prelude (8B)]
