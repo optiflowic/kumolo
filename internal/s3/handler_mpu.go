@@ -615,6 +615,9 @@ func (ro *Router) handleCompleteMultipartUpload(
 		Key:      key,
 		ETag:     meta.ETag,
 	})
+	if fl, ok := w.(http.Flusher); ok {
+		fl.Flush()
+	}
 	ro.replicateObject(bucket, key, meta)
 }
 

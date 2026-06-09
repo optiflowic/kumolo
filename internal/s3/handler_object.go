@@ -381,6 +381,9 @@ func (ro *Router) handleCopyObject(
 		ETag:         meta.ETag,
 		LastModified: meta.LastModified,
 	})
+	if fl, ok := w.(http.Flusher); ok {
+		fl.Flush()
+	}
 	ro.replicateObject(dstBucket, dstKey, meta)
 }
 
@@ -602,6 +605,9 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 	}
 	setSSEHeaders(w, meta)
 	w.WriteHeader(http.StatusOK)
+	if fl, ok := w.(http.Flusher); ok {
+		fl.Flush()
+	}
 	ro.replicateObject(bucket, key, meta)
 }
 
