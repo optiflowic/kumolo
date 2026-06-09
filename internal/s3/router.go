@@ -616,6 +616,8 @@ func (ro *Router) routeObject(w http.ResponseWriter, r *http.Request, bucket, ke
 			ro.handleCompleteMultipartUpload(w, r, bucket, key)
 		case q.Has("restore"):
 			ro.handleRestoreObject(w, r, bucket, key)
+		case q.Has("select") && q.Get("select-type") == "2":
+			ro.handleSelectObjectContent(w, r, bucket, key)
 		default:
 			writeNotImplemented(w, r)
 		}
