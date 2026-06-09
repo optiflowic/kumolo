@@ -23,11 +23,26 @@ func parseEventStream(t *testing.T, data []byte) []struct{ kind, payload string 
 	var events []struct{ kind, payload string }
 	for len(data) >= 16 {
 		totalLen := binary.BigEndian.Uint32(data[0:4])
-		dataLen := len(data)
-		if uint32(dataLen) < totalLen { //nolint:gosec // test payloads are always < 4GB
-			t.Fatalf("truncated event stream: have %d bytes, need %d", len(data), totalLen)
-		}
+		require.Greater(
+			t,
+			totalLen,
+			uint32(0),
+			"event stream frame totalLen must be positive to make progress",
+		)
+		require.GreaterOrEqual(
+			t,
+			uint32(len(data)),
+			totalLen, //nolint:gosec // test payloads are always < 4GB
+			"truncated event stream: have %d bytes, need %d",
+			len(data),
+			totalLen,
+		)
+
 		headersLen := binary.BigEndian.Uint32(data[4:8])
+		// 12 = 8-byte prelude + 4-byte prelude CRC; 4 = message CRC tail
+		require.LessOrEqual(t, uint32(12)+headersLen+uint32(4), totalLen,
+			"headersLen %d overflows message of totalLen %d", headersLen, totalLen)
+
 		msg := data[:totalLen]
 
 		// Verify prelude CRC.
@@ -42,8 +57,16 @@ func parseEventStream(t *testing.T, data []byte) []struct{ kind, payload string 
 		hBytes := msg[12 : 12+headersLen]
 		headers := parseESHeaders(hBytes)
 
-		payloadStart := 12 + headersLen
+		payloadStart := uint32(12) + headersLen
 		payloadEnd := totalLen - 4
+		require.LessOrEqual(
+			t,
+			payloadStart,
+			payloadEnd,
+			"payload bounds invalid: start=%d end=%d",
+			payloadStart,
+			payloadEnd,
+		)
 		payload := string(msg[payloadStart:payloadEnd])
 
 		events = append(events, struct{ kind, payload string }{
@@ -1411,8 +1434,8 @@ func TestSelectObjectContent_StorageError(t *testing.T) {
 }
 
 func TestSelectObjectContent_BZip2Path(t *testing.T) {
-	// Non-BZIP2 data with CompressionType=BZIP2: triggers bzip2.NewReader (lines 154-155)
-	// and then io.ReadAll error during decompression (lines 18-20, 166-173).
+	// Non-BZIP2 data with CompressionType=BZIP2: bzip2.NewReader wraps the reader,
+	// then io.ReadAll fails during decompression.
 	ro := newTestRouter(t)
 	putSelectObject(t, ro, "my-bucket", "data.csv", "not bzip2 data")
 
@@ -1510,23 +1533,23 @@ func TestExecute_CastNullColumn(t *testing.T) {
 }
 
 func TestExecute_CastINTParseError(t *testing.T) {
-	// CAST("abc" AS INT) returns "0" (parse error fallback)
+	// CAST of a non-numeric value yields NULL; NULL > 0 is false
 	q, err := parseSQL("SELECT * FROM S3Object WHERE CAST(_1 AS INT) > 0")
 	require.NoError(t, err)
 	rows := []selectRow{makeRow([]string{"_1"}, map[string]string{"_1": "abc"})}
 	result, err := q.execute(rows)
 	require.NoError(t, err)
-	assert.Empty(t, result) // 0 > 0 = false
+	assert.Empty(t, result)
 }
 
 func TestExecute_CastFLOATParseError(t *testing.T) {
-	// CAST("xyz" AS FLOAT) returns "0"
+	// CAST of a non-numeric value yields NULL; NULL = 0 is false
 	q, err := parseSQL("SELECT * FROM S3Object WHERE CAST(_1 AS FLOAT) = 0")
 	require.NoError(t, err)
 	rows := []selectRow{makeRow([]string{"_1"}, map[string]string{"_1": "xyz"})}
 	result, err := q.execute(rows)
 	require.NoError(t, err)
-	require.Len(t, result, 1) // 0 = 0 = true
+	assert.Empty(t, result)
 }
 
 func TestExecute_CastDefaultType(t *testing.T) {
@@ -1589,6 +1612,8 @@ func TestParseSQL_Errors(t *testing.T) {
 		{"WHERE parse error", "SELECT * FROM S3Object WHERE ="},
 		{"LIMIT non-number", "SELECT * FROM S3Object LIMIT abc"},
 		{"LIMIT float", "SELECT * FROM S3Object LIMIT 3.14"},
+		{"LIMIT negative", "SELECT * FROM S3Object LIMIT -1"},
+		{"trailing token", "SELECT * FROM S3Object s EXTRA_TOKEN"},
 		{"COUNT no paren", "SELECT COUNT FROM S3Object"},
 		{"COUNT no star", "SELECT COUNT(5) FROM S3Object"},
 		{"COUNT no close", "SELECT COUNT(* FROM S3Object"},
@@ -1653,7 +1678,7 @@ func TestScanNumber_ScientificWithSign(t *testing.T) {
 }
 
 func TestScan_UnrecognisedChar(t *testing.T) {
-	// '@' is not a valid SQL token → scan returns EOF kind
+	// '@' is not a valid SQL token → scan returns sqlTokIllegal → parse error
 	_, err := parseSQL("SELECT * FROM S3Object WHERE _1 @ 5")
 	assert.Error(t, err)
 }
@@ -1738,7 +1763,7 @@ func TestParseSQL_LTOperator(t *testing.T) {
 
 // select_sql.go:654-656 — right-side value expr error in comparison
 func TestParseSQL_ComparisonRightError(t *testing.T) {
-	// After '=', the token '@' is unrecognised → scan returns EOF → parseValExpr errors
+	// After '=', the token '@' is unrecognised → scan returns sqlTokIllegal → parseValExpr errors
 	_, err := parseSQL("SELECT * FROM S3Object WHERE _1 = @")
 	require.Error(t, err)
 }
@@ -1761,4 +1786,64 @@ func TestParseSQL_ValExprDotNonIdent(t *testing.T) {
 	// Right-hand side "s.123": '123' is sqlTokNumber, not sqlTokIdent
 	_, err := parseSQL("SELECT * FROM S3Object WHERE _1 = s.123")
 	require.Error(t, err)
+}
+
+func TestExecute_LimitZero(t *testing.T) {
+	q, err := parseSQL("SELECT * FROM S3Object LIMIT 0")
+	require.NoError(t, err)
+	rows := []selectRow{
+		makeRow([]string{"_1"}, map[string]string{"_1": "a"}),
+		makeRow([]string{"_1"}, map[string]string{"_1": "b"}),
+	}
+	result, err := q.execute(rows)
+	require.NoError(t, err)
+	assert.Empty(t, result)
+}
+
+func TestSelectObjectContent_UnknownCompressionType(t *testing.T) {
+	ro := newTestRouter(t)
+	putSelectObject(t, ro, "my-bucket", "data.csv", "a\n1\n")
+
+	xmlBody := `<?xml version="1.0" encoding="UTF-8"?>` +
+		`<SelectObjectContentRequest>` +
+		`<Expression>SELECT * FROM S3Object</Expression>` +
+		`<ExpressionType>SQL</ExpressionType>` +
+		`<InputSerialization>` +
+		`<CompressionType>SNAPPY</CompressionType>` +
+		`<CSV><FileHeaderInfo>NONE</FileHeaderInfo></CSV>` +
+		`</InputSerialization>` +
+		`<OutputSerialization><CSV></CSV></OutputSerialization>` +
+		`</SelectObjectContentRequest>`
+	w := doSelect(t, ro, "my-bucket", "data.csv", xmlBody)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "InvalidArgument")
+}
+
+func TestSelectObjectContent_MultipleInputSerialization(t *testing.T) {
+	ro := newTestRouter(t)
+	putSelectObject(t, ro, "my-bucket", "data.csv", "a\n1\n")
+
+	xmlBody := `<?xml version="1.0" encoding="UTF-8"?>` +
+		`<SelectObjectContentRequest>` +
+		`<Expression>SELECT * FROM S3Object</Expression>` +
+		`<ExpressionType>SQL</ExpressionType>` +
+		`<InputSerialization>` +
+		`<CSV><FileHeaderInfo>NONE</FileHeaderInfo></CSV>` +
+		`<JSON><Type>LINES</Type></JSON>` +
+		`</InputSerialization>` +
+		`<OutputSerialization><CSV></CSV></OutputSerialization>` +
+		`</SelectObjectContentRequest>`
+	w := doSelect(t, ro, "my-bucket", "data.csv", xmlBody)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "MissingRequiredParameter")
+}
+
+func TestExecute_WrongTableAlias(t *testing.T) {
+	// Column ref with wrong table alias resolves to NULL → comparison fails → no rows
+	q, err := parseSQL("SELECT * FROM S3Object s WHERE t.col = 'x'")
+	require.NoError(t, err)
+	rows := []selectRow{makeRow([]string{"col"}, map[string]string{"col": "x"})}
+	result, err := q.execute(rows)
+	require.NoError(t, err)
+	assert.Empty(t, result)
 }
