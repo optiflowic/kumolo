@@ -1670,3 +1670,95 @@ func TestParseSQL_GTOperatorAlone(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, result, 1)
 }
+
+// ---- Targeted coverage for remaining uncovered lines ----
+
+// select_data.go:138-139 — blank lines in NDJSON are skipped
+func TestParseJSONLines_BlankLines(t *testing.T) {
+	rows, err := parseJSONLines([]byte("\n" + `{"a":"1"}` + "\n\n" + `{"a":"2"}` + "\n"))
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+}
+
+// select_data.go:152-154 — empty input to parseJSONDocument
+func TestParseJSONDocument_Empty(t *testing.T) {
+	rows, err := parseJSONDocument([]byte{})
+	require.NoError(t, err)
+	assert.Empty(t, rows)
+}
+
+// select_data.go:202-204 — JSON object with non-string key token
+func TestJSONObjectToRow_NonStringKey(t *testing.T) {
+	// Go's json.Decoder.Token() returns bool(true) for "true" at key position;
+	// the string type-assertion then fails.
+	_, err := jsonObjectToRow([]byte(`{true: "val"}`))
+	require.Error(t, err)
+}
+
+// select_data.go:246-248 — custom field delimiter in formatCSVOutput
+func TestFormatCSVOutput_CustomDelimiter(t *testing.T) {
+	rows := []selectRow{makeRow([]string{"a", "b"}, map[string]string{"a": "1", "b": "2"})}
+	out, err := formatCSVOutput(rows, &xmlCSVOutput{FieldDelimiter: "|"})
+	require.NoError(t, err)
+	assert.Contains(t, string(out), "1|2")
+}
+
+// select_sql.go:73-75 — orNode error propagation from left child
+type errWhereNode struct{}
+
+func (n *errWhereNode) evalRow(_ selectRow) (bool, error) {
+	return false, errors.New("forced eval error")
+}
+
+func TestOrNodeEvalError(t *testing.T) {
+	n := &orNode{left: &errWhereNode{}, right: &notNode{inner: &errWhereNode{}}}
+	_, err := n.evalRow(selectRow{})
+	require.Error(t, err)
+}
+
+// select_sql.go:181 — compareValues with unknown operator
+func TestCompareValues_UnknownOperator(t *testing.T) {
+	_, err := compareValues("a", "??", "b")
+	require.Error(t, err)
+}
+
+// select_sql.go:346 + 667-668 — lone '<' token in lexer and parseOp
+func TestParseSQL_LTOperator(t *testing.T) {
+	q, err := parseSQL("SELECT * FROM S3Object WHERE _1 < 5")
+	require.NoError(t, err)
+	rows := []selectRow{
+		makeRow([]string{"_1"}, map[string]string{"_1": "3"}),
+		makeRow([]string{"_1"}, map[string]string{"_1": "7"}),
+	}
+	result, err := q.execute(rows)
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+	assert.Equal(t, "3", result[0].vals["_1"])
+}
+
+// select_sql.go:654-656 — right-side value expr error in comparison
+func TestParseSQL_ComparisonRightError(t *testing.T) {
+	// After '=', the token '@' is unrecognised → scan returns EOF → parseValExpr errors
+	_, err := parseSQL("SELECT * FROM S3Object WHERE _1 = @")
+	require.Error(t, err)
+}
+
+// select_sql.go:688-690 — CAST inner expression error
+func TestParseSQL_CastInnerError(t *testing.T) {
+	_, err := parseSQL("SELECT * FROM S3Object WHERE CAST(@ AS INT) = 1")
+	require.Error(t, err)
+}
+
+// select_sql.go:712-714 — multi-dot "number" fails ParseFloat
+func TestParseSQL_InvalidNumericLiteral(t *testing.T) {
+	// Lexer scans "1.2.3" as one token; ParseFloat("1.2.3") fails
+	_, err := parseSQL("SELECT * FROM S3Object WHERE _1 = 1.2.3")
+	require.Error(t, err)
+}
+
+// select_sql.go:735-737 — dot followed by non-identifier in parseValExpr (value position)
+func TestParseSQL_ValExprDotNonIdent(t *testing.T) {
+	// Right-hand side "s.123": '123' is sqlTokNumber, not sqlTokIdent
+	_, err := parseSQL("SELECT * FROM S3Object WHERE _1 = s.123")
+	require.Error(t, err)
+}
