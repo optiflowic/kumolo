@@ -113,8 +113,13 @@ func (n *likeNode) evalRow(r selectRow) (bool, error) {
 	return matched, nil
 }
 
-// matchLike matches s against a SQL LIKE pattern (% = any sequence, _ = one char).
+// matchLike matches s against a SQL LIKE pattern (% = any sequence, _ = one Unicode codepoint).
+// Operates on runes so that multi-byte UTF-8 characters are handled correctly.
 func matchLike(s, pattern string) bool {
+	return matchLikeRunes([]rune(s), []rune(pattern))
+}
+
+func matchLikeRunes(s, pattern []rune) bool {
 	if len(pattern) == 0 {
 		return len(s) == 0
 	}
@@ -124,7 +129,7 @@ func matchLike(s, pattern string) bool {
 			return true
 		}
 		for i := range len(s) + 1 {
-			if matchLike(s[i:], rest) {
+			if matchLikeRunes(s[i:], rest) {
 				return true
 			}
 		}
@@ -134,7 +139,7 @@ func matchLike(s, pattern string) bool {
 		return false
 	}
 	if pattern[0] == '_' || pattern[0] == s[0] {
-		return matchLike(s[1:], pattern[1:])
+		return matchLikeRunes(s[1:], pattern[1:])
 	}
 	return false
 }

@@ -104,3 +104,4 @@ Each header: `[name_len: 1B][name: name_len bytes][type: 1B = 7 (string)][value_
 - Progress events not sent (RequestProgress is accepted but ignored)
 - ScanRange accepted but ignored in v1
 - `ExpressionType` validation is case-sensitive per spec (`SQL`)
+- CSV `QuoteCharacter` other than `"` (double-quote) is silently ignored; `encoding/csv` only supports `"` as the quote character

@@ -281,6 +281,7 @@ func quoteCSVField(s string, comma rune) string {
 }
 
 // formatJSONOutput serialises rows as newline-delimited JSON objects.
+// Keys are written in row.headers order to match AWS column ordering behaviour.
 func formatJSONOutput(rows []selectRow, cfg *xmlJSONOutput) ([]byte, error) {
 	delim := "\n"
 	if cfg != nil && cfg.RecordDelimiter != "" {
@@ -289,15 +290,24 @@ func formatJSONOutput(rows []selectRow, cfg *xmlJSONOutput) ([]byte, error) {
 
 	var buf bytes.Buffer
 	for _, row := range rows {
-		obj := make(map[string]string, len(row.headers))
-		for _, h := range row.headers {
-			obj[h] = row.vals[h]
+		buf.WriteByte('{')
+		for i, h := range row.headers {
+			if i > 0 {
+				buf.WriteByte(',')
+			}
+			keyJSON, err := json.Marshal(h)
+			if err != nil {
+				return nil, err
+			}
+			valJSON, err := json.Marshal(row.vals[h])
+			if err != nil {
+				return nil, err
+			}
+			buf.Write(keyJSON)
+			buf.WriteByte(':')
+			buf.Write(valJSON)
 		}
-		b, err := json.Marshal(obj)
-		if err != nil {
-			return nil, err
-		}
-		buf.Write(b)
+		buf.WriteByte('}')
 		buf.WriteString(delim)
 	}
 	return buf.Bytes(), nil
