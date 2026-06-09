@@ -199,7 +199,7 @@ func jsonObjectToRow(data []byte) (selectRow, error) {
 			return selectRow{}, err
 		}
 		key, ok := keyTok.(string)
-		if !ok {
+		if !ok { // unreachable: Go's json.Decoder.Token() at key position returns a string or an error, never a non-string
 			return selectRow{}, fmt.Errorf("expected JSON object key, got %T", keyTok)
 		}
 		headers = append(headers, key)
