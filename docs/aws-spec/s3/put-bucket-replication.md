@@ -27,7 +27,7 @@ Stores a `ReplicationConfiguration` XML document. Configuration is stored verbat
 
 After each successful `PutObject`, `CopyObject`, or `CompleteMultipartUpload`, kumolo evaluates all `Enabled` rules against the object key. For each matching rule:
 
-- The object is copied (synchronously) to the destination bucket extracted from `Destination.Bucket` ARN (`arn:aws:s3:::bucket-name`).
+- The object is copied to the destination bucket extracted from `Destination.Bucket` ARN (`arn:aws:s3:::bucket-name`). Replication runs in the same request goroutine after the HTTP response is flushed to the client.
 - The destination copy receives `ReplicationStatus: REPLICA` in its metadata; this value is returned as `X-Amz-Replication-Status` on `GetObject` / `HeadObject`.
 - The source object receives `ReplicationStatus: COMPLETED`.
 - Objects already marked `REPLICA` are not re-replicated (prevents cascading loops).
@@ -36,7 +36,7 @@ After each successful `PutObject`, `CopyObject`, or `CompleteMultipartUpload`, k
 
 ## Kumolo deviations
 
-- Replication is synchronous (real AWS is asynchronous); when `X-Amz-Replication-Status` is present, it is always `COMPLETED` or `REPLICA` — never `PENDING` or `FAILED`.
+- Replication runs in the same request goroutine (no background job); when `X-Amz-Replication-Status` is present it is always `COMPLETED` or `REPLICA` — never `PENDING` or `FAILED` as in real AWS async replication.
 - Same-instance replication only; cross-instance / real-AWS destination is not supported.
 - Delete marker replication is not implemented.
 - Tag-based filter rules (`Filter/Tag`, `Filter/And/Tag`) are ignored; only key prefix matching is applied.
