@@ -2,7 +2,7 @@
 
 **URL**: https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectAcl.html  
 **SDK struct**: `s3.GetObjectAclInput` / `s3.GetObjectAclOutput`  
-**Last verified**: 2026-05-21
+**Last verified**: 2026-06-10
 
 ## Request
 
@@ -11,23 +11,9 @@
 
 ## Response
 
-`HTTP/1.1 200`
+`HTTP/1.1 200` with `AccessControlPolicy` XML body.
 
-Always returns a fixed ACL with a single `FULL_CONTROL` grant to a hardcoded `owner` principal:
-
-```xml
-<AccessControlPolicy xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
-  <Owner><ID>owner</ID><DisplayName>owner</DisplayName></Owner>
-  <AccessControlList>
-    <Grant>
-      <Grantee xmlns:xsi="..." xsi:type="CanonicalUser">
-        <ID>owner</ID><DisplayName>owner</DisplayName>
-      </Grantee>
-      <Permission>FULL_CONTROL</Permission>
-    </Grant>
-  </AccessControlList>
-</AccessControlPolicy>
-```
+If no ACL has been explicitly set, returns the default private ACL (owner `FULL_CONTROL` only).
 
 ## Errors
 
@@ -39,5 +25,5 @@ Always returns a fixed ACL with a single `FULL_CONTROL` grant to a hardcoded `ow
 
 ## Kumolo deviations
 
-- Always returns a fixed stub ACL regardless of any ACL set on the object.
-- Real per-object ACLs are not stored or enforced.
+- Owner ID and DisplayName are always `"owner"`.
+- `versionId` query parameter is not supported.

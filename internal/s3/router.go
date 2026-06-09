@@ -55,6 +55,8 @@ const (
 	amzChecksumCRC64NVME           = "X-Amz-Checksum-Crc64nvme"
 	amzObjectAttributes            = "X-Amz-Object-Attributes"
 
+	amzACL = "X-Amz-Acl"
+
 	// Presigned URL query parameter names.
 	amzQSignature  = "X-Amz-Signature"
 	amzQAlgorithm  = "X-Amz-Algorithm"
@@ -91,6 +93,8 @@ type Router struct {
 		bucketObjectLockStore
 		objectRetentionStore
 		objectLegalHoldStore
+		bucketACLStore
+		objectACLStore
 	}
 	kms KMSService       // nil means SSE-KMS key validation is skipped
 	now func() time.Time // injectable for testing; defaults to time.Now
@@ -327,6 +331,39 @@ func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, bucket str
 }
 
 func (ro *Router) handleListObjects(w http.ResponseWriter, r *http.Request, bucket string) {
+	if isAnonymousRequest(r) {
+		bucketACL, err := ro.storage.GetBucketACL(bucket)
+		if err != nil {
+			if errors.Is(err, ErrBucketNotFound) {
+				slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+					"bucket not found",
+					"bucket",
+					bucket,
+				)
+				writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+					"The specified bucket does not exist.")
+				return
+			}
+			slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"failed to get bucket ACL",
+				"bucket",
+				bucket,
+				"err",
+				err,
+			)
+			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+			return
+		}
+		if !aclAllowsAnonymous(bucketACL, aclPermRead) {
+			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"list objects denied: ACL",
+				"bucket",
+				bucket,
+			)
+			writeError(w, r, http.StatusForbidden, "AccessDenied", "Access Denied")
+			return
+		}
+	}
 	q := r.URL.Query()
 	prefix := q.Get("prefix")
 	delimiter := q.Get("delimiter")
@@ -433,6 +470,39 @@ func (ro *Router) handleListObjects(w http.ResponseWriter, r *http.Request, buck
 }
 
 func (ro *Router) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bucket string) {
+	if isAnonymousRequest(r) {
+		bucketACL, err := ro.storage.GetBucketACL(bucket)
+		if err != nil {
+			if errors.Is(err, ErrBucketNotFound) {
+				slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+					"bucket not found",
+					"bucket",
+					bucket,
+				)
+				writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+					"The specified bucket does not exist.")
+				return
+			}
+			slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"failed to get bucket ACL",
+				"bucket",
+				bucket,
+				"err",
+				err,
+			)
+			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+			return
+		}
+		if !aclAllowsAnonymous(bucketACL, aclPermRead) {
+			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"list objects v2 denied: ACL",
+				"bucket",
+				bucket,
+			)
+			writeError(w, r, http.StatusForbidden, "AccessDenied", "Access Denied")
+			return
+		}
+	}
 	q := r.URL.Query()
 	prefix := q.Get("prefix")
 	delimiter := q.Get("delimiter")

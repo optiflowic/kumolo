@@ -392,6 +392,13 @@ type mockStore struct {
 	getObjectLegalHoldResult  string
 	getObjectLegalHoldErr     error
 
+	putBucketACLErr    error
+	getBucketACLResult string
+	getBucketACLErr    error
+	putObjectACLErr    error
+	getObjectACLResult string
+	getObjectACLErr    error
+
 	capturedPutObjectSSEAlg            string
 	capturedPutObjectSSEKeyID          string
 	capturedPutObjectBucketKeyEnabled  bool
@@ -663,6 +670,31 @@ func (m *mockStore) GetObjectLegalHold(_, _, _ string) (string, error) {
 	return m.getObjectLegalHoldResult, m.getObjectLegalHoldErr
 }
 
+func (m *mockStore) PutBucketACL(_ string, _ string) error {
+	if m.putBucketACLErr != nil {
+		return m.putBucketACLErr
+	}
+	if !m.bucketExists {
+		return ErrBucketNotFound
+	}
+	return nil
+}
+func (m *mockStore) GetBucketACL(_ string) (string, error) {
+	if m.getBucketACLErr != nil {
+		return "", m.getBucketACLErr
+	}
+	if !m.bucketExists {
+		return "", ErrBucketNotFound
+	}
+	return m.getBucketACLResult, nil
+}
+func (m *mockStore) PutObjectACL(_ string, _ string, _ string) error {
+	return m.putObjectACLErr
+}
+func (m *mockStore) GetObjectACL(_ string, _ string) (string, error) {
+	return m.getObjectACLResult, m.getObjectACLErr
+}
+
 func newRouterWithMock(store *mockStore) *Router {
 	return &Router{storage: store, now: time.Now}
 }
@@ -734,7 +766,9 @@ func TestRouterPutObject(t *testing.T) {
 	})
 
 	t.Run("returns 500 on unexpected storage error", func(t *testing.T) {
-		ro := newRouterWithMock(&mockStore{putObjectErr: errors.New("disk full")})
+		ro := newRouterWithMock(
+			&mockStore{bucketExists: true, putObjectErr: errors.New("disk full")},
+		)
 		req := httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt", strings.NewReader("data"))
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
@@ -1775,7 +1809,9 @@ func TestRouterDeleteObject(t *testing.T) {
 	})
 
 	t.Run("returns 500 on unexpected storage error", func(t *testing.T) {
-		ro := newRouterWithMock(&mockStore{deleteObjectErr: errors.New("disk failure")})
+		ro := newRouterWithMock(
+			&mockStore{bucketExists: true, deleteObjectErr: errors.New("disk failure")},
+		)
 		req := httptest.NewRequest(http.MethodDelete, "/my-bucket/obj.txt", nil)
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
@@ -1783,7 +1819,7 @@ func TestRouterDeleteObject(t *testing.T) {
 	})
 
 	t.Run("returns 403 when object is locked", func(t *testing.T) {
-		ro := newRouterWithMock(&mockStore{deleteObjectErr: ErrObjectLocked})
+		ro := newRouterWithMock(&mockStore{bucketExists: true, deleteObjectErr: ErrObjectLocked})
 		req := httptest.NewRequest(http.MethodDelete, "/my-bucket/obj.txt", nil)
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
@@ -2064,7 +2100,9 @@ func TestRouterListObjectsV2(t *testing.T) {
 	})
 
 	t.Run("returns 500 on unexpected storage error", func(t *testing.T) {
-		ro := newRouterWithMock(&mockStore{listObjectsErr: errors.New("disk failure")})
+		ro := newRouterWithMock(
+			&mockStore{bucketExists: true, listObjectsErr: errors.New("disk failure")},
+		)
 		req := httptest.NewRequest(http.MethodGet, "/my-bucket?list-type=2", nil)
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
@@ -3960,7 +3998,9 @@ func TestRouterListObjects(t *testing.T) {
 	})
 
 	t.Run("returns 500 on storage error", func(t *testing.T) {
-		ro := newRouterWithMock(&mockStore{listObjectsErr: errors.New("disk failure")})
+		ro := newRouterWithMock(
+			&mockStore{bucketExists: true, listObjectsErr: errors.New("disk failure")},
+		)
 		req := httptest.NewRequest(http.MethodGet, "/my-bucket", nil)
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
@@ -6714,7 +6754,7 @@ func TestRouterDeleteObjectVersioned(t *testing.T) {
 
 	t.Run("delete with versionId returns 500 on storage error", func(t *testing.T) {
 		ro := newRouterWithMock(
-			&mockStore{deleteObjectVersionErr: errors.New("disk failure")},
+			&mockStore{bucketExists: true, deleteObjectVersionErr: errors.New("disk failure")},
 		)
 		req := httptest.NewRequest(
 			http.MethodDelete,
@@ -6729,7 +6769,7 @@ func TestRouterDeleteObjectVersioned(t *testing.T) {
 
 	t.Run("delete with versionId returns 403 when object is locked", func(t *testing.T) {
 		ro := newRouterWithMock(
-			&mockStore{deleteObjectVersionErr: ErrObjectLocked},
+			&mockStore{bucketExists: true, deleteObjectVersionErr: ErrObjectLocked},
 		)
 		req := httptest.NewRequest(
 			http.MethodDelete,
@@ -7010,7 +7050,7 @@ func TestBucketConfigHandlers(t *testing.T) {
 	t.Run("PUT returns 200 on valid XML", func(t *testing.T) {
 		for _, q := range []string{
 			"publicAccessBlock", "encryption", "ownershipControls", "notification",
-			"lifecycle", "website", "logging", "accelerate", "replication", "requestPayment", "acl",
+			"lifecycle", "website", "logging", "accelerate", "replication", "requestPayment",
 			"object-lock",
 		} {
 			q := q
@@ -7022,6 +7062,15 @@ func TestBucketConfigHandlers(t *testing.T) {
 				assert.Equal(t, http.StatusOK, w.Code)
 			})
 		}
+		// acl requires valid AccessControlPolicy XML, not a generic XML body.
+		t.Run("acl", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{bucketExists: true})
+			req := httptest.NewRequest(http.MethodPut, "/b?acl",
+				strings.NewReader(`<AccessControlPolicy/>`))
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+		})
 	})
 
 	t.Run("PUT returns 400 on malformed XML", func(t *testing.T) {
@@ -7719,7 +7768,7 @@ func TestObjectACLHandlers(t *testing.T) {
 	})
 
 	t.Run("GET returns 404 when bucket not found", func(t *testing.T) {
-		ro := newRouterWithMock(&mockStore{bucketExists: false})
+		ro := newRouterWithMock(&mockStore{bucketExists: true, getObjectACLErr: ErrBucketNotFound})
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/my-bucket/obj.txt?acl", nil))
 		assert.Equal(t, http.StatusNotFound, w.Code)
@@ -7727,23 +7776,23 @@ func TestObjectACLHandlers(t *testing.T) {
 	})
 
 	t.Run("GET returns 404 when object not found", func(t *testing.T) {
-		ro := newRouterWithMock(&mockStore{bucketExists: true, headObjectErr: ErrObjectNotFound})
+		ro := newRouterWithMock(&mockStore{bucketExists: true, getObjectACLErr: ErrObjectNotFound})
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/my-bucket/obj.txt?acl", nil))
 		assert.Equal(t, http.StatusNotFound, w.Code)
 		assert.Contains(t, w.Body.String(), "NoSuchKey")
 	})
 
-	t.Run("GET returns 500 on HeadObject error", func(t *testing.T) {
+	t.Run("GET returns 500 on storage error", func(t *testing.T) {
 		ro := newRouterWithMock(
-			&mockStore{bucketExists: true, headObjectErr: errors.New("disk fail")},
+			&mockStore{bucketExists: true, getObjectACLErr: errors.New("disk fail")},
 		)
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/my-bucket/obj.txt?acl", nil))
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
 
-	t.Run("PUT returns 200 when bucket exists (stub ignores body)", func(t *testing.T) {
+	t.Run("PUT returns 200 when object exists", func(t *testing.T) {
 		ro := newRouterWithMock(&mockStore{bucketExists: true})
 		req := httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt?acl",
 			strings.NewReader(`<AccessControlPolicy/>`))
@@ -7753,7 +7802,7 @@ func TestObjectACLHandlers(t *testing.T) {
 	})
 
 	t.Run("PUT returns 404 when bucket not found", func(t *testing.T) {
-		ro := newRouterWithMock(&mockStore{bucketExists: false})
+		ro := newRouterWithMock(&mockStore{bucketExists: true, putObjectACLErr: ErrBucketNotFound})
 		req := httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt?acl",
 			strings.NewReader(`<AccessControlPolicy/>`))
 		w := httptest.NewRecorder()
@@ -7763,7 +7812,7 @@ func TestObjectACLHandlers(t *testing.T) {
 	})
 
 	t.Run("PUT returns 404 when object not found", func(t *testing.T) {
-		ro := newRouterWithMock(&mockStore{bucketExists: true, headObjectErr: ErrObjectNotFound})
+		ro := newRouterWithMock(&mockStore{bucketExists: true, putObjectACLErr: ErrObjectNotFound})
 		req := httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt?acl",
 			strings.NewReader(`<AccessControlPolicy/>`))
 		w := httptest.NewRecorder()
@@ -7772,9 +7821,9 @@ func TestObjectACLHandlers(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "NoSuchKey")
 	})
 
-	t.Run("PUT returns 500 on HeadObject error", func(t *testing.T) {
+	t.Run("PUT returns 500 on storage error", func(t *testing.T) {
 		ro := newRouterWithMock(
-			&mockStore{bucketExists: true, headObjectErr: errors.New("disk fail")},
+			&mockStore{bucketExists: true, putObjectACLErr: errors.New("disk fail")},
 		)
 		req := httptest.NewRequest(http.MethodPut, "/my-bucket/obj.txt?acl",
 			strings.NewReader(`<AccessControlPolicy/>`))
@@ -7953,6 +8002,7 @@ func TestStorageClassAccessControl(t *testing.T) {
 func TestSSEResponseHeaders(t *testing.T) {
 	t.Run("PutObject echoes SSE headers from metadata", func(t *testing.T) {
 		ro := newRouterWithMock(&mockStore{
+			bucketExists:  true,
 			putObjectMeta: ObjectMetadata{SSEAlgorithm: "aws:kms", SSEKMSKeyID: "my-key"},
 		})
 		req := httptest.NewRequest(http.MethodPut, "/b/k", strings.NewReader("data"))
@@ -8120,6 +8170,7 @@ func TestSSEBucketKeyEnabled(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ms := &mockStore{
+				bucketExists:   true,
 				putObjectMeta:  tt.respMeta,
 				getObjectMeta:  tt.respMeta,
 				headObjectMeta: tt.respMeta,
@@ -8263,31 +8314,40 @@ func TestSSEAlgorithmValidation(t *testing.T) {
 			wantErr:  "InvalidArgument",
 		},
 		{
-			name:      "PutObject accepts AES256",
-			method:    http.MethodPut,
-			url:       "/b/k",
-			extraHdr:  map[string]string{amzSSE: "AES256"},
-			body:      "data",
-			wantCode:  http.StatusOK,
-			mockStore: &mockStore{putObjectMeta: ObjectMetadata{SSEAlgorithm: "AES256"}},
+			name:     "PutObject accepts AES256",
+			method:   http.MethodPut,
+			url:      "/b/k",
+			extraHdr: map[string]string{amzSSE: "AES256"},
+			body:     "data",
+			wantCode: http.StatusOK,
+			mockStore: &mockStore{
+				bucketExists:  true,
+				putObjectMeta: ObjectMetadata{SSEAlgorithm: "AES256"},
+			},
 		},
 		{
-			name:      "PutObject accepts aws:kms",
-			method:    http.MethodPut,
-			url:       "/b/k",
-			extraHdr:  map[string]string{amzSSE: "aws:kms"},
-			body:      "data",
-			wantCode:  http.StatusOK,
-			mockStore: &mockStore{putObjectMeta: ObjectMetadata{SSEAlgorithm: "aws:kms"}},
+			name:     "PutObject accepts aws:kms",
+			method:   http.MethodPut,
+			url:      "/b/k",
+			extraHdr: map[string]string{amzSSE: "aws:kms"},
+			body:     "data",
+			wantCode: http.StatusOK,
+			mockStore: &mockStore{
+				bucketExists:  true,
+				putObjectMeta: ObjectMetadata{SSEAlgorithm: "aws:kms"},
+			},
 		},
 		{
-			name:      "PutObject accepts aws:kms:dsse",
-			method:    http.MethodPut,
-			url:       "/b/k",
-			extraHdr:  map[string]string{amzSSE: "aws:kms:dsse"},
-			body:      "data",
-			wantCode:  http.StatusOK,
-			mockStore: &mockStore{putObjectMeta: ObjectMetadata{SSEAlgorithm: "aws:kms:dsse"}},
+			name:     "PutObject accepts aws:kms:dsse",
+			method:   http.MethodPut,
+			url:      "/b/k",
+			extraHdr: map[string]string{amzSSE: "aws:kms:dsse"},
+			body:     "data",
+			wantCode: http.StatusOK,
+			mockStore: &mockStore{
+				bucketExists:  true,
+				putObjectMeta: ObjectMetadata{SSEAlgorithm: "aws:kms:dsse"},
+			},
 		},
 		{
 			name:      "PutObject accepts absent SSE header",
@@ -8295,7 +8355,7 @@ func TestSSEAlgorithmValidation(t *testing.T) {
 			url:       "/b/k",
 			body:      "data",
 			wantCode:  http.StatusOK,
-			mockStore: &mockStore{},
+			mockStore: &mockStore{bucketExists: true},
 		},
 		{
 			name:     "CopyObject rejects unknown algorithm",
@@ -8372,7 +8432,7 @@ func TestSSEBucketDefaultEncryption(t *testing.T) {
 	t.Run(
 		"PutObject: no SSE header + AES256 bucket config passes AES256 to storage",
 		func(t *testing.T) {
-			ms := &mockStore{getBucketEncryptionResult: aes256XML}
+			ms := &mockStore{bucketExists: true, getBucketEncryptionResult: aes256XML}
 			ro := newRouterWithMock(ms)
 			ro.ServeHTTP(
 				httptest.NewRecorder(),
@@ -8387,7 +8447,7 @@ func TestSSEBucketDefaultEncryption(t *testing.T) {
 	t.Run(
 		"PutObject: no SSE header + aws:kms bucket config passes kms alg and key to storage",
 		func(t *testing.T) {
-			ms := &mockStore{getBucketEncryptionResult: kmsXML}
+			ms := &mockStore{bucketExists: true, getBucketEncryptionResult: kmsXML}
 			ro := newRouterWithMock(ms)
 			ro.ServeHTTP(
 				httptest.NewRecorder(),
@@ -8402,7 +8462,7 @@ func TestSSEBucketDefaultEncryption(t *testing.T) {
 	t.Run(
 		"PutObject: no SSE header + aws:kms:dsse bucket config passes dsse alg and BucketKeyEnabled to storage",
 		func(t *testing.T) {
-			ms := &mockStore{getBucketEncryptionResult: kmsDSSEXML}
+			ms := &mockStore{bucketExists: true, getBucketEncryptionResult: kmsDSSEXML}
 			ro := newRouterWithMock(ms)
 			ro.ServeHTTP(
 				httptest.NewRecorder(),
@@ -8415,7 +8475,7 @@ func TestSSEBucketDefaultEncryption(t *testing.T) {
 	)
 
 	t.Run("PutObject: explicit SSE header overrides bucket config", func(t *testing.T) {
-		ms := &mockStore{getBucketEncryptionResult: aes256XML}
+		ms := &mockStore{bucketExists: true, getBucketEncryptionResult: aes256XML}
 		ro := newRouterWithMock(ms)
 		req := httptest.NewRequest(http.MethodPut, "/b/k", strings.NewReader("data"))
 		req.Header.Set(amzSSE, "aws:kms")
@@ -8424,7 +8484,7 @@ func TestSSEBucketDefaultEncryption(t *testing.T) {
 	})
 
 	t.Run("PutObject: no bucket config passes empty SSE to storage", func(t *testing.T) {
-		ms := &mockStore{}
+		ms := &mockStore{bucketExists: true}
 		ro := newRouterWithMock(ms)
 		ro.ServeHTTP(
 			httptest.NewRecorder(),
@@ -8434,7 +8494,7 @@ func TestSSEBucketDefaultEncryption(t *testing.T) {
 	})
 
 	t.Run("PutObject: GetBucketEncryption error yields 200 with no SSE", func(t *testing.T) {
-		ms := &mockStore{getBucketEncryptionErr: errors.New("disk failure")}
+		ms := &mockStore{bucketExists: true, getBucketEncryptionErr: errors.New("disk failure")}
 		ro := newRouterWithMock(ms)
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, httptest.NewRequest(http.MethodPut, "/b/k", strings.NewReader("data")))
@@ -8443,7 +8503,7 @@ func TestSSEBucketDefaultEncryption(t *testing.T) {
 	})
 
 	t.Run("PutObject: malformed bucket encryption XML yields 200 with no SSE", func(t *testing.T) {
-		ms := &mockStore{getBucketEncryptionResult: "<not-valid-xml"}
+		ms := &mockStore{bucketExists: true, getBucketEncryptionResult: "<not-valid-xml"}
 		ro := newRouterWithMock(ms)
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, httptest.NewRequest(http.MethodPut, "/b/k", strings.NewReader("data")))
@@ -8455,6 +8515,7 @@ func TestSSEBucketDefaultEncryption(t *testing.T) {
 		"PutObject: bucket encryption XML with no rules yields 200 with no SSE",
 		func(t *testing.T) {
 			ms := &mockStore{
+				bucketExists:              true,
 				getBucketEncryptionResult: `<ServerSideEncryptionConfiguration></ServerSideEncryptionConfiguration>`,
 			}
 			ro := newRouterWithMock(ms)
@@ -9713,7 +9774,7 @@ func TestSSEKMSIntegration(t *testing.T) {
 	}
 
 	t.Run("PutObject with kms=nil stores key verbatim", func(t *testing.T) {
-		ms := &mockStore{}
+		ms := &mockStore{bucketExists: true}
 		ro := newRouterWithMock(ms) // kms=nil
 		req := httptest.NewRequest(http.MethodPut, "/b/k", strings.NewReader("data"))
 		req.Header.Set(amzSSE, "aws:kms")
@@ -9726,6 +9787,7 @@ func TestSSEKMSIntegration(t *testing.T) {
 
 	t.Run("PutObject with valid KMS resolves key ID to ARN", func(t *testing.T) {
 		ms := &mockStore{
+			bucketExists:  true,
 			putObjectMeta: ObjectMetadata{SSEAlgorithm: "aws:kms", SSEKMSKeyID: mockARN},
 		}
 		ro := newRouterWithMockKMS(ms, kmsOK)
@@ -9774,6 +9836,7 @@ func TestSSEKMSIntegration(t *testing.T) {
 
 	t.Run("PutObject with aws:kms:dsse resolves key ID to ARN", func(t *testing.T) {
 		ms := &mockStore{
+			bucketExists:  true,
 			putObjectMeta: ObjectMetadata{SSEAlgorithm: "aws:kms:dsse", SSEKMSKeyID: mockARN},
 		}
 		ro := newRouterWithMockKMS(ms, kmsOK)
@@ -9837,6 +9900,7 @@ func TestSSEKMSIntegration(t *testing.T) {
 			`<KMSMasterKeyID>bucket-default-key</KMSMasterKeyID></ApplyServerSideEncryptionByDefault>` +
 			`</Rule></ServerSideEncryptionConfiguration>`
 		ms := &mockStore{
+			bucketExists:              true,
 			getBucketEncryptionResult: kmsXML,
 			putObjectMeta: ObjectMetadata{
 				SSEAlgorithm: "aws:kms",
@@ -9857,7 +9921,7 @@ func TestSSEKMSIntegration(t *testing.T) {
 				return "", errors.New("should not be called")
 			},
 		}
-		ms := &mockStore{}
+		ms := &mockStore{bucketExists: true}
 		ro := newRouterWithMockKMS(ms, kmsAlwaysFail)
 		req := httptest.NewRequest(http.MethodPut, "/b/k", strings.NewReader("data"))
 		req.Header.Set(amzSSE, "AES256")
@@ -9903,7 +9967,7 @@ func ssecMD5() string {
 
 func TestSSEC(t *testing.T) {
 	t.Run("PutObject stores SSE-C key MD5 and returns SSE-C response headers", func(t *testing.T) {
-		ms := &mockStore{putObjectMeta: ObjectMetadata{SSECKeyMD5: ssecMD5()}}
+		ms := &mockStore{bucketExists: true, putObjectMeta: ObjectMetadata{SSECKeyMD5: ssecMD5()}}
 		ro := newRouterWithMock(ms)
 		req := httptest.NewRequest(http.MethodPut, "/b/k", strings.NewReader("data"))
 		for k, v := range validSSECHeaders() {

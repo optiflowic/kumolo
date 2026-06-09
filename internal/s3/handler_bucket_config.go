@@ -312,26 +312,29 @@ func (ro *Router) handleDeleteBucketOwnershipControls(
 	)
 }
 
-// --- ACL (#79) ---
-// ACL is a stub: PUT accepts and ignores the body; GET returns a default owner ACL.
-
-const defaultACLResponse = `<AccessControlPolicy xmlns="http://s3.amazonaws.com/doc/2006-03-01/">` +
-	`<Owner><ID>owner</ID><DisplayName>owner</DisplayName></Owner>` +
-	`<AccessControlList><Grant>` +
-	`<Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="CanonicalUser">` +
-	`<ID>owner</ID><DisplayName>owner</DisplayName></Grantee>` +
-	`<Permission>FULL_CONTROL</Permission>` +
-	`</Grant></AccessControlList></AccessControlPolicy>`
+// --- ACL (#211) ---
 
 func (ro *Router) handleGetBucketACL(w http.ResponseWriter, r *http.Request, bucket string) {
-	if !ro.storage.BucketExists(bucket) {
-		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-			"bucket not found",
+	aclXML, err := ro.storage.GetBucketACL(bucket)
+	if err != nil {
+		if errors.Is(err, ErrBucketNotFound) {
+			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"bucket not found",
+				"bucket",
+				bucket,
+			)
+			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+				"The specified bucket does not exist.")
+			return
+		}
+		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			"failed to get bucket ACL",
 			"bucket",
 			bucket,
+			"err",
+			err,
 		)
-		writeError(w, r, http.StatusNotFound, "NoSuchBucket",
-			"The specified bucket does not exist.")
+		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
 	slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
@@ -339,23 +342,51 @@ func (ro *Router) handleGetBucketACL(w http.ResponseWriter, r *http.Request, buc
 		"bucket",
 		bucket,
 	)
-	writeRawXML(w, http.StatusOK, defaultACLResponse)
+	if aclXML == "" {
+		aclXML = defaultACLXML()
+	}
+	writeRawXML(w, http.StatusOK, aclXML)
 }
 
 func (ro *Router) handlePutBucketACL(w http.ResponseWriter, r *http.Request, bucket string) {
-	_, _ = io.Copy(io.Discard, r.Body)
-	if !ro.storage.BucketExists(bucket) {
-		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-			"bucket not found",
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+
+	aclXML, err := resolveACLFromRequest(r, body)
+	if err != nil {
+		writeError(w, r, http.StatusBadRequest, "InvalidArgument", err.Error())
+		return
+	}
+	if aclXML == "" {
+		aclXML = defaultACLXML()
+	}
+
+	if err := ro.storage.PutBucketACL(bucket, aclXML); err != nil {
+		if errors.Is(err, ErrBucketNotFound) {
+			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"bucket not found",
+				"bucket",
+				bucket,
+			)
+			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+				"The specified bucket does not exist.")
+			return
+		}
+		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			"failed to put bucket ACL",
 			"bucket",
 			bucket,
+			"err",
+			err,
 		)
-		writeError(w, r, http.StatusNotFound, "NoSuchBucket",
-			"The specified bucket does not exist.")
+		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
 	slog.Info( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-		"bucket ACL updated (stub)",
+		"bucket ACL updated",
 		"bucket",
 		bucket,
 	)
@@ -363,17 +394,18 @@ func (ro *Router) handlePutBucketACL(w http.ResponseWriter, r *http.Request, buc
 }
 
 func (ro *Router) handleGetObjectACL(w http.ResponseWriter, r *http.Request, bucket, key string) {
-	if !ro.storage.BucketExists(bucket) {
-		slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-			"bucket not found",
-			"bucket",
-			bucket,
-		)
-		writeError(w, r, http.StatusNotFound, "NoSuchBucket",
-			"The specified bucket does not exist.")
-		return
-	}
-	if _, err := ro.storage.HeadObject(bucket, key); err != nil {
+	aclXML, err := ro.storage.GetObjectACL(bucket, key)
+	if err != nil {
+		if errors.Is(err, ErrBucketNotFound) {
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"bucket not found",
+				"bucket",
+				bucket,
+			)
+			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+				"The specified bucket does not exist.")
+			return
+		}
 		if errors.Is(err, ErrObjectNotFound) {
 			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
 				"object not found",
@@ -387,7 +419,7 @@ func (ro *Router) handleGetObjectACL(w http.ResponseWriter, r *http.Request, buc
 			return
 		}
 		slog.Error( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-			"failed to head object for ACL",
+			"failed to get object ACL",
 			"bucket",
 			bucket,
 			"key",
@@ -405,22 +437,39 @@ func (ro *Router) handleGetObjectACL(w http.ResponseWriter, r *http.Request, buc
 		"key",
 		key,
 	)
-	writeRawXML(w, http.StatusOK, defaultACLResponse)
+	if aclXML == "" {
+		aclXML = defaultACLXML()
+	}
+	writeRawXML(w, http.StatusOK, aclXML)
 }
 
 func (ro *Router) handlePutObjectACL(w http.ResponseWriter, r *http.Request, bucket, key string) {
-	_, _ = io.Copy(io.Discard, r.Body)
-	if !ro.storage.BucketExists(bucket) {
-		slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-			"bucket not found",
-			"bucket",
-			bucket,
-		)
-		writeError(w, r, http.StatusNotFound, "NoSuchBucket",
-			"The specified bucket does not exist.")
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
-	if _, err := ro.storage.HeadObject(bucket, key); err != nil {
+
+	aclXML, err := resolveACLFromRequest(r, body)
+	if err != nil {
+		writeError(w, r, http.StatusBadRequest, "InvalidArgument", err.Error())
+		return
+	}
+	if aclXML == "" {
+		aclXML = defaultACLXML()
+	}
+
+	if err := ro.storage.PutObjectACL(bucket, key, aclXML); err != nil {
+		if errors.Is(err, ErrBucketNotFound) {
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"bucket not found",
+				"bucket",
+				bucket,
+			)
+			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+				"The specified bucket does not exist.")
+			return
+		}
 		if errors.Is(err, ErrObjectNotFound) {
 			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
 				"object not found",
@@ -434,7 +483,7 @@ func (ro *Router) handlePutObjectACL(w http.ResponseWriter, r *http.Request, buc
 			return
 		}
 		slog.Error( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-			"failed to head object for ACL",
+			"failed to put object ACL",
 			"bucket",
 			bucket,
 			"key",
@@ -446,13 +495,25 @@ func (ro *Router) handlePutObjectACL(w http.ResponseWriter, r *http.Request, buc
 		return
 	}
 	slog.Info( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-		"object ACL updated (stub)",
+		"object ACL updated",
 		"bucket",
 		bucket,
 		"key",
 		key,
 	)
 	w.WriteHeader(http.StatusOK)
+}
+
+// resolveACLFromRequest returns ACL XML from the x-amz-acl header (takes precedence)
+// or the request body. Returns "" if neither is provided.
+func resolveACLFromRequest(r *http.Request, body []byte) (string, error) {
+	if canned := r.Header.Get(amzACL); canned != "" {
+		return buildCannedACL(canned)
+	}
+	if len(body) > 0 {
+		return parseACLBody(body)
+	}
+	return "", nil
 }
 
 // --- NotificationConfiguration (#80) ---

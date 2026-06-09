@@ -434,6 +434,13 @@ func isKMSAlgorithm(alg string) bool {
 }
 
 func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket, key string) {
+	if cannedACL := r.Header.Get(amzACL); cannedACL != "" {
+		if _, err := buildCannedACL(cannedACL); err != nil {
+			writeError(w, r, http.StatusBadRequest, "InvalidArgument",
+				"The canned ACL you provided is not valid.")
+			return
+		}
+	}
 	contentType := r.Header.Get("Content-Type")
 	if contentType == "" {
 		contentType = "application/octet-stream"
@@ -460,6 +467,41 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 		return
 	}
 	storageClass := r.Header.Get(amzStorageClass)
+	if isAnonymousRequest(r) {
+		bucketACL, err := ro.storage.GetBucketACL(bucket)
+		if err != nil {
+			if errors.Is(err, ErrBucketNotFound) {
+				slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+					"bucket not found",
+					"bucket",
+					bucket,
+				)
+				writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+					"The specified bucket does not exist.")
+				return
+			}
+			slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"failed to get bucket ACL",
+				"bucket",
+				bucket,
+				"err",
+				err,
+			)
+			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+			return
+		}
+		if !aclAllowsAnonymous(bucketACL, aclPermWrite) {
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"put object denied: ACL",
+				"bucket",
+				bucket,
+				"key",
+				key,
+			)
+			writeError(w, r, http.StatusForbidden, "AccessDenied", "Access Denied")
+			return
+		}
+	}
 	putFn := ro.storage.PutObject
 	if r.Header.Get("If-None-Match") == "*" {
 		putFn = ro.storage.PutObjectIfNotExists
@@ -591,6 +633,21 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 		writeError(w, r, http.StatusBadRequest, "BadDigest",
 			"The checksum you specified did not match what we received.")
 		return
+	}
+	if cannedACL := r.Header.Get(amzACL); cannedACL != "" {
+		if aclXML, aclErr := buildCannedACL(cannedACL); aclErr == nil {
+			if storeErr := ro.storage.PutObjectACL(bucket, key, aclXML); storeErr != nil {
+				slog.Warn( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+					"failed to set object ACL after put",
+					"bucket",
+					bucket,
+					"key",
+					key,
+					"err",
+					storeErr,
+				)
+			}
+		}
 	}
 	slog.Info( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
 		"object created",
@@ -746,6 +803,17 @@ func (ro *Router) handleHeadObject(w http.ResponseWriter, r *http.Request, bucke
 		}
 		return
 	}
+	if isAnonymousRequest(r) && !aclAllowsAnonymous(meta.ACL, aclPermRead) {
+		slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			"head object denied: ACL",
+			"bucket",
+			bucket,
+			"key",
+			key,
+		)
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
 	ssecKeyMD5, ok := parseSSECHeaders(w, r, amzSSECAlgorithm, amzSSECKey, amzSSECKeyMD5)
 	if !ok {
 		return
@@ -800,6 +868,41 @@ func (ro *Router) handleHeadObject(w http.ResponseWriter, r *http.Request, bucke
 }
 
 func (ro *Router) handleDeleteObject(w http.ResponseWriter, r *http.Request, bucket, key string) {
+	if isAnonymousRequest(r) {
+		bucketACL, err := ro.storage.GetBucketACL(bucket)
+		if err != nil {
+			if errors.Is(err, ErrBucketNotFound) {
+				slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+					"bucket not found",
+					"bucket",
+					bucket,
+				)
+				writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+					"The specified bucket does not exist.")
+				return
+			}
+			slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"failed to get bucket ACL",
+				"bucket",
+				bucket,
+				"err",
+				err,
+			)
+			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+			return
+		}
+		if !aclAllowsAnonymous(bucketACL, aclPermWrite) {
+			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"delete object denied: ACL",
+				"bucket",
+				bucket,
+				"key",
+				key,
+			)
+			writeError(w, r, http.StatusForbidden, "AccessDenied", "Access Denied")
+			return
+		}
+	}
 	bypassGovernance := r.Header.Get(amzBypassGovernanceRetention) == "true"
 
 	if versionID := r.URL.Query().Get("versionId"); versionID != "" {
@@ -979,6 +1082,17 @@ func (ro *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 		return
 	}
 	defer func() { _ = f.Close() }()
+	if isAnonymousRequest(r) && !aclAllowsAnonymous(meta.ACL, aclPermRead) {
+		slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			"get object denied: ACL",
+			"bucket",
+			bucket,
+			"key",
+			key,
+		)
+		writeError(w, r, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return
+	}
 	ssecKeyMD5, ok := parseSSECHeaders(w, r, amzSSECAlgorithm, amzSSECKey, amzSSECKeyMD5)
 	if !ok {
 		return
