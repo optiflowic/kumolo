@@ -2,6 +2,7 @@ package s3
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/binary"
 	"encoding/xml"
 	"hash/crc32"
@@ -996,4 +997,303 @@ func TestCompareValues(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, tt.want, got, "%s %s %s", tt.left, tt.op, tt.right)
 	}
+}
+
+// --- Additional handler coverage tests ---
+
+func TestSelectObjectContent_MissingExpression(t *testing.T) {
+	ro := newTestRouter(t)
+	putSelectObject(t, ro, "my-bucket", "data.csv", "a\n1\n")
+
+	// Missing Expression field.
+	xmlBody := `<?xml version="1.0" encoding="UTF-8"?>` +
+		`<SelectObjectContentRequest>` +
+		`<ExpressionType>SQL</ExpressionType>` +
+		`<InputSerialization><CSV><FileHeaderInfo>NONE</FileHeaderInfo></CSV></InputSerialization>` +
+		`<OutputSerialization><CSV></CSV></OutputSerialization>` +
+		`</SelectObjectContentRequest>`
+	w := doSelect(t, ro, "my-bucket", "data.csv", xmlBody)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "MissingRequiredParameter")
+}
+
+func gzipBytes(t *testing.T, data string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	_, err := gw.Write([]byte(data))
+	require.NoError(t, err)
+	require.NoError(t, gw.Close())
+	return buf.Bytes()
+}
+
+func putSelectObjectBytes(t *testing.T, ro *Router, bucket, key string, data []byte) {
+	t.Helper()
+	ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/"+bucket, nil))
+	req := httptest.NewRequest(http.MethodPut, "/"+bucket+"/"+key, bytes.NewReader(data))
+	req.Header.Set("Content-Type", "application/octet-stream")
+	ro.ServeHTTP(httptest.NewRecorder(), req)
+}
+
+func TestSelectObjectContent_GZIPInput(t *testing.T) {
+	ro := newTestRouter(t)
+	csvData := "name,score\nAlice,90\nBob,75\n"
+	putSelectObjectBytes(t, ro, "my-bucket", "data.csv.gz", gzipBytes(t, csvData))
+
+	xmlBody := `<?xml version="1.0" encoding="UTF-8"?>` +
+		`<SelectObjectContentRequest>` +
+		`<Expression>SELECT * FROM S3Object</Expression>` +
+		`<ExpressionType>SQL</ExpressionType>` +
+		`<InputSerialization>` +
+		`<CompressionType>GZIP</CompressionType>` +
+		`<CSV><FileHeaderInfo>USE</FileHeaderInfo></CSV>` +
+		`</InputSerialization>` +
+		`<OutputSerialization><CSV></CSV></OutputSerialization>` +
+		`</SelectObjectContentRequest>`
+	w := doSelect(t, ro, "my-bucket", "data.csv.gz", xmlBody)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	events := parseEventStream(t, w.Body.Bytes())
+	var buf strings.Builder
+	for _, ev := range events {
+		if ev.kind == "Records" {
+			buf.WriteString(ev.payload)
+		}
+	}
+	assert.Contains(t, buf.String(), "Alice")
+	assert.Contains(t, buf.String(), "Bob")
+}
+
+func TestSelectObjectContent_GZIPInvalidInput(t *testing.T) {
+	ro := newTestRouter(t)
+	// Store plain (non-GZIP) bytes but request GZIP decompression.
+	putSelectObject(t, ro, "my-bucket", "data.csv", "not gzip data")
+
+	xmlBody := `<?xml version="1.0" encoding="UTF-8"?>` +
+		`<SelectObjectContentRequest>` +
+		`<Expression>SELECT * FROM S3Object</Expression>` +
+		`<ExpressionType>SQL</ExpressionType>` +
+		`<InputSerialization>` +
+		`<CompressionType>GZIP</CompressionType>` +
+		`<CSV><FileHeaderInfo>NONE</FileHeaderInfo></CSV>` +
+		`</InputSerialization>` +
+		`<OutputSerialization><CSV></CSV></OutputSerialization>` +
+		`</SelectObjectContentRequest>`
+	w := doSelect(t, ro, "my-bucket", "data.csv", xmlBody)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "InvalidDataSource")
+}
+
+func TestSelectObjectContent_EmptyCSV(t *testing.T) {
+	ro := newTestRouter(t)
+	putSelectObject(t, ro, "my-bucket", "empty.csv", "")
+
+	xmlBody := selectXMLBody(
+		"SELECT * FROM S3Object",
+		"SQL",
+		`<InputSerialization><CSV><FileHeaderInfo>NONE</FileHeaderInfo></CSV></InputSerialization>`,
+		csvOutputFmt(),
+	)
+	w := doSelect(t, ro, "my-bucket", "empty.csv", xmlBody)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	events := parseEventStream(t, w.Body.Bytes())
+	kinds := make(map[string]int)
+	for _, ev := range events {
+		kinds[ev.kind]++
+	}
+	assert.Zero(t, kinds["Records"])
+	assert.Equal(t, 1, kinds["End"])
+}
+
+func TestSelectObjectContent_CSVWithComments(t *testing.T) {
+	ro := newTestRouter(t)
+	// Lines starting with '#' should be skipped as comments.
+	csvData := "# this is a comment\nname,score\nAlice,90\n# another comment\nBob,75\n"
+	putSelectObject(t, ro, "my-bucket", "data.csv", csvData)
+
+	xmlBody := `<?xml version="1.0" encoding="UTF-8"?>` +
+		`<SelectObjectContentRequest>` +
+		`<Expression>SELECT * FROM S3Object</Expression>` +
+		`<ExpressionType>SQL</ExpressionType>` +
+		`<InputSerialization>` +
+		`<CSV>` +
+		`<FileHeaderInfo>USE</FileHeaderInfo>` +
+		`<Comments>#</Comments>` +
+		`</CSV>` +
+		`</InputSerialization>` +
+		`<OutputSerialization><CSV></CSV></OutputSerialization>` +
+		`</SelectObjectContentRequest>`
+	w := doSelect(t, ro, "my-bucket", "data.csv", xmlBody)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	events := parseEventStream(t, w.Body.Bytes())
+	var buf strings.Builder
+	for _, ev := range events {
+		if ev.kind == "Records" {
+			buf.WriteString(ev.payload)
+		}
+	}
+	got := buf.String()
+	assert.Contains(t, got, "Alice")
+	assert.Contains(t, got, "Bob")
+}
+
+// --- Additional SQL lexer/parser coverage ---
+
+func TestParseSQL_NegativeNumber(t *testing.T) {
+	q, err := parseSQL("SELECT * FROM S3Object WHERE _1 > -5")
+	require.NoError(t, err)
+	assert.NotNil(t, q.where)
+}
+
+func TestParseSQL_FloatLiteral(t *testing.T) {
+	q, err := parseSQL("SELECT * FROM S3Object WHERE _1 >= 3.14")
+	require.NoError(t, err)
+	assert.NotNil(t, q.where)
+}
+
+func TestParseSQL_StringEscapedQuote(t *testing.T) {
+	// SQL string with doubled single-quote escape: 'it''s'
+	q, err := parseSQL("SELECT * FROM S3Object WHERE name = 'it''s'")
+	require.NoError(t, err)
+	rows := []selectRow{makeRow([]string{"name"}, map[string]string{"name": "it's"})}
+	result, err := q.execute(rows)
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+}
+
+func TestParseSQL_NEOperators(t *testing.T) {
+	for _, op := range []string{"!=", "<>"} {
+		t.Run(op, func(t *testing.T) {
+			q, err := parseSQL("SELECT * FROM S3Object WHERE _1 " + op + " 'x'")
+			require.NoError(t, err)
+			rows := []selectRow{
+				makeRow([]string{"_1"}, map[string]string{"_1": "x"}),
+				makeRow([]string{"_1"}, map[string]string{"_1": "y"}),
+			}
+			result, err := q.execute(rows)
+			require.NoError(t, err)
+			assert.Len(t, result, 1)
+			assert.Equal(t, "y", result[0].vals["_1"])
+		})
+	}
+}
+
+func TestParseSQL_LEGEOperators(t *testing.T) {
+	q, err := parseSQL(
+		"SELECT * FROM S3Object WHERE CAST(_1 AS FLOAT) <= 5 AND CAST(_2 AS FLOAT) >= 3",
+	)
+	require.NoError(t, err)
+	rows := []selectRow{
+		makeRow([]string{"_1", "_2"}, map[string]string{"_1": "4", "_2": "3"}),
+		makeRow([]string{"_1", "_2"}, map[string]string{"_1": "6", "_2": "3"}),
+	}
+	result, err := q.execute(rows)
+	require.NoError(t, err)
+	assert.Len(t, result, 1)
+}
+
+func TestParseSQL_ParenthesisedCondition(t *testing.T) {
+	q, err := parseSQL("SELECT * FROM S3Object WHERE (a = '1' OR a = '2') AND b = 'x'")
+	require.NoError(t, err)
+	rows := []selectRow{
+		makeRow([]string{"a", "b"}, map[string]string{"a": "1", "b": "x"}),
+		makeRow([]string{"a", "b"}, map[string]string{"a": "1", "b": "y"}),
+		makeRow([]string{"a", "b"}, map[string]string{"a": "3", "b": "x"}),
+	}
+	result, err := q.execute(rows)
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+	assert.Equal(t, "1", result[0].vals["a"])
+}
+
+func TestParseSQL_MultipleColumns(t *testing.T) {
+	q, err := parseSQL("SELECT a, b, c FROM S3Object")
+	require.NoError(t, err)
+	require.Len(t, q.columns, 3)
+	assert.Equal(t, "a", q.columns[0].name)
+	assert.Equal(t, "c", q.columns[2].name)
+}
+
+func TestParseSQL_ScientificNotation(t *testing.T) {
+	q, err := parseSQL("SELECT * FROM S3Object WHERE CAST(_1 AS FLOAT) > 1e2")
+	require.NoError(t, err)
+	rows := []selectRow{
+		makeRow([]string{"_1"}, map[string]string{"_1": "50"}),
+		makeRow([]string{"_1"}, map[string]string{"_1": "200"}),
+	}
+	result, err := q.execute(rows)
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+	assert.Equal(t, "200", result[0].vals["_1"])
+}
+
+func TestMatchLike_Unicode(t *testing.T) {
+	tests := []struct {
+		s, pattern string
+		want       bool
+	}{
+		{"café", "____", true}, // 4 runes, 4 underscores
+		{"café", "___", false}, // 4 runes, 3 underscores
+		{"中文", "__", true},     // 2 runes, 2 underscores
+		{"中文", "_", false},     // 2 runes, 1 underscore
+		{"café", "ca%", true},  // prefix wildcard
+		{"café", "%é", true},   // suffix wildcard
+		{"中文字", "_文_", true},   // middle wildcard
+	}
+	for _, tt := range tests {
+		t.Run(tt.s+"/"+tt.pattern, func(t *testing.T) {
+			assert.Equal(t, tt.want, matchLike(tt.s, tt.pattern))
+		})
+	}
+}
+
+// --- Additional select_data coverage ---
+
+func TestReadCSVRows_EmptyFile(t *testing.T) {
+	rows, _, err := readCSVRows(strings.NewReader(""), nil)
+	require.NoError(t, err)
+	assert.Empty(t, rows)
+}
+
+func TestReadCSVRows_CommentLines(t *testing.T) {
+	csvData := "# comment\nname\nAlice\n"
+	rows, _, err := readCSVRows(strings.NewReader(csvData), &xmlCSVInput{
+		FileHeaderInfo: "USE",
+		Comments:       "#",
+	})
+	require.NoError(t, err)
+	// Header row is "name", data row is "Alice" (comment is skipped).
+	require.Len(t, rows, 1)
+	assert.Equal(t, "Alice", rows[0].vals["name"])
+}
+
+func TestReadJSONRows_EmptyInput(t *testing.T) {
+	rows, _, err := readJSONRows(strings.NewReader(""), &xmlJSONInput{Type: "LINES"})
+	require.NoError(t, err)
+	assert.Empty(t, rows)
+}
+
+func TestReadJSONRows_SingleObjectDocument(t *testing.T) {
+	jsonData := `{"name":"Alice","score":90}`
+	rows, _, err := readJSONRows(strings.NewReader(jsonData), &xmlJSONInput{Type: "DOCUMENT"})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "Alice", rows[0].vals["name"])
+}
+
+func TestFormatJSONOutput_KeyOrder(t *testing.T) {
+	// Keys should appear in headers order, not alphabetical order.
+	rows := []selectRow{
+		makeRow([]string{"z", "a", "m"}, map[string]string{"z": "1", "a": "2", "m": "3"}),
+	}
+	out, err := formatJSONOutput(rows, &xmlJSONOutput{RecordDelimiter: "\n"})
+	require.NoError(t, err)
+	s := string(out)
+	zIdx := strings.Index(s, `"z"`)
+	aIdx := strings.Index(s, `"a"`)
+	mIdx := strings.Index(s, `"m"`)
+	assert.Less(t, zIdx, aIdx, "z should appear before a (headers order, not alphabetical)")
+	assert.Less(t, aIdx, mIdx, "a should appear before m")
 }
