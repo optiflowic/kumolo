@@ -82,13 +82,31 @@ func (ro *Router) handleSelectObjectContent(
 		return
 	}
 
-	hasInput := req.InputSerialization.CSV != nil ||
-		req.InputSerialization.JSON != nil ||
-		req.InputSerialization.Parquet != nil
-	hasOutput := req.OutputSerialization.CSV != nil || req.OutputSerialization.JSON != nil
-	if !hasInput || !hasOutput {
-		writeError(w, r, http.StatusBadRequest, "MissingRequiredParameter",
-			"SelectObjectContentRequest is missing InputSerialization or OutputSerialization.")
+	inputCount := 0
+	if req.InputSerialization.CSV != nil {
+		inputCount++
+	}
+	if req.InputSerialization.JSON != nil {
+		inputCount++
+	}
+	if req.InputSerialization.Parquet != nil {
+		inputCount++
+	}
+	outputCount := 0
+	if req.OutputSerialization.CSV != nil {
+		outputCount++
+	}
+	if req.OutputSerialization.JSON != nil {
+		outputCount++
+	}
+	if inputCount != 1 || outputCount != 1 {
+		writeError(
+			w,
+			r,
+			http.StatusBadRequest,
+			"MissingRequiredParameter",
+			"SelectObjectContentRequest requires exactly one InputSerialization and one OutputSerialization.",
+		)
 		return
 	}
 
