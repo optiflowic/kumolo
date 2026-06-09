@@ -157,6 +157,8 @@ func (ro *Router) handleSelectObjectContent(
 
 	var reader io.Reader = f
 	switch req.InputSerialization.CompressionType {
+	case "", "NONE":
+		// no decompression
 	case "GZIP":
 		gr, err := gzip.NewReader(f)
 		if err != nil {
@@ -171,6 +173,14 @@ func (ro *Router) handleSelectObjectContent(
 		reader = gr
 	case "BZIP2":
 		reader = bzip2.NewReader(f)
+	default:
+		slog.Debug( // #nosec G706
+			"unsupported CompressionType", "bucket", bucket, "key", key,
+			"compression_type", req.InputSerialization.CompressionType,
+		)
+		writeError(w, r, http.StatusBadRequest, "InvalidArgument",
+			"Unsupported CompressionType: "+req.InputSerialization.CompressionType)
+		return
 	}
 
 	var rows []selectRow
