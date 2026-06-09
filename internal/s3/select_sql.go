@@ -10,9 +10,11 @@ import (
 
 // selectRow holds a single data row for S3 Select processing.
 // headers preserves column order for CSV/JSON output; vals provides O(1) lookup.
+// tableAlias is set by execute() to the query's FROM alias for column-reference validation.
 type selectRow struct {
-	headers []string
-	vals    map[string]string
+	headers    []string
+	vals       map[string]string
+	tableAlias string
 }
 
 func newSelectRow(headers []string) selectRow {
@@ -25,7 +27,7 @@ type parsedQuery struct {
 	columns    []colRef // nil = SELECT *
 	tableAlias string
 	where      whereNode
-	limit      int // 0 = no limit
+	limit      int // -1 = no limit; 0 = return zero rows; >0 = cap at that many rows
 }
 
 // colRef names a column, optionally prefixed by a table alias.
@@ -144,6 +146,17 @@ func matchLikeRunes(s, pattern []rune) bool {
 	return false
 }
 
+// floatEqual reports whether a and b are equal within a tight relative epsilon.
+// Both operands in S3 Select SQL originate from parsed string literals (no arithmetic),
+// so exact equality usually holds; the epsilon guards against edge-case representation drift.
+func floatEqual(a, b float64) bool {
+	if a == b {
+		return true
+	}
+	scale := math.Abs(a) + math.Abs(b)
+	return scale > 0 && math.Abs(a-b)/scale < 1e-9
+}
+
 // compareValues compares two string values using op, preferring numeric comparison.
 func compareValues(left, op, right string) (bool, error) {
 	ln, lerr := strconv.ParseFloat(left, 64)
@@ -151,9 +164,9 @@ func compareValues(left, op, right string) (bool, error) {
 	if lerr == nil && rerr == nil {
 		switch op {
 		case "=":
-			return ln == rn, nil
+			return floatEqual(ln, rn), nil
 		case "!=", "<>":
-			return ln != rn, nil
+			return !floatEqual(ln, rn), nil
 		case "<":
 			return ln < rn, nil
 		case "<=":
@@ -197,6 +210,9 @@ type castNode struct {
 }
 
 func (n *colValNode) evalVal(r selectRow) (string, bool) {
+	if n.ref.tableAlias != "" && r.tableAlias != "" && n.ref.tableAlias != r.tableAlias {
+		return "", true // wrong table alias → treat as NULL
+	}
 	v, ok := r.vals[n.ref.name]
 	if !ok {
 		return "", true
@@ -224,13 +240,13 @@ func (n *castNode) evalVal(r selectRow) (string, bool) {
 	case "INT", "INTEGER", "SMALLINT", "TINYINT", "BIGINT":
 		f, err := strconv.ParseFloat(v, 64)
 		if err != nil {
-			return "0", false
+			return "", true // non-numeric input → NULL
 		}
 		return strconv.FormatInt(int64(f), 10), false
 	case "FLOAT", "DOUBLE", "DECIMAL", "NUMERIC", "REAL":
 		f, err := strconv.ParseFloat(v, 64)
 		if err != nil {
-			return "0", false
+			return "", true // non-numeric input → NULL
 		}
 		return strconv.FormatFloat(f, 'f', -1, 64), false
 	case "STRING", "VARCHAR", "CHAR", "TEXT":
@@ -264,6 +280,7 @@ const (
 	sqlTokLE
 	sqlTokGT
 	sqlTokGE
+	sqlTokIllegal // unrecognised character
 )
 
 type sqlToken struct {
@@ -360,7 +377,7 @@ func (l *sqlLexer) scan() sqlToken {
 		return l.scanIdent()
 	}
 	l.pos++
-	return sqlToken{kind: sqlTokEOF}
+	return sqlToken{kind: sqlTokIllegal, val: string(ch)}
 }
 
 func (l *sqlLexer) scanString() sqlToken {
@@ -434,7 +451,7 @@ func (p *sqlParser) parseQuery() (*parsedQuery, error) {
 		return nil, err
 	}
 
-	q := &parsedQuery{}
+	q := &parsedQuery{limit: -1}
 
 	cols, countStar, err := p.parseSelectList()
 	if err != nil {
@@ -476,7 +493,14 @@ func (p *sqlParser) parseQuery() (*parsedQuery, error) {
 		if err != nil {
 			return nil, fmt.Errorf("invalid LIMIT value: %w", err)
 		}
+		if n < 0 {
+			return nil, fmt.Errorf("invalid LIMIT value: must be non-negative, got %d", n)
+		}
 		q.limit = n
+	}
+
+	if pk := p.lex.peek(); pk.kind != sqlTokEOF {
+		return nil, fmt.Errorf("unexpected trailing token %q", pk.val)
 	}
 
 	return q, nil
@@ -764,6 +788,7 @@ func (q *parsedQuery) execute(rows []selectRow) ([]selectRow, error) {
 	if q.countStar {
 		count := 0
 		for _, r := range rows {
+			r.tableAlias = q.tableAlias
 			if q.where == nil {
 				count++
 				continue
@@ -783,6 +808,7 @@ func (q *parsedQuery) execute(rows []selectRow) ([]selectRow, error) {
 
 	var result []selectRow
 	for _, r := range rows {
+		r.tableAlias = q.tableAlias
 		if q.where != nil {
 			ok, err := q.where.evalRow(r)
 			if err != nil { // unreachable: no evalRow impl returns non-nil error
@@ -792,10 +818,11 @@ func (q *parsedQuery) execute(rows []selectRow) ([]selectRow, error) {
 				continue
 			}
 		}
-		result = append(result, q.project(r))
-		if q.limit > 0 && len(result) >= q.limit {
+		// Check limit before appending so LIMIT 0 returns zero rows.
+		if q.limit >= 0 && len(result) >= q.limit {
 			break
 		}
+		result = append(result, q.project(r))
 	}
 	return result, nil
 }
