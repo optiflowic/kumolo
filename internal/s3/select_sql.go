@@ -70,7 +70,7 @@ func (n *andNode) evalRow(r selectRow) (bool, error) {
 
 func (n *orNode) evalRow(r selectRow) (bool, error) {
 	l, err := n.left.evalRow(r)
-	if err != nil {
+	if err != nil { // unreachable via parseSQL: no AST node returns a non-nil error
 		return false, err
 	}
 	if l {
@@ -769,7 +769,7 @@ func (q *parsedQuery) execute(rows []selectRow) ([]selectRow, error) {
 				continue
 			}
 			ok, err := q.where.evalRow(r)
-			if err != nil {
+			if err != nil { // unreachable: no evalRow impl returns non-nil error
 				return nil, err
 			}
 			if ok {
@@ -785,7 +785,7 @@ func (q *parsedQuery) execute(rows []selectRow) ([]selectRow, error) {
 	for _, r := range rows {
 		if q.where != nil {
 			ok, err := q.where.evalRow(r)
-			if err != nil {
+			if err != nil { // unreachable: no evalRow impl returns non-nil error
 				return nil, err
 			}
 			if !ok {

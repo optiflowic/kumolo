@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"encoding/binary"
 	"encoding/xml"
+	"errors"
 	"hash/crc32"
 	"net/http"
 	"net/http/httptest"
@@ -1296,4 +1297,376 @@ func TestFormatJSONOutput_KeyOrder(t *testing.T) {
 	mIdx := strings.Index(s, `"m"`)
 	assert.Less(t, zIdx, aIdx, "z should appear before a (headers order, not alphabetical)")
 	assert.Less(t, aIdx, mIdx, "a should appear before m")
+}
+
+// ---- errReader for io.ReadAll failure tests ----
+
+type selectErrReader struct{}
+
+func (e *selectErrReader) Read(_ []byte) (int, error) { return 0, errors.New("read error") }
+
+func TestReadCSVRows_IOReadError(t *testing.T) {
+	_, _, err := readCSVRows(&selectErrReader{}, nil)
+	require.Error(t, err)
+}
+
+func TestReadJSONRows_IOReadError(t *testing.T) {
+	_, _, err := readJSONRows(&selectErrReader{}, nil)
+	require.Error(t, err)
+}
+
+func TestReadCSVRows_QuoteCharacterSet(t *testing.T) {
+	rows, _, err := readCSVRows(strings.NewReader("name,score\nAlice,90\n"), &xmlCSVInput{
+		FileHeaderInfo: "USE",
+		QuoteCharacter: "|", // exercises the _ = q path
+	})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "Alice", rows[0].vals["name"])
+}
+
+func TestReadCSVRows_VariableWidthRows(t *testing.T) {
+	// Data row has more columns than header row → triggers headers slice growth
+	rows, _, err := readCSVRows(strings.NewReader("a\n1,extra\n"), &xmlCSVInput{
+		FileHeaderInfo: "USE",
+	})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "1", rows[0].vals["a"])
+	assert.Equal(t, "extra", rows[0].vals["_2"])
+}
+
+// ---- JSON parsing error paths ----
+
+func TestJSONObjectToRow_EmptyInput(t *testing.T) {
+	_, err := jsonObjectToRow([]byte{})
+	require.Error(t, err)
+}
+
+func TestJSONObjectToRow_NonObjectToken(t *testing.T) {
+	// First token is a string, not '{'
+	_, err := jsonObjectToRow([]byte(`"hello"`))
+	require.Error(t, err)
+}
+
+func TestJSONObjectToRow_ArrayToken(t *testing.T) {
+	// First token is '[', not '{'
+	_, err := jsonObjectToRow([]byte(`[1,2]`))
+	require.Error(t, err)
+}
+
+func TestJSONObjectToRow_TruncatedKeyError(t *testing.T) {
+	// After '{', the key string is unterminated → dec.Token() returns error
+	_, err := jsonObjectToRow([]byte(`{"`))
+	require.Error(t, err)
+}
+
+func TestJSONObjectToRow_TruncatedValue(t *testing.T) {
+	// After the key, the value is missing → dec.Decode() returns error
+	_, err := jsonObjectToRow([]byte(`{"key":`))
+	require.Error(t, err)
+}
+
+func TestParseJSONLines_MalformedLine(t *testing.T) {
+	// Second line is a JSON array, not an object
+	_, err := parseJSONLines([]byte(`{"a":1}` + "\n" + `[1,2]` + "\n"))
+	require.Error(t, err)
+}
+
+func TestParseJSONDocument_InvalidArrayJSON(t *testing.T) {
+	_, err := parseJSONDocument([]byte(`[invalid]`))
+	require.Error(t, err)
+}
+
+func TestParseJSONDocument_ArrayWithNonObjects(t *testing.T) {
+	// Array elements are not objects
+	_, err := parseJSONDocument([]byte(`[1, 2, 3]`))
+	require.Error(t, err)
+}
+
+func TestParseJSONDocument_SingleNonObject(t *testing.T) {
+	// Single JSON value that is not an object
+	_, err := parseJSONDocument([]byte(`"hello"`))
+	require.Error(t, err)
+}
+
+// ---- Handler: storage error and BZIP2 paths ----
+
+func TestSelectObjectContent_StorageError(t *testing.T) {
+	ro := newRouterWithMock(&mockStore{getObjectErr: errors.New("disk failure")})
+	xmlBody := selectXMLBody(
+		"SELECT * FROM S3Object",
+		"SQL",
+		`<InputSerialization><CSV><FileHeaderInfo>NONE</FileHeaderInfo></CSV></InputSerialization>`,
+		csvOutputFmt(),
+	)
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/my-bucket/data.csv?select&select-type=2",
+		strings.NewReader(xmlBody),
+	)
+	w := httptest.NewRecorder()
+	ro.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+func TestSelectObjectContent_BZip2Path(t *testing.T) {
+	// Non-BZIP2 data with CompressionType=BZIP2: triggers bzip2.NewReader (lines 154-155)
+	// and then io.ReadAll error during decompression (lines 18-20, 166-173).
+	ro := newTestRouter(t)
+	putSelectObject(t, ro, "my-bucket", "data.csv", "not bzip2 data")
+
+	xmlBody := `<?xml version="1.0" encoding="UTF-8"?>` +
+		`<SelectObjectContentRequest>` +
+		`<Expression>SELECT * FROM S3Object</Expression>` +
+		`<ExpressionType>SQL</ExpressionType>` +
+		`<InputSerialization>` +
+		`<CompressionType>BZIP2</CompressionType>` +
+		`<CSV><FileHeaderInfo>NONE</FileHeaderInfo></CSV>` +
+		`</InputSerialization>` +
+		`<OutputSerialization><CSV></CSV></OutputSerialization>` +
+		`</SelectObjectContentRequest>`
+	w := doSelect(t, ro, "my-bucket", "data.csv", xmlBody)
+	// BZIP2 decompression of non-BZIP2 data fails → 400 InvalidDataType
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "InvalidDataType")
+}
+
+func TestSelectObjectContent_JSONParseError(t *testing.T) {
+	// Malformed JSON input triggers readJSONRows error → handler lines 166-173
+	ro := newTestRouter(t)
+	putSelectObject(t, ro, "my-bucket", "data.json", `[invalid json]`)
+
+	xmlBody := selectXMLBody(
+		"SELECT * FROM S3Object",
+		"SQL",
+		`<InputSerialization><JSON><Type>DOCUMENT</Type></JSON></InputSerialization>`,
+		csvOutputFmt(),
+	)
+	w := doSelect(t, ro, "my-bucket", "data.json", xmlBody)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "InvalidDataType")
+}
+
+// ---- SQL AST eval coverage ----
+
+func TestExecute_IsNotNull(t *testing.T) {
+	q, err := parseSQL("SELECT * FROM S3Object WHERE col IS NOT NULL")
+	require.NoError(t, err)
+	rows := []selectRow{
+		makeRow([]string{"col"}, map[string]string{"col": "val"}),
+		makeRow([]string{"col"}, map[string]string{}), // missing col → NULL
+	}
+	result, err := q.execute(rows)
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+	assert.Equal(t, "val", result[0].vals["col"])
+}
+
+func TestExecute_LikeOnNullColumn(t *testing.T) {
+	// LIKE applied to a missing (NULL) column → false
+	q, err := parseSQL("SELECT * FROM S3Object WHERE missing LIKE 'x%'")
+	require.NoError(t, err)
+	rows := []selectRow{makeRow([]string{"name"}, map[string]string{"name": "Alice"})}
+	result, err := q.execute(rows)
+	require.NoError(t, err)
+	assert.Empty(t, result)
+}
+
+func TestExecute_NotLikeExecution(t *testing.T) {
+	q, err := parseSQL("SELECT * FROM S3Object WHERE name NOT LIKE 'Al%'")
+	require.NoError(t, err)
+	rows := []selectRow{
+		makeRow([]string{"name"}, map[string]string{"name": "Alice"}),
+		makeRow([]string{"name"}, map[string]string{"name": "Bob"}),
+	}
+	result, err := q.execute(rows)
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+	assert.Equal(t, "Bob", result[0].vals["name"])
+}
+
+func TestExecute_FloatLiteral(t *testing.T) {
+	// Tests numLitNode.evalVal float path (non-integer value)
+	q, err := parseSQL("SELECT * FROM S3Object WHERE _1 = 3.14")
+	require.NoError(t, err)
+	rows := []selectRow{
+		makeRow([]string{"_1"}, map[string]string{"_1": "3.14"}),
+		makeRow([]string{"_1"}, map[string]string{"_1": "2.71"}),
+	}
+	result, err := q.execute(rows)
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+}
+
+func TestExecute_CastNullColumn(t *testing.T) {
+	// CAST of a missing column returns NULL, NULL > 5 is false
+	q, err := parseSQL("SELECT * FROM S3Object WHERE CAST(missing AS INT) > 5")
+	require.NoError(t, err)
+	rows := []selectRow{makeRow([]string{"_1"}, map[string]string{"_1": "10"})}
+	result, err := q.execute(rows)
+	require.NoError(t, err)
+	assert.Empty(t, result)
+}
+
+func TestExecute_CastINTParseError(t *testing.T) {
+	// CAST("abc" AS INT) returns "0" (parse error fallback)
+	q, err := parseSQL("SELECT * FROM S3Object WHERE CAST(_1 AS INT) > 0")
+	require.NoError(t, err)
+	rows := []selectRow{makeRow([]string{"_1"}, map[string]string{"_1": "abc"})}
+	result, err := q.execute(rows)
+	require.NoError(t, err)
+	assert.Empty(t, result) // 0 > 0 = false
+}
+
+func TestExecute_CastFLOATParseError(t *testing.T) {
+	// CAST("xyz" AS FLOAT) returns "0"
+	q, err := parseSQL("SELECT * FROM S3Object WHERE CAST(_1 AS FLOAT) = 0")
+	require.NoError(t, err)
+	rows := []selectRow{makeRow([]string{"_1"}, map[string]string{"_1": "xyz"})}
+	result, err := q.execute(rows)
+	require.NoError(t, err)
+	require.Len(t, result, 1) // 0 = 0 = true
+}
+
+func TestExecute_CastDefaultType(t *testing.T) {
+	// CAST("abc" AS UNKNOWN_TYPE) passes through as-is
+	q, err := parseSQL("SELECT * FROM S3Object WHERE CAST(_1 AS UNKNOWNTYPE) = 'abc'")
+	require.NoError(t, err)
+	rows := []selectRow{makeRow([]string{"_1"}, map[string]string{"_1": "abc"})}
+	result, err := q.execute(rows)
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+}
+
+func TestExecute_TrueFalseLiterals(t *testing.T) {
+	q, err := parseSQL("SELECT * FROM S3Object WHERE flag = TRUE")
+	require.NoError(t, err)
+	rows := []selectRow{
+		makeRow([]string{"flag"}, map[string]string{"flag": "true"}),
+		makeRow([]string{"flag"}, map[string]string{"flag": "false"}),
+	}
+	result, err := q.execute(rows)
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+
+	q2, err := parseSQL("SELECT * FROM S3Object WHERE flag = FALSE")
+	require.NoError(t, err)
+	result2, err := q2.execute(rows)
+	require.NoError(t, err)
+	require.Len(t, result2, 1)
+}
+
+// ---- SQL compareValues string <= >= paths ----
+
+func TestCompareValues_StringLEGE(t *testing.T) {
+	got, err := compareValues("abc", "<=", "abd")
+	require.NoError(t, err)
+	assert.True(t, got)
+
+	got, err = compareValues("abc", ">=", "abc")
+	require.NoError(t, err)
+	assert.True(t, got)
+}
+
+// ---- matchLike edge case: % pattern exhausts without match ----
+
+func TestMatchLike_PercentNoMatch(t *testing.T) {
+	// '%xyz' with a string that doesn't end in 'xyz'
+	assert.False(t, matchLike("abcdef", "%xyz"))
+	assert.True(t, matchLike("abcxyz", "%xyz"))
+}
+
+// ---- SQL parser error path coverage ----
+
+func TestParseSQL_Errors(t *testing.T) {
+	cases := []struct {
+		name string
+		sql  string
+	}{
+		{"no FROM", "SELECT * S3Object"},
+		{"wrong table", "SELECT * FROM OtherTable"},
+		{"WHERE parse error", "SELECT * FROM S3Object WHERE ="},
+		{"LIMIT non-number", "SELECT * FROM S3Object LIMIT abc"},
+		{"LIMIT float", "SELECT * FROM S3Object LIMIT 3.14"},
+		{"COUNT no paren", "SELECT COUNT FROM S3Object"},
+		{"COUNT no star", "SELECT COUNT(5) FROM S3Object"},
+		{"COUNT no close", "SELECT COUNT(* FROM S3Object"},
+		{"IS NULL missing NULL", "SELECT * FROM S3Object WHERE col IS SOMETHING"},
+		{"LIKE non-string pattern", "SELECT * FROM S3Object WHERE col LIKE 123"},
+		{"NOT without LIKE", "SELECT * FROM S3Object WHERE col NOT = 'x'"},
+		{"no operator after value", "SELECT * FROM S3Object WHERE col"},
+		{"CAST no paren", "SELECT * FROM S3Object WHERE CAST col AS INT = 1"},
+		{"CAST no AS", "SELECT * FROM S3Object WHERE CAST(col INT) = 1"},
+		{"CAST no type ident", "SELECT * FROM S3Object WHERE CAST(col AS 123) = 1"},
+		{"CAST no close paren", "SELECT * FROM S3Object WHERE CAST(col AS INT = 1"},
+		{"unexpected token in value", "SELECT * FROM S3Object WHERE = 5"},
+		{"col ref after dot non-ident", "SELECT s.123 FROM S3Object s"},
+		{"select col ref error", "SELECT 123 FROM S3Object"},
+		{"unclosed paren", "SELECT * FROM S3Object WHERE (col = 'x'"},
+		{"paren inner error", "SELECT * FROM S3Object WHERE (=)"},
+		{"OR right error", "SELECT * FROM S3Object WHERE a = 'x' OR ="},
+		{"AND right error", "SELECT * FROM S3Object WHERE a = 'x' AND ="},
+		{"NOT inner error", "SELECT * FROM S3Object WHERE NOT ="},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parseSQL(tc.sql)
+			assert.Error(t, err, "expected parse error for: %s", tc.sql)
+		})
+	}
+}
+
+func TestParseSQL_SelectWithAlias(t *testing.T) {
+	// SELECT col AS alias FROM S3Object — exercises AS alias path in parseSelectList
+	q, err := parseSQL("SELECT name AS n, score AS s FROM S3Object")
+	require.NoError(t, err)
+	require.Len(t, q.columns, 2)
+	assert.Equal(t, "name", q.columns[0].name)
+	assert.Equal(t, "score", q.columns[1].name)
+}
+
+func TestParseSQL_ColRefAfterDotError(t *testing.T) {
+	// "SELECT s.123" — dot followed by non-identifier
+	_, err := parseSQL("SELECT s.123 FROM S3Object s")
+	assert.Error(t, err)
+}
+
+func TestParseSQL_ColRefInSelectError(t *testing.T) {
+	// Number as column reference is not valid
+	_, err := parseSQL("SELECT 123 FROM S3Object")
+	assert.Error(t, err)
+}
+
+func TestScanNumber_ScientificWithSign(t *testing.T) {
+	// "1e+2" — scientific notation with explicit '+' sign exercises scanNumber lines 396-398
+	q, err := parseSQL("SELECT * FROM S3Object WHERE _1 > 1e+2")
+	require.NoError(t, err)
+	rows := []selectRow{
+		makeRow([]string{"_1"}, map[string]string{"_1": "50"}),
+		makeRow([]string{"_1"}, map[string]string{"_1": "200"}),
+	}
+	result, err := q.execute(rows)
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+	assert.Equal(t, "200", result[0].vals["_1"])
+}
+
+func TestScan_UnrecognisedChar(t *testing.T) {
+	// '@' is not a valid SQL token → scan returns EOF kind
+	_, err := parseSQL("SELECT * FROM S3Object WHERE _1 @ 5")
+	assert.Error(t, err)
+}
+
+func TestParseSQL_GTOperatorAlone(t *testing.T) {
+	// '>' without '=' → exercises case sqlTokGT in parseOp
+	q, err := parseSQL("SELECT * FROM S3Object WHERE _1 > 3")
+	require.NoError(t, err)
+	rows := []selectRow{
+		makeRow([]string{"_1"}, map[string]string{"_1": "2"}),
+		makeRow([]string{"_1"}, map[string]string{"_1": "5"}),
+	}
+	result, err := q.execute(rows)
+	require.NoError(t, err)
+	assert.Len(t, result, 1)
 }

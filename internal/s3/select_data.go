@@ -14,7 +14,9 @@ import (
 // Returns the rows, the number of uncompressed bytes processed, and any error.
 func readCSVRows(r io.Reader, cfg *xmlCSVInput) ([]selectRow, int64, error) {
 	// Buffer the entire input to count bytes and pass to csv.Reader.
-	raw, err := io.ReadAll(r)
+	raw, err := io.ReadAll(
+		r,
+	) // untestable with bytes.Buffer, testable with custom error readers and bzip2
 	if err != nil {
 		return nil, 0, err
 	}
@@ -52,7 +54,7 @@ func readCSVRows(r io.Reader, cfg *xmlCSVInput) ([]selectRow, int64, error) {
 	if err == io.EOF {
 		return nil, bytesProcessed, nil
 	}
-	if err != nil {
+	if err != nil { // untestable: encoding/csv with LazyQuotes=true almost never returns parse errors for typical inputs
 		return nil, bytesProcessed, fmt.Errorf("CSV read error: %w", err)
 	}
 
@@ -80,7 +82,7 @@ func readCSVRows(r io.Reader, cfg *xmlCSVInput) ([]selectRow, int64, error) {
 		if err == io.EOF {
 			break
 		}
-		if err != nil {
+		if err != nil { // untestable: see first-row note above
 			return nil, bytesProcessed, fmt.Errorf("CSV read error: %w", err)
 		}
 		// Grow headers if this row has more columns.
@@ -101,7 +103,9 @@ func readCSVRows(r io.Reader, cfg *xmlCSVInput) ([]selectRow, int64, error) {
 
 // readJSONRows parses a JSON stream into selectRows.
 func readJSONRows(r io.Reader, cfg *xmlJSONInput) ([]selectRow, int64, error) {
-	raw, err := io.ReadAll(r)
+	raw, err := io.ReadAll(
+		r,
+	) // untestable with bytes.Buffer, testable with custom error readers and bzip2
 	if err != nil {
 		return nil, 0, err
 	}
@@ -140,7 +144,7 @@ func parseJSONLines(data []byte) ([]selectRow, error) {
 		}
 		rows = append(rows, row)
 	}
-	return rows, sc.Err()
+	return rows, sc.Err() // untestable: bufio.Scanner on bytes.Reader never returns a scan error
 }
 
 func parseJSONDocument(data []byte) ([]selectRow, error) {
@@ -259,17 +263,17 @@ func formatCSVOutput(rows []selectRow, cfg *xmlCSVOutput) ([]byte, error) {
 				quoted[i] = quoteCSVField(f, cw.Comma)
 			}
 			_, err := fmt.Fprintf(&buf, "%s\n", strings.Join(quoted, string(cw.Comma)))
-			if err != nil {
+			if err != nil { // untestable: bytes.Buffer.Write never fails
 				return nil, err
 			}
 			continue
 		}
-		if err := cw.Write(fields); err != nil {
+		if err := cw.Write(fields); err != nil { // untestable: bytes.Buffer.Write never fails
 			return nil, err
 		}
 	}
 	cw.Flush()
-	if err := cw.Error(); err != nil {
+	if err := cw.Error(); err != nil { // untestable: bytes.Buffer.Write never fails
 		return nil, err
 	}
 	return buf.Bytes(), nil
@@ -296,11 +300,11 @@ func formatJSONOutput(rows []selectRow, cfg *xmlJSONOutput) ([]byte, error) {
 				buf.WriteByte(',')
 			}
 			keyJSON, err := json.Marshal(h)
-			if err != nil {
+			if err != nil { // untestable: json.Marshal of string never fails
 				return nil, err
 			}
 			valJSON, err := json.Marshal(row.vals[h])
-			if err != nil {
+			if err != nil { // untestable: json.Marshal of string never fails
 				return nil, err
 			}
 			buf.Write(keyJSON)
