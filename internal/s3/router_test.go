@@ -489,6 +489,7 @@ func (m *mockStore) HeadObjectVersion(_ string, _ string, _ string) (ObjectMetad
 func (m *mockStore) SetObjectRestoreInitiated(_ string, _ string) error {
 	return m.setObjectRestoreInitiatedErr
 }
+func (m *mockStore) SetObjectReplicationStatus(_ string, _ string, _ string) error { return nil }
 func (m *mockStore) ListObjects(_ string) ([]ObjectInfo, error) {
 	return m.listObjectsObjs, m.listObjectsErr
 }

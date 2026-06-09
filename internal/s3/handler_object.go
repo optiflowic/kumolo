@@ -381,6 +381,10 @@ func (ro *Router) handleCopyObject(
 		ETag:         meta.ETag,
 		LastModified: meta.LastModified,
 	})
+	if fl, ok := w.(http.Flusher); ok {
+		fl.Flush()
+	}
+	ro.replicateObject(dstBucket, dstKey, meta)
 }
 
 // setSSEHeaders writes SSE response headers derived from object metadata.
@@ -601,6 +605,10 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 	}
 	setSSEHeaders(w, meta)
 	w.WriteHeader(http.StatusOK)
+	if fl, ok := w.(http.Flusher); ok {
+		fl.Flush()
+	}
+	ro.replicateObject(bucket, key, meta)
 }
 
 // checkConditionals evaluates conditional request headers per RFC 7232.
@@ -759,6 +767,9 @@ func (ro *Router) handleHeadObject(w http.ResponseWriter, r *http.Request, bucke
 	setSSEHeaders(w, meta)
 	if meta.StorageClass != "" {
 		w.Header().Set(amzStorageClass, meta.StorageClass)
+	}
+	if meta.ReplicationStatus != "" {
+		w.Header().Set(amzReplicationStatus, meta.ReplicationStatus)
 	}
 	// tagging count is best-effort; errors are intentionally ignored so that a
 	// missing or unreadable tags file never prevents a successful object response.
@@ -1056,6 +1067,9 @@ func (ro *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 	setSSEHeaders(w, meta)
 	if meta.StorageClass != "" {
 		w.Header().Set(amzStorageClass, meta.StorageClass)
+	}
+	if meta.ReplicationStatus != "" {
+		w.Header().Set(amzReplicationStatus, meta.ReplicationStatus)
 	}
 	// tagging count is best-effort; errors are intentionally ignored so that a
 	// missing or unreadable tags file never prevents a successful object response.

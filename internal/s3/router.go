@@ -41,6 +41,7 @@ const (
 	amzMetadataDirective           = "X-Amz-Metadata-Directive"
 	amzCopySourceRange             = "X-Amz-Copy-Source-Range"
 	amzBypassGovernanceRetention   = "X-Amz-Bypass-Governance-Retention" // #nosec G101 -- HTTP header name, not a credential
+	amzReplicationStatus           = "X-Amz-Replication-Status"
 	amzBucketRegion                = "X-Amz-Bucket-Region"
 	amzObjectLockEnabled           = "X-Amz-Object-Lock-Enabled"
 	amzObjectLockMode              = "X-Amz-Object-Lock-Mode"
