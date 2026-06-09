@@ -260,7 +260,7 @@ func formatCSVOutput(rows []selectRow, cfg *xmlCSVOutput) ([]byte, error) {
 			// or newlines. We force quoting by wrapping each field.
 			quoted := make([]string, len(fields))
 			for i, f := range fields {
-				quoted[i] = quoteCSVField(f, cw.Comma)
+				quoted[i] = quoteCSVField(f)
 			}
 			_, err := fmt.Fprintf(&buf, "%s\n", strings.Join(quoted, string(cw.Comma)))
 			if err != nil { // untestable: bytes.Buffer.Write never fails
@@ -279,7 +279,7 @@ func formatCSVOutput(rows []selectRow, cfg *xmlCSVOutput) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func quoteCSVField(s string, comma rune) string {
+func quoteCSVField(s string) string {
 	escaped := strings.ReplaceAll(s, `"`, `""`)
 	return `"` + escaped + `"`
 }
