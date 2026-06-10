@@ -680,15 +680,23 @@ func TestExecuteTransaction_Writes(t *testing.T) {
 			]
 		}`)
 		assert.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		// Write transactions return a Responses list with one empty object per statement.
+		responses := resp["Responses"].([]any)
+		assert.Len(t, responses, 2)
+		for _, r := range responses {
+			assert.Empty(t, r.(map[string]any))
+		}
 
 		// Verify both items exist
 		w2 := dynamo(t, ro, "ExecuteStatement", `{
 			"Statement": "SELECT * FROM \"t\" WHERE pk = ?",
 			"Parameters": [{"S":"ttx1"}]
 		}`)
-		var resp map[string]any
-		require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &resp))
-		assert.Len(t, resp["Items"].([]any), 1)
+		var resp2 map[string]any
+		require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &resp2))
+		assert.Len(t, resp2["Items"].([]any), 1)
 	})
 
 	t.Run("400 on empty TransactStatements", func(t *testing.T) {
