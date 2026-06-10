@@ -461,6 +461,145 @@ fi
 $AWS delete-table --table-name "$STREAM_TABLE" > /dev/null 2>&1 || true
 
 # ---------------------------------------------------------------------------
+# PartiQL
+# ---------------------------------------------------------------------------
+PARTIQL_TABLE="kumolo-cli-ddb-partiql-verify"
+
+$AWS delete-table --table-name "$PARTIQL_TABLE" > /dev/null 2>&1 || true
+
+echo ""
+echo "=== DynamoDB PartiQL ==="
+
+run "CreateTable (PartiQL)" \
+  $AWS create-table \
+    --table-name "$PARTIQL_TABLE" \
+    --attribute-definitions \
+      AttributeName=pk,AttributeType=S \
+      AttributeName=sk,AttributeType=N \
+    --key-schema \
+      AttributeName=pk,KeyType=HASH \
+      AttributeName=sk,KeyType=RANGE \
+    --billing-mode PAY_PER_REQUEST
+
+run "WaitTableExists (PartiQL table)" \
+  $AWS wait table-exists --table-name "$PARTIQL_TABLE"
+
+# ExecuteStatement — INSERT
+run "ExecuteStatement (INSERT row 1)" \
+  $AWS execute-statement \
+    --statement "INSERT INTO \"$PARTIQL_TABLE\" VALUE {'pk': 'user-001', 'sk': 1, 'name': 'Alice', 'score': 100}"
+
+run "ExecuteStatement (INSERT row 2)" \
+  $AWS execute-statement \
+    --statement "INSERT INTO \"$PARTIQL_TABLE\" VALUE {'pk': 'user-001', 'sk': 2, 'name': 'Bob', 'score': 200}"
+
+run "ExecuteStatement (INSERT row 3)" \
+  $AWS execute-statement \
+    --statement "INSERT INTO \"$PARTIQL_TABLE\" VALUE {'pk': 'user-002', 'sk': 1, 'name': 'Carol', 'score': 150}"
+
+# ExecuteStatement — SELECT
+SEL_RESP=$($AWS execute-statement \
+  --statement "SELECT * FROM \"$PARTIQL_TABLE\" WHERE pk='user-001'" \
+  2>/dev/null || true)
+SEL_COUNT=$(echo "$SEL_RESP" | jq '.Items | length' 2>/dev/null || echo -1)
+if [[ "$SEL_COUNT" -eq 2 ]]; then
+  ok "ExecuteStatement (SELECT WHERE pk — 2 rows)"
+else
+  fail "ExecuteStatement (SELECT WHERE pk — expected 2, got $SEL_COUNT)"
+fi
+
+SEL_PK_SK=$($AWS execute-statement \
+  --statement "SELECT * FROM \"$PARTIQL_TABLE\" WHERE pk='user-001' AND sk=1" \
+  2>/dev/null || true)
+SEL_PK_SK_COUNT=$(echo "$SEL_PK_SK" | jq '.Items | length' 2>/dev/null || echo -1)
+if [[ "$SEL_PK_SK_COUNT" -eq 1 ]]; then
+  ok "ExecuteStatement (SELECT WHERE pk AND sk — 1 row)"
+else
+  fail "ExecuteStatement (SELECT WHERE pk AND sk — expected 1, got $SEL_PK_SK_COUNT)"
+fi
+
+# ExecuteStatement — UPDATE
+run "ExecuteStatement (UPDATE)" \
+  $AWS execute-statement \
+    --statement "UPDATE \"$PARTIQL_TABLE\" SET score=999 WHERE pk='user-001' AND sk=1"
+
+UPDATED_RESP=$($AWS execute-statement \
+  --statement "SELECT score FROM \"$PARTIQL_TABLE\" WHERE pk='user-001' AND sk=1" \
+  2>/dev/null || true)
+UPDATED_SCORE=$(echo "$UPDATED_RESP" | jq -r '.Items[0].score.N // empty' 2>/dev/null || true)
+if [[ "$UPDATED_SCORE" == "999" ]]; then
+  ok "ExecuteStatement (UPDATE reflected in SELECT)"
+else
+  fail "ExecuteStatement (UPDATE: expected score=999, got '$UPDATED_SCORE')"
+fi
+
+# ExecuteStatement — DELETE
+run "ExecuteStatement (DELETE)" \
+  $AWS execute-statement \
+    --statement "DELETE FROM \"$PARTIQL_TABLE\" WHERE pk='user-001' AND sk=2"
+
+DEL_VERIFY=$($AWS execute-statement \
+  --statement "SELECT * FROM \"$PARTIQL_TABLE\" WHERE pk='user-001'" \
+  2>/dev/null || true)
+DEL_COUNT=$(echo "$DEL_VERIFY" | jq '.Items | length' 2>/dev/null || echo -1)
+if [[ "$DEL_COUNT" -eq 1 ]]; then
+  ok "ExecuteStatement (DELETE — row removed)"
+else
+  fail "ExecuteStatement (DELETE — expected 1 remaining row, got $DEL_COUNT)"
+fi
+
+# BatchExecuteStatement
+BATCH_RESP=$($AWS batch-execute-statement \
+  --statements \
+    "[{\"Statement\":\"INSERT INTO \\\"$PARTIQL_TABLE\\\" VALUE {'pk': 'user-003', 'sk': 1, 'name': 'Dave', 'score': 50}\"},
+      {\"Statement\":\"INSERT INTO \\\"$PARTIQL_TABLE\\\" VALUE {'pk': 'user-004', 'sk': 1, 'name': 'Eve', 'score': 75}\"}]" \
+  2>/dev/null || true)
+BATCH_RESP_COUNT=$(echo "$BATCH_RESP" | jq '.Responses | length' 2>/dev/null || echo -1)
+if [[ "$BATCH_RESP_COUNT" -eq 2 ]]; then
+  ok "BatchExecuteStatement (2 INSERTs — Responses count matches)"
+else
+  fail "BatchExecuteStatement (expected 2 Responses, got $BATCH_RESP_COUNT)"
+fi
+
+BATCH_SELECT_RESP=$($AWS batch-execute-statement \
+  --statements \
+    "[{\"Statement\":\"SELECT * FROM \\\"$PARTIQL_TABLE\\\" WHERE pk='user-003' AND sk=1\"},
+      {\"Statement\":\"SELECT * FROM \\\"$PARTIQL_TABLE\\\" WHERE pk='user-004' AND sk=1\"}]" \
+  2>/dev/null || true)
+BATCH_SELECT_COUNT=$(echo "$BATCH_SELECT_RESP" | jq '.Responses | length' 2>/dev/null || echo -1)
+if [[ "$BATCH_SELECT_COUNT" -eq 2 ]]; then
+  ok "BatchExecuteStatement (2 SELECTs — Responses count matches)"
+else
+  fail "BatchExecuteStatement (SELECT — expected 2 Responses, got $BATCH_SELECT_COUNT)"
+fi
+
+# ExecuteTransaction
+TXN_RESP=$($AWS execute-transaction \
+  --transact-statements \
+    "[{\"Statement\":\"UPDATE \\\"$PARTIQL_TABLE\\\" SET score=100 WHERE pk='user-003' AND sk=1\"},
+      {\"Statement\":\"UPDATE \\\"$PARTIQL_TABLE\\\" SET score=200 WHERE pk='user-004' AND sk=1\"}]" \
+  2>/dev/null || true)
+TXN_RESP_COUNT=$(echo "$TXN_RESP" | jq '.Responses | length' 2>/dev/null || echo -1)
+if [[ "$TXN_RESP_COUNT" -eq 2 ]]; then
+  ok "ExecuteTransaction (2 UPDATEs — Responses count matches)"
+else
+  fail "ExecuteTransaction (expected 2 Responses, got $TXN_RESP_COUNT)"
+fi
+
+TXN_VERIFY=$($AWS execute-statement \
+  --statement "SELECT score FROM \"$PARTIQL_TABLE\" WHERE pk='user-003' AND sk=1" \
+  2>/dev/null || true)
+TXN_SCORE=$(echo "$TXN_VERIFY" | jq -r '.Items[0].score.N // empty' 2>/dev/null || true)
+if [[ "$TXN_SCORE" == "100" ]]; then
+  ok "ExecuteTransaction (UPDATE reflected in SELECT)"
+else
+  fail "ExecuteTransaction (expected score=100, got '$TXN_SCORE')"
+fi
+
+# Cleanup PartiQL table.
+$AWS delete-table --table-name "$PARTIQL_TABLE" > /dev/null 2>&1 || true
+
+# ---------------------------------------------------------------------------
 echo ""
 echo "DynamoDB results: ${PASS} passed, ${FAIL} failed"
 [[ $FAIL -eq 0 ]]
