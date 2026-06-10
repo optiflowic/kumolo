@@ -203,6 +203,18 @@ type bucketObjectLockStore interface {
 	GetBucketObjectLock(bucket string) (string, error)
 }
 
+// bucketACLStore handles bucket-level ACL configuration.
+type bucketACLStore interface {
+	PutBucketACL(bucket, xmlBody string) error
+	GetBucketACL(bucket string) (string, error)
+}
+
+// objectACLStore handles per-object ACL configuration.
+type objectACLStore interface {
+	PutObjectACL(bucket, key, xmlBody string) error
+	GetObjectACL(bucket, key string) (string, error)
+}
+
 // objectRetentionStore handles per-object retention settings.
 type objectRetentionStore interface {
 	PutObjectRetention(bucket, key, versionID string, retention ObjectRetention) error

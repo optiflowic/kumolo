@@ -38,6 +38,7 @@ type bucketMeta struct {
 	Replication       string     `json:"replication,omitempty"`
 	RequestPayment    string     `json:"requestPayment,omitempty"`
 	ObjectLock        string     `json:"objectLock,omitempty"`
+	ACL               string     `json:"acl,omitempty"`
 }
 
 // Storage is a filesystem-backed S3 backend. os.Root scopes all access to the
@@ -2447,6 +2448,48 @@ func parseBucketDefaultRetention(xmlBody string, now time.Time) *ObjectRetention
 		return nil
 	}
 	return &ObjectRetention{Mode: dr.Mode, RetainUntilDate: retainUntil}
+}
+
+func (s *Storage) PutBucketACL(bucket, xmlBody string) error {
+	return s.putBucketConfigField(bucket, func(m *bucketMeta) { m.ACL = xmlBody })
+}
+
+func (s *Storage) GetBucketACL(bucket string) (string, error) {
+	return s.getBucketConfigField(bucket, func(m bucketMeta) string { return m.ACL })
+}
+
+func (s *Storage) PutObjectACL(bucket, key, xmlBody string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.bucketExistsLocked(bucket) {
+		return ErrBucketNotFound
+	}
+	objPath := filepath.Join(bucket, key)
+	meta, err := s.readMeta(objPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return ErrObjectNotFound
+		}
+		return err // untestable: non-ErrNotExist readMeta failure cannot be injected
+	}
+	meta.ACL = xmlBody
+	return s.writeMeta(objPath, meta)
+}
+
+func (s *Storage) GetObjectACL(bucket, key string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.bucketExistsLocked(bucket) {
+		return "", ErrBucketNotFound
+	}
+	meta, err := s.readMeta(filepath.Join(bucket, key))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", ErrObjectNotFound
+		}
+		return "", err // untestable: non-ErrNotExist readMeta failure cannot be injected
+	}
+	return meta.ACL, nil
 }
 
 // bucketDefaultRetentionLocked returns the bucket-level default ObjectRetention,
