@@ -6374,7 +6374,9 @@ func TestRouterListObjectVersions(t *testing.T) {
 	})
 
 	t.Run("returns 500 on storage error", func(t *testing.T) {
-		ro := newRouterWithMock(&mockStore{listObjectVersionsErr: errors.New("disk failure")})
+		ro := newRouterWithMock(
+			&mockStore{bucketExists: true, listObjectVersionsErr: errors.New("disk failure")},
+		)
 		req := httptest.NewRequest(http.MethodGet, "/my-bucket?versions", nil)
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)

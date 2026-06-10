@@ -350,7 +350,7 @@ func (ro *Router) handleGetBucketACL(w http.ResponseWriter, r *http.Request, buc
 
 func (ro *Router) handlePutBucketACL(w http.ResponseWriter, r *http.Request, bucket string) {
 	body, err := io.ReadAll(r.Body)
-	if err != nil {
+	if err != nil { // untestable: httptest.NewRequest body never errors
 		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
@@ -361,7 +361,14 @@ func (ro *Router) handlePutBucketACL(w http.ResponseWriter, r *http.Request, buc
 		return
 	}
 	if aclXML == "" {
-		aclXML = defaultACLXML()
+		writeError(
+			w,
+			r,
+			http.StatusBadRequest,
+			"MalformedXML",
+			"The XML you provided was not well-formed or did not validate against our published schema.",
+		)
+		return
 	}
 
 	if err := ro.storage.PutBucketACL(bucket, aclXML); err != nil {
@@ -445,7 +452,7 @@ func (ro *Router) handleGetObjectACL(w http.ResponseWriter, r *http.Request, buc
 
 func (ro *Router) handlePutObjectACL(w http.ResponseWriter, r *http.Request, bucket, key string) {
 	body, err := io.ReadAll(r.Body)
-	if err != nil {
+	if err != nil { // untestable: httptest.NewRequest body never errors
 		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
@@ -456,7 +463,14 @@ func (ro *Router) handlePutObjectACL(w http.ResponseWriter, r *http.Request, buc
 		return
 	}
 	if aclXML == "" {
-		aclXML = defaultACLXML()
+		writeError(
+			w,
+			r,
+			http.StatusBadRequest,
+			"MalformedXML",
+			"The XML you provided was not well-formed or did not validate against our published schema.",
+		)
+		return
 	}
 
 	if err := ro.storage.PutObjectACL(bucket, key, aclXML); err != nil {

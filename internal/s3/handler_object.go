@@ -1664,6 +1664,12 @@ func (ro *Router) handleGetObjectAttributes(
 		}
 		return
 	}
+	if isAnonymousRequest(r) && !aclAllowsAnonymous(meta.ACL, aclPermRead) {
+		slog.Debug("get object attributes denied: ACL",
+			"bucket", bucket, "key", key) // #nosec G706
+		writeError(w, r, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return
+	}
 
 	resp := getObjectAttributesResponse{}
 	if _, ok := requested["ETag"]; ok {

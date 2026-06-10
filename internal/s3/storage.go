@@ -2470,7 +2470,7 @@ func (s *Storage) PutObjectACL(bucket, key, xmlBody string) error {
 		if errors.Is(err, os.ErrNotExist) {
 			return ErrObjectNotFound
 		}
-		return err
+		return err // untestable: non-ErrNotExist readMeta failure cannot be injected
 	}
 	meta.ACL = xmlBody
 	return s.writeMeta(objPath, meta)
@@ -2487,7 +2487,7 @@ func (s *Storage) GetObjectACL(bucket, key string) (string, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			return "", ErrObjectNotFound
 		}
-		return "", err
+		return "", err // untestable: non-ErrNotExist readMeta failure cannot be injected
 	}
 	return meta.ACL, nil
 }

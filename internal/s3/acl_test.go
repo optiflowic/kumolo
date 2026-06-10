@@ -1,6 +1,7 @@
 package s3
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -514,5 +515,366 @@ func TestACLHeadEnforcement(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code)
 
 		assert.Equal(t, http.StatusOK, anonHeadStatus(t, ro, "/head-priv/obj"))
+	})
+}
+
+// TestACLHandlerErrorPaths covers 500-level and MalformedXML paths using mock storage.
+func TestACLHandlerErrorPaths(t *testing.T) {
+	t.Run("GetBucketACL 500 on storage error", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			bucketExists:    true,
+			getBucketACLErr: errors.New("disk fail"),
+		})
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/b?acl", nil))
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assert.Contains(t, w.Body.String(), "InternalError")
+	})
+
+	t.Run("PutBucketACL MalformedXML when no body and no header", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{bucketExists: true})
+		req := httptest.NewRequest(http.MethodPut, "/b?acl", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "MalformedXML")
+	})
+
+	t.Run("PutBucketACL 500 on storage error", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			bucketExists:    true,
+			putBucketACLErr: errors.New("disk fail"),
+		})
+		req := httptest.NewRequest(http.MethodPut, "/b?acl", nil)
+		req.Header.Set(amzACL, "private")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assert.Contains(t, w.Body.String(), "InternalError")
+	})
+
+	t.Run("GetObjectACL 500 on storage error", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			bucketExists:    true,
+			getObjectACLErr: errors.New("disk fail"),
+		})
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/b/k?acl", nil))
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assert.Contains(t, w.Body.String(), "InternalError")
+	})
+
+	t.Run("PutObjectACL MalformedXML when no body and no header", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{bucketExists: true})
+		req := httptest.NewRequest(http.MethodPut, "/b/k?acl", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "MalformedXML")
+	})
+
+	t.Run("PutObjectACL 500 on storage error", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			bucketExists:    true,
+			putObjectACLErr: errors.New("disk fail"),
+		})
+		req := httptest.NewRequest(http.MethodPut, "/b/k?acl", nil)
+		req.Header.Set(amzACL, "private")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assert.Contains(t, w.Body.String(), "InternalError")
+	})
+}
+
+// TestACLEnforcementNewOps covers ACL enforcement for the operations added in the review pass.
+func TestACLEnforcementNewOps(t *testing.T) {
+	privateBucketACL := mustBuildCannedACL(t, "private")
+	privateObjACL := mustBuildCannedACL(t, "private")
+
+	t.Run("ListObjects: anonymous denied by private ACL", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			bucketExists:       true,
+			getBucketACLResult: privateBucketACL,
+		})
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/b", nil))
+		assert.Equal(t, http.StatusForbidden, w.Code)
+	})
+
+	t.Run("ListObjects: anonymous + GetBucketACL 500", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			bucketExists:    true,
+			getBucketACLErr: errors.New("disk fail"),
+		})
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/b", nil))
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+
+	t.Run("ListObjectsV2: anonymous denied by private ACL", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			bucketExists:       true,
+			getBucketACLResult: privateBucketACL,
+		})
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/b?list-type=2", nil))
+		assert.Equal(t, http.StatusForbidden, w.Code)
+	})
+
+	t.Run("ListObjectsV2: anonymous + GetBucketACL bucket not found → 404", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{bucketExists: false})
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/b?list-type=2", nil))
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchBucket")
+	})
+
+	t.Run("ListObjectsV2: anonymous + GetBucketACL 500", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			bucketExists:    true,
+			getBucketACLErr: errors.New("disk fail"),
+		})
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/b?list-type=2", nil))
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+
+	t.Run("DeleteObjects: anonymous denied by private ACL", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			bucketExists:       true,
+			getBucketACLResult: privateBucketACL,
+		})
+		body := `<Delete><Object><Key>k</Key></Object></Delete>`
+		req := httptest.NewRequest(http.MethodPost, "/b?delete", strings.NewReader(body))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusForbidden, w.Code)
+	})
+
+	t.Run("DeleteObjects: anonymous + GetBucketACL bucket not found → 404", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{bucketExists: false})
+		body := `<Delete><Object><Key>k</Key></Object></Delete>`
+		req := httptest.NewRequest(http.MethodPost, "/b?delete", strings.NewReader(body))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+
+	t.Run("DeleteObjects: anonymous + GetBucketACL 500", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			bucketExists:    true,
+			getBucketACLErr: errors.New("disk fail"),
+		})
+		body := `<Delete><Object><Key>k</Key></Object></Delete>`
+		req := httptest.NewRequest(http.MethodPost, "/b?delete", strings.NewReader(body))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+
+	t.Run("ListObjectVersions: anonymous denied by private ACL", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			bucketExists:       true,
+			getBucketACLResult: privateBucketACL,
+		})
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/b?versions", nil))
+		assert.Equal(t, http.StatusForbidden, w.Code)
+	})
+
+	t.Run(
+		"ListObjectVersions: anonymous + GetBucketACL bucket not found → 404",
+		func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{bucketExists: false})
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/b?versions", nil))
+			assert.Equal(t, http.StatusNotFound, w.Code)
+		},
+	)
+
+	t.Run("ListObjectVersions: anonymous + GetBucketACL 500", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			bucketExists:    true,
+			getBucketACLErr: errors.New("disk fail"),
+		})
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/b?versions", nil))
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+
+	t.Run("GetObjectAttributes: anonymous denied by private object ACL", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			bucketExists:   true,
+			headObjectMeta: ObjectMetadata{ACL: privateObjACL},
+		})
+		req := httptest.NewRequest(http.MethodGet, "/b/k?attributes", nil)
+		req.Header.Set(amzObjectAttributes, "ETag")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusForbidden, w.Code)
+	})
+
+	t.Run("PutObject: anonymous + GetBucketACL 500", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			bucketExists:    true,
+			getBucketACLErr: errors.New("disk fail"),
+		})
+		req := httptest.NewRequest(http.MethodPut, "/b/k", strings.NewReader("data"))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+
+	t.Run("DeleteObject: anonymous denied by private ACL", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			bucketExists:       true,
+			getBucketACLResult: privateBucketACL,
+		})
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/b/k", nil))
+		assert.Equal(t, http.StatusForbidden, w.Code)
+	})
+
+	t.Run("DeleteObject: anonymous + GetBucketACL 500", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			bucketExists:    true,
+			getBucketACLErr: errors.New("disk fail"),
+		})
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/b/k", nil))
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+
+	t.Run("PutObject: PutObjectACL fails after put — 200 still returned", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			bucketExists:    true,
+			putObjectMeta:   ObjectMetadata{ETag: `"abc"`},
+			putObjectACLErr: errors.New("acl write fail"),
+		})
+		req := httptest.NewRequest(http.MethodPut, "/b/k", strings.NewReader("data"))
+		req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test")
+		req.Header.Set(amzACL, "public-read")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+}
+
+// TestACLCoverageGaps covers storage-error paths that are reachable but were previously untested.
+func TestACLCoverageGaps(t *testing.T) {
+	t.Run("PutObjectACL with invalid XML body returns 400 InvalidArgument", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{bucketExists: true})
+		req := httptest.NewRequest(http.MethodPut, "/b/k?acl", strings.NewReader("<not-valid-xml"))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidArgument")
+	})
+
+	// Anonymous PutObject: ACL check passes, then putFn returns ErrBucketNotFound (race-like).
+	t.Run(
+		"PutObject anonymous: ACL passes then putFn returns ErrBucketNotFound → 404",
+		func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{bucketExists: true, putObjectErr: ErrBucketNotFound})
+			req := httptest.NewRequest(http.MethodPut, "/b/k", strings.NewReader("data"))
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusNotFound, w.Code)
+			assert.Contains(t, w.Body.String(), "NoSuchBucket")
+		},
+	)
+
+	// DeleteObject with versionId: DeleteObjectVersion returns ErrBucketNotFound.
+	t.Run(
+		"DeleteObject versionId: DeleteObjectVersion ErrBucketNotFound → 404",
+		func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{
+				bucketExists:           true,
+				deleteObjectVersionErr: ErrBucketNotFound,
+			})
+			req := httptest.NewRequest(http.MethodDelete, "/b/k?versionId=abc", nil)
+			req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test")
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusNotFound, w.Code)
+			assert.Contains(t, w.Body.String(), "NoSuchBucket")
+		},
+	)
+
+	// DeleteObject without versionId: DeleteObject returns ErrBucketNotFound.
+	t.Run("DeleteObject: DeleteObject ErrBucketNotFound → 404", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			bucketExists:    true,
+			deleteObjectErr: ErrBucketNotFound,
+		})
+		req := httptest.NewRequest(http.MethodDelete, "/b/k", nil)
+		req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchBucket")
+	})
+
+	// ListObjects: bucket vanished between ACL check and ListObjects call.
+	t.Run("ListObjects: ListObjects ErrBucketNotFound → 404", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{listObjectsErr: ErrBucketNotFound})
+		req := httptest.NewRequest(http.MethodGet, "/b", nil)
+		req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchBucket")
+	})
+
+	// ListObjectsV2: same race pattern.
+	t.Run("ListObjectsV2: ListObjects ErrBucketNotFound → 404", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{listObjectsErr: ErrBucketNotFound})
+		req := httptest.NewRequest(http.MethodGet, "/b?list-type=2", nil)
+		req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchBucket")
+	})
+
+	// DeleteObjects authenticated: bucket does not exist → BucketExists returns false → 404.
+	t.Run("DeleteObjects authenticated: BucketExists false → 404", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{bucketExists: false})
+		body := `<Delete><Object><Key>k</Key></Object></Delete>`
+		req := httptest.NewRequest(http.MethodPost, "/b?delete", strings.NewReader(body))
+		req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchBucket")
+	})
+
+	// ListObjectVersions: bucket vanished between ACL check and ListObjectVersions call.
+	t.Run("ListObjectVersions: ErrBucketNotFound from storage → 404", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{listObjectVersionsErr: ErrBucketNotFound})
+		req := httptest.NewRequest(http.MethodGet, "/b?versions", nil)
+		req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchBucket")
+	})
+}
+
+// TestACLStorageBucketNotFound covers the bucket-not-found paths in PutObjectACL / GetObjectACL.
+func TestACLStorageBucketNotFound(t *testing.T) {
+	s, err := NewStorage(t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+
+	t.Run("PutObjectACL unknown bucket returns ErrBucketNotFound", func(t *testing.T) {
+		err := s.PutObjectACL("no-such-bucket", "key", "xml")
+		require.ErrorIs(t, err, ErrBucketNotFound)
+	})
+
+	t.Run("GetObjectACL unknown bucket returns ErrBucketNotFound", func(t *testing.T) {
+		_, err := s.GetObjectACL("no-such-bucket", "key")
+		require.ErrorIs(t, err, ErrBucketNotFound)
 	})
 }

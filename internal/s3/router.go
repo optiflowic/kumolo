@@ -1735,6 +1735,39 @@ func (ro *Router) handleListMultipartUploads(
 }
 
 func (ro *Router) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bucket string) {
+	if isAnonymousRequest(r) {
+		bucketACL, err := ro.storage.GetBucketACL(bucket)
+		if err != nil {
+			if errors.Is(err, ErrBucketNotFound) {
+				slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+					"bucket not found",
+					"bucket",
+					bucket,
+				)
+				writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+					"The specified bucket does not exist.")
+				return
+			}
+			slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"failed to get bucket ACL",
+				"bucket",
+				bucket,
+				"err",
+				err,
+			)
+			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+			return
+		}
+		if !aclAllowsAnonymous(bucketACL, aclPermWrite) {
+			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"delete objects denied: ACL",
+				"bucket",
+				bucket,
+			)
+			writeError(w, r, http.StatusForbidden, "AccessDenied", "Access Denied")
+			return
+		}
+	}
 	if !ro.storage.BucketExists(bucket) {
 		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
 			"bucket not found",
@@ -1842,6 +1875,39 @@ func (ro *Router) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 }
 
 func (ro *Router) handleListObjectVersions(w http.ResponseWriter, r *http.Request, bucket string) {
+	if isAnonymousRequest(r) {
+		bucketACL, err := ro.storage.GetBucketACL(bucket)
+		if err != nil {
+			if errors.Is(err, ErrBucketNotFound) {
+				slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+					"bucket not found",
+					"bucket",
+					bucket,
+				)
+				writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+					"The specified bucket does not exist.")
+				return
+			}
+			slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"failed to get bucket ACL",
+				"bucket",
+				bucket,
+				"err",
+				err,
+			)
+			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+			return
+		}
+		if !aclAllowsAnonymous(bucketACL, aclPermRead) {
+			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"list object versions denied: ACL",
+				"bucket",
+				bucket,
+			)
+			writeError(w, r, http.StatusForbidden, "AccessDenied", "Access Denied")
+			return
+		}
+	}
 	q := r.URL.Query()
 	prefix := q.Get("prefix")
 	delimiter := q.Get("delimiter")
