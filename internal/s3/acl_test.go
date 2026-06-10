@@ -2,7 +2,6 @@ package s3
 
 import (
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -293,6 +292,64 @@ func TestACLHandlers(t *testing.T) {
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNotFound, w.Code)
 	})
+
+	t.Run(
+		"PutBucketACL XML prolog body — GET returns exactly one <?xml declaration",
+		func(t *testing.T) {
+			createBucket(t, "b-prolog-bucket")
+			xmlWithProlog := `<?xml version="1.0" encoding="UTF-8"?>` + mustBuildCannedACL(
+				t,
+				"public-read",
+			)
+			req := httptest.NewRequest(
+				http.MethodPut,
+				"/b-prolog-bucket?acl",
+				strings.NewReader(xmlWithProlog),
+			)
+			req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test")
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			require.Equal(t, http.StatusOK, w.Code)
+
+			req2 := httptest.NewRequest(http.MethodGet, "/b-prolog-bucket?acl", nil)
+			w2 := httptest.NewRecorder()
+			ro.ServeHTTP(w2, req2)
+			assert.Equal(t, http.StatusOK, w2.Code)
+			body := w2.Body.String()
+			assert.Equal(t, 1, strings.Count(body, "<?xml"), "expected exactly one XML declaration")
+			assert.Contains(t, body, "AllUsers")
+		},
+	)
+
+	t.Run(
+		"PutObjectACL XML prolog body — GET returns exactly one <?xml declaration",
+		func(t *testing.T) {
+			createBucket(t, "b-prolog-obj")
+			putObject(t, "b-prolog-obj", "key", "data")
+
+			xmlWithProlog := `<?xml version="1.0" encoding="UTF-8"?>` + mustBuildCannedACL(
+				t,
+				"public-read",
+			)
+			req := httptest.NewRequest(
+				http.MethodPut,
+				"/b-prolog-obj/key?acl",
+				strings.NewReader(xmlWithProlog),
+			)
+			req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test")
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			require.Equal(t, http.StatusOK, w.Code)
+
+			req2 := httptest.NewRequest(http.MethodGet, "/b-prolog-obj/key?acl", nil)
+			w2 := httptest.NewRecorder()
+			ro.ServeHTTP(w2, req2)
+			assert.Equal(t, http.StatusOK, w2.Code)
+			body := w2.Body.String()
+			assert.Equal(t, 1, strings.Count(body, "<?xml"), "expected exactly one XML declaration")
+			assert.Contains(t, body, "AllUsers")
+		},
+	)
 }
 
 func TestACLEnforcement(t *testing.T) {
@@ -506,7 +563,7 @@ func TestACLHeadEnforcement(t *testing.T) {
 		req := httptest.NewRequest(
 			http.MethodPut,
 			"/head-priv/obj?acl",
-			io.NopCloser(strings.NewReader("")),
+			strings.NewReader(""),
 		)
 		req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test")
 		req.Header.Set(amzACL, "public-read")
@@ -746,7 +803,7 @@ func TestACLEnforcementNewOps(t *testing.T) {
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
 
-	t.Run("PutObject: PutObjectACL fails after put — 200 still returned", func(t *testing.T) {
+	t.Run("PutObject: PutObjectACL fails — rolls back and returns 500", func(t *testing.T) {
 		ro := newRouterWithMock(&mockStore{
 			bucketExists:    true,
 			putObjectMeta:   ObjectMetadata{ETag: `"abc"`},
@@ -757,7 +814,58 @@ func TestACLEnforcementNewOps(t *testing.T) {
 		req.Header.Set(amzACL, "public-read")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assert.Contains(t, w.Body.String(), "InternalError")
+	})
+
+	t.Run(
+		"PutObject: ACL rollback versioned — deleteObjectVersion succeeds → 500",
+		func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{
+				bucketExists:    true,
+				putObjectMeta:   ObjectMetadata{ETag: `"abc"`, VersionID: "v1"},
+				putObjectACLErr: errors.New("acl write fail"),
+			})
+			req := httptest.NewRequest(http.MethodPut, "/b/k", strings.NewReader("data"))
+			req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test")
+			req.Header.Set(amzACL, "public-read")
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusInternalServerError, w.Code)
+			assert.Contains(t, w.Body.String(), "InternalError")
+		},
+	)
+
+	t.Run("PutObject: ACL rollback non-versioned delete fails — still 500", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			bucketExists:    true,
+			putObjectMeta:   ObjectMetadata{ETag: `"abc"`},
+			putObjectACLErr: errors.New("acl write fail"),
+			deleteObjectErr: errors.New("delete fail"),
+		})
+		req := httptest.NewRequest(http.MethodPut, "/b/k", strings.NewReader("data"))
+		req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test")
+		req.Header.Set(amzACL, "public-read")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assert.Contains(t, w.Body.String(), "InternalError")
+	})
+
+	t.Run("PutObject: ACL rollback versioned delete fails — still 500", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			bucketExists:           true,
+			putObjectMeta:          ObjectMetadata{ETag: `"abc"`, VersionID: "v1"},
+			putObjectACLErr:        errors.New("acl write fail"),
+			deleteObjectVersionErr: errors.New("delete fail"),
+		})
+		req := httptest.NewRequest(http.MethodPut, "/b/k", strings.NewReader("data"))
+		req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test")
+		req.Header.Set(amzACL, "public-read")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assert.Contains(t, w.Body.String(), "InternalError")
 	})
 }
 

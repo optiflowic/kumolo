@@ -637,15 +637,35 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 	if cannedACL := r.Header.Get(amzACL); cannedACL != "" {
 		if aclXML, aclErr := buildCannedACL(cannedACL); aclErr == nil {
 			if storeErr := ro.storage.PutObjectACL(bucket, key, aclXML); storeErr != nil {
-				slog.Warn( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-					"failed to set object ACL after put",
-					"bucket",
-					bucket,
-					"key",
-					key,
-					"err",
-					storeErr,
-				)
+				if meta.VersionID != "" {
+					if _, err := ro.storage.DeleteObjectVersion(bucket, key, meta.VersionID, false); err != nil {
+						slog.Warn( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+							"failed to roll back object version after ACL persistence failure",
+							"bucket",
+							bucket,
+							"key",
+							key,
+							"versionID",
+							meta.VersionID,
+							"err",
+							err,
+						)
+					}
+				} else {
+					if err := ro.storage.DeleteObject(bucket, key, false); err != nil {
+						slog.Warn( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+							"failed to roll back object after ACL persistence failure",
+							"bucket",
+							bucket,
+							"key",
+							key,
+							"err",
+							err,
+						)
+					}
+				}
+				writeError(w, r, http.StatusInternalServerError, "InternalError", storeErr.Error())
+				return
 			}
 		}
 	}

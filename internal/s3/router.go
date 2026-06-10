@@ -197,7 +197,7 @@ func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, bucket str
 		"cors", "policy", "tagging", "versioning", "publicAccessBlock",
 		"encryption", "ownershipControls", "notification", "lifecycle",
 		"website", "logging", "accelerate", "replication", "requestPayment",
-		"object-lock",
+		"object-lock", "acl",
 	}, q.Has)
 	if r.Method != http.MethodOptions && !isMgmtSubresource {
 		ro.injectCORSHeaders(w, r, bucket)

@@ -349,10 +349,14 @@ func (ro *Router) handleGetBucketACL(w http.ResponseWriter, r *http.Request, buc
 }
 
 func (ro *Router) handlePutBucketACL(w http.ResponseWriter, r *http.Request, bucket string) {
-	body, err := io.ReadAll(r.Body)
-	if err != nil { // untestable: httptest.NewRequest body never errors
-		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
-		return
+	var body []byte
+	if r.Header.Get(amzACL) == "" {
+		var err error
+		body, err = io.ReadAll(r.Body)
+		if err != nil { // untestable: httptest.NewRequest body never errors
+			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+			return
+		}
 	}
 
 	aclXML, err := resolveACLFromRequest(r, body)
@@ -371,7 +375,7 @@ func (ro *Router) handlePutBucketACL(w http.ResponseWriter, r *http.Request, buc
 		return
 	}
 
-	if err := ro.storage.PutBucketACL(bucket, aclXML); err != nil {
+	if err := ro.storage.PutBucketACL(bucket, stripXMLDecl(aclXML)); err != nil {
 		if errors.Is(err, ErrBucketNotFound) {
 			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
 				"bucket not found",
@@ -451,10 +455,14 @@ func (ro *Router) handleGetObjectACL(w http.ResponseWriter, r *http.Request, buc
 }
 
 func (ro *Router) handlePutObjectACL(w http.ResponseWriter, r *http.Request, bucket, key string) {
-	body, err := io.ReadAll(r.Body)
-	if err != nil { // untestable: httptest.NewRequest body never errors
-		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
-		return
+	var body []byte
+	if r.Header.Get(amzACL) == "" {
+		var err error
+		body, err = io.ReadAll(r.Body)
+		if err != nil { // untestable: httptest.NewRequest body never errors
+			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+			return
+		}
 	}
 
 	aclXML, err := resolveACLFromRequest(r, body)
@@ -473,7 +481,7 @@ func (ro *Router) handlePutObjectACL(w http.ResponseWriter, r *http.Request, buc
 		return
 	}
 
-	if err := ro.storage.PutObjectACL(bucket, key, aclXML); err != nil {
+	if err := ro.storage.PutObjectACL(bucket, key, stripXMLDecl(aclXML)); err != nil {
 		if errors.Is(err, ErrBucketNotFound) {
 			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
 				"bucket not found",

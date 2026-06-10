@@ -26,6 +26,7 @@ Also set at object creation time via `PutObject` with `x-amz-acl` header.
 | `NoSuchBucket` | 404 | Bucket does not exist |
 | `NoSuchKey` | 404 | Object does not exist |
 | `InvalidArgument` | 400 | Unrecognized canned ACL value |
+| `MalformedXML` | 400 | Request body is not valid AccessControlPolicy XML, or neither `x-amz-acl` header nor body provided |
 | `InternalError` | 500 | Storage failure |
 
 ## Kumolo deviations

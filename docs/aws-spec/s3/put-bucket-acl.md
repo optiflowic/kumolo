@@ -25,7 +25,7 @@ Supported canned ACLs: `private`, `public-read`, `public-read-write`, `authentic
 |---|---|---|
 | `NoSuchBucket` | 404 | Bucket does not exist |
 | `InvalidArgument` | 400 | Unrecognized canned ACL value |
-| `MalformedXML` | 400 | Request body is not valid AccessControlPolicy XML |
+| `MalformedXML` | 400 | Request body is not valid AccessControlPolicy XML, or neither `x-amz-acl` header nor body provided |
 
 ## Kumolo deviations
 
