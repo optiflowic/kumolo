@@ -25,7 +25,7 @@
 
 | Field | Notes |
 |-------|-------|
-| Responses | []ItemResponse — one per statement (reads only); empty for writes |
+| Responses | []ItemResponse — one per statement; for reads each `Item` holds the result, for writes each ItemResponse is empty (`{}`) |
 | ConsumedCapacity | When ReturnConsumedCapacity != NONE |
 
 ### ItemResponse

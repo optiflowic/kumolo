@@ -330,6 +330,12 @@ func (ro *Router) handleExecuteTransaction(w http.ResponseWriter, body []byte) {
 			pqWriteTransactError(w, err)
 			return
 		}
+		// AWS returns an empty ItemResponse per statement for write transactions.
+		responses := make([]map[string]any, len(stmts))
+		for i := range responses {
+			responses[i] = map[string]any{}
+		}
+		resp["Responses"] = responses
 	}
 
 	seen := make(map[string]struct{})
