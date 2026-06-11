@@ -39,3 +39,60 @@ resource "aws_s3_object" "config" {
   content      = jsonencode({ env = "local", emulator = "kumolo" })
   content_type = "application/json"
 }
+
+# ---------------------------------------------------------------------------
+# BucketReplication
+# ---------------------------------------------------------------------------
+resource "aws_s3_bucket" "replica" {
+  bucket        = "kumolo-tf-verify-replica"
+  force_destroy = true
+}
+
+resource "aws_s3_bucket_versioning" "replica" {
+  bucket = aws_s3_bucket.replica.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_replication_configuration" "main" {
+  depends_on = [aws_s3_bucket_versioning.main, aws_s3_bucket_versioning.replica]
+
+  bucket = aws_s3_bucket.main.id
+  role   = "arn:aws:iam::000000000000:role/replication-role"
+
+  rule {
+    id     = "replicate-all"
+    status = "Enabled"
+
+    destination {
+      bucket = aws_s3_bucket.replica.arn
+    }
+  }
+}
+
+# ---------------------------------------------------------------------------
+# SSE-KMS — separate bucket using the KMS key defined in kms.tf
+# ---------------------------------------------------------------------------
+resource "aws_s3_bucket" "kms_encrypted" {
+  bucket        = "kumolo-tf-verify-kms"
+  force_destroy = true
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "kms_encrypted" {
+  bucket = aws_s3_bucket.kms_encrypted.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm     = "aws:kms"
+      kms_master_key_id = aws_kms_key.main.arn
+    }
+  }
+}
+
+resource "aws_s3_object" "kms_encrypted" {
+  bucket  = aws_s3_bucket.kms_encrypted.id
+  key     = "encrypted.txt"
+  content = "KMS-encrypted content via Terraform"
+}
