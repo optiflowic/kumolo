@@ -146,7 +146,11 @@ func (ro *Router) handleAssumeRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(roleArn) < 20 {
-		slog.Debug("AssumeRole: RoleArn too short", "len", len(roleArn))
+		slog.Debug(
+			"AssumeRole: RoleArn too short",
+			"len",
+			len(roleArn),
+		) // #nosec G706 -- roleArn comes from the request form; log injection risk accepted for a local dev emulator
 		writeError(
 			w,
 			http.StatusBadRequest,
@@ -159,7 +163,11 @@ func (ro *Router) handleAssumeRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(roleArn) > 2048 {
-		slog.Debug("AssumeRole: RoleArn too long", "len", len(roleArn))
+		slog.Debug(
+			"AssumeRole: RoleArn too long",
+			"len",
+			len(roleArn),
+		) // #nosec G706 -- roleArn comes from the request form; log injection risk accepted for a local dev emulator
 		writeError(
 			w,
 			http.StatusBadRequest,
@@ -182,7 +190,11 @@ func (ro *Router) handleAssumeRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(sessionName) < 2 {
-		slog.Debug("AssumeRole: RoleSessionName too short", "len", len(sessionName))
+		slog.Debug(
+			"AssumeRole: RoleSessionName too short",
+			"len",
+			len(sessionName),
+		) // #nosec G706 -- sessionName comes from the request form; log injection risk accepted for a local dev emulator
 		writeError(
 			w,
 			http.StatusBadRequest,
@@ -195,7 +207,11 @@ func (ro *Router) handleAssumeRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(sessionName) > 64 {
-		slog.Debug("AssumeRole: RoleSessionName too long", "len", len(sessionName))
+		slog.Debug(
+			"AssumeRole: RoleSessionName too long",
+			"len",
+			len(sessionName),
+		) // #nosec G706 -- sessionName comes from the request form; log injection risk accepted for a local dev emulator
 		writeError(
 			w,
 			http.StatusBadRequest,
@@ -208,7 +224,11 @@ func (ro *Router) handleAssumeRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !validSessionNameRE.MatchString(sessionName) {
-		slog.Debug("AssumeRole: RoleSessionName invalid pattern", "sessionName", sessionName)
+		slog.Debug(
+			"AssumeRole: RoleSessionName invalid pattern",
+			"sessionName",
+			sessionName,
+		) // #nosec G706 -- sessionName comes from the request form; log injection risk accepted for a local dev emulator
 		writeError(
 			w,
 			http.StatusBadRequest,
