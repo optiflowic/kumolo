@@ -2,8 +2,10 @@ package sts
 
 import (
 	"encoding/xml"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 )
 
@@ -86,6 +88,9 @@ type errorResponse struct {
 	RequestID string      `xml:"RequestId"`
 }
 
+// validSessionNameRE enforces the RoleSessionName pattern: [\w+=,.@-]*
+var validSessionNameRE = regexp.MustCompile(`^[\w+=,.@-]*$`)
+
 // Router handles STS API requests dispatched via the Action query parameter.
 type Router struct{}
 
@@ -141,6 +146,27 @@ func (ro *Router) handleAssumeRole(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
+	if len(roleArn) < 20 {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"ValidationError",
+			fmt.Sprintf(
+				"1 validation error detected: Value '%s' at 'roleArn' failed to satisfy constraint: Member must have length greater than or equal to 20",
+				roleArn,
+			),
+		)
+		return
+	}
+	if len(roleArn) > 2048 {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"ValidationError",
+			"1 validation error detected: Value at 'roleArn' failed to satisfy constraint: Member must have length less than or equal to 2048",
+		)
+		return
+	}
 	if sessionName == "" {
 		slog.Debug("AssumeRole: missing required param", "param", "RoleSessionName")
 		writeError(
@@ -148,6 +174,42 @@ func (ro *Router) handleAssumeRole(w http.ResponseWriter, r *http.Request) {
 			http.StatusBadRequest,
 			"ValidationError",
 			"1 validation error detected: Value null at 'roleSessionName' failed to satisfy constraint: Member must not be null",
+		)
+		return
+	}
+	if len(sessionName) < 2 {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"ValidationError",
+			fmt.Sprintf(
+				"1 validation error detected: Value '%s' at 'roleSessionName' failed to satisfy constraint: Member must have length greater than or equal to 2",
+				sessionName,
+			),
+		)
+		return
+	}
+	if len(sessionName) > 64 {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"ValidationError",
+			fmt.Sprintf(
+				"1 validation error detected: Value '%s' at 'roleSessionName' failed to satisfy constraint: Member must have length less than or equal to 64",
+				sessionName[:64]+"...",
+			),
+		)
+		return
+	}
+	if !validSessionNameRE.MatchString(sessionName) {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"ValidationError",
+			fmt.Sprintf(
+				"1 validation error detected: Value '%s' at 'roleSessionName' failed to satisfy constraint: Member must satisfy regular expression pattern: [\\w+=,.@-]*",
+				sessionName,
+			),
 		)
 		return
 	}

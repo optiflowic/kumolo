@@ -31,7 +31,10 @@ Ignored parameters (accepted without error): `DurationSeconds`, `ExternalId`, `P
 | Error | HTTP | Condition |
 |---|---|---|
 | `ValidationError` | 400 | `RoleArn` or `RoleSessionName` is missing |
+| `ValidationError` | 400 | `RoleArn` is shorter than 20 chars or longer than 2048 chars |
 | `ValidationError` | 400 | `RoleArn` contains no `/` or ends with `/` (role name segment is empty) |
+| `ValidationError` | 400 | `RoleSessionName` is shorter than 2 chars or longer than 64 chars |
+| `ValidationError` | 400 | `RoleSessionName` does not match `[\w+=,.@-]*` |
 
 ## kumolo Deviations
 
