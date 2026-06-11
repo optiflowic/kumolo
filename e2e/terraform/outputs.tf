@@ -9,6 +9,18 @@ output "s3_object_keys" {
   ]
 }
 
+output "s3_replica_bucket" {
+  value = aws_s3_bucket.replica.id
+}
+
+output "s3_kms_bucket" {
+  value = aws_s3_bucket.kms_encrypted.id
+}
+
+output "s3_kms_object_key" {
+  value = aws_s3_object.kms_encrypted.key
+}
+
 output "dynamodb_table" {
   value = aws_dynamodb_table.users.name
 }
