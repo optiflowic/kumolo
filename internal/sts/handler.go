@@ -88,7 +88,6 @@ type errorResponse struct {
 	RequestID string      `xml:"RequestId"`
 }
 
-// validSessionNameRE enforces the RoleSessionName pattern: [\w+=,.@-]*
 var validSessionNameRE = regexp.MustCompile(`^[\w+=,.@-]*$`)
 
 // Router handles STS API requests dispatched via the Action query parameter.
@@ -147,6 +146,7 @@ func (ro *Router) handleAssumeRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(roleArn) < 20 {
+		slog.Debug("AssumeRole: RoleArn too short", "len", len(roleArn))
 		writeError(
 			w,
 			http.StatusBadRequest,
@@ -159,11 +159,15 @@ func (ro *Router) handleAssumeRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(roleArn) > 2048 {
+		slog.Debug("AssumeRole: RoleArn too long", "len", len(roleArn))
 		writeError(
 			w,
 			http.StatusBadRequest,
 			"ValidationError",
-			"1 validation error detected: Value at 'roleArn' failed to satisfy constraint: Member must have length less than or equal to 2048",
+			fmt.Sprintf(
+				"1 validation error detected: Value '%s' at 'roleArn' failed to satisfy constraint: Member must have length less than or equal to 2048",
+				roleArn[:64]+"...",
+			),
 		)
 		return
 	}
@@ -178,6 +182,7 @@ func (ro *Router) handleAssumeRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(sessionName) < 2 {
+		slog.Debug("AssumeRole: RoleSessionName too short", "len", len(sessionName))
 		writeError(
 			w,
 			http.StatusBadRequest,
@@ -190,18 +195,20 @@ func (ro *Router) handleAssumeRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(sessionName) > 64 {
+		slog.Debug("AssumeRole: RoleSessionName too long", "len", len(sessionName))
 		writeError(
 			w,
 			http.StatusBadRequest,
 			"ValidationError",
 			fmt.Sprintf(
 				"1 validation error detected: Value '%s' at 'roleSessionName' failed to satisfy constraint: Member must have length less than or equal to 64",
-				sessionName[:64]+"...",
+				sessionName,
 			),
 		)
 		return
 	}
 	if !validSessionNameRE.MatchString(sessionName) {
+		slog.Debug("AssumeRole: RoleSessionName invalid pattern", "sessionName", sessionName)
 		writeError(
 			w,
 			http.StatusBadRequest,
