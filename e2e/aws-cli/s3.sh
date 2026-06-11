@@ -4,7 +4,8 @@ set -euo pipefail
 ENDPOINT="${KUMOLO_ENDPOINT:-http://localhost:5566}"
 BUCKET="kumolo-cli-s3-verify"
 TMPFILE="$(mktemp)"
-trap 'rm -f "$TMPFILE"' EXIT
+SSEC_TMPKEY=""
+trap 'rm -f "$TMPFILE" "${SSEC_TMPKEY:-}"' EXIT
 
 export AWS_ACCESS_KEY_ID=test
 export AWS_SECRET_ACCESS_KEY=test
@@ -227,7 +228,7 @@ LOG_BUCKET="kumolo-cli-s3-logging"
 cleanup_bucket "$LOG_BUCKET"
 run "CreateBucket (log target)" $AWS s3api create-bucket --bucket "$LOG_BUCKET"
 
-LOG_CONFIG='{"LoggingEnabled":{"TargetBucket":"kumolo-cli-s3-logging","TargetPrefix":"logs/"}}'
+LOG_CONFIG=$(printf '{"LoggingEnabled":{"TargetBucket":"%s","TargetPrefix":"logs/"}}' "$LOG_BUCKET")
 run "PutBucketLogging" \
   $AWS s3api put-bucket-logging \
     --bucket "$BUCKET" \
@@ -336,7 +337,7 @@ run "GetObject (SSE-KMS)" \
 # The AWS CLI expects raw key bytes via fileb://; it base64-encodes and
 # computes the MD5 internally.
 # ---------------------------------------------------------------------------
-SSEC_TMPKEY="$(mktemp)"
+SSEC_TMPKEY="$(mktemp)"  # registered in EXIT trap above
 dd if=/dev/urandom bs=32 count=1 2>/dev/null > "$SSEC_TMPKEY"
 
 echo "sse-c-data" > "$TMPFILE"
@@ -427,7 +428,7 @@ run "PutObjectAcl (public-read)" \
   $AWS s3api put-object-acl --bucket "$BUCKET" --key "acl-test.txt" --acl public-read
 
 # Anonymous GET via plain HTTP (no auth headers) should succeed.
-ACL_PUBLIC_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+ACL_PUBLIC_STATUS=$(curl -s -m 10 -o /dev/null -w "%{http_code}" \
   "${ENDPOINT}/${BUCKET}/acl-test.txt")
 if [[ "$ACL_PUBLIC_STATUS" == "200" ]]; then
   ok "ACL enforcement (public-read: anonymous GET returns 200)"
@@ -439,7 +440,7 @@ run "PutObjectAcl (private)" \
   $AWS s3api put-object-acl --bucket "$BUCKET" --key "acl-test.txt" --acl private
 
 # Anonymous GET should now be denied.
-ACL_PRIVATE_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+ACL_PRIVATE_STATUS=$(curl -s -m 10 -o /dev/null -w "%{http_code}" \
   "${ENDPOINT}/${BUCKET}/acl-test.txt")
 if [[ "$ACL_PRIVATE_STATUS" == "403" ]]; then
   ok "ACL enforcement (private: anonymous GET returns 403)"
