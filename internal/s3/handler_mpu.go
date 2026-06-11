@@ -175,22 +175,23 @@ func (ro *Router) handleUploadPart(w http.ResponseWriter, r *http.Request, bucke
 		return
 	}
 	if isAnonymousRequest(r) {
-		bucketACL, err := ro.storage.GetBucketACL(bucket)
+		// use the upload's canonical bucket (not the URL path bucket) to prevent ACL bypass
+		bucketACL, err := ro.storage.GetBucketACL(umeta.Bucket)
 		if err != nil {
 			if errors.Is(err, ErrBucketNotFound) {
-				slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				slog.Debug( // #nosec G706 -- umeta.Bucket is stored upload metadata; log injection risk accepted for a local dev emulator
 					"bucket not found",
 					"bucket",
-					bucket,
+					umeta.Bucket,
 				)
 				writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 					"The specified bucket does not exist.")
 				return
 			}
-			slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			slog.Error( // #nosec G706 -- umeta.Bucket is stored upload metadata; log injection risk accepted for a local dev emulator
 				"failed to get bucket ACL",
 				"bucket",
-				bucket,
+				umeta.Bucket,
 				"err",
 				err,
 			)
@@ -198,10 +199,10 @@ func (ro *Router) handleUploadPart(w http.ResponseWriter, r *http.Request, bucke
 			return
 		}
 		if !aclAllowsAnonymous(bucketACL, aclPermWrite) {
-			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			slog.Debug( // #nosec G706 -- umeta.Bucket/key are stored upload metadata; log injection risk accepted for a local dev emulator
 				"upload part denied: ACL",
 				"bucket",
-				bucket,
+				umeta.Bucket,
 				"key",
 				key,
 			)
@@ -437,22 +438,40 @@ func (ro *Router) handleUploadPartCopy(w http.ResponseWriter, r *http.Request, b
 		}
 	}
 	if isAnonymousRequest(r) {
-		bucketACL, err := ro.storage.GetBucketACL(bucket)
+		// use the upload's canonical bucket (not the URL path bucket) to prevent ACL bypass
+		umeta, err := ro.storage.GetUploadMeta(uploadID)
+		if err != nil {
+			if errors.Is(err, ErrUploadNotFound) {
+				writeError(w, r, http.StatusNotFound, "NoSuchUpload",
+					"The specified upload does not exist.")
+				return
+			}
+			slog.Error( // #nosec G706 -- uploadID comes from URL query; log injection risk accepted for a local dev emulator
+				"failed to get upload meta for ACL check",
+				"uploadId",
+				uploadID,
+				"err",
+				err,
+			)
+			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+			return
+		}
+		bucketACL, err := ro.storage.GetBucketACL(umeta.Bucket)
 		if err != nil {
 			if errors.Is(err, ErrBucketNotFound) {
-				slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				slog.Debug( // #nosec G706 -- umeta.Bucket is stored upload metadata; log injection risk accepted for a local dev emulator
 					"bucket not found",
 					"bucket",
-					bucket,
+					umeta.Bucket,
 				)
 				writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 					"The specified bucket does not exist.")
 				return
 			}
-			slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			slog.Error( // #nosec G706 -- umeta.Bucket is stored upload metadata; log injection risk accepted for a local dev emulator
 				"failed to get bucket ACL",
 				"bucket",
-				bucket,
+				umeta.Bucket,
 				"err",
 				err,
 			)
@@ -460,10 +479,10 @@ func (ro *Router) handleUploadPartCopy(w http.ResponseWriter, r *http.Request, b
 			return
 		}
 		if !aclAllowsAnonymous(bucketACL, aclPermWrite) {
-			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			slog.Debug( // #nosec G706 -- umeta.Bucket/key are stored upload metadata; log injection risk accepted for a local dev emulator
 				"upload part copy denied: ACL",
 				"bucket",
-				bucket,
+				umeta.Bucket,
 				"key",
 				key,
 			)
@@ -616,22 +635,40 @@ func (ro *Router) handleCompleteMultipartUpload(
 		return
 	}
 	if isAnonymousRequest(r) {
-		bucketACL, err := ro.storage.GetBucketACL(bucket)
+		// use the upload's canonical bucket (not the URL path bucket) to prevent ACL bypass
+		umeta, err := ro.storage.GetUploadMeta(uploadID)
+		if err != nil {
+			if errors.Is(err, ErrUploadNotFound) {
+				writeError(w, r, http.StatusNotFound, "NoSuchUpload",
+					"The specified upload does not exist.")
+				return
+			}
+			slog.Error( // #nosec G706 -- uploadID comes from URL query; log injection risk accepted for a local dev emulator
+				"failed to get upload meta for ACL check",
+				"uploadId",
+				uploadID,
+				"err",
+				err,
+			)
+			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+			return
+		}
+		bucketACL, err := ro.storage.GetBucketACL(umeta.Bucket)
 		if err != nil {
 			if errors.Is(err, ErrBucketNotFound) {
-				slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				slog.Debug( // #nosec G706 -- umeta.Bucket is stored upload metadata; log injection risk accepted for a local dev emulator
 					"bucket not found",
 					"bucket",
-					bucket,
+					umeta.Bucket,
 				)
 				writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 					"The specified bucket does not exist.")
 				return
 			}
-			slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			slog.Error( // #nosec G706 -- umeta.Bucket is stored upload metadata; log injection risk accepted for a local dev emulator
 				"failed to get bucket ACL",
 				"bucket",
-				bucket,
+				umeta.Bucket,
 				"err",
 				err,
 			)
@@ -639,10 +676,10 @@ func (ro *Router) handleCompleteMultipartUpload(
 			return
 		}
 		if !aclAllowsAnonymous(bucketACL, aclPermWrite) {
-			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			slog.Debug( // #nosec G706 -- umeta.Bucket/key are stored upload metadata; log injection risk accepted for a local dev emulator
 				"complete multipart upload denied: ACL",
 				"bucket",
-				bucket,
+				umeta.Bucket,
 				"key",
 				key,
 			)
@@ -782,22 +819,40 @@ func (ro *Router) handleAbortMultipartUpload(
 		return
 	}
 	if isAnonymousRequest(r) {
-		bucketACL, err := ro.storage.GetBucketACL(bucket)
+		// use the upload's canonical bucket (not the URL path bucket) to prevent ACL bypass
+		umeta, err := ro.storage.GetUploadMeta(uploadID)
+		if err != nil {
+			if errors.Is(err, ErrUploadNotFound) {
+				writeError(w, r, http.StatusNotFound, "NoSuchUpload",
+					"The specified upload does not exist.")
+				return
+			}
+			slog.Error( // #nosec G706 -- uploadID comes from URL query; log injection risk accepted for a local dev emulator
+				"failed to get upload meta for ACL check",
+				"uploadId",
+				uploadID,
+				"err",
+				err,
+			)
+			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+			return
+		}
+		bucketACL, err := ro.storage.GetBucketACL(umeta.Bucket)
 		if err != nil {
 			if errors.Is(err, ErrBucketNotFound) {
-				slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				slog.Debug( // #nosec G706 -- umeta.Bucket is stored upload metadata; log injection risk accepted for a local dev emulator
 					"bucket not found",
 					"bucket",
-					bucket,
+					umeta.Bucket,
 				)
 				writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 					"The specified bucket does not exist.")
 				return
 			}
-			slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			slog.Error( // #nosec G706 -- umeta.Bucket is stored upload metadata; log injection risk accepted for a local dev emulator
 				"failed to get bucket ACL",
 				"bucket",
-				bucket,
+				umeta.Bucket,
 				"err",
 				err,
 			)
@@ -805,10 +860,10 @@ func (ro *Router) handleAbortMultipartUpload(
 			return
 		}
 		if !aclAllowsAnonymous(bucketACL, aclPermWrite) {
-			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			slog.Debug( // #nosec G706 -- umeta.Bucket/key are stored upload metadata; log injection risk accepted for a local dev emulator
 				"abort multipart upload denied: ACL",
 				"bucket",
-				bucket,
+				umeta.Bucket,
 				"key",
 				key,
 			)
