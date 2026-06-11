@@ -347,6 +347,352 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# ReEncrypt — re-encrypt ciphertext from one symmetric key to another.
+# ---------------------------------------------------------------------------
+if [[ -n "$KEY_ID" && -n "$CIPHERTEXT_BLOB" ]]; then
+  REENC_KEY_RESP=$($AWS create-key --description "kumolo-e2e-reenc-key" 2>/dev/null || true)
+  REENC_KEY_ID=$(echo "$REENC_KEY_RESP" | jq -r '.KeyMetadata.KeyId // empty' 2>/dev/null || true)
+
+  if [[ -n "$REENC_KEY_ID" ]]; then
+    REENC_RESP=$($AWS re-encrypt \
+      --ciphertext-blob "$CIPHERTEXT_BLOB" \
+      --destination-key-id "$REENC_KEY_ID" \
+      2>/dev/null || true)
+    REENC_BLOB=$(echo "$REENC_RESP" | jq -r '.CiphertextBlob // empty' 2>/dev/null || true)
+    REENC_SRC_KEY=$(echo "$REENC_RESP" | jq -r '.SourceKeyId // empty' 2>/dev/null || true)
+    REENC_DST_KEY=$(echo "$REENC_RESP" | jq -r '.KeyId // empty' 2>/dev/null || true)
+    if [[ -n "$REENC_BLOB" && -n "$REENC_SRC_KEY" && -n "$REENC_DST_KEY" ]]; then
+      ok "ReEncrypt (CiphertextBlob, SourceKeyId, and KeyId present)"
+    else
+      fail "ReEncrypt (missing fields: blob='$REENC_BLOB' src='$REENC_SRC_KEY' dst='$REENC_DST_KEY')"
+    fi
+
+    if [[ -n "$REENC_BLOB" ]]; then
+      DEC_REENC_RESP=$($AWS decrypt \
+        --ciphertext-blob "$REENC_BLOB" \
+        --key-id "$REENC_KEY_ID" \
+        2>/dev/null || true)
+      DEC_REENC_PLAINTEXT=$(echo "$DEC_REENC_RESP" | jq -r '.Plaintext // empty' 2>/dev/null || true)
+      if [[ "$DEC_REENC_PLAINTEXT" == "$PLAINTEXT_INPUT" ]]; then
+        ok "ReEncrypt (re-encrypted ciphertext decrypts to original plaintext)"
+      else
+        fail "ReEncrypt (decrypted plaintext mismatch: got '$DEC_REENC_PLAINTEXT')"
+      fi
+    else
+      fail "ReEncrypt (re-encrypted ciphertext decrypts to original plaintext) (skipped: ReEncrypt failed)"
+    fi
+  else
+    fail "ReEncrypt (skipped: second key creation failed)"
+    fail "ReEncrypt (re-encrypted ciphertext decrypts to original plaintext) (skipped)"
+  fi
+else
+  fail "ReEncrypt (skipped: no KeyId or no CiphertextBlob)"
+  fail "ReEncrypt (re-encrypted ciphertext decrypts to original plaintext) (skipped)"
+fi
+
+# ---------------------------------------------------------------------------
+# RotateKeyOnDemand / ListKeyRotations
+# ---------------------------------------------------------------------------
+ROD_KEY_RESP=$($AWS create-key --description "kumolo-e2e-rotate-key" 2>/dev/null || true)
+ROD_KEY_ID=$(echo "$ROD_KEY_RESP" | jq -r '.KeyMetadata.KeyId // empty' 2>/dev/null || true)
+if [[ -n "$ROD_KEY_ID" ]]; then
+  ROD_RESP=$($AWS rotate-key-on-demand --key-id "$ROD_KEY_ID" 2>/dev/null || true)
+  ROD_KEY_ID_RESP=$(echo "$ROD_RESP" | jq -r '.KeyId // empty' 2>/dev/null || true)
+  if [[ -n "$ROD_KEY_ID_RESP" ]]; then
+    ok "RotateKeyOnDemand (KeyId present)"
+  else
+    fail "RotateKeyOnDemand (no KeyId in response)"
+  fi
+
+  LKR_RESP=$($AWS list-key-rotations --key-id "$ROD_KEY_ID" 2>/dev/null || true)
+  ROT_COUNT=$(echo "$LKR_RESP" | jq '.Rotations | length' 2>/dev/null || echo 0)
+  if [[ "$ROT_COUNT" -ge 1 ]]; then
+    ok "ListKeyRotations (at least 1 rotation after RotateKeyOnDemand)"
+  else
+    fail "ListKeyRotations (expected >=1 rotation, got $ROT_COUNT)"
+  fi
+else
+  fail "RotateKeyOnDemand (skipped: key creation failed)"
+  fail "ListKeyRotations (skipped: key creation failed)"
+fi
+
+# ---------------------------------------------------------------------------
+# Sign / Verify — RSA (RSASSA_PKCS1_V1_5_SHA_256) and ECDSA (ECDSA_SHA_256)
+# ---------------------------------------------------------------------------
+RSA_SIGN_KEY_RESP=$($AWS create-key \
+  --key-spec RSA_2048 \
+  --key-usage SIGN_VERIFY \
+  --description "kumolo-e2e-rsa-sign" \
+  2>/dev/null || true)
+RSA_SIGN_KEY_ID=$(echo "$RSA_SIGN_KEY_RESP" | jq -r '.KeyMetadata.KeyId // empty' 2>/dev/null || true)
+
+if [[ -n "$RSA_SIGN_KEY_ID" ]]; then
+  RSA_SIGN_RESP=$($AWS sign \
+    --key-id "$RSA_SIGN_KEY_ID" \
+    --message "$PLAINTEXT_INPUT" \
+    --signing-algorithm RSASSA_PKCS1_V1_5_SHA_256 \
+    2>/dev/null || true)
+  RSA_SIG=$(echo "$RSA_SIGN_RESP" | jq -r '.Signature // empty' 2>/dev/null || true)
+  RSA_SIGN_ALGO=$(echo "$RSA_SIGN_RESP" | jq -r '.SigningAlgorithm // empty' 2>/dev/null || true)
+  if [[ -n "$RSA_SIG" && "$RSA_SIGN_ALGO" == "RSASSA_PKCS1_V1_5_SHA_256" ]]; then
+    ok "Sign RSA (Signature and SigningAlgorithm=RSASSA_PKCS1_V1_5_SHA_256 present)"
+  else
+    fail "Sign RSA (missing fields: sig='$RSA_SIG' algo='$RSA_SIGN_ALGO')"
+  fi
+
+  if [[ -n "$RSA_SIG" ]]; then
+    RSA_VERIFY_RESP=$($AWS verify \
+      --key-id "$RSA_SIGN_KEY_ID" \
+      --message "$PLAINTEXT_INPUT" \
+      --signing-algorithm RSASSA_PKCS1_V1_5_SHA_256 \
+      --signature "$RSA_SIG" \
+      2>/dev/null || true)
+    RSA_VERIFY_RESULT=$(echo "$RSA_VERIFY_RESP" | jq -r '.SignatureValid // empty' 2>/dev/null || true)
+    if [[ "$RSA_VERIFY_RESULT" == "true" ]]; then
+      ok "Verify RSA (SignatureValid=true)"
+    else
+      fail "Verify RSA (expected SignatureValid=true, got '$RSA_VERIFY_RESULT')"
+    fi
+  else
+    fail "Verify RSA (skipped: no Signature from Sign)"
+  fi
+else
+  fail "Sign RSA (skipped: RSA key creation failed)"
+  fail "Verify RSA (skipped: RSA key creation failed)"
+fi
+
+ECC_KEY_RESP=$($AWS create-key \
+  --key-spec ECC_NIST_P256 \
+  --key-usage SIGN_VERIFY \
+  --description "kumolo-e2e-ecc-sign" \
+  2>/dev/null || true)
+ECC_KEY_ID=$(echo "$ECC_KEY_RESP" | jq -r '.KeyMetadata.KeyId // empty' 2>/dev/null || true)
+
+if [[ -n "$ECC_KEY_ID" ]]; then
+  ECC_SIGN_RESP=$($AWS sign \
+    --key-id "$ECC_KEY_ID" \
+    --message "$PLAINTEXT_INPUT" \
+    --signing-algorithm ECDSA_SHA_256 \
+    2>/dev/null || true)
+  ECC_SIG=$(echo "$ECC_SIGN_RESP" | jq -r '.Signature // empty' 2>/dev/null || true)
+  ECC_SIGN_ALGO=$(echo "$ECC_SIGN_RESP" | jq -r '.SigningAlgorithm // empty' 2>/dev/null || true)
+  if [[ -n "$ECC_SIG" && "$ECC_SIGN_ALGO" == "ECDSA_SHA_256" ]]; then
+    ok "Sign ECDSA (Signature and SigningAlgorithm=ECDSA_SHA_256 present)"
+  else
+    fail "Sign ECDSA (missing fields: sig='$ECC_SIG' algo='$ECC_SIGN_ALGO')"
+  fi
+
+  if [[ -n "$ECC_SIG" ]]; then
+    ECC_VERIFY_RESP=$($AWS verify \
+      --key-id "$ECC_KEY_ID" \
+      --message "$PLAINTEXT_INPUT" \
+      --signing-algorithm ECDSA_SHA_256 \
+      --signature "$ECC_SIG" \
+      2>/dev/null || true)
+    ECC_VERIFY_RESULT=$(echo "$ECC_VERIFY_RESP" | jq -r '.SignatureValid // empty' 2>/dev/null || true)
+    if [[ "$ECC_VERIFY_RESULT" == "true" ]]; then
+      ok "Verify ECDSA (SignatureValid=true)"
+    else
+      fail "Verify ECDSA (expected SignatureValid=true, got '$ECC_VERIFY_RESULT')"
+    fi
+  else
+    fail "Verify ECDSA (skipped: no Signature from Sign)"
+  fi
+else
+  fail "Sign ECDSA (skipped: ECC key creation failed)"
+  fail "Verify ECDSA (skipped: ECC key creation failed)"
+fi
+
+# ---------------------------------------------------------------------------
+# GetPublicKey — RSA asymmetric key
+# ---------------------------------------------------------------------------
+if [[ -n "$RSA_SIGN_KEY_ID" ]]; then
+  GPK_RESP=$($AWS get-public-key --key-id "$RSA_SIGN_KEY_ID" 2>/dev/null || true)
+  GPK_PUB=$(echo "$GPK_RESP" | jq -r '.PublicKey // empty' 2>/dev/null || true)
+  GPK_KEY_ID=$(echo "$GPK_RESP" | jq -r '.KeyId // empty' 2>/dev/null || true)
+  GPK_SPEC=$(echo "$GPK_RESP" | jq -r '.KeySpec // empty' 2>/dev/null || true)
+  GPK_USAGE=$(echo "$GPK_RESP" | jq -r '.KeyUsage // empty' 2>/dev/null || true)
+  if [[ -n "$GPK_PUB" && -n "$GPK_KEY_ID" && "$GPK_SPEC" == "RSA_2048" && "$GPK_USAGE" == "SIGN_VERIFY" ]]; then
+    ok "GetPublicKey (PublicKey, KeyId, KeySpec=RSA_2048, KeyUsage=SIGN_VERIFY present)"
+  else
+    fail "GetPublicKey (unexpected response: pub='$GPK_PUB' id='$GPK_KEY_ID' spec='$GPK_SPEC' usage='$GPK_USAGE')"
+  fi
+else
+  fail "GetPublicKey (skipped: no RSA SIGN_VERIFY key)"
+fi
+
+# ---------------------------------------------------------------------------
+# GenerateMac / VerifyMac — HMAC_256 key
+# ---------------------------------------------------------------------------
+HMAC_KEY_RESP=$($AWS create-key \
+  --key-spec HMAC_256 \
+  --key-usage GENERATE_VERIFY_MAC \
+  --description "kumolo-e2e-hmac" \
+  2>/dev/null || true)
+HMAC_KEY_ID=$(echo "$HMAC_KEY_RESP" | jq -r '.KeyMetadata.KeyId // empty' 2>/dev/null || true)
+
+if [[ -n "$HMAC_KEY_ID" ]]; then
+  GMAC_RESP=$($AWS generate-mac \
+    --key-id "$HMAC_KEY_ID" \
+    --message "$PLAINTEXT_INPUT" \
+    --mac-algorithm HMAC_SHA_256 \
+    2>/dev/null || true)
+  HMAC_MAC=$(echo "$GMAC_RESP" | jq -r '.Mac // empty' 2>/dev/null || true)
+  GMAC_KEY_ID=$(echo "$GMAC_RESP" | jq -r '.KeyId // empty' 2>/dev/null || true)
+  GMAC_ALGO=$(echo "$GMAC_RESP" | jq -r '.MacAlgorithm // empty' 2>/dev/null || true)
+  if [[ -n "$HMAC_MAC" && -n "$GMAC_KEY_ID" && "$GMAC_ALGO" == "HMAC_SHA_256" ]]; then
+    ok "GenerateMac (Mac, KeyId, MacAlgorithm=HMAC_SHA_256 present)"
+  else
+    fail "GenerateMac (missing fields: mac='$HMAC_MAC' key='$GMAC_KEY_ID' algo='$GMAC_ALGO')"
+  fi
+
+  if [[ -n "$HMAC_MAC" ]]; then
+    VMAC_RESP=$($AWS verify-mac \
+      --key-id "$HMAC_KEY_ID" \
+      --message "$PLAINTEXT_INPUT" \
+      --mac-algorithm HMAC_SHA_256 \
+      --mac "$HMAC_MAC" \
+      2>/dev/null || true)
+    VMAC_RESULT=$(echo "$VMAC_RESP" | jq -r '.MacValid // empty' 2>/dev/null || true)
+    if [[ "$VMAC_RESULT" == "true" ]]; then
+      ok "VerifyMac (MacValid=true)"
+    else
+      fail "VerifyMac (expected MacValid=true, got '$VMAC_RESULT')"
+    fi
+  else
+    fail "VerifyMac (skipped: no Mac from GenerateMac)"
+  fi
+else
+  fail "GenerateMac (skipped: HMAC key creation failed)"
+  fail "VerifyMac (skipped: HMAC key creation failed)"
+fi
+
+# ---------------------------------------------------------------------------
+# GenerateDataKeyPair / GenerateDataKeyPairWithoutPlaintext
+# ---------------------------------------------------------------------------
+if [[ -n "$KEY_ID" ]]; then
+  GDKP_RESP=$($AWS generate-data-key-pair \
+    --key-id "$KEY_ID" \
+    --key-pair-spec RSA_2048 \
+    2>/dev/null || true)
+  GDKP_PRIV_PLAIN=$(echo "$GDKP_RESP" | jq -r '.PrivateKeyPlaintext // empty' 2>/dev/null || true)
+  GDKP_PRIV_CIPHER=$(echo "$GDKP_RESP" | jq -r '.PrivateKeyCiphertextBlob // empty' 2>/dev/null || true)
+  GDKP_PUB=$(echo "$GDKP_RESP" | jq -r '.PublicKey // empty' 2>/dev/null || true)
+  GDKP_SPEC=$(echo "$GDKP_RESP" | jq -r '.KeyPairSpec // empty' 2>/dev/null || true)
+  if [[ -n "$GDKP_PRIV_PLAIN" && -n "$GDKP_PRIV_CIPHER" && -n "$GDKP_PUB" && "$GDKP_SPEC" == "RSA_2048" ]]; then
+    ok "GenerateDataKeyPair (PrivateKeyPlaintext, PrivateKeyCiphertextBlob, PublicKey, KeyPairSpec=RSA_2048 present)"
+  else
+    fail "GenerateDataKeyPair (missing fields: plain='$GDKP_PRIV_PLAIN' cipher='$GDKP_PRIV_CIPHER' pub='$GDKP_PUB' spec='$GDKP_SPEC')"
+  fi
+
+  GDKPWP_RESP=$($AWS generate-data-key-pair-without-plaintext \
+    --key-id "$KEY_ID" \
+    --key-pair-spec RSA_2048 \
+    2>/dev/null || true)
+  GDKPWP_PRIV_PLAIN=$(echo "$GDKPWP_RESP" | jq -r '.PrivateKeyPlaintext // empty' 2>/dev/null || true)
+  GDKPWP_PRIV_CIPHER=$(echo "$GDKPWP_RESP" | jq -r '.PrivateKeyCiphertextBlob // empty' 2>/dev/null || true)
+  GDKPWP_PUB=$(echo "$GDKPWP_RESP" | jq -r '.PublicKey // empty' 2>/dev/null || true)
+  GDKPWP_SPEC=$(echo "$GDKPWP_RESP" | jq -r '.KeyPairSpec // empty' 2>/dev/null || true)
+  if [[ -n "$GDKPWP_PRIV_CIPHER" && -n "$GDKPWP_PUB" && "$GDKPWP_SPEC" == "RSA_2048" && -z "$GDKPWP_PRIV_PLAIN" ]]; then
+    ok "GenerateDataKeyPairWithoutPlaintext (PrivateKeyCiphertextBlob and PublicKey present, no PrivateKeyPlaintext)"
+  else
+    fail "GenerateDataKeyPairWithoutPlaintext (unexpected fields: cipher='$GDKPWP_PRIV_CIPHER' pub='$GDKPWP_PUB' spec='$GDKPWP_SPEC' plain='$GDKPWP_PRIV_PLAIN')"
+  fi
+else
+  fail "GenerateDataKeyPair (skipped: no KeyId)"
+  fail "GenerateDataKeyPairWithoutPlaintext (skipped: no KeyId)"
+fi
+
+# ---------------------------------------------------------------------------
+# GenerateRandom
+# ---------------------------------------------------------------------------
+GR_RESP=$($AWS generate-random --number-of-bytes 32 2>/dev/null || true)
+GR_PLAINTEXT=$(echo "$GR_RESP" | jq -r '.Plaintext // empty' 2>/dev/null || true)
+if [[ -n "$GR_PLAINTEXT" ]]; then
+  ok "GenerateRandom (Plaintext present for 32 bytes)"
+else
+  fail "GenerateRandom (no Plaintext returned)"
+fi
+
+# ---------------------------------------------------------------------------
+# Grants: CreateGrant / ListGrants / RevokeGrant / RetireGrant / ListRetirableGrants
+# ---------------------------------------------------------------------------
+if [[ -n "$KEY_ID" ]]; then
+  GRANT_PRINCIPAL="arn:aws:iam::000000000000:user/kumolo-e2e"
+  RETIRING_PRINCIPAL="arn:aws:iam::000000000000:user/kumolo-e2e-retire"
+
+  GRANT_RESP=$($AWS create-grant \
+    --key-id "$KEY_ID" \
+    --grantee-principal "$GRANT_PRINCIPAL" \
+    --operations Encrypt Decrypt \
+    --name "kumolo-e2e-grant" \
+    2>/dev/null || true)
+  GRANT_ID=$(echo "$GRANT_RESP" | jq -r '.GrantId // empty' 2>/dev/null || true)
+  GRANT_TOKEN=$(echo "$GRANT_RESP" | jq -r '.GrantToken // empty' 2>/dev/null || true)
+  if [[ -n "$GRANT_ID" && -n "$GRANT_TOKEN" ]]; then
+    ok "CreateGrant (GrantId and GrantToken present)"
+  else
+    fail "CreateGrant (missing GrantId or GrantToken)"
+  fi
+
+  LG_RESP=$($AWS list-grants --key-id "$KEY_ID" 2>/dev/null || true)
+  LG_COUNT=$(echo "$LG_RESP" | jq '[.Grants[] | select(.GrantId == "'"$GRANT_ID"'")] | length' 2>/dev/null || echo 0)
+  if [[ "$LG_COUNT" -ge 1 ]]; then
+    ok "ListGrants (created grant present)"
+  else
+    fail "ListGrants (created grant not found)"
+  fi
+
+  # Create a second grant with a RetiringPrincipal for RetireGrant / ListRetirableGrants.
+  GRANT2_RESP=$($AWS create-grant \
+    --key-id "$KEY_ID" \
+    --grantee-principal "$GRANT_PRINCIPAL" \
+    --retiring-principal "$RETIRING_PRINCIPAL" \
+    --operations Decrypt \
+    --name "kumolo-e2e-grant-retire" \
+    2>/dev/null || true)
+  GRANT2_ID=$(echo "$GRANT2_RESP" | jq -r '.GrantId // empty' 2>/dev/null || true)
+
+  LRG_RESP=$($AWS list-retirable-grants --retiring-principal "$RETIRING_PRINCIPAL" 2>/dev/null || true)
+  LRG_COUNT=$(echo "$LRG_RESP" | jq '[.Grants[] | select(.GrantId == "'"$GRANT2_ID"'")] | length' 2>/dev/null || echo 0)
+  if [[ "$LRG_COUNT" -ge 1 ]]; then
+    ok "ListRetirableGrants (grant with RetiringPrincipal present)"
+  else
+    fail "ListRetirableGrants (grant not found for retiring principal)"
+  fi
+
+  if [[ -n "$GRANT2_ID" ]]; then
+    run "RetireGrant (by KeyId and GrantId)" \
+      $AWS retire-grant --key-id "$KEY_ID" --grant-id "$GRANT2_ID"
+  else
+    fail "RetireGrant (skipped: second grant creation failed)"
+  fi
+
+  if [[ -n "$GRANT_ID" ]]; then
+    run "RevokeGrant" \
+      $AWS revoke-grant --key-id "$KEY_ID" --grant-id "$GRANT_ID"
+
+    LG_AFTER_RESP=$($AWS list-grants --key-id "$KEY_ID" 2>/dev/null || true)
+    LG_AFTER_COUNT=$(echo "$LG_AFTER_RESP" | jq '[.Grants[] | select(.GrantId == "'"$GRANT_ID"'")] | length' 2>/dev/null || echo 0)
+    if [[ "$LG_AFTER_COUNT" -eq 0 ]]; then
+      ok "RevokeGrant (grant removed from ListGrants)"
+    else
+      fail "RevokeGrant (grant still present in ListGrants after revoke)"
+    fi
+  else
+    fail "RevokeGrant (skipped: no GrantId)"
+    fail "RevokeGrant (grant removed from ListGrants) (skipped)"
+  fi
+else
+  fail "CreateGrant (skipped: no KeyId)"
+  fail "ListGrants (skipped: no KeyId)"
+  fail "ListRetirableGrants (skipped: no KeyId)"
+  fail "RetireGrant (skipped: no KeyId)"
+  fail "RevokeGrant (skipped: no KeyId)"
+  fail "RevokeGrant (grant removed from ListGrants) (skipped)"
+fi
+
+# ---------------------------------------------------------------------------
 # ScheduleKeyDeletion / CancelKeyDeletion
 # ---------------------------------------------------------------------------
 if [[ -n "$KEY_ID" ]]; then
