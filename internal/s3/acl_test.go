@@ -1006,6 +1006,21 @@ func TestACLEnforcementNewOps(t *testing.T) {
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
 
+	t.Run("UploadPart: anonymous + bucket/key mismatch → 404 NoSuchUpload", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			listPartsUploadMeta: uploadMeta{Bucket: "other-bucket", Key: "k"},
+		})
+		req := httptest.NewRequest(
+			http.MethodPut,
+			"/b/k?partNumber=1&uploadId=uid",
+			strings.NewReader("data"),
+		)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchUpload")
+	})
+
 	// UploadPartCopy ACL enforcement
 	t.Run(
 		"UploadPartCopy: anonymous destination write denied by private bucket ACL",
@@ -1084,6 +1099,21 @@ func TestACLEnforcementNewOps(t *testing.T) {
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
 
+	t.Run(
+		"UploadPartCopy: anonymous + bucket/key mismatch → 404 NoSuchUpload",
+		func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{
+				listPartsUploadMeta: uploadMeta{Bucket: "other-bucket", Key: "k"},
+			})
+			req := httptest.NewRequest(http.MethodPut, "/b/k?partNumber=1&uploadId=uid", nil)
+			req.Header.Set(amzCopySource, "/src-b/src-k")
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusNotFound, w.Code)
+			assert.Contains(t, w.Body.String(), "NoSuchUpload")
+		},
+	)
+
 	// CompleteMultipartUpload ACL enforcement
 	t.Run("CompleteMultipartUpload: anonymous denied by private bucket ACL", func(t *testing.T) {
 		ro := newRouterWithMock(&mockStore{
@@ -1157,6 +1187,25 @@ func TestACLEnforcementNewOps(t *testing.T) {
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
 
+	t.Run(
+		"CompleteMultipartUpload: anonymous + bucket/key mismatch → 404 NoSuchUpload",
+		func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{
+				listPartsUploadMeta: uploadMeta{Bucket: "other-bucket", Key: "k"},
+			})
+			body := `<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>"e"</ETag></Part></CompleteMultipartUpload>`
+			req := httptest.NewRequest(
+				http.MethodPost,
+				"/b/k?uploadId=uid",
+				strings.NewReader(body),
+			)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusNotFound, w.Code)
+			assert.Contains(t, w.Body.String(), "NoSuchUpload")
+		},
+	)
+
 	// AbortMultipartUpload ACL enforcement
 	t.Run("AbortMultipartUpload: anonymous denied by private bucket ACL", func(t *testing.T) {
 		ro := newRouterWithMock(&mockStore{
@@ -1207,6 +1256,19 @@ func TestACLEnforcementNewOps(t *testing.T) {
 		ro.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/b/k?uploadId=uid", nil))
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
+
+	t.Run(
+		"AbortMultipartUpload: anonymous + bucket/key mismatch → 404 NoSuchUpload",
+		func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{
+				listPartsUploadMeta: uploadMeta{Bucket: "other-bucket", Key: "k"},
+			})
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/b/k?uploadId=uid", nil))
+			assert.Equal(t, http.StatusNotFound, w.Code)
+			assert.Contains(t, w.Body.String(), "NoSuchUpload")
+		},
+	)
 }
 
 // TestACLCoverageGaps covers storage-error paths that are reachable but were previously untested.

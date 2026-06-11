@@ -175,6 +175,11 @@ func (ro *Router) handleUploadPart(w http.ResponseWriter, r *http.Request, bucke
 		return
 	}
 	if isAnonymousRequest(r) {
+		if umeta.Bucket != bucket || umeta.Key != key {
+			writeError(w, r, http.StatusNotFound, "NoSuchUpload",
+				"The specified upload does not exist.")
+			return
+		}
 		// use the upload's canonical bucket (not the URL path bucket) to prevent ACL bypass
 		bucketACL, err := ro.storage.GetBucketACL(umeta.Bucket)
 		if err != nil {
@@ -456,6 +461,11 @@ func (ro *Router) handleUploadPartCopy(w http.ResponseWriter, r *http.Request, b
 			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 			return
 		}
+		if umeta.Bucket != bucket || umeta.Key != key {
+			writeError(w, r, http.StatusNotFound, "NoSuchUpload",
+				"The specified upload does not exist.")
+			return
+		}
 		bucketACL, err := ro.storage.GetBucketACL(umeta.Bucket)
 		if err != nil {
 			if errors.Is(err, ErrBucketNotFound) {
@@ -653,6 +663,11 @@ func (ro *Router) handleCompleteMultipartUpload(
 			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 			return
 		}
+		if umeta.Bucket != bucket || umeta.Key != key {
+			writeError(w, r, http.StatusNotFound, "NoSuchUpload",
+				"The specified upload does not exist.")
+			return
+		}
 		bucketACL, err := ro.storage.GetBucketACL(umeta.Bucket)
 		if err != nil {
 			if errors.Is(err, ErrBucketNotFound) {
@@ -835,6 +850,11 @@ func (ro *Router) handleAbortMultipartUpload(
 				err,
 			)
 			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+			return
+		}
+		if umeta.Bucket != bucket || umeta.Key != key {
+			writeError(w, r, http.StatusNotFound, "NoSuchUpload",
+				"The specified upload does not exist.")
 			return
 		}
 		bucketACL, err := ro.storage.GetBucketACL(umeta.Bucket)

@@ -3021,9 +3021,11 @@ func TestRouterMultipartUpload(t *testing.T) {
 	})
 
 	t.Run("UploadPart returns 500 on storage error", func(t *testing.T) {
-		ro := newRouterWithMock(
-			&mockStore{bucketExists: true, uploadPartErr: errors.New("disk failure")},
-		)
+		ro := newRouterWithMock(&mockStore{
+			bucketExists:        true,
+			uploadPartErr:       errors.New("disk failure"),
+			listPartsUploadMeta: uploadMeta{Bucket: "my-bucket", Key: "key"},
+		})
 		req := httptest.NewRequest(
 			http.MethodPut,
 			"/my-bucket/key?partNumber=1&uploadId=abc",
@@ -3094,6 +3096,7 @@ func TestRouterMultipartUpload(t *testing.T) {
 				m.bucketExists = true
 				m.uploadPartETag = `"abc123"`
 				m.deletePartErr = errors.New("delete failed")
+				m.listPartsUploadMeta = uploadMeta{Bucket: "my-bucket", Key: "obj.txt"}
 			})
 			ro := newRouterWithMock(m)
 			req := httptest.NewRequest(
@@ -3117,6 +3120,7 @@ func TestRouterMultipartUpload(t *testing.T) {
 				m.bucketExists = true
 				m.uploadPartETag = `"abc123"`
 				m.deletePartErr = errors.New("delete failed")
+				m.listPartsUploadMeta = uploadMeta{Bucket: "my-bucket", Key: "obj.txt"}
 			})
 			ro := newRouterWithMock(m)
 			req := httptest.NewRequest(
@@ -3383,9 +3387,11 @@ func TestRouterMultipartUpload(t *testing.T) {
 	})
 
 	t.Run("CompleteMultipartUpload returns 404 for unknown uploadId", func(t *testing.T) {
-		ro := newRouterWithMock(
-			&mockStore{bucketExists: true, completeMultipartUploadErr: ErrUploadNotFound},
-		)
+		ro := newRouterWithMock(&mockStore{
+			bucketExists:               true,
+			completeMultipartUploadErr: ErrUploadNotFound,
+			listPartsUploadMeta:        uploadMeta{Bucket: "my-bucket", Key: "key"},
+		})
 		body, _ := xml.Marshal(
 			completeMultipartUploadRequest{
 				Parts: []xmlCompletePart{{PartNumber: 1, ETag: `"abc"`}},
@@ -3403,9 +3409,11 @@ func TestRouterMultipartUpload(t *testing.T) {
 	})
 
 	t.Run("CompleteMultipartUpload returns 400 for invalid part", func(t *testing.T) {
-		ro := newRouterWithMock(
-			&mockStore{bucketExists: true, completeMultipartUploadErr: ErrInvalidPart},
-		)
+		ro := newRouterWithMock(&mockStore{
+			bucketExists:               true,
+			completeMultipartUploadErr: ErrInvalidPart,
+			listPartsUploadMeta:        uploadMeta{Bucket: "my-bucket", Key: "key"},
+		})
 		body, _ := xml.Marshal(
 			completeMultipartUploadRequest{
 				Parts: []xmlCompletePart{{PartNumber: 1, ETag: `"abc"`}},
@@ -3423,9 +3431,11 @@ func TestRouterMultipartUpload(t *testing.T) {
 	})
 
 	t.Run("CompleteMultipartUpload returns 400 for entity too small", func(t *testing.T) {
-		ro := newRouterWithMock(
-			&mockStore{bucketExists: true, completeMultipartUploadErr: ErrEntityTooSmall},
-		)
+		ro := newRouterWithMock(&mockStore{
+			bucketExists:               true,
+			completeMultipartUploadErr: ErrEntityTooSmall,
+			listPartsUploadMeta:        uploadMeta{Bucket: "my-bucket", Key: "key"},
+		})
 		body, _ := xml.Marshal(
 			completeMultipartUploadRequest{
 				Parts: []xmlCompletePart{{PartNumber: 1, ETag: `"abc"`}},
@@ -3443,9 +3453,11 @@ func TestRouterMultipartUpload(t *testing.T) {
 	})
 
 	t.Run("CompleteMultipartUpload returns 400 for invalid part order", func(t *testing.T) {
-		ro := newRouterWithMock(
-			&mockStore{bucketExists: true, completeMultipartUploadErr: ErrInvalidPartOrder},
-		)
+		ro := newRouterWithMock(&mockStore{
+			bucketExists:               true,
+			completeMultipartUploadErr: ErrInvalidPartOrder,
+			listPartsUploadMeta:        uploadMeta{Bucket: "my-bucket", Key: "key"},
+		})
 		body, _ := xml.Marshal(
 			completeMultipartUploadRequest{
 				Parts: []xmlCompletePart{{PartNumber: 1, ETag: `"abc"`}},
@@ -3463,9 +3475,11 @@ func TestRouterMultipartUpload(t *testing.T) {
 	})
 
 	t.Run("CompleteMultipartUpload returns 404 for missing bucket", func(t *testing.T) {
-		ro := newRouterWithMock(
-			&mockStore{bucketExists: true, completeMultipartUploadErr: ErrBucketNotFound},
-		)
+		ro := newRouterWithMock(&mockStore{
+			bucketExists:               true,
+			completeMultipartUploadErr: ErrBucketNotFound,
+			listPartsUploadMeta:        uploadMeta{Bucket: "my-bucket", Key: "key"},
+		})
 		body, _ := xml.Marshal(
 			completeMultipartUploadRequest{
 				Parts: []xmlCompletePart{{PartNumber: 1, ETag: `"abc"`}},
@@ -3483,9 +3497,11 @@ func TestRouterMultipartUpload(t *testing.T) {
 	})
 
 	t.Run("CompleteMultipartUpload returns 500 on storage error", func(t *testing.T) {
-		ro := newRouterWithMock(
-			&mockStore{bucketExists: true, completeMultipartUploadErr: errors.New("disk failure")},
-		)
+		ro := newRouterWithMock(&mockStore{
+			bucketExists:               true,
+			completeMultipartUploadErr: errors.New("disk failure"),
+			listPartsUploadMeta:        uploadMeta{Bucket: "my-bucket", Key: "key"},
+		})
 		body, _ := xml.Marshal(
 			completeMultipartUploadRequest{
 				Parts: []xmlCompletePart{{PartNumber: 1, ETag: `"abc"`}},
@@ -3519,9 +3535,11 @@ func TestRouterMultipartUpload(t *testing.T) {
 	})
 
 	t.Run("AbortMultipartUpload returns 404 for unknown uploadId", func(t *testing.T) {
-		ro := newRouterWithMock(
-			&mockStore{bucketExists: true, abortMultipartUploadErr: ErrUploadNotFound},
-		)
+		ro := newRouterWithMock(&mockStore{
+			bucketExists:            true,
+			abortMultipartUploadErr: ErrUploadNotFound,
+			listPartsUploadMeta:     uploadMeta{Bucket: "my-bucket", Key: "key"},
+		})
 		req := httptest.NewRequest(http.MethodDelete, "/my-bucket/key?uploadId=nonexistent", nil)
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
@@ -3530,9 +3548,11 @@ func TestRouterMultipartUpload(t *testing.T) {
 	})
 
 	t.Run("AbortMultipartUpload returns 500 on storage error", func(t *testing.T) {
-		ro := newRouterWithMock(
-			&mockStore{bucketExists: true, abortMultipartUploadErr: errors.New("disk failure")},
-		)
+		ro := newRouterWithMock(&mockStore{
+			bucketExists:            true,
+			abortMultipartUploadErr: errors.New("disk failure"),
+			listPartsUploadMeta:     uploadMeta{Bucket: "my-bucket", Key: "key"},
+		})
 		req := httptest.NewRequest(http.MethodDelete, "/my-bucket/key?uploadId=abc", nil)
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
@@ -4708,7 +4728,11 @@ func TestRouterUploadPartCopy(t *testing.T) {
 	})
 
 	t.Run("routes to UploadPart when x-amz-copy-source is absent", func(t *testing.T) {
-		ro := newRouterWithMock(&mockStore{bucketExists: true, uploadPartETag: `"abc"`})
+		ro := newRouterWithMock(&mockStore{
+			bucketExists:        true,
+			uploadPartETag:      `"abc"`,
+			listPartsUploadMeta: uploadMeta{Bucket: "bucket", Key: "key"},
+		})
 		req := httptest.NewRequest(
 			http.MethodPut,
 			"/bucket/key?partNumber=1&uploadId=abc",
@@ -4742,9 +4766,11 @@ func TestRouterUploadPartCopy(t *testing.T) {
 	})
 
 	t.Run("returns 404 NoSuchUpload when storage reports upload not found", func(t *testing.T) {
-		ro := newRouterWithMock(
-			&mockStore{bucketExists: true, uploadPartCopyErr: ErrUploadNotFound},
-		)
+		ro := newRouterWithMock(&mockStore{
+			bucketExists:        true,
+			uploadPartCopyErr:   ErrUploadNotFound,
+			listPartsUploadMeta: uploadMeta{Bucket: "bucket", Key: "key"},
+		})
 		req := httptest.NewRequest(http.MethodPut, "/bucket/key?partNumber=1&uploadId=abc", nil)
 		req.Header.Set(amzCopySource, "/src-bucket/obj.txt")
 		w := httptest.NewRecorder()
@@ -4754,9 +4780,11 @@ func TestRouterUploadPartCopy(t *testing.T) {
 	})
 
 	t.Run("returns 404 when source bucket does not exist", func(t *testing.T) {
-		ro := newRouterWithMock(
-			&mockStore{bucketExists: true, uploadPartCopyErr: ErrBucketNotFound},
-		)
+		ro := newRouterWithMock(&mockStore{
+			bucketExists:        true,
+			uploadPartCopyErr:   ErrBucketNotFound,
+			listPartsUploadMeta: uploadMeta{Bucket: "bucket", Key: "key"},
+		})
 		req := httptest.NewRequest(http.MethodPut, "/bucket/key?partNumber=1&uploadId=abc", nil)
 		req.Header.Set(amzCopySource, "/no-such-bucket/obj.txt")
 		w := httptest.NewRecorder()
@@ -4837,9 +4865,11 @@ func TestRouterUploadPartCopy(t *testing.T) {
 	})
 
 	t.Run("returns 500 on storage error", func(t *testing.T) {
-		ro := newRouterWithMock(
-			&mockStore{bucketExists: true, uploadPartCopyErr: errors.New("disk failure")},
-		)
+		ro := newRouterWithMock(&mockStore{
+			bucketExists:        true,
+			uploadPartCopyErr:   errors.New("disk failure"),
+			listPartsUploadMeta: uploadMeta{Bucket: "bucket", Key: "key"},
+		})
 		req := httptest.NewRequest(http.MethodPut, "/bucket/key?partNumber=1&uploadId=abc", nil)
 		req.Header.Set(amzCopySource, "/src-bucket/obj.txt")
 		w := httptest.NewRecorder()
@@ -8140,6 +8170,7 @@ func TestSSEResponseHeaders(t *testing.T) {
 		ro := newRouterWithMock(&mockStore{
 			bucketExists:                true,
 			completeMultipartUploadMeta: ObjectMetadata{SSEAlgorithm: "AES256"},
+			listPartsUploadMeta:         uploadMeta{Bucket: "b", Key: "k"},
 		})
 		body := `<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>"abc"</ETag></Part></CompleteMultipartUpload>`
 		req := httptest.NewRequest(http.MethodPost, "/b/k?uploadId=uid123", strings.NewReader(body))
@@ -8307,6 +8338,7 @@ func TestSSEBucketKeyEnabled(t *testing.T) {
 					SSEAlgorithm:        "aws:kms",
 					SSEBucketKeyEnabled: true,
 				},
+				listPartsUploadMeta: uploadMeta{Bucket: "b", Key: "k"},
 			})
 			body := `<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>"abc"</ETag></Part></CompleteMultipartUpload>`
 			req := httptest.NewRequest(
@@ -10420,7 +10452,7 @@ func TestSSECCoverage(t *testing.T) {
 		func(t *testing.T) {
 			ro := newRouterWithMock(&mockStore{
 				bucketExists:        true,
-				listPartsUploadMeta: uploadMeta{},
+				listPartsUploadMeta: uploadMeta{Bucket: "b", Key: "k"},
 				uploadPartErr:       ErrUploadNotFound,
 			})
 			req := httptest.NewRequest(http.MethodPut, "/b/k?uploadId=uid&partNumber=1",
@@ -10523,9 +10555,10 @@ func TestSSECCoverage(t *testing.T) {
 
 	t.Run("UploadPartCopy succeeds with correct source SSE-C headers", func(t *testing.T) {
 		ro := newRouterWithMock(&mockStore{
-			bucketExists:       true,
-			headObjectMeta:     ObjectMetadata{SSECKeyMD5: ssecMD5()},
-			uploadPartCopyETag: `"etag"`,
+			bucketExists:        true,
+			headObjectMeta:      ObjectMetadata{SSECKeyMD5: ssecMD5()},
+			uploadPartCopyETag:  `"etag"`,
+			listPartsUploadMeta: uploadMeta{Bucket: "b", Key: "k"},
 		})
 		req := httptest.NewRequest(http.MethodPut, "/b/k?uploadId=uid&partNumber=1", nil)
 		req.Header.Set(amzCopySource, "/src/obj")
