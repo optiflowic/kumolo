@@ -367,15 +367,19 @@ if [[ -n "$KEY_ID" && -n "$CIPHERTEXT_BLOB" ]]; then
       fail "ReEncrypt (missing fields: blob='$REENC_BLOB' src='$REENC_SRC_KEY' dst='$REENC_DST_KEY')"
     fi
 
-    DEC_REENC_RESP=$($AWS decrypt \
-      --ciphertext-blob "$REENC_BLOB" \
-      --key-id "$REENC_KEY_ID" \
-      2>/dev/null || true)
-    DEC_REENC_PLAINTEXT=$(echo "$DEC_REENC_RESP" | jq -r '.Plaintext // empty' 2>/dev/null || true)
-    if [[ "$DEC_REENC_PLAINTEXT" == "$PLAINTEXT_INPUT" ]]; then
-      ok "ReEncrypt (re-encrypted ciphertext decrypts to original plaintext)"
+    if [[ -n "$REENC_BLOB" ]]; then
+      DEC_REENC_RESP=$($AWS decrypt \
+        --ciphertext-blob "$REENC_BLOB" \
+        --key-id "$REENC_KEY_ID" \
+        2>/dev/null || true)
+      DEC_REENC_PLAINTEXT=$(echo "$DEC_REENC_RESP" | jq -r '.Plaintext // empty' 2>/dev/null || true)
+      if [[ "$DEC_REENC_PLAINTEXT" == "$PLAINTEXT_INPUT" ]]; then
+        ok "ReEncrypt (re-encrypted ciphertext decrypts to original plaintext)"
+      else
+        fail "ReEncrypt (decrypted plaintext mismatch: got '$DEC_REENC_PLAINTEXT')"
+      fi
     else
-      fail "ReEncrypt (decrypted plaintext mismatch: got '$DEC_REENC_PLAINTEXT')"
+      fail "ReEncrypt (re-encrypted ciphertext decrypts to original plaintext) (skipped: ReEncrypt failed)"
     fi
   else
     fail "ReEncrypt (skipped: second key creation failed)"
