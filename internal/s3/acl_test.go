@@ -1029,6 +1029,31 @@ func TestACLEnforcementNewOps(t *testing.T) {
 		assert.Equal(t, http.StatusForbidden, w.Code)
 	})
 
+	t.Run(
+		"UploadPartCopy: anonymous + destination GetBucketACL bucket not found → 404",
+		func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{bucketExists: false})
+			req := httptest.NewRequest(http.MethodPut, "/b/k?partNumber=1&uploadId=uid", nil)
+			req.Header.Set(amzCopySource, "/src-b/src-k")
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusNotFound, w.Code)
+			assert.Contains(t, w.Body.String(), "NoSuchBucket")
+		},
+	)
+
+	t.Run("UploadPartCopy: anonymous + destination GetBucketACL 500", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			bucketExists:    true,
+			getBucketACLErr: errors.New("disk fail"),
+		})
+		req := httptest.NewRequest(http.MethodPut, "/b/k?partNumber=1&uploadId=uid", nil)
+		req.Header.Set(amzCopySource, "/src-b/src-k")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+
 	// CompleteMultipartUpload ACL enforcement
 	t.Run("CompleteMultipartUpload: anonymous denied by private bucket ACL", func(t *testing.T) {
 		ro := newRouterWithMock(&mockStore{

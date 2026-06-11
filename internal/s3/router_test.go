@@ -2943,6 +2943,20 @@ func TestRouterMultipartUpload(t *testing.T) {
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
 
+	t.Run(
+		"CreateMultipartUpload returns 404 when storage reports missing bucket",
+		func(t *testing.T) {
+			ro := newRouterWithMock(
+				&mockStore{bucketExists: true, createMultipartUploadErr: ErrBucketNotFound},
+			)
+			req := httptest.NewRequest(http.MethodPost, "/my-bucket/key?uploads", nil)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusNotFound, w.Code)
+			assert.Contains(t, w.Body.String(), "NoSuchBucket")
+		},
+	)
+
 	t.Run("CreateMultipartUpload returns 400 on invalid Object Lock header", func(t *testing.T) {
 		ro := newRouterWithMock(&mockStore{bucketExists: true})
 		req := httptest.NewRequest(http.MethodPost, "/my-bucket/key?uploads", nil)
@@ -3449,7 +3463,9 @@ func TestRouterMultipartUpload(t *testing.T) {
 	})
 
 	t.Run("CompleteMultipartUpload returns 404 for missing bucket", func(t *testing.T) {
-		ro := newRouterWithMock(&mockStore{completeMultipartUploadErr: ErrBucketNotFound})
+		ro := newRouterWithMock(
+			&mockStore{bucketExists: true, completeMultipartUploadErr: ErrBucketNotFound},
+		)
 		body, _ := xml.Marshal(
 			completeMultipartUploadRequest{
 				Parts: []xmlCompletePart{{PartNumber: 1, ETag: `"abc"`}},
@@ -4726,7 +4742,9 @@ func TestRouterUploadPartCopy(t *testing.T) {
 	})
 
 	t.Run("returns 404 when source bucket does not exist", func(t *testing.T) {
-		ro := newRouterWithMock(&mockStore{uploadPartCopyErr: ErrBucketNotFound})
+		ro := newRouterWithMock(
+			&mockStore{bucketExists: true, uploadPartCopyErr: ErrBucketNotFound},
+		)
 		req := httptest.NewRequest(http.MethodPut, "/bucket/key?partNumber=1&uploadId=abc", nil)
 		req.Header.Set(amzCopySource, "/no-such-bucket/obj.txt")
 		w := httptest.NewRecorder()
