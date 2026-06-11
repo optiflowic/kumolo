@@ -31,5 +31,6 @@ Cancels a multipart upload and frees all associated part storage.
 | Code | HTTP | Condition |
 |---|---|---|
 | `NoSuchUpload` | 404 | Upload ID does not exist |
+| `AccessDenied` | 403 | Anonymous request denied by bucket ACL |
 | `InvalidArgument` | 400 | Missing `uploadId` |
 | `InternalError` | 500 | Storage failure |

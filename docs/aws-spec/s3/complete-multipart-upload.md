@@ -64,6 +64,7 @@ The ETag format for multipart objects is `"<md5>-<partCount>"`.
 |---|---|---|
 | `NoSuchUpload` | 404 | Upload ID does not exist |
 | `NoSuchBucket` | 404 | Bucket does not exist |
+| `AccessDenied` | 403 | Anonymous request denied by bucket ACL |
 | `InvalidPart` | 400 | A specified part was not found |
 | `InvalidPartOrder` | 400 | Parts are not in ascending order |
 | `EntityTooSmall` | 400 | A non-final part is below the 5 MB minimum |

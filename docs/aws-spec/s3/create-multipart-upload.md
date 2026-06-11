@@ -56,6 +56,7 @@ Initiates a multipart upload and returns an `UploadId`.
 | Code | HTTP | Condition |
 |---|---|---|
 | `NoSuchBucket` | 404 | Bucket does not exist |
+| `AccessDenied` | 403 | Anonymous request denied by bucket ACL |
 | `InternalError` | 500 | Storage failure |
 
 ## Kumolo deviations

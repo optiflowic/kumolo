@@ -59,6 +59,7 @@ Source may include a `?versionId=<id>` query string.
 | `NoSuchUpload` | 404 | Upload ID does not exist |
 | `NoSuchBucket` | 404 | Source bucket does not exist |
 | `NoSuchKey` | 404 | Source object does not exist |
+| `AccessDenied` | 403 | Anonymous request denied by source object ACL or destination bucket ACL |
 | `PreconditionFailed` | 412 | Copy source precondition failed |
 | `InvalidArgument` | 400 | Missing or invalid parameters |
 | `InternalError` | 500 | Storage failure |
