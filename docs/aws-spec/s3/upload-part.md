@@ -46,6 +46,7 @@ Uploads a single part in a multipart upload. Part numbers must be between 1 and 
 | Code | HTTP | Condition |
 |---|---|---|
 | `NoSuchUpload` | 404 | Upload ID does not exist |
+| `AccessDenied` | 403 | Anonymous request denied by bucket ACL |
 | `InvalidArgument` | 400 | Missing or invalid `uploadId` or `partNumber` |
 | `BadDigest` | 400 | Content-MD5 or checksum mismatch (part is rolled back) |
 | `InternalError` | 500 | Storage failure |

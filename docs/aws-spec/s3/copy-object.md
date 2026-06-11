@@ -61,6 +61,7 @@ Source may include a `?versionId=<id>` query string to copy a specific version.
 |---|---|---|
 | `NoSuchBucket` | 404 | Source or destination bucket does not exist |
 | `NoSuchKey` | 404 | Source object does not exist |
+| `AccessDenied` | 403 | Anonymous request denied by source object ACL or destination bucket ACL |
 | `InvalidArgument` | 400 | Missing or malformed `x-amz-copy-source` |
 | `InternalError` | 500 | Storage failure |
 
