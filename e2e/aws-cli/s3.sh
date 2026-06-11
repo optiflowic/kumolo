@@ -45,13 +45,21 @@ cleanup_bucket() {
       --output text --query 'Versions[].[Key,VersionId]' 2>/dev/null | \
     while IFS=$'\t' read -r key vid _rest; do
       [[ -z "$key" || "$key" == "None" ]] && continue
-      $AWS s3api delete-object --bucket "$b" --key "$key" --version-id "$vid" > /dev/null 2>&1 || true
+      if [[ -z "$vid" || "$vid" == "null" || "$vid" == "None" ]]; then
+        $AWS s3api delete-object --bucket "$b" --key "$key" > /dev/null 2>&1 || true
+      else
+        $AWS s3api delete-object --bucket "$b" --key "$key" --version-id "$vid" > /dev/null 2>&1 || true
+      fi
     done
   $AWS s3api list-object-versions --bucket "$b" \
       --output text --query 'DeleteMarkers[].[Key,VersionId]' 2>/dev/null | \
     while IFS=$'\t' read -r key vid _rest; do
       [[ -z "$key" || "$key" == "None" ]] && continue
-      $AWS s3api delete-object --bucket "$b" --key "$key" --version-id "$vid" > /dev/null 2>&1 || true
+      if [[ -z "$vid" || "$vid" == "null" || "$vid" == "None" ]]; then
+        $AWS s3api delete-object --bucket "$b" --key "$key" > /dev/null 2>&1 || true
+      else
+        $AWS s3api delete-object --bucket "$b" --key "$key" --version-id "$vid" > /dev/null 2>&1 || true
+      fi
     done
   $AWS s3api delete-bucket --bucket "$b" > /dev/null 2>&1 || true
 }
@@ -211,6 +219,233 @@ run "PutBucketCors" \
       '{"CORSRules":[{"AllowedOrigins":["*"],"AllowedMethods":["GET","PUT"]}]}'
 run "GetBucketCors"    $AWS s3api get-bucket-cors    --bucket "$BUCKET"
 run "DeleteBucketCors" $AWS s3api delete-bucket-cors --bucket "$BUCKET"
+
+# ---------------------------------------------------------------------------
+# BucketLogging — configure log delivery and verify a log object is written.
+# ---------------------------------------------------------------------------
+LOG_BUCKET="kumolo-cli-s3-logging"
+cleanup_bucket "$LOG_BUCKET"
+run "CreateBucket (log target)" $AWS s3api create-bucket --bucket "$LOG_BUCKET"
+
+LOG_CONFIG='{"LoggingEnabled":{"TargetBucket":"kumolo-cli-s3-logging","TargetPrefix":"logs/"}}'
+run "PutBucketLogging" \
+  $AWS s3api put-bucket-logging \
+    --bucket "$BUCKET" \
+    --bucket-logging-status "$LOG_CONFIG"
+
+LOG_RESP=$($AWS s3api get-bucket-logging --bucket "$BUCKET" 2>/dev/null || true)
+LOG_TARGET=$(echo "$LOG_RESP" | jq -r '.LoggingEnabled.TargetBucket // empty' 2>/dev/null || true)
+if [[ "$LOG_TARGET" == "$LOG_BUCKET" ]]; then
+  ok "GetBucketLogging (TargetBucket present)"
+else
+  fail "GetBucketLogging (expected TargetBucket=$LOG_BUCKET, got '$LOG_TARGET')"
+fi
+
+# Trigger a request; logging is synchronous so the log object is present
+# in the target bucket before this script proceeds.
+echo "log-trigger" > "$TMPFILE"
+$AWS s3api put-object \
+  --bucket "$BUCKET" --key "log-trigger.txt" --body "$TMPFILE" > /dev/null 2>&1 || true
+
+LOG_OBJ_RESP=$($AWS s3api list-objects-v2 --bucket "$LOG_BUCKET" --prefix "logs/" 2>/dev/null || true)
+LOG_OBJ_COUNT=$(echo "$LOG_OBJ_RESP" | jq '.Contents | length' 2>/dev/null || echo 0)
+if [[ "$LOG_OBJ_COUNT" -ge 1 ]]; then
+  ok "BucketLogging (log object written to target bucket)"
+else
+  fail "BucketLogging (expected >=1 log object under logs/ in $LOG_BUCKET, got $LOG_OBJ_COUNT)"
+fi
+
+cleanup_bucket "$LOG_BUCKET"
+
+# ---------------------------------------------------------------------------
+# BucketReplication — configure replication and verify object is copied.
+# Source bucket already has versioning enabled; enable it on destination too.
+# ---------------------------------------------------------------------------
+DEST_BUCKET="kumolo-cli-s3-replication-dest"
+cleanup_bucket "$DEST_BUCKET"
+run "CreateBucket (replication dest)" $AWS s3api create-bucket --bucket "$DEST_BUCKET"
+run "PutBucketVersioning (replication dest)" \
+  $AWS s3api put-bucket-versioning \
+    --bucket "$DEST_BUCKET" \
+    --versioning-configuration Status=Enabled
+
+REPL_CONFIG=$(cat <<'JSON'
+{
+  "Role": "arn:aws:iam::000000000000:role/replication-role",
+  "Rules": [{
+    "ID": "replicate-all",
+    "Status": "Enabled",
+    "Filter": {},
+    "Destination": {"Bucket": "arn:aws:s3:::kumolo-cli-s3-replication-dest"}
+  }]
+}
+JSON
+)
+run "PutBucketReplication" \
+  $AWS s3api put-bucket-replication \
+    --bucket "$BUCKET" \
+    --replication-configuration "$REPL_CONFIG"
+
+REPL_RESP=$($AWS s3api get-bucket-replication --bucket "$BUCKET" 2>/dev/null || true)
+REPL_RULE_COUNT=$(echo "$REPL_RESP" | jq '.ReplicationConfiguration.Rules | length' 2>/dev/null || echo 0)
+if [[ "$REPL_RULE_COUNT" -ge 1 ]]; then
+  ok "GetBucketReplication (rules present)"
+else
+  fail "GetBucketReplication (expected >=1 rule, got $REPL_RULE_COUNT)"
+fi
+
+# Replication is synchronous; the destination object exists immediately.
+echo "replicated-content" > "$TMPFILE"
+$AWS s3api put-object \
+  --bucket "$BUCKET" --key "replicated.txt" --body "$TMPFILE" > /dev/null 2>&1 || true
+
+REPL_HEAD=$($AWS s3api head-object --bucket "$DEST_BUCKET" --key "replicated.txt" 2>/dev/null || true)
+REPL_STATUS=$(echo "$REPL_HEAD" | jq -r '.ReplicationStatus // empty' 2>/dev/null || true)
+if [[ "$REPL_STATUS" == "REPLICA" ]]; then
+  ok "BucketReplication (object replicated; ReplicationStatus=REPLICA in destination)"
+else
+  fail "BucketReplication (expected ReplicationStatus=REPLICA, got '$REPL_STATUS')"
+fi
+
+cleanup_bucket "$DEST_BUCKET"
+
+# ---------------------------------------------------------------------------
+# SSE-KMS — PutObject with aws:kms; verify header echoed on HeadObject.
+# ---------------------------------------------------------------------------
+echo "sse-kms-data" > "$TMPFILE"
+run "PutObject (SSE-KMS)" \
+  $AWS s3api put-object \
+    --bucket "$BUCKET" \
+    --key "sse-kms.txt" \
+    --body "$TMPFILE" \
+    --server-side-encryption aws:kms
+
+HEAD_SSE_KMS=$($AWS s3api head-object --bucket "$BUCKET" --key "sse-kms.txt" 2>/dev/null || true)
+SSE_VALUE=$(echo "$HEAD_SSE_KMS" | jq -r '.ServerSideEncryption // empty' 2>/dev/null || true)
+if [[ "$SSE_VALUE" == "aws:kms" ]]; then
+  ok "HeadObject (SSE-KMS echoed: ServerSideEncryption=aws:kms)"
+else
+  fail "HeadObject (SSE-KMS: expected ServerSideEncryption=aws:kms, got '$SSE_VALUE')"
+fi
+
+run "GetObject (SSE-KMS)" \
+  $AWS s3api get-object --bucket "$BUCKET" --key "sse-kms.txt" /dev/null
+
+# ---------------------------------------------------------------------------
+# SSE-C — PutObject with customer-provided key; verify round-trip.
+# The AWS CLI expects raw key bytes via fileb://; it base64-encodes and
+# computes the MD5 internally.
+# ---------------------------------------------------------------------------
+SSEC_TMPKEY="$(mktemp)"
+dd if=/dev/urandom bs=32 count=1 2>/dev/null > "$SSEC_TMPKEY"
+
+echo "sse-c-data" > "$TMPFILE"
+run "PutObject (SSE-C)" \
+  $AWS s3api put-object \
+    --bucket "$BUCKET" \
+    --key "sse-c.txt" \
+    --body "$TMPFILE" \
+    --sse-customer-algorithm AES256 \
+    --sse-customer-key "fileb://$SSEC_TMPKEY"
+
+run "GetObject (SSE-C round-trip)" \
+  $AWS s3api get-object \
+    --bucket "$BUCKET" \
+    --key "sse-c.txt" \
+    --sse-customer-algorithm AES256 \
+    --sse-customer-key "fileb://$SSEC_TMPKEY" \
+    /dev/null
+
+run "HeadObject (SSE-C)" \
+  $AWS s3api head-object \
+    --bucket "$BUCKET" \
+    --key "sse-c.txt" \
+    --sse-customer-algorithm AES256 \
+    --sse-customer-key "fileb://$SSEC_TMPKEY"
+
+rm -f "$SSEC_TMPKEY"
+
+# ---------------------------------------------------------------------------
+# SelectObjectContent — CSV and JSON input/output; verify filtered results.
+# ---------------------------------------------------------------------------
+CSV_KEY="select-test.csv"
+printf 'name,age\nAlice,30\nBob,25\nCarol,35\n' > "$TMPFILE"
+$AWS s3api put-object \
+  --bucket "$BUCKET" --key "$CSV_KEY" --body "$TMPFILE" > /dev/null 2>&1 || true
+
+CSV_SELECT_OUT="$(mktemp)"
+if $AWS s3api select-object-content \
+  --bucket "$BUCKET" \
+  --key "$CSV_KEY" \
+  --expression "SELECT * FROM S3Object WHERE CAST(age AS INT) > 27" \
+  --expression-type SQL \
+  --input-serialization '{"CSV":{"FileHeaderInfo":"USE"}}' \
+  --output-serialization '{"CSV":{}}' \
+  "$CSV_SELECT_OUT" > /dev/null 2>&1; then
+  if grep -q "Alice" "$CSV_SELECT_OUT" || grep -q "Carol" "$CSV_SELECT_OUT"; then
+    ok "SelectObjectContent (CSV input/output: filtered rows present)"
+  else
+    fail "SelectObjectContent (CSV: expected Alice or Carol in output, got: $(head -3 "$CSV_SELECT_OUT"))"
+  fi
+else
+  fail "SelectObjectContent (CSV: command failed)"
+fi
+rm -f "$CSV_SELECT_OUT"
+
+JSON_KEY="select-test.json"
+printf '{"name":"Alice","score":90}\n{"name":"Bob","score":60}\n{"name":"Carol","score":85}\n' > "$TMPFILE"
+$AWS s3api put-object \
+  --bucket "$BUCKET" --key "$JSON_KEY" --body "$TMPFILE" > /dev/null 2>&1 || true
+
+JSON_SELECT_OUT="$(mktemp)"
+if $AWS s3api select-object-content \
+  --bucket "$BUCKET" \
+  --key "$JSON_KEY" \
+  --expression "SELECT * FROM S3Object s WHERE s.score > 70" \
+  --expression-type SQL \
+  --input-serialization '{"JSON":{"Type":"LINES"}}' \
+  --output-serialization '{"JSON":{}}' \
+  "$JSON_SELECT_OUT" > /dev/null 2>&1; then
+  if grep -q "Alice" "$JSON_SELECT_OUT" || grep -q "Carol" "$JSON_SELECT_OUT"; then
+    ok "SelectObjectContent (JSON input/output: filtered rows present)"
+  else
+    fail "SelectObjectContent (JSON: expected Alice or Carol in output, got: $(head -3 "$JSON_SELECT_OUT"))"
+  fi
+else
+  fail "SelectObjectContent (JSON: command failed)"
+fi
+rm -f "$JSON_SELECT_OUT"
+
+# ---------------------------------------------------------------------------
+# ACL enforcement — verify anonymous access is controlled by object ACL.
+# ---------------------------------------------------------------------------
+echo "public-content" > "$TMPFILE"
+$AWS s3api put-object \
+  --bucket "$BUCKET" --key "acl-test.txt" --body "$TMPFILE" > /dev/null 2>&1 || true
+
+run "PutObjectAcl (public-read)" \
+  $AWS s3api put-object-acl --bucket "$BUCKET" --key "acl-test.txt" --acl public-read
+
+# Anonymous GET via plain HTTP (no auth headers) should succeed.
+ACL_PUBLIC_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+  "${ENDPOINT}/${BUCKET}/acl-test.txt")
+if [[ "$ACL_PUBLIC_STATUS" == "200" ]]; then
+  ok "ACL enforcement (public-read: anonymous GET returns 200)"
+else
+  fail "ACL enforcement (public-read: expected 200, got $ACL_PUBLIC_STATUS)"
+fi
+
+run "PutObjectAcl (private)" \
+  $AWS s3api put-object-acl --bucket "$BUCKET" --key "acl-test.txt" --acl private
+
+# Anonymous GET should now be denied.
+ACL_PRIVATE_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+  "${ENDPOINT}/${BUCKET}/acl-test.txt")
+if [[ "$ACL_PRIVATE_STATUS" == "403" ]]; then
+  ok "ACL enforcement (private: anonymous GET returns 403)"
+else
+  fail "ACL enforcement (private: expected 403, got $ACL_PRIVATE_STATUS)"
+fi
 
 # Cleanup
 cleanup_bucket "$BUCKET"
