@@ -34,7 +34,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - PartiQL: `ExecuteStatement`, `BatchExecuteStatement`, `ExecuteTransaction`
 - `ReturnValuesOnConditionCheckFailure` on PartiQL write statements
-- `ReturnConsumedCapacity`: `ConsumedCapacity` (or `ConsumedCapacities`) now included in all item and query responses
 - DynamoDB Streams: `ListStreams`, `DescribeStream`, `GetShardIterator`, `GetRecords`
 
 #### Go testing library
@@ -47,6 +46,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - ACL operations were stored but never enforced — `GetBucketAcl`, `PutBucketAcl`, `GetObjectAcl`, `PutObjectAcl` now store grants and enforce access on `GetObject` / `PutObject`
 - Lifecycle rule `Expiration.Date` (absolute expiry date) and `ExpiredObjectDeleteMarker` were never evaluated by the background enforcement loop
+
+#### DynamoDB
+
+- `ReturnConsumedCapacity`: `ConsumedCapacity` (or `ConsumedCapacities`) was accepted as a parameter but omitted from all responses; it is now included
 
 ## [0.1.1] - 2026-05-28
 
