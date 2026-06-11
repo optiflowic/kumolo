@@ -287,8 +287,8 @@ func (ro *Router) handleCopyObject(
 	if !ok {
 		return
 	}
-	// Validate source SSE-C: head the source to check its stored key MD5.
-	// Only short-circuit on validation failure; not-found errors are left to CopyObject.
+	// Validate source: check anonymous ACL and SSE-C key consistency.
+	// Not-found errors are left for CopyObject to report.
 	{
 		var srcMeta ObjectMetadata
 		var headErr error
@@ -297,8 +297,21 @@ func (ro *Router) handleCopyObject(
 		} else {
 			srcMeta, headErr = ro.storage.HeadObject(srcBucket, srcKey)
 		}
-		if headErr == nil && !validateSSECOnRead(w, r, srcMeta, srcSSECKeyMD5) {
-			return
+		if headErr == nil {
+			if isAnonymousRequest(r) && !aclAllowsAnonymous(srcMeta.ACL, aclPermRead) {
+				slog.Debug( // #nosec G706 -- srcBucket/srcKey come from header; log injection risk accepted for a local dev emulator
+					"copy object source denied: ACL",
+					"srcBucket",
+					srcBucket,
+					"srcKey",
+					srcKey,
+				)
+				writeError(w, r, http.StatusForbidden, "AccessDenied", "Access Denied")
+				return
+			}
+			if !validateSSECOnRead(w, r, srcMeta, srcSSECKeyMD5) {
+				return
+			}
 		}
 	}
 	retention, legalHold, ok := parseObjectLockHeaders(w, r)
@@ -306,6 +319,41 @@ func (ro *Router) handleCopyObject(
 		return
 	}
 	storageClass := r.Header.Get(amzStorageClass)
+	if isAnonymousRequest(r) {
+		bucketACL, err := ro.storage.GetBucketACL(dstBucket)
+		if err != nil {
+			if errors.Is(err, ErrBucketNotFound) {
+				slog.Debug( // #nosec G706 -- dstBucket comes from URL path; log injection risk accepted for a local dev emulator
+					"bucket not found",
+					"bucket",
+					dstBucket,
+				)
+				writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+					"The specified bucket does not exist.")
+				return
+			}
+			slog.Error( // #nosec G706 -- dstBucket comes from URL path; log injection risk accepted for a local dev emulator
+				"failed to get bucket ACL",
+				"bucket",
+				dstBucket,
+				"err",
+				err,
+			)
+			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+			return
+		}
+		if !aclAllowsAnonymous(bucketACL, aclPermWrite) {
+			slog.Debug( // #nosec G706 -- dstBucket/dstKey come from URL path; log injection risk accepted for a local dev emulator
+				"copy object denied: ACL",
+				"bucket",
+				dstBucket,
+				"key",
+				dstKey,
+			)
+			writeError(w, r, http.StatusForbidden, "AccessDenied", "Access Denied")
+			return
+		}
+	}
 	meta, err := ro.storage.CopyObject(
 		srcBucket,
 		srcKey,
