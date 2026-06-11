@@ -79,14 +79,15 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
 })
 ```
 
-The same pattern applies to DynamoDB, STS, and other supported services.
+The same pattern applies to DynamoDB, KMS, STS, and other supported services.
 
 ## Supported Services
 
 | Service      | Operations |
 |--------------|------------|
-| **S3**       | Bucket CRUD, Object CRUD, Multipart Upload, Versioning, Tagging, CORS, Policy, Lifecycle, ACL, Encryption, Object Lock, and more |
-| **DynamoDB** | Table CRUD, Item operations (Get/Put/Delete/Update), Query, Scan, Batch operations, Transactions, TTL, Tags, Kinesis streaming destinations |
+| **S3**       | Bucket CRUD, Object CRUD, Multipart Upload, Versioning, Tagging, CORS, Policy, Lifecycle, ACL (enforced), Encryption (SSE-S3 / SSE-KMS / SSE-C), Object Lock, SelectObjectContent, BucketLogging, BucketReplication, and more |
+| **DynamoDB** | Table CRUD, Item operations (Get/Put/Delete/Update), Query, Scan, Batch operations, Transactions, PartiQL (ExecuteStatement / BatchExecuteStatement / ExecuteTransaction), Streams, TTL, Tags, Kinesis streaming destinations |
+| **KMS**      | Key management (Create/Describe/Enable/Disable/Schedule deletion), Data plane (Encrypt/Decrypt/GenerateDataKey/GenerateDataKeyPair), Aliases, Key rotation, Grants, Tags |
 | **STS**      | GetCallerIdentity, AssumeRole, GetSessionToken |
 
 For the full list of supported operations, see the [documentation](https://optiflowic.github.io/kumolo-docs).
@@ -105,7 +106,7 @@ kumolo aims for high fidelity, but some behaviors differ from real AWS by design
 
 **S3**
 
-- Bucket Policy and ACL rules are stored and returned but not enforced — all requests are permitted regardless of policy content.
+- Bucket Policy rules are stored and returned but not enforced — all requests are permitted regardless of policy content.
 - SigV4 request signatures are parsed but not cryptographically verified. This is intentional for local development.
 
 **DynamoDB**
