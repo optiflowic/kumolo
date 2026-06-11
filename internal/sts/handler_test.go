@@ -90,13 +90,49 @@ func TestHandleAssumeRole(t *testing.T) {
 		},
 		{
 			name:        "RoleArn with no slash",
-			body:        "Action=AssumeRole&Version=2011-06-15&RoleArn=invalidarn&RoleSessionName=my-session",
+			body:        "Action=AssumeRole&Version=2011-06-15&RoleArn=arn:aws:iam::123456789012:role-no-slash&RoleSessionName=my-session",
 			wantStatus:  http.StatusBadRequest,
 			wantErrCode: "ValidationError",
 		},
 		{
 			name:        "RoleArn ending with slash",
 			body:        "Action=AssumeRole&Version=2011-06-15&RoleArn=arn:aws:iam::123456789012:role/&RoleSessionName=my-session",
+			wantStatus:  http.StatusBadRequest,
+			wantErrCode: "ValidationError",
+		},
+		{
+			name:        "RoleArn too short (< 20 chars)",
+			body:        "Action=AssumeRole&Version=2011-06-15&RoleArn=arn:aws:iam:role/x&RoleSessionName=my-session",
+			wantStatus:  http.StatusBadRequest,
+			wantErrCode: "ValidationError",
+		},
+		{
+			name: "RoleArn too long (> 2048 chars)",
+			body: "Action=AssumeRole&Version=2011-06-15&RoleArn=arn:aws:iam::123456789012:role/" + strings.Repeat(
+				"a",
+				2020,
+			) + "&RoleSessionName=my-session",
+			wantStatus:  http.StatusBadRequest,
+			wantErrCode: "ValidationError",
+		},
+		{
+			name:        "RoleSessionName too short (1 char)",
+			body:        "Action=AssumeRole&Version=2011-06-15&RoleArn=arn:aws:iam::123456789012:role/my-role&RoleSessionName=x",
+			wantStatus:  http.StatusBadRequest,
+			wantErrCode: "ValidationError",
+		},
+		{
+			name: "RoleSessionName too long (65 chars)",
+			body: "Action=AssumeRole&Version=2011-06-15&RoleArn=arn:aws:iam::123456789012:role/my-role&RoleSessionName=" + strings.Repeat(
+				"a",
+				65,
+			),
+			wantStatus:  http.StatusBadRequest,
+			wantErrCode: "ValidationError",
+		},
+		{
+			name:        "RoleSessionName invalid characters",
+			body:        "Action=AssumeRole&Version=2011-06-15&RoleArn=arn:aws:iam::123456789012:role/my-role&RoleSessionName=bad!name",
 			wantStatus:  http.StatusBadRequest,
 			wantErrCode: "ValidationError",
 		},

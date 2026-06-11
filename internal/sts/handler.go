@@ -2,8 +2,10 @@ package sts
 
 import (
 	"encoding/xml"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 )
 
@@ -86,6 +88,8 @@ type errorResponse struct {
 	RequestID string      `xml:"RequestId"`
 }
 
+var validSessionNameRE = regexp.MustCompile(`^[\w+=,.@-]*$`)
+
 // Router handles STS API requests dispatched via the Action query parameter.
 type Router struct{}
 
@@ -141,6 +145,40 @@ func (ro *Router) handleAssumeRole(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
+	if len(roleArn) < 20 {
+		slog.Debug(
+			"AssumeRole: RoleArn too short",
+			"len",
+			len(roleArn),
+		) // #nosec G706 -- roleArn comes from the request form; log injection risk accepted for a local dev emulator
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"ValidationError",
+			fmt.Sprintf(
+				"1 validation error detected: Value '%s' at 'roleArn' failed to satisfy constraint: Member must have length greater than or equal to 20",
+				roleArn,
+			),
+		)
+		return
+	}
+	if len(roleArn) > 2048 {
+		slog.Debug(
+			"AssumeRole: RoleArn too long",
+			"len",
+			len(roleArn),
+		) // #nosec G706 -- roleArn comes from the request form; log injection risk accepted for a local dev emulator
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"ValidationError",
+			fmt.Sprintf(
+				"1 validation error detected: Value '%s' at 'roleArn' failed to satisfy constraint: Member must have length less than or equal to 2048",
+				roleArn[:64]+"...",
+			),
+		)
+		return
+	}
 	if sessionName == "" {
 		slog.Debug("AssumeRole: missing required param", "param", "RoleSessionName")
 		writeError(
@@ -148,6 +186,57 @@ func (ro *Router) handleAssumeRole(w http.ResponseWriter, r *http.Request) {
 			http.StatusBadRequest,
 			"ValidationError",
 			"1 validation error detected: Value null at 'roleSessionName' failed to satisfy constraint: Member must not be null",
+		)
+		return
+	}
+	if len(sessionName) < 2 {
+		slog.Debug(
+			"AssumeRole: RoleSessionName too short",
+			"len",
+			len(sessionName),
+		) // #nosec G706 -- sessionName comes from the request form; log injection risk accepted for a local dev emulator
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"ValidationError",
+			fmt.Sprintf(
+				"1 validation error detected: Value '%s' at 'roleSessionName' failed to satisfy constraint: Member must have length greater than or equal to 2",
+				sessionName,
+			),
+		)
+		return
+	}
+	if len(sessionName) > 64 {
+		slog.Debug(
+			"AssumeRole: RoleSessionName too long",
+			"len",
+			len(sessionName),
+		) // #nosec G706 -- sessionName comes from the request form; log injection risk accepted for a local dev emulator
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"ValidationError",
+			fmt.Sprintf(
+				"1 validation error detected: Value '%s' at 'roleSessionName' failed to satisfy constraint: Member must have length less than or equal to 64",
+				sessionName,
+			),
+		)
+		return
+	}
+	if !validSessionNameRE.MatchString(sessionName) {
+		slog.Debug(
+			"AssumeRole: RoleSessionName invalid pattern",
+			"sessionName",
+			sessionName,
+		) // #nosec G706 -- sessionName comes from the request form; log injection risk accepted for a local dev emulator
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"ValidationError",
+			fmt.Sprintf(
+				"1 validation error detected: Value '%s' at 'roleSessionName' failed to satisfy constraint: Member must satisfy regular expression pattern: [\\w+=,.@-]*",
+				sessionName,
+			),
 		)
 		return
 	}
