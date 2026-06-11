@@ -4741,6 +4741,18 @@ func TestRouterUploadPartCopy(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "InvalidArgument")
 	})
 
+	t.Run("returns 404 NoSuchUpload when storage reports upload not found", func(t *testing.T) {
+		ro := newRouterWithMock(
+			&mockStore{bucketExists: true, uploadPartCopyErr: ErrUploadNotFound},
+		)
+		req := httptest.NewRequest(http.MethodPut, "/bucket/key?partNumber=1&uploadId=abc", nil)
+		req.Header.Set(amzCopySource, "/src-bucket/obj.txt")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "NoSuchUpload")
+	})
+
 	t.Run("returns 404 when source bucket does not exist", func(t *testing.T) {
 		ro := newRouterWithMock(
 			&mockStore{bucketExists: true, uploadPartCopyErr: ErrBucketNotFound},
