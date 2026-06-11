@@ -44,7 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### S3
 
-- ACL operations were stored but never enforced — `GetBucketAcl`, `PutBucketAcl`, `GetObjectAcl`, `PutObjectAcl` now store grants and enforce access on `GetObject` / `PutObject`
+- ACL operations (`GetBucketAcl`, `PutBucketAcl`, `GetObjectAcl`, `PutObjectAcl`) stored grants but never enforced them — previously stored grants are now enforced on `GetObject` / `PutObject`
 - Lifecycle rule `Expiration.Date` (absolute expiry date) and `ExpiredObjectDeleteMarker` were never evaluated by the background enforcement loop
 
 #### DynamoDB
