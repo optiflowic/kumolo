@@ -57,7 +57,7 @@ resource "aws_s3_bucket_versioning" "replica" {
 }
 
 resource "aws_s3_bucket_replication_configuration" "main" {
-  depends_on = [aws_s3_bucket_versioning.main]
+  depends_on = [aws_s3_bucket_versioning.main, aws_s3_bucket_versioning.replica]
 
   bucket = aws_s3_bucket.main.id
   role   = "arn:aws:iam::000000000000:role/replication-role"
