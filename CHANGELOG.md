@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-06-11
+
+### Added
+
+#### KMS (new service)
+
+- Core key management: `CreateKey`, `DescribeKey`, `ListKeys`, `GetKeyPolicy`, `PutKeyPolicy`
+- Data plane: `GenerateDataKey`, `GenerateDataKeyWithoutPlaintext`, `GenerateDataKeyPair`, `GenerateDataKeyPairWithoutPlaintext`, `Encrypt`, `Decrypt`
+- Key aliases: `CreateAlias`, `DeleteAlias`, `UpdateAlias`, `ListAliases`
+- Key lifecycle: `EnableKey`, `DisableKey`, `ScheduleKeyDeletion`, `CancelKeyDeletion`
+- Key rotation: `EnableKeyRotation`, `DisableKeyRotation`, `GetKeyRotationStatus`, `RotateKeyOnDemand`, `ListKeyRotations`
+- Grant management: `CreateGrant`, `ListGrants`, `RetireGrant`, `RevokeGrant`, `ListRetirableGrants`
+- Tagging: `TagResource`, `UntagResource`, `ListResourceTags`
+
+#### S3
+
+- `SelectObjectContent` — CSV and JSON input/output with SQL expression evaluation
+- SSE-C: server-side encryption with customer-provided keys (`x-amz-server-side-encryption-customer-*` headers validated and stored on `PutObject`, `GetObject`, `HeadObject`, `UploadPart`, `CopyObject`)
+- SSE header validation: `x-amz-server-side-encryption` now rejects invalid values; `AES256`, `aws:kms`, and `aws:kms:dsse` accepted
+- SSE-KMS integration: KMS `GenerateDataKey` called on object writes when a KMS key is specified; `x-amz-server-side-encryption-aws-kms-key-id` resolved and echoed in responses
+- `BucketKeyEnabled` request/response header and object metadata
+- Default encryption applied to `PutObject`, `CopyObject`, and `CreateMultipartUpload` when a bucket default encryption rule is configured
+- BucketLogging: access log records now delivered to the configured target bucket and prefix
+- BucketReplication: objects now replicated to the configured destination bucket on `PutObject`, `CopyObject`, and multipart upload completion
+
+#### DynamoDB
+
+- PartiQL: `ExecuteStatement`, `BatchExecuteStatement`, `ExecuteTransaction`
+- `ReturnValuesOnConditionCheckFailure` on PartiQL write statements
+- DynamoDB Streams: `ListStreams`, `DescribeStream`, `GetShardIterator`, `GetRecords`
+
+#### Go testing library
+
+- `pkg/kumolo`: in-process Go testing library — start kumolo in a `httptest.Server` with a single call, no Docker required
+
+### Fixed
+
+#### S3
+
+- ACL operations (`GetBucketAcl`, `PutBucketAcl`, `GetObjectAcl`, `PutObjectAcl`) stored grants but never enforced them — previously stored grants are now enforced on `GetObject` / `PutObject`
+- Lifecycle rule `Expiration.Date` (absolute expiry date) and `ExpiredObjectDeleteMarker` were never evaluated by the background enforcement loop
+
+#### DynamoDB
+
+- `ReturnConsumedCapacity`: `ConsumedCapacity` (or `ConsumedCapacities`) was accepted as a parameter but omitted from all responses; it is now included
+
 ## [0.1.1] - 2026-05-28
 
 ### Fixed
@@ -80,5 +126,6 @@ Initial release of kumolo — a high-fidelity AWS emulator for local development
 - AWS CLI and Terraform e2e verification suite (`e2e/`)
 - CI: build, vet, lint (golangci-lint), test with race detector, Docker image publish
 
+[0.2.0]: https://github.com/optiflowic/kumolo/releases/tag/v0.2.0
 [0.1.1]: https://github.com/optiflowic/kumolo/releases/tag/v0.1.1
 [0.1.0]: https://github.com/optiflowic/kumolo/releases/tag/v0.1.0
