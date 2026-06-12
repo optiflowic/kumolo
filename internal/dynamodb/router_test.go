@@ -2681,6 +2681,14 @@ func TestHandleCreateTable_InternalErrors(t *testing.T) {
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
 
+	tagsBody := `{
+		"TableName": "t",
+		"KeySchema": [{"AttributeName":"pk","KeyType":"HASH"}],
+		"AttributeDefinitions": [{"AttributeName":"pk","AttributeType":"S"}],
+		"BillingMode": "PAY_PER_REQUEST",
+		"Tags": [{"Key": "k", "Value": "v"}]
+	}`
+
 	t.Run("500 when TagResource fails after create", func(t *testing.T) {
 		deleteTableCalled := false
 		ro := &Router{storage: &mockStore{
@@ -2691,15 +2699,19 @@ func TestHandleCreateTable_InternalErrors(t *testing.T) {
 				return nil
 			},
 		}}
-		w := dynamo(t, ro, "CreateTable", `{
-			"TableName": "t",
-			"KeySchema": [{"AttributeName":"pk","KeyType":"HASH"}],
-			"AttributeDefinitions": [{"AttributeName":"pk","AttributeType":"S"}],
-			"BillingMode": "PAY_PER_REQUEST",
-			"Tags": [{"Key": "k", "Value": "v"}]
-		}`)
+		w := dynamo(t, ro, "CreateTable", tagsBody)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 		assert.True(t, deleteTableCalled, "table must be rolled back after tagging failure")
+	})
+
+	t.Run("500 when TagResource fails and rollback also fails", func(t *testing.T) {
+		ro := &Router{storage: &mockStore{
+			createTableFn: func(TableMetadata) error { return nil },
+			tagResourceFn: func(string, map[string]string) error { return errInternal },
+			deleteTableFn: func(string) error { return errInternal },
+		}}
+		w := dynamo(t, ro, "CreateTable", tagsBody)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
 }
 
