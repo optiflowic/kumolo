@@ -90,6 +90,47 @@ func TestHandleCreateTable(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assertErrorType(t, w, ErrTypeValidationException)
 	})
+
+	t.Run("tags are stored and readable via ListTagsOfResource", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "CreateTable", `{
+			"TableName": "tagged-table",
+			"KeySchema": [{"AttributeName":"pk","KeyType":"HASH"}],
+			"AttributeDefinitions": [{"AttributeName":"pk","AttributeType":"S"}],
+			"BillingMode": "PAY_PER_REQUEST",
+			"Tags": [
+				{"Key": "Env", "Value": "local"},
+				{"Key": "Team", "Value": "backend"}
+			]
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		w2 := dynamo(t, ro, "ListTagsOfResource", `{
+			"ResourceArn": "arn:aws:dynamodb:us-east-1:000000000000:table/tagged-table"
+		}`)
+		require.Equal(t, http.StatusOK, w2.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &resp))
+		tagList := resp["Tags"].([]any)
+		tags := make(map[string]string, len(tagList))
+		for _, raw := range tagList {
+			entry := raw.(map[string]any)
+			tags[entry["Key"].(string)] = entry["Value"].(string)
+		}
+		assert.Equal(t, map[string]string{"Env": "local", "Team": "backend"}, tags)
+	})
+
+	t.Run("no tags results in empty tag list", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "ListTagsOfResource", `{
+			"ResourceArn": "arn:aws:dynamodb:us-east-1:000000000000:table/test-table"
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Empty(t, resp["Tags"])
+	})
 }
 
 func TestHandleCreateTable_IndexValidation(t *testing.T) {

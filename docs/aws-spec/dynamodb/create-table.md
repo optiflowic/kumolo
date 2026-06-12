@@ -2,7 +2,7 @@
 
 - Official URL: https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_CreateTable.html
 - SDK struct: `dynamodb.CreateTableInput` / `dynamodb.CreateTableOutput`
-- Last verified: 2026-05-21
+- Last verified: 2026-06-12
 
 ## Request Parameters (implemented)
 
@@ -15,10 +15,11 @@
 | `ProvisionedThroughput` | object | no | Required when BillingMode=PROVISIONED; fields: `ReadCapacityUnits`, `WriteCapacityUnits` |
 | `GlobalSecondaryIndexes` | []object | no | Max 20; fields: `IndexName`, `KeySchema`, `Projection`, `ProvisionedThroughput` |
 | `LocalSecondaryIndexes` | []object | no | Max 5; share table partition key; must have sort key; cannot be added post-creation |
+| `Tags` | []Tag | no | `{Key, Value}` pairs; stored atomically with table creation via `storage.TagResource` |
 
 ## Ignored Parameters
 
-`StreamSpecification`, `SSESpecification`, `TableClass`, `Tags`, `DeletionProtectionEnabled`, `OnDemandThroughput`, `WarmThroughput`, `ResourcePolicy` — accepted without error, not stored.
+`StreamSpecification`, `SSESpecification`, `TableClass`, `DeletionProtectionEnabled`, `OnDemandThroughput`, `WarmThroughput`, `ResourcePolicy` — accepted without error, not stored.
 
 ## Response
 

@@ -31,6 +31,10 @@ func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 			KeySchema  []KeySchemaElement `json:"KeySchema"`
 			Projection map[string]any     `json:"Projection,omitempty"`
 		} `json:"LocalSecondaryIndexes"`
+		Tags []struct {
+			Key   string `json:"Key"`
+			Value string `json:"Value"`
+		} `json:"Tags"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(
@@ -120,6 +124,23 @@ func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 			"internal server error",
 		)
 		return
+	}
+	if len(req.Tags) > 0 {
+		tags := make(map[string]string, len(req.Tags))
+		for _, t := range req.Tags {
+			tags[t.Key] = t.Value
+		}
+		arn := fmt.Sprintf("arn:aws:dynamodb:us-east-1:000000000000:table/%s", req.TableName)
+		if err := ro.storage.TagResource(arn, tags); err != nil {
+			slog.Error("CreateTable: failed to store tags", "table", req.TableName, "err", err)
+			writeError(
+				w,
+				http.StatusInternalServerError,
+				ErrTypeInternalServerError,
+				"internal server error",
+			)
+			return
+		}
 	}
 	desc, err := ro.storage.DescribeTable(req.TableName)
 	if err != nil {
