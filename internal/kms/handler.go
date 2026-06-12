@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sort"
+	"strings"
 )
 
 func validateLimit(w http.ResponseWriter, limit *int, max int) bool {
@@ -28,14 +29,15 @@ func validateLimit(w http.ResponseWriter, limit *int, max int) bool {
 
 func (ro *Router) handleCreateKey(w http.ResponseWriter, body []byte) {
 	var req struct {
-		Description                    string `json:"Description"`
-		KeySpec                        string `json:"KeySpec"`
-		CustomerMasterKeySpec          string `json:"CustomerMasterKeySpec"`
-		KeyUsage                       string `json:"KeyUsage"`
-		MultiRegion                    bool   `json:"MultiRegion"`
-		Origin                         string `json:"Origin"`
-		Policy                         string `json:"Policy"`
-		BypassPolicyLockoutSafetyCheck bool   `json:"BypassPolicyLockoutSafetyCheck"`
+		Description                    string     `json:"Description"`
+		KeySpec                        string     `json:"KeySpec"`
+		CustomerMasterKeySpec          string     `json:"CustomerMasterKeySpec"`
+		KeyUsage                       string     `json:"KeyUsage"`
+		MultiRegion                    bool       `json:"MultiRegion"`
+		Origin                         string     `json:"Origin"`
+		Policy                         string     `json:"Policy"`
+		BypassPolicyLockoutSafetyCheck bool       `json:"BypassPolicyLockoutSafetyCheck"`
+		Tags                           []TagEntry `json:"Tags"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "ValidationException", "invalid request body")
@@ -84,6 +86,29 @@ func (ro *Router) handleCreateKey(w http.ResponseWriter, body []byte) {
 		return
 	}
 
+	if len(req.Tags) > maxTagsPerKey {
+		writeError(w, http.StatusBadRequest, "LimitExceededException",
+			fmt.Sprintf("A KMS key can have at most %d tags", maxTagsPerKey))
+		return
+	}
+	for _, t := range req.Tags {
+		if strings.HasPrefix(t.TagKey, "aws:") {
+			writeError(w, http.StatusBadRequest, "TagException",
+				fmt.Sprintf("Tag key %q is reserved for AWS use", t.TagKey))
+			return
+		}
+		if len(t.TagKey) < 1 || len(t.TagKey) > maxTagKeyLen {
+			writeError(w, http.StatusBadRequest, "TagException",
+				fmt.Sprintf("Tag key must be between 1 and %d characters", maxTagKeyLen))
+			return
+		}
+		if len(t.TagValue) > maxTagValueLen {
+			writeError(w, http.StatusBadRequest, "TagException",
+				fmt.Sprintf("Tag value must be at most %d characters", maxTagValueLen))
+			return
+		}
+	}
+
 	meta, err := ro.storage.CreateKey(CreateKeyInput{
 		Description: req.Description,
 		KeySpec:     req.KeySpec,
@@ -103,7 +128,14 @@ func (ro *Router) handleCreateKey(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	slog.Info("KMS CreateKey", "keyID", meta.KeyID, "spec", meta.KeySpec)
+	if len(req.Tags) > 0 {
+		if err := ro.storage.TagResource(meta.KeyID, req.Tags); err != nil {
+			writeTagError(w, meta.KeyID, "CreateKey", err)
+			return
+		}
+	}
+
+	slog.Info("KMS CreateKey", "keyID", meta.KeyID, "spec", meta.KeySpec, "tags", len(req.Tags))
 	writeJSON(w, http.StatusOK, map[string]any{"KeyMetadata": meta})
 }
 

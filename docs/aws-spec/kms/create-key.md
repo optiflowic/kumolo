@@ -18,7 +18,7 @@ All fields are optional.
 | `MultiRegion` | bool | stored as-is; kumolo does not replicate |
 | `Origin` | string | only `AWS_KMS` accepted; others return `UnsupportedOperationException` |
 | `Policy` | string | JSON policy document; default policy applied if omitted |
-| `Tags` | array | accepted but not persisted |
+| `Tags` | []TagEntry | stored atomically with key creation; same constraints as `TagResource` (key 1–128 chars, no `aws:` prefix; value 0–256 chars); max 50 tags |
 | `BypassPolicyLockoutSafetyCheck` | bool | accepted, not enforced |
 
 ## Supported KeySpec values and default KeyUsage
@@ -44,6 +44,8 @@ Returns `{"KeyMetadata": {...}}`. See [KeyMetadata fields](#keymetadata-fields).
 |---|---|---|
 | `ValidationException` | 400 | invalid KeySpec, incompatible KeyUsage; Description > 8192 chars |
 | `UnsupportedOperationException` | 400 | Origin != `AWS_KMS` |
+| `TagException` | 400 | invalid tag key/value (reserved `aws:` prefix, length violation) |
+| `LimitExceededException` | 400 | Tags count > 50 |
 | `KMSInternalException` | 500 | storage failure |
 
 ## KeyMetadata fields
