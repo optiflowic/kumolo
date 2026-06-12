@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -150,6 +151,69 @@ func TestHandleCreateKey(t *testing.T) {
 		w := kmsReq(t, ro, "CreateKey", string(body))
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assertErrType(t, w, "ValidationException")
+	})
+
+	t.Run(
+		"creates key with Tags and tags are immediately visible via ListResourceTags",
+		func(t *testing.T) {
+			ro := newTestRouter(t)
+			body := `{"Tags":[{"TagKey":"ManagedBy","TagValue":"terraform"},{"TagKey":"Env","TagValue":"local"}]}`
+			w := kmsReq(t, ro, "CreateKey", body)
+			require.Equal(t, http.StatusOK, w.Code)
+			var resp map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+			keyID := resp["KeyMetadata"].(map[string]any)["KeyId"].(string)
+
+			w2 := kmsReq(t, ro, "ListResourceTags", `{"KeyId":"`+keyID+`"}`)
+			require.Equal(t, http.StatusOK, w2.Code)
+			var tagsResp map[string]any
+			require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &tagsResp))
+			tags := tagsResp["Tags"].([]any)
+			require.Len(t, tags, 2)
+			keys := map[string]string{}
+			for _, e := range tags {
+				m := e.(map[string]any)
+				keys[m["TagKey"].(string)] = m["TagValue"].(string)
+			}
+			assert.Equal(t, "terraform", keys["ManagedBy"])
+			assert.Equal(t, "local", keys["Env"])
+		},
+	)
+
+	t.Run("400 when Tags contains reserved aws: prefix", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "CreateKey", `{"Tags":[{"TagKey":"aws:reserved","TagValue":"val"}]}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "TagException")
+	})
+
+	t.Run("400 when Tags contains empty key", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "CreateKey", `{"Tags":[{"TagKey":"","TagValue":"val"}]}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "TagException")
+	})
+
+	t.Run("400 when Tags contains value exceeding 256 chars", func(t *testing.T) {
+		ro := newTestRouter(t)
+		body, _ := json.Marshal(map[string]any{
+			"Tags": []map[string]any{{"TagKey": "k", "TagValue": strings.Repeat("v", 257)}},
+		})
+		w := kmsReq(t, ro, "CreateKey", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "TagException")
+	})
+
+	t.Run("400 LimitExceededException when Tags count exceeds 50", func(t *testing.T) {
+		ro := newTestRouter(t)
+		tags := make([]map[string]any, 51)
+		for i := range tags {
+			tags[i] = map[string]any{"TagKey": fmt.Sprintf("k%d", i), "TagValue": "v"}
+		}
+		body, _ := json.Marshal(map[string]any{"Tags": tags})
+		w := kmsReq(t, ro, "CreateKey", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "LimitExceededException")
 	})
 }
 
