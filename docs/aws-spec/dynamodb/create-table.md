@@ -15,7 +15,7 @@
 | `ProvisionedThroughput` | object | no | Required when BillingMode=PROVISIONED; fields: `ReadCapacityUnits`, `WriteCapacityUnits` |
 | `GlobalSecondaryIndexes` | []object | no | Max 20; fields: `IndexName`, `KeySchema`, `Projection`, `ProvisionedThroughput` |
 | `LocalSecondaryIndexes` | []object | no | Max 5; share table partition key; must have sort key; cannot be added post-creation |
-| `Tags` | []Tag | no | `{Key, Value}` pairs; stored atomically with table creation via `storage.TagResource` |
+| `Tags` | []Tag | no | `{Key, Value}` pairs; stored after table creation via `storage.TagResource`; max 50 tags; >50 → 400 `LimitExceededException` (validated before table creation) |
 
 ## Ignored Parameters
 
@@ -43,6 +43,7 @@
 |---|---|---|
 | `ResourceInUseException` | 400 | Table already exists |
 | `ValidationException` | 400 | Missing/invalid TableName, KeySchema, AttributeDefinitions; index validation failures |
+| `LimitExceededException` | 400 | Tags array exceeds 50 entries |
 | `InternalServerError` | 500 | Storage failure |
 
 ## kumolo-Specific Deviations

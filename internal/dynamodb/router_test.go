@@ -131,6 +131,26 @@ func TestHandleCreateTable(t *testing.T) {
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		assert.Empty(t, resp["Tags"])
 	})
+
+	t.Run("400 when Tags exceeds 50", func(t *testing.T) {
+		ro := newTestRouter(t)
+		tags := make([]map[string]string, 51)
+		for i := range tags {
+			tags[i] = map[string]string{"Key": fmt.Sprintf("k%d", i), "Value": "v"}
+		}
+		tagsJSON, err := json.Marshal(tags)
+		require.NoError(t, err)
+		body := fmt.Sprintf(`{
+			"TableName": "t",
+			"KeySchema": [{"AttributeName":"pk","KeyType":"HASH"}],
+			"AttributeDefinitions": [{"AttributeName":"pk","AttributeType":"S"}],
+			"BillingMode": "PAY_PER_REQUEST",
+			"Tags": %s
+		}`, tagsJSON)
+		w := dynamo(t, ro, "CreateTable", body)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, ErrTypeLimitExceededException)
+	})
 }
 
 func TestHandleCreateTable_IndexValidation(t *testing.T) {
@@ -2657,6 +2677,21 @@ func TestHandleCreateTable_InternalErrors(t *testing.T) {
 			},
 		}}
 		w := dynamo(t, ro, "CreateTable", createTableBody)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+
+	t.Run("500 when TagResource fails after create", func(t *testing.T) {
+		ro := &Router{storage: &mockStore{
+			createTableFn: func(TableMetadata) error { return nil },
+			tagResourceFn: func(string, map[string]string) error { return errInternal },
+		}}
+		w := dynamo(t, ro, "CreateTable", `{
+			"TableName": "t",
+			"KeySchema": [{"AttributeName":"pk","KeyType":"HASH"}],
+			"AttributeDefinitions": [{"AttributeName":"pk","AttributeType":"S"}],
+			"BillingMode": "PAY_PER_REQUEST",
+			"Tags": [{"Key": "k", "Value": "v"}]
+		}`)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
 }

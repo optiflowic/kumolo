@@ -105,6 +105,15 @@ func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
+	if len(req.Tags) > 50 {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeLimitExceededException,
+			"Too many tags. Table may not have more than 50 user-created tags.",
+		)
+		return
+	}
 	if err := ro.storage.CreateTable(meta); err != nil {
 		if errors.Is(err, ErrTableAlreadyExists) {
 			slog.Debug("CreateTable: table already exists", "table", req.TableName)
