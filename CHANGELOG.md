@@ -11,19 +11,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### S3
 
-- `CopyObject` and all multipart upload operations now enforce ACL permission checks for anonymous requests; previously anonymous callers could bypass ACL restrictions on these paths ([#326](https://github.com/optiflowic/kumolo/issues/326))
+- `CopyObject` and all multipart upload operations now enforce ACL permission checks for anonymous requests; previously anonymous callers could bypass ACL restrictions on these paths
 
 #### STS
 
-- `AssumeRole` now validates `RoleArn` (length 20–2048) and `RoleSessionName` (length 2–64, pattern `[\w+=,.@-]*`), returning `ValidationError` for out-of-range or malformed inputs ([#327](https://github.com/optiflowic/kumolo/issues/327))
+- `AssumeRole` now validates `RoleArn` (length 20–2048) and `RoleSessionName` (length 2–64, pattern `[\w+=,.@-]*`), returning `ValidationError` for out-of-range or malformed inputs
 
 #### KMS
 
-- `CreateKey` now persists the `Tags` parameter; previously tags were accepted but silently discarded, causing Terraform's `default_tags` mechanism to loop indefinitely on plan/apply ([#347](https://github.com/optiflowic/kumolo/issues/347))
+- `CreateKey` now persists the `Tags` parameter; previously tags were accepted but silently discarded, causing Terraform's `default_tags` mechanism to loop indefinitely on plan/apply
 
 #### DynamoDB
 
-- `CreateTable` now persists the `Tags` parameter; previously tags were accepted but silently discarded ([#348](https://github.com/optiflowic/kumolo/issues/348))
+- `CreateTable` now persists the `Tags` parameter; previously tags were accepted but silently discarded
 
 ## [0.2.0] - 2026-06-11
 
