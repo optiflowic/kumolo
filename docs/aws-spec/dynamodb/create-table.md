@@ -15,11 +15,12 @@
 | `ProvisionedThroughput` | object | no | Required when BillingMode=PROVISIONED; fields: `ReadCapacityUnits`, `WriteCapacityUnits` |
 | `GlobalSecondaryIndexes` | []object | no | Max 20; fields: `IndexName`, `KeySchema`, `Projection`, `ProvisionedThroughput` |
 | `LocalSecondaryIndexes` | []object | no | Max 5; share table partition key; must have sort key; cannot be added post-creation |
-| `Tags` | []Tag | no | `{Key, Value}` pairs; stored after table creation via `storage.TagResource`; max 50 tags; >50 → 400 `LimitExceededException` (validated before table creation) |
+| `Tags` | []Tag | no | `{Key, Value}` pairs; stored after table creation via `storage.TagResource`; max 50 tags; >50 → 400 `LimitExceededException` (validated before table creation); if tag storage fails the table is rolled back via `storage.DeleteTable` |
+| `StreamSpecification` | object | no | `{StreamEnabled: bool, StreamViewType: string}`; `StreamEnabled` required if object present; `StreamViewType` required when `StreamEnabled=true`; stored and returned in `TableDescription` |
 
 ## Ignored Parameters
 
-`StreamSpecification`, `SSESpecification`, `TableClass`, `DeletionProtectionEnabled`, `OnDemandThroughput`, `WarmThroughput`, `ResourcePolicy` — accepted without error, not stored.
+`SSESpecification`, `TableClass`, `DeletionProtectionEnabled`, `OnDemandThroughput`, `WarmThroughput`, `ResourcePolicy` — accepted without error, not stored.
 
 ## Response
 
@@ -50,6 +51,6 @@
 
 - `TableStatus` is `ACTIVE` immediately; real AWS returns `CREATING` and transitions async.
 - ARN form of `TableName` is not accepted.
-- `TableId`, `SSEDescription`, `StreamSpecification`, `TableClassSummary`, `DeletionProtectionEnabled` are not returned.
+- `TableId`, `SSEDescription`, `TableClassSummary`, `DeletionProtectionEnabled` are not returned.
 - `LimitExceededException` (500 concurrent table operations, 2500 table soft quota) is not enforced.
 - `ProvisionedThroughput` is not required when `BillingMode=PROVISIONED` (kumolo accepts both modes without enforcement).

@@ -9,6 +9,8 @@ import (
 	"sort"
 )
 
+const maxTableUserTags = 50
+
 func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 	var req struct {
 		TableName             string                 `json:"TableName"`
@@ -105,12 +107,15 @@ func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
-	if len(req.Tags) > 50 {
+	if len(req.Tags) > maxTableUserTags {
 		writeError(
 			w,
 			http.StatusBadRequest,
 			ErrTypeLimitExceededException,
-			"Too many tags. Table may not have more than 50 user-created tags.",
+			fmt.Sprintf(
+				"Too many tags. Table may not have more than %d user-created tags.",
+				maxTableUserTags,
+			),
 		)
 		return
 	}
@@ -142,6 +147,9 @@ func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 		arn := fmt.Sprintf("arn:aws:dynamodb:us-east-1:000000000000:table/%s", req.TableName)
 		if err := ro.storage.TagResource(arn, tags); err != nil {
 			slog.Error("CreateTable: failed to store tags", "table", req.TableName, "err", err)
+			if delErr := ro.storage.DeleteTable(req.TableName); delErr != nil {
+				slog.Error("CreateTable: rollback failed", "table", req.TableName, "err", delErr)
+			}
 			writeError(
 				w,
 				http.StatusInternalServerError,

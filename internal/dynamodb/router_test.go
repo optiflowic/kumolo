@@ -129,7 +129,8 @@ func TestHandleCreateTable(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code)
 		var resp map[string]any
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-		assert.Empty(t, resp["Tags"])
+		require.Contains(t, resp, "Tags")
+		assert.Equal(t, []any{}, resp["Tags"])
 	})
 
 	t.Run("400 when Tags exceeds 50", func(t *testing.T) {
@@ -2681,9 +2682,14 @@ func TestHandleCreateTable_InternalErrors(t *testing.T) {
 	})
 
 	t.Run("500 when TagResource fails after create", func(t *testing.T) {
+		deleteTableCalled := false
 		ro := &Router{storage: &mockStore{
 			createTableFn: func(TableMetadata) error { return nil },
 			tagResourceFn: func(string, map[string]string) error { return errInternal },
+			deleteTableFn: func(string) error {
+				deleteTableCalled = true
+				return nil
+			},
 		}}
 		w := dynamo(t, ro, "CreateTable", `{
 			"TableName": "t",
@@ -2693,6 +2699,7 @@ func TestHandleCreateTable_InternalErrors(t *testing.T) {
 			"Tags": [{"Key": "k", "Value": "v"}]
 		}`)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assert.True(t, deleteTableCalled, "table must be rolled back after tagging failure")
 	})
 }
 
