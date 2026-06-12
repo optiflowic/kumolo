@@ -147,6 +147,6 @@ Initial release of kumolo — a high-fidelity AWS emulator for local development
 - CI: build, vet, lint (golangci-lint), test with race detector, Docker image publish
 
 [0.2.1]: https://github.com/optiflowic/kumolo/compare/v0.2.0...v0.2.1
-[0.2.0]: https://github.com/optiflowic/kumolo/releases/tag/v0.2.0
-[0.1.1]: https://github.com/optiflowic/kumolo/releases/tag/v0.1.1
+[0.2.0]: https://github.com/optiflowic/kumolo/compare/v0.1.1...v0.2.0
+[0.1.1]: https://github.com/optiflowic/kumolo/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/optiflowic/kumolo/releases/tag/v0.1.0
