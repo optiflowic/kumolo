@@ -90,6 +90,68 @@ func TestHandleCreateTable(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assertErrorType(t, w, ErrTypeValidationException)
 	})
+
+	t.Run("tags are stored and readable via ListTagsOfResource", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := dynamo(t, ro, "CreateTable", `{
+			"TableName": "tagged-table",
+			"KeySchema": [{"AttributeName":"pk","KeyType":"HASH"}],
+			"AttributeDefinitions": [{"AttributeName":"pk","AttributeType":"S"}],
+			"BillingMode": "PAY_PER_REQUEST",
+			"Tags": [
+				{"Key": "Env", "Value": "local"},
+				{"Key": "Team", "Value": "backend"}
+			]
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		w2 := dynamo(t, ro, "ListTagsOfResource", `{
+			"ResourceArn": "arn:aws:dynamodb:us-east-1:000000000000:table/tagged-table"
+		}`)
+		require.Equal(t, http.StatusOK, w2.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &resp))
+		tagList := resp["Tags"].([]any)
+		tags := make(map[string]string, len(tagList))
+		for _, raw := range tagList {
+			entry := raw.(map[string]any)
+			tags[entry["Key"].(string)] = entry["Value"].(string)
+		}
+		assert.Equal(t, map[string]string{"Env": "local", "Team": "backend"}, tags)
+	})
+
+	t.Run("no tags results in empty tag list", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		w := dynamo(t, ro, "ListTagsOfResource", `{
+			"ResourceArn": "arn:aws:dynamodb:us-east-1:000000000000:table/test-table"
+		}`)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		require.Contains(t, resp, "Tags")
+		assert.Equal(t, []any{}, resp["Tags"])
+	})
+
+	t.Run("400 when Tags exceeds 50", func(t *testing.T) {
+		ro := newTestRouter(t)
+		tags := make([]map[string]string, 51)
+		for i := range tags {
+			tags[i] = map[string]string{"Key": fmt.Sprintf("k%d", i), "Value": "v"}
+		}
+		tagsJSON, err := json.Marshal(tags)
+		require.NoError(t, err)
+		body := fmt.Sprintf(`{
+			"TableName": "t",
+			"KeySchema": [{"AttributeName":"pk","KeyType":"HASH"}],
+			"AttributeDefinitions": [{"AttributeName":"pk","AttributeType":"S"}],
+			"BillingMode": "PAY_PER_REQUEST",
+			"Tags": %s
+		}`, tagsJSON)
+		w := dynamo(t, ro, "CreateTable", body)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, ErrTypeLimitExceededException)
+	})
 }
 
 func TestHandleCreateTable_IndexValidation(t *testing.T) {
@@ -2616,6 +2678,39 @@ func TestHandleCreateTable_InternalErrors(t *testing.T) {
 			},
 		}}
 		w := dynamo(t, ro, "CreateTable", createTableBody)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+
+	tagsBody := `{
+		"TableName": "t",
+		"KeySchema": [{"AttributeName":"pk","KeyType":"HASH"}],
+		"AttributeDefinitions": [{"AttributeName":"pk","AttributeType":"S"}],
+		"BillingMode": "PAY_PER_REQUEST",
+		"Tags": [{"Key": "k", "Value": "v"}]
+	}`
+
+	t.Run("500 when TagResource fails after create", func(t *testing.T) {
+		deleteTableCalled := false
+		ro := &Router{storage: &mockStore{
+			createTableFn: func(TableMetadata) error { return nil },
+			tagResourceFn: func(string, map[string]string) error { return errInternal },
+			deleteTableFn: func(string) error {
+				deleteTableCalled = true
+				return nil
+			},
+		}}
+		w := dynamo(t, ro, "CreateTable", tagsBody)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assert.True(t, deleteTableCalled, "table must be rolled back after tagging failure")
+	})
+
+	t.Run("500 when TagResource fails and rollback also fails", func(t *testing.T) {
+		ro := &Router{storage: &mockStore{
+			createTableFn: func(TableMetadata) error { return nil },
+			tagResourceFn: func(string, map[string]string) error { return errInternal },
+			deleteTableFn: func(string) error { return errInternal },
+		}}
+		w := dynamo(t, ro, "CreateTable", tagsBody)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
 }

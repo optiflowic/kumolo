@@ -9,6 +9,8 @@ import (
 	"sort"
 )
 
+const maxTableUserTags = 50
+
 func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 	var req struct {
 		TableName             string                 `json:"TableName"`
@@ -31,6 +33,10 @@ func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 			KeySchema  []KeySchemaElement `json:"KeySchema"`
 			Projection map[string]any     `json:"Projection,omitempty"`
 		} `json:"LocalSecondaryIndexes"`
+		Tags []struct {
+			Key   string `json:"Key"`
+			Value string `json:"Value"`
+		} `json:"Tags"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(
@@ -101,6 +107,18 @@ func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
+	if len(req.Tags) > maxTableUserTags {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeLimitExceededException,
+			fmt.Sprintf(
+				"Too many tags. Table may not have more than %d user-created tags.",
+				maxTableUserTags,
+			),
+		)
+		return
+	}
 	if err := ro.storage.CreateTable(meta); err != nil {
 		if errors.Is(err, ErrTableAlreadyExists) {
 			slog.Debug("CreateTable: table already exists", "table", req.TableName)
@@ -120,6 +138,26 @@ func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 			"internal server error",
 		)
 		return
+	}
+	if len(req.Tags) > 0 {
+		tags := make(map[string]string, len(req.Tags))
+		for _, t := range req.Tags {
+			tags[t.Key] = t.Value
+		}
+		arn := fmt.Sprintf("arn:aws:dynamodb:us-east-1:000000000000:table/%s", req.TableName)
+		if err := ro.storage.TagResource(arn, tags); err != nil {
+			slog.Error("CreateTable: failed to store tags", "table", req.TableName, "err", err)
+			if delErr := ro.storage.DeleteTable(req.TableName); delErr != nil {
+				slog.Error("CreateTable: rollback failed", "table", req.TableName, "err", delErr)
+			}
+			writeError(
+				w,
+				http.StatusInternalServerError,
+				ErrTypeInternalServerError,
+				"internal server error",
+			)
+			return
+		}
 	}
 	desc, err := ro.storage.DescribeTable(req.TableName)
 	if err != nil {
