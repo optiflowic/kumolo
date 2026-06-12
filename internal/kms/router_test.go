@@ -799,6 +799,22 @@ func TestHandleCreateKey_storageFailure(t *testing.T) {
 	assertErrType(t, w, "KMSInternalException")
 }
 
+// tagFailStore wraps a real store but makes TagResource always fail.
+type tagFailStore struct {
+	store
+	err error
+}
+
+func (s *tagFailStore) TagResource(string, []TagEntry) error { return s.err }
+
+func TestHandleCreateKey_tagResourceFailure(t *testing.T) {
+	ro := newTestRouter(t)
+	ro.storage = &tagFailStore{store: ro.storage, err: errors.New("tag storage error")}
+	w := kmsReq(t, ro, "CreateKey", `{"Tags":[{"TagKey":"k","TagValue":"v"}]}`)
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, "KMSInternalException")
+}
+
 func TestHandleDescribeKey_storageFailure(t *testing.T) {
 	ro := newFailRouter()
 	w := kmsReq(t, ro, "DescribeKey", `{"KeyId":"00000000-0000-0000-0000-000000000001"}`)
