@@ -5632,8 +5632,10 @@ func TestVersioning(t *testing.T) {
 
 			tagsErr := errors.New("tags remove failed")
 			realRemove := s.removeFile
+			hit := false
 			s.removeFile = func(name string) error {
 				if strings.HasSuffix(name, ".tags.json") {
+					hit = true
 					return tagsErr
 				}
 				return realRemove(name)
@@ -5642,6 +5644,7 @@ func TestVersioning(t *testing.T) {
 			isMarker, err := s.DeleteObjectVersion(bucket, "obj.txt", m1.VersionID, false)
 			require.NoError(t, err)
 			assert.False(t, isMarker)
+			require.True(t, hit, "removeFile for .tags.json should have been called")
 		},
 	)
 
