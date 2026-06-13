@@ -72,7 +72,7 @@ func (ro *Router) handleCreateKey(w http.ResponseWriter, body []byte) {
 			w,
 			http.StatusBadRequest,
 			"UnsupportedOperationException",
-			"kumolo does not support ECC_SECG_P256K1: secp256k1 curve is unavailable in Go's standard library",
+			"kumolo does not support ECC_SECG_P256K1 key spec",
 		)
 		return
 	}
