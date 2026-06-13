@@ -2461,6 +2461,53 @@ func TestRouterListObjectsV2(t *testing.T) {
 		assert.Contains(t, body, "<StartAfter>logs%2F</StartAfter>")
 	})
 
+	t.Run(
+		"encoding-type=url does not encode ContinuationToken or NextContinuationToken",
+		func(t *testing.T) {
+			ro := newTestRouter(t)
+			ro.ServeHTTP(
+				httptest.NewRecorder(),
+				httptest.NewRequest(http.MethodPut, "/my-bucket", nil),
+			)
+			ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/a%20b.txt", "data"))
+			ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/c%20d.txt", "data"))
+
+			// First page: trigger truncation to obtain a NextContinuationToken.
+			req := httptest.NewRequest(
+				http.MethodGet,
+				"/my-bucket?list-type=2&encoding-type=url&max-keys=1",
+				nil,
+			)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+
+			require.Equal(t, http.StatusOK, w.Code)
+			body := w.Body.String()
+			require.Contains(t, body, "<IsTruncated>true</IsTruncated>")
+
+			// The token is base64(key) and may contain '=' padding; it must not be percent-encoded.
+			token := base64.URLEncoding.EncodeToString([]byte("a b.txt"))
+			assert.Contains(t, body, "<NextContinuationToken>"+token+"</NextContinuationToken>")
+			assert.NotContains(t, body, "%3D") // '=' padding must not be encoded
+
+			// Second page: echoed ContinuationToken must be the raw base64 token, not percent-encoded.
+			req2 := httptest.NewRequest(
+				http.MethodGet,
+				"/my-bucket?list-type=2&encoding-type=url&continuation-token="+url.QueryEscape(
+					token,
+				),
+				nil,
+			)
+			w2 := httptest.NewRecorder()
+			ro.ServeHTTP(w2, req2)
+
+			require.Equal(t, http.StatusOK, w2.Code)
+			body2 := w2.Body.String()
+			assert.Contains(t, body2, "<ContinuationToken>"+token+"</ContinuationToken>")
+			assert.NotContains(t, body2, "%3D")
+		},
+	)
+
 	t.Run("invalid encoding-type returns 400 InvalidArgument", func(t *testing.T) {
 		ro := newTestRouter(t)
 		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
@@ -4304,6 +4351,26 @@ func TestRouterListObjects(t *testing.T) {
 		body := w.Body.String()
 		assert.Contains(t, body, "<IsTruncated>true</IsTruncated>")
 		assert.Contains(t, body, "<NextMarker>a%20b.txt</NextMarker>")
+	})
+
+	t.Run("encoding-type=url encodes request marker in response", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/a%20b.txt", "data"))
+		ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/c%20d.txt", "data"))
+
+		req := httptest.NewRequest(
+			http.MethodGet,
+			"/my-bucket?encoding-type=url&marker=a%20b.txt",
+			nil,
+		)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		body := w.Body.String()
+		assert.Contains(t, body, "<Marker>a%20b.txt</Marker>")
+		assert.NotContains(t, body, "<Marker>a b.txt</Marker>")
 	})
 
 	t.Run("invalid encoding-type returns 400 InvalidArgument", func(t *testing.T) {
