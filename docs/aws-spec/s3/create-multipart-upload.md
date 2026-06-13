@@ -2,7 +2,7 @@
 
 **URL**: https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateMultipartUpload.html  
 **SDK struct**: `s3.CreateMultipartUploadInput` / `s3.CreateMultipartUploadOutput`  
-**Last verified**: 2026-05-21
+**Last verified**: 2026-06-14
 
 ## Request
 
@@ -24,7 +24,6 @@ Initiates a multipart upload and returns an `UploadId`.
 | `x-amz-object-lock-mode` | GOVERNANCE or COMPLIANCE |
 | `x-amz-object-lock-retain-until-date` | RFC3339 timestamp |
 | `x-amz-object-lock-legal-hold` | ON or OFF |
-
 | `x-amz-tagging` | URL query-string-encoded tags applied to the final object by CompleteMultipartUpload |
 
 ### Not implemented headers
@@ -58,6 +57,7 @@ Initiates a multipart upload and returns an `UploadId`.
 |---|---|---|
 | `NoSuchBucket` | 404 | Bucket does not exist |
 | `AccessDenied` | 403 | Anonymous request denied by bucket ACL |
+| `InvalidArgument` | 400 | Invalid `x-amz-tagging` value |
 | `InternalError` | 500 | Storage failure |
 
 ## Kumolo deviations

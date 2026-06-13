@@ -1981,7 +1981,7 @@ func (s *Storage) CompleteMultipartUpload(
 	}
 	if umeta.Tagging != nil {
 		if err := s.applyTagsLocked(objPath, umeta.Tagging); err != nil {
-			return ObjectMetadata{}, err
+			return ObjectMetadata{}, err // untestable: writeJSON failures on .tags.json cannot be injected via current test helpers
 		}
 	}
 	if err := s.removeUploadDir(uploadDir); err != nil {
