@@ -3416,6 +3416,35 @@ func TestHandleTagResource(t *testing.T) {
 		assertErrorType(t, w, ErrTypeValidationException)
 	})
 
+	t.Run("200 for tag key at exactly 128 Unicode runes", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		arn := tableARNFor("test-table")
+		key128 := strings.Repeat("界", 128)
+		w := dynamo(
+			t,
+			ro,
+			"TagResource",
+			`{"ResourceArn":"`+arn+`","Tags":[{"Key":"`+key128+`","Value":"v"}]}`,
+		)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("400 for tag key exceeding 128 Unicode runes", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		arn := tableARNFor("test-table")
+		key129 := strings.Repeat("界", 129)
+		w := dynamo(
+			t,
+			ro,
+			"TagResource",
+			`{"ResourceArn":"`+arn+`","Tags":[{"Key":"`+key129+`","Value":"v"}]}`,
+		)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, ErrTypeValidationException)
+	})
+
 	t.Run("400 for tag value exceeding 256 chars", func(t *testing.T) {
 		ro := newTestRouter(t)
 		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
@@ -3426,6 +3455,35 @@ func TestHandleTagResource(t *testing.T) {
 			ro,
 			"TagResource",
 			`{"ResourceArn":"`+arn+`","Tags":[{"Key":"k","Value":"`+longVal+`"}]}`,
+		)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, ErrTypeValidationException)
+	})
+
+	t.Run("200 for tag value at exactly 256 Unicode runes", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		arn := tableARNFor("test-table")
+		val256 := strings.Repeat("界", 256)
+		w := dynamo(
+			t,
+			ro,
+			"TagResource",
+			`{"ResourceArn":"`+arn+`","Tags":[{"Key":"k","Value":"`+val256+`"}]}`,
+		)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("400 for tag value exceeding 256 Unicode runes", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		arn := tableARNFor("test-table")
+		val257 := strings.Repeat("界", 257)
+		w := dynamo(
+			t,
+			ro,
+			"TagResource",
+			`{"ResourceArn":"`+arn+`","Tags":[{"Key":"k","Value":"`+val257+`"}]}`,
 		)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assertErrorType(t, w, ErrTypeValidationException)
