@@ -27,6 +27,7 @@ var (
 	ErrConditionalCheckFailed     = errors.New("conditional check failed")
 	ErrKinesisLimitExceeded       = errors.New("kinesis destinations limit exceeded")
 	ErrKinesisDestinationNotFound = errors.New("kinesis destination not found")
+	ErrTagLimitExceeded           = errors.New("tag limit exceeded")
 )
 
 // ConditionalCheckFailedError is returned by write operations when a ConditionExpression

@@ -35,6 +35,24 @@ func (ro *Router) handleTagResource(w http.ResponseWriter, body []byte) {
 	}
 	tags := make(map[string]string, len(req.Tags))
 	for _, t := range req.Tags {
+		if len(t.Key) < 1 || len(t.Key) > 128 {
+			writeError(
+				w,
+				http.StatusBadRequest,
+				ErrTypeValidationException,
+				"Tag keys must be between 1 and 128 characters in length",
+			)
+			return
+		}
+		if len(t.Value) > 256 {
+			writeError(
+				w,
+				http.StatusBadRequest,
+				ErrTypeValidationException,
+				"Tag values must be between 0 and 256 characters in length",
+			)
+			return
+		}
 		tags[t.Key] = t.Value
 	}
 	if err := ro.storage.TagResource(req.ResourceArn, tags); err != nil {
@@ -45,6 +63,15 @@ func (ro *Router) handleTagResource(w http.ResponseWriter, body []byte) {
 				http.StatusBadRequest,
 				ErrTypeResourceNotFoundException,
 				"Requested resource not found: "+req.ResourceArn,
+			)
+			return
+		}
+		if errors.Is(err, ErrTagLimitExceeded) {
+			writeError(
+				w,
+				http.StatusBadRequest,
+				ErrTypeLimitExceededException,
+				"Too many tags. The table has more than 50 tags after this request.",
 			)
 			return
 		}
@@ -83,6 +110,17 @@ func (ro *Router) handleUntagResource(w http.ResponseWriter, body []byte) {
 			"ResourceArn is required",
 		)
 		return
+	}
+	for _, k := range req.TagKeys {
+		if k == "" {
+			writeError(
+				w,
+				http.StatusBadRequest,
+				ErrTypeValidationException,
+				"Tag keys must not be empty",
+			)
+			return
+		}
 	}
 	if err := ro.storage.UntagResource(req.ResourceArn, req.TagKeys); err != nil {
 		if errors.Is(err, ErrTableNotFound) {

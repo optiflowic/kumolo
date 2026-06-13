@@ -40,6 +40,9 @@ func (s *Storage) TagResource(resourceARN string, tags map[string]string) error 
 	for k, v := range tags {
 		meta.Tags[k] = v
 	}
+	if len(meta.Tags) > 50 {
+		return ErrTagLimitExceeded
+	}
 	return s.writeTableMeta(name, meta)
 }
 
