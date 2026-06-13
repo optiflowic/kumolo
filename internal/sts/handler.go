@@ -6,12 +6,18 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
 const (
 	xmlns     = "https://sts.amazonaws.com/doc/2011-06-15/"
 	requestID = "00000000-0000-0000-0000-000000000000"
+
+	assumeRoleMinDuration      = 900
+	assumeRoleMaxDuration      = 43200
+	getSessionTokenMinDuration = 900
+	getSessionTokenMaxDuration = 129600
 
 	fixedAccount      = "000000000000"
 	fixedUserID       = "000000000000"
@@ -108,7 +114,7 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "AssumeRole":
 		ro.handleAssumeRole(w, r)
 	case "GetSessionToken":
-		ro.handleGetSessionToken(w)
+		ro.handleGetSessionToken(w, r)
 	default:
 		slog.Debug( // #nosec G706 -- action comes from the Action query parameter; log injection risk accepted for a local dev emulator
 			"STS operation not implemented",
@@ -240,6 +246,35 @@ func (ro *Router) handleAssumeRole(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
+	if durationStr := r.Form.Get("DurationSeconds"); durationStr != "" {
+		d, err := strconv.Atoi(durationStr)
+		if err != nil || d < assumeRoleMinDuration {
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"ValidationError",
+				fmt.Sprintf(
+					"1 validation error detected: Value '%s' at 'durationSeconds' failed to satisfy constraint: Member must have value greater than or equal to %d",
+					durationStr,
+					assumeRoleMinDuration,
+				),
+			)
+			return
+		}
+		if d > assumeRoleMaxDuration {
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"ValidationError",
+				fmt.Sprintf(
+					"1 validation error detected: Value '%s' at 'durationSeconds' failed to satisfy constraint: Member must have value less than or equal to %d",
+					durationStr,
+					assumeRoleMaxDuration,
+				),
+			)
+			return
+		}
+	}
 	idx := strings.LastIndex(roleArn, "/")
 	if idx == -1 || idx == len(roleArn)-1 {
 		slog.Debug(
@@ -276,7 +311,36 @@ func (ro *Router) handleAssumeRole(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (ro *Router) handleGetSessionToken(w http.ResponseWriter) {
+func (ro *Router) handleGetSessionToken(w http.ResponseWriter, r *http.Request) {
+	if durationStr := r.Form.Get("DurationSeconds"); durationStr != "" {
+		d, err := strconv.Atoi(durationStr)
+		if err != nil || d < getSessionTokenMinDuration {
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"ValidationError",
+				fmt.Sprintf(
+					"1 validation error detected: Value '%s' at 'durationSeconds' failed to satisfy constraint: Member must have value greater than or equal to %d",
+					durationStr,
+					getSessionTokenMinDuration,
+				),
+			)
+			return
+		}
+		if d > getSessionTokenMaxDuration {
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"ValidationError",
+				fmt.Sprintf(
+					"1 validation error detected: Value '%s' at 'durationSeconds' failed to satisfy constraint: Member must have value less than or equal to %d",
+					durationStr,
+					getSessionTokenMaxDuration,
+				),
+			)
+			return
+		}
+	}
 	writeXML(w, http.StatusOK, getSessionTokenResponse{
 		Xmlns: xmlns,
 		GetSessionTokenResult: getSessionTokenResult{

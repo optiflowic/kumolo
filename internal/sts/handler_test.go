@@ -136,6 +136,44 @@ func TestHandleAssumeRole(t *testing.T) {
 			wantStatus:  http.StatusBadRequest,
 			wantErrCode: "ValidationError",
 		},
+		{
+			name:       "DurationSeconds at minimum (900)",
+			body:       "Action=AssumeRole&Version=2011-06-15&RoleArn=arn:aws:iam::123456789012:role/my-role&RoleSessionName=my-session&DurationSeconds=900",
+			wantStatus: http.StatusOK,
+			wantARN:    "arn:aws:sts::000000000000:assumed-role/my-role/my-session",
+			wantRoleID: fixedRoleIDPrefix + ":my-session",
+		},
+		{
+			name:       "DurationSeconds at maximum (43200)",
+			body:       "Action=AssumeRole&Version=2011-06-15&RoleArn=arn:aws:iam::123456789012:role/my-role&RoleSessionName=my-session&DurationSeconds=43200",
+			wantStatus: http.StatusOK,
+			wantARN:    "arn:aws:sts::000000000000:assumed-role/my-role/my-session",
+			wantRoleID: fixedRoleIDPrefix + ":my-session",
+		},
+		{
+			name:        "DurationSeconds below minimum (0)",
+			body:        "Action=AssumeRole&Version=2011-06-15&RoleArn=arn:aws:iam::123456789012:role/my-role&RoleSessionName=my-session&DurationSeconds=0",
+			wantStatus:  http.StatusBadRequest,
+			wantErrCode: "ValidationError",
+		},
+		{
+			name:        "DurationSeconds below minimum (899)",
+			body:        "Action=AssumeRole&Version=2011-06-15&RoleArn=arn:aws:iam::123456789012:role/my-role&RoleSessionName=my-session&DurationSeconds=899",
+			wantStatus:  http.StatusBadRequest,
+			wantErrCode: "ValidationError",
+		},
+		{
+			name:        "DurationSeconds above maximum (43201)",
+			body:        "Action=AssumeRole&Version=2011-06-15&RoleArn=arn:aws:iam::123456789012:role/my-role&RoleSessionName=my-session&DurationSeconds=43201",
+			wantStatus:  http.StatusBadRequest,
+			wantErrCode: "ValidationError",
+		},
+		{
+			name:        "DurationSeconds non-numeric",
+			body:        "Action=AssumeRole&Version=2011-06-15&RoleArn=arn:aws:iam::123456789012:role/my-role&RoleSessionName=my-session&DurationSeconds=abc",
+			wantStatus:  http.StatusBadRequest,
+			wantErrCode: "ValidationError",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -161,16 +199,71 @@ func TestHandleAssumeRole(t *testing.T) {
 }
 
 func TestHandleGetSessionToken(t *testing.T) {
-	w := stsAction(t, "GetSessionToken")
-	assert.Equal(t, http.StatusOK, w.Code)
-
-	var resp getSessionTokenResponse
-	require.NoError(t, xml.Unmarshal(w.Body.Bytes(), &resp))
-	creds := resp.GetSessionTokenResult.Credentials
-	assert.Equal(t, fixedAccessKeyID, creds.AccessKeyID)
-	assert.Equal(t, fixedSecretKey, creds.SecretAccessKey)
-	assert.Equal(t, fixedSessionToken, creds.SessionToken)
-	assert.Equal(t, fixedExpiration, creds.Expiration)
+	tests := []struct {
+		name        string
+		body        string
+		wantStatus  int
+		wantErrCode string
+	}{
+		{
+			name:       "no DurationSeconds",
+			body:       "Action=GetSessionToken&Version=2011-06-15",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "DurationSeconds at minimum (900)",
+			body:       "Action=GetSessionToken&Version=2011-06-15&DurationSeconds=900",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "DurationSeconds at maximum (129600)",
+			body:       "Action=GetSessionToken&Version=2011-06-15&DurationSeconds=129600",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:        "DurationSeconds below minimum (0)",
+			body:        "Action=GetSessionToken&Version=2011-06-15&DurationSeconds=0",
+			wantStatus:  http.StatusBadRequest,
+			wantErrCode: "ValidationError",
+		},
+		{
+			name:        "DurationSeconds below minimum (899)",
+			body:        "Action=GetSessionToken&Version=2011-06-15&DurationSeconds=899",
+			wantStatus:  http.StatusBadRequest,
+			wantErrCode: "ValidationError",
+		},
+		{
+			name:        "DurationSeconds above maximum (129601)",
+			body:        "Action=GetSessionToken&Version=2011-06-15&DurationSeconds=129601",
+			wantStatus:  http.StatusBadRequest,
+			wantErrCode: "ValidationError",
+		},
+		{
+			name:        "DurationSeconds non-numeric",
+			body:        "Action=GetSessionToken&Version=2011-06-15&DurationSeconds=abc",
+			wantStatus:  http.StatusBadRequest,
+			wantErrCode: "ValidationError",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := stsRequest(t, tt.body)
+			assert.Equal(t, tt.wantStatus, w.Code)
+			if tt.wantErrCode != "" {
+				var errResp errorResponse
+				require.NoError(t, xml.Unmarshal(w.Body.Bytes(), &errResp))
+				assert.Equal(t, tt.wantErrCode, errResp.Error.Code)
+				return
+			}
+			var resp getSessionTokenResponse
+			require.NoError(t, xml.Unmarshal(w.Body.Bytes(), &resp))
+			creds := resp.GetSessionTokenResult.Credentials
+			assert.Equal(t, fixedAccessKeyID, creds.AccessKeyID)
+			assert.Equal(t, fixedSecretKey, creds.SecretAccessKey)
+			assert.Equal(t, fixedSessionToken, creds.SessionToken)
+			assert.Equal(t, fixedExpiration, creds.Expiration)
+		})
+	}
 }
 
 func TestParseFormError(t *testing.T) {
