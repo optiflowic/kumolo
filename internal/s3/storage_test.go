@@ -5614,6 +5614,37 @@ func TestVersioning(t *testing.T) {
 		assert.True(t, errors.Is(statErr, os.ErrNotExist), "archived tag sidecar should be removed")
 	})
 
+	t.Run(
+		"DeleteObjectVersion logs warning and succeeds when archived tag sidecar removal fails",
+		func(t *testing.T) {
+			s, bucket := setup(t)
+			m1, err := s.PutObject(
+				bucket, "obj.txt", strings.NewReader("v1"), "text/plain",
+				nil, "", "", false, "", nil, nil, "",
+			)
+			require.NoError(t, err)
+			require.NoError(t, s.PutObjectTagging(bucket, "obj.txt", []Tag{{Key: "k", Value: "v"}}))
+			_, err = s.PutObject(
+				bucket, "obj.txt", strings.NewReader("v2"), "text/plain",
+				nil, "", "", false, "", nil, nil, "",
+			)
+			require.NoError(t, err)
+
+			tagsErr := errors.New("tags remove failed")
+			realRemove := s.removeFile
+			s.removeFile = func(name string) error {
+				if strings.HasSuffix(name, ".tags.json") {
+					return tagsErr
+				}
+				return realRemove(name)
+			}
+
+			isMarker, err := s.DeleteObjectVersion(bucket, "obj.txt", m1.VersionID, false)
+			require.NoError(t, err)
+			assert.False(t, isMarker)
+		},
+	)
+
 	t.Run("ListObjectVersions returns all versions and delete markers", func(t *testing.T) {
 		s, bucket := setup(t)
 		m1, err := s.PutObject(
