@@ -269,6 +269,11 @@ func (ro *Router) handleCopyObject(
 			userMetadata = map[string]string{}
 		}
 	}
+	// nil tags = COPY (inherit from source); non-nil (even empty) = REPLACE.
+	tags, ok := parseTaggingDirectiveHeaders(w, r)
+	if !ok {
+		return
+	}
 	srcSSECKeyMD5, ok := parseSSECHeaders(
 		w,
 		r,
@@ -369,6 +374,7 @@ func (ro *Router) handleCopyObject(
 		retention,
 		legalHold,
 		storageClass,
+		tags,
 	)
 	if err != nil {
 		switch {
@@ -1649,6 +1655,47 @@ func parseObjectLockHeaders(
 	}
 
 	return retention, legalHold, true
+}
+
+// parseTaggingDirectiveHeaders reads x-amz-tagging-directive and x-amz-tagging
+// from r and returns the tags to apply to the destination object.
+// nil means COPY (inherit source tags); non-nil (even empty) means REPLACE.
+// Returns false and writes an error response on invalid input.
+func parseTaggingDirectiveHeaders(w http.ResponseWriter, r *http.Request) ([]Tag, bool) {
+	directive := strings.ToUpper(r.Header.Get(amzTaggingDirective))
+	switch directive {
+	case "", "COPY":
+		return nil, true
+	case "REPLACE":
+		tags, err := parseTagsFromHeader(r.Header.Get(amzTagging))
+		if err != nil {
+			writeError(w, r, http.StatusBadRequest, "InvalidArgument",
+				"Invalid x-amz-tagging value.")
+			return nil, false
+		}
+		return tags, true
+	default:
+		writeError(w, r, http.StatusBadRequest, "InvalidArgument",
+			"x-amz-tagging-directive must be COPY or REPLACE.")
+		return nil, false
+	}
+}
+
+// parseTagsFromHeader parses the URL query-string-encoded tag set used in the
+// x-amz-tagging header (e.g. "key1=val1&key2=val2") into a []Tag.
+func parseTagsFromHeader(header string) ([]Tag, error) {
+	if header == "" {
+		return []Tag{}, nil
+	}
+	params, err := url.ParseQuery(header)
+	if err != nil {
+		return nil, err
+	}
+	tags := make([]Tag, 0, len(params))
+	for k, vs := range params {
+		tags = append(tags, Tag{Key: k, Value: vs[0]})
+	}
+	return tags, nil
 }
 
 func isArchiveStorageClass(sc string) bool {

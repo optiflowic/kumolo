@@ -474,6 +474,7 @@ func (m *mockStore) CopyObject(
 	_ *ObjectRetention,
 	_ *ObjectLegalHold,
 	_ string,
+	_ []Tag,
 ) (ObjectMetadata, error) {
 	m.capturedCopyObjectSSEAlg = sseAlgorithm
 	m.capturedCopyObjectSSEKeyID = sseKMSKeyID
@@ -2843,6 +2844,126 @@ func TestRouterCopyObject(t *testing.T) {
 		ro.ServeHTTP(retW, retReq)
 		assert.Equal(t, http.StatusOK, retW.Code)
 		assert.Contains(t, retW.Body.String(), "GOVERNANCE")
+	})
+}
+
+func TestRouterCopyObjectTaggingDirective(t *testing.T) {
+	setup := func(t *testing.T) *Router {
+		t.Helper()
+		ro := newTestRouter(t)
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/src-bucket", nil),
+		)
+		ro.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPut, "/dst-bucket", nil),
+		)
+		putReq := httptest.NewRequest(
+			http.MethodPut,
+			"/src-bucket/orig.txt",
+			strings.NewReader("hello"),
+		)
+		putReq.Header.Set("Content-Type", "text/plain")
+		ro.ServeHTTP(httptest.NewRecorder(), putReq)
+		tagReq := httptest.NewRequest(
+			http.MethodPut,
+			"/src-bucket/orig.txt?tagging",
+			strings.NewReader(
+				`<Tagging><TagSet><Tag><Key>env</Key><Value>prod</Value></Tag></TagSet></Tagging>`,
+			),
+		)
+		ro.ServeHTTP(httptest.NewRecorder(), tagReq)
+		return ro
+	}
+
+	t.Run("COPY directive (default) propagates source tags", func(t *testing.T) {
+		ro := setup(t)
+		req := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
+		req.Header.Set(amzCopySource, "/src-bucket/orig.txt")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		getTag := httptest.NewRequest(http.MethodGet, "/dst-bucket/copy.txt?tagging", nil)
+		tw := httptest.NewRecorder()
+		ro.ServeHTTP(tw, getTag)
+		assert.Equal(t, http.StatusOK, tw.Code)
+		assert.Contains(t, tw.Body.String(), "env")
+		assert.Contains(t, tw.Body.String(), "prod")
+	})
+
+	t.Run("explicit COPY directive propagates source tags", func(t *testing.T) {
+		ro := setup(t)
+		req := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
+		req.Header.Set(amzCopySource, "/src-bucket/orig.txt")
+		req.Header.Set(amzTaggingDirective, "COPY")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		getTag := httptest.NewRequest(http.MethodGet, "/dst-bucket/copy.txt?tagging", nil)
+		tw := httptest.NewRecorder()
+		ro.ServeHTTP(tw, getTag)
+		assert.Contains(t, tw.Body.String(), "env")
+	})
+
+	t.Run("REPLACE directive applies x-amz-tagging tags", func(t *testing.T) {
+		ro := setup(t)
+		req := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
+		req.Header.Set(amzCopySource, "/src-bucket/orig.txt")
+		req.Header.Set(amzTaggingDirective, "REPLACE")
+		req.Header.Set(amzTagging, "stage=dev&cost=low")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		getTag := httptest.NewRequest(http.MethodGet, "/dst-bucket/copy.txt?tagging", nil)
+		tw := httptest.NewRecorder()
+		ro.ServeHTTP(tw, getTag)
+		assert.Equal(t, http.StatusOK, tw.Code)
+		assert.Contains(t, tw.Body.String(), "stage")
+		assert.Contains(t, tw.Body.String(), "dev")
+		assert.NotContains(t, tw.Body.String(), "env")
+	})
+
+	t.Run("REPLACE with no x-amz-tagging clears tags", func(t *testing.T) {
+		ro := setup(t)
+		req := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
+		req.Header.Set(amzCopySource, "/src-bucket/orig.txt")
+		req.Header.Set(amzTaggingDirective, "REPLACE")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		getTag := httptest.NewRequest(http.MethodGet, "/dst-bucket/copy.txt?tagging", nil)
+		tw := httptest.NewRecorder()
+		ro.ServeHTTP(tw, getTag)
+		assert.Equal(t, http.StatusOK, tw.Code)
+		assert.NotContains(t, tw.Body.String(), "env")
+	})
+
+	t.Run("invalid tagging-directive returns 400", func(t *testing.T) {
+		ro := setup(t)
+		req := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
+		req.Header.Set(amzCopySource, "/src-bucket/orig.txt")
+		req.Header.Set(amzTaggingDirective, "INVALID")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidArgument")
+	})
+
+	t.Run("REPLACE with malformed x-amz-tagging returns 400", func(t *testing.T) {
+		ro := setup(t)
+		req := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
+		req.Header.Set(amzCopySource, "/src-bucket/orig.txt")
+		req.Header.Set(amzTaggingDirective, "REPLACE")
+		req.Header.Set(amzTagging, "%zz=invalid") // invalid percent-encoding
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidArgument")
 	})
 }
 

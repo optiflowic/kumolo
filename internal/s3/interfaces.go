@@ -53,6 +53,7 @@ type objectStore interface {
 		retention *ObjectRetention,
 		legalHold *ObjectLegalHold,
 		storageClass string,
+		tags []Tag,
 	) (ObjectMetadata, error)
 	DeleteObject(bucket, key string, bypassGovernance bool) error
 	DeleteObjectVersioned(

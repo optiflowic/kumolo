@@ -790,6 +790,7 @@ func TestPutObject(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		assert.True(t, meta.SSEBucketKeyEnabled)
@@ -805,7 +806,7 @@ func TestPutObject(t *testing.T) {
 			"", "", false, ssecMD5(), nil, nil, "")
 		require.NoError(t, err)
 		meta, err := s.CopyObject("b", "src", "", "b", "dst", "",
-			nil, "", "", false, ssecMD5(), nil, nil, "")
+			nil, "", "", false, ssecMD5(), nil, nil, "", nil)
 		require.NoError(t, err)
 		assert.Equal(t, ssecMD5(), meta.SSECKeyMD5)
 		assert.Empty(t, meta.SSEAlgorithm)
@@ -1138,6 +1139,7 @@ func TestCopyObject(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		f, _, err := s.GetObject("src-bucket", "copy.txt")
@@ -1163,6 +1165,7 @@ func TestCopyObject(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		f, _, err := s.GetObject("dst-bucket", "copy.txt")
@@ -1190,6 +1193,7 @@ func TestCopyObject(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		assert.Equal(t, origMeta.ETag, meta.ETag)
@@ -1211,7 +1215,7 @@ func TestCopyObject(t *testing.T) {
 		meta, err := s.CopyObject(
 			"src-bucket", "orig.txt", "",
 			"src-bucket", "orig.txt", "",
-			nil, "", "", false, "", retention, legalHold, "",
+			nil, "", "", false, "", retention, legalHold, "", nil,
 		)
 		require.NoError(t, err)
 		require.NotNil(t, meta.Retention)
@@ -1243,6 +1247,7 @@ func TestCopyObject(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		assert.Error(t, err)
 	})
@@ -1259,6 +1264,7 @@ func TestCopyObject(t *testing.T) {
 			"copy.txt",
 			"",
 			nil, "", "", false, "", nil, nil, "",
+			nil,
 		)
 		require.NoError(t, err)
 		assert.True(t, !dstMeta.LastModified.Before(srcMeta.LastModified))
@@ -1274,6 +1280,7 @@ func TestCopyObject(t *testing.T) {
 			"path/to/copy.txt",
 			"",
 			nil, "", "", false, "", nil, nil, "",
+			nil,
 		)
 		require.NoError(t, err)
 		_, _, err = s.GetObject("dst-bucket", "path/to/copy.txt")
@@ -1301,6 +1308,7 @@ func TestCopyObject(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		assert.Error(t, err)
 		assert.NotErrorIs(t, err, ErrObjectNotFound)
@@ -1321,6 +1329,7 @@ func TestCopyObject(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		assert.ErrorIs(t, err, ErrBucketNotFound)
 	})
@@ -1340,6 +1349,7 @@ func TestCopyObject(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		assert.ErrorIs(t, err, ErrObjectNotFound)
 	})
@@ -1359,6 +1369,7 @@ func TestCopyObject(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		assert.ErrorIs(t, err, ErrBucketNotFound)
 	})
@@ -1379,6 +1390,7 @@ func TestCopyObject(t *testing.T) {
 			"nested/copy.txt",
 			"",
 			nil, "", "", false, "", nil, nil, "",
+			nil,
 		)
 		assert.Error(t, err)
 	})
@@ -1400,6 +1412,7 @@ func TestCopyObject(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		assert.ErrorIs(t, err, ErrObjectNotFound)
 	})
@@ -1423,6 +1436,7 @@ func TestCopyObject(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		assert.Error(t, err)
 		assert.NotErrorIs(t, err, ErrObjectNotFound)
@@ -1455,6 +1469,7 @@ func TestCopyObject(t *testing.T) {
 			"copy.txt",
 			"",
 			nil, "", "", false, "", nil, nil, "",
+			nil,
 		)
 		require.NoError(t, err)
 		assert.Equal(t, srcMeta, dstMeta.UserMetadata)
@@ -1482,6 +1497,7 @@ func TestCopyObject(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		assert.Equal(t, newMeta, dstMeta.UserMetadata)
@@ -1513,6 +1529,7 @@ func TestCopyObject(t *testing.T) {
 			"orig.txt",
 			"",
 			nil, "", "", false, "", nil, nil, "",
+			nil,
 		)
 		require.NoError(t, err)
 		assert.Equal(t, srcMeta, dstMeta.UserMetadata)
@@ -1539,6 +1556,7 @@ func TestCopyObject(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		assert.Equal(t, newMeta, dstMeta.UserMetadata)
@@ -1565,6 +1583,7 @@ func TestCopyObject(t *testing.T) {
 			"copy.txt",
 			"application/json",
 			nil, "", "", false, "", nil, nil, "",
+			nil,
 		)
 		require.NoError(t, err)
 		assert.Equal(t, "application/json", dstMeta.ContentType)
@@ -1591,6 +1610,7 @@ func TestCopyObject(t *testing.T) {
 			"copy.txt",
 			"",
 			nil, "", "", false, "", nil, nil, "",
+			nil,
 		)
 		require.NoError(t, err)
 		assert.Equal(t, "text/plain", dstMeta.ContentType)
@@ -1614,7 +1634,7 @@ func TestCopyObject(t *testing.T) {
 		legalHold := &ObjectLegalHold{Status: "ON"}
 		dstMeta, err := s.CopyObject(
 			"src-bucket", "orig.txt", "", "dst-bucket", "copy.txt", "", nil, "", "", false, "",
-			retention, legalHold, "",
+			retention, legalHold, "", nil,
 		)
 		require.NoError(t, err)
 		require.NotNil(t, dstMeta.Retention)
@@ -1660,6 +1680,7 @@ func TestCopyObject(t *testing.T) {
 				nil,
 				nil,
 				"",
+				nil,
 			)
 			require.NoError(t, err)
 
@@ -1706,6 +1727,7 @@ func TestCopyObject(t *testing.T) {
 				explicit,
 				nil,
 				"",
+				nil,
 			)
 			require.NoError(t, err)
 
@@ -1746,6 +1768,7 @@ func TestCopyObject(t *testing.T) {
 				nil,
 				nil,
 				"",
+				nil,
 			)
 			require.NoError(t, err)
 
@@ -1768,12 +1791,156 @@ func TestCopyObject(t *testing.T) {
 				nil,
 				nil,
 				"",
+				nil,
 			)
 			require.NoError(t, err)
 
 			_, err = s.GetObjectRetention("dst-bucket", "copy.txt", "")
 			assert.ErrorIs(t, err, ErrNoObjectRetention)
 		})
+	})
+}
+
+func TestCopyObjectTaggingDirective(t *testing.T) {
+	setup := func(t *testing.T) *Storage {
+		t.Helper()
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("src", "", false))
+		require.NoError(t, s.CreateBucket("dst", "", false))
+		_, err := s.PutObject("src", "obj.txt", strings.NewReader("data"), "text/plain",
+			nil, "", "", false, "", nil, nil, "")
+		require.NoError(t, err)
+		require.NoError(t, s.PutObjectTagging("src", "obj.txt", []Tag{
+			{Key: "env", Value: "prod"},
+			{Key: "team", Value: "core"},
+		}))
+		return s
+	}
+
+	t.Run("nil tags (COPY) copies source tags to destination", func(t *testing.T) {
+		s := setup(t)
+		_, err := s.CopyObject("src", "obj.txt", "", "dst", "copy.txt",
+			"", nil, "", "", false, "", nil, nil, "", nil)
+		require.NoError(t, err)
+		tags, err := s.GetObjectTagging("dst", "copy.txt")
+		require.NoError(t, err)
+		require.Len(t, tags, 2)
+		tagMap := make(map[string]string, len(tags))
+		for _, tg := range tags {
+			tagMap[tg.Key] = tg.Value
+		}
+		assert.Equal(t, "prod", tagMap["env"])
+		assert.Equal(t, "core", tagMap["team"])
+	})
+
+	t.Run("non-nil empty tags (REPLACE with empty) clears tags on destination", func(t *testing.T) {
+		s := setup(t)
+		// First copy with COPY so dst has tags.
+		_, err := s.CopyObject("src", "obj.txt", "", "dst", "copy.txt",
+			"", nil, "", "", false, "", nil, nil, "", nil)
+		require.NoError(t, err)
+
+		// Overwrite with REPLACE and empty tag set.
+		_, err = s.CopyObject("src", "obj.txt", "", "dst", "copy.txt",
+			"", nil, "", "", false, "", nil, nil, "", []Tag{})
+		require.NoError(t, err)
+		tags, err := s.GetObjectTagging("dst", "copy.txt")
+		require.NoError(t, err)
+		assert.Empty(t, tags)
+	})
+
+	t.Run("non-nil tags (REPLACE) applies provided tags ignoring source", func(t *testing.T) {
+		s := setup(t)
+		replaceTags := []Tag{{Key: "new-key", Value: "new-val"}}
+		_, err := s.CopyObject("src", "obj.txt", "", "dst", "copy.txt",
+			"", nil, "", "", false, "", nil, nil, "", replaceTags)
+		require.NoError(t, err)
+		tags, err := s.GetObjectTagging("dst", "copy.txt")
+		require.NoError(t, err)
+		require.Len(t, tags, 1)
+		assert.Equal(t, "new-key", tags[0].Key)
+		assert.Equal(t, "new-val", tags[0].Value)
+	})
+
+	t.Run(
+		"nil tags (COPY) on source with no tags results in no destination tags",
+		func(t *testing.T) {
+			s := newTestStorage(t)
+			require.NoError(t, s.CreateBucket("src", "", false))
+			require.NoError(t, s.CreateBucket("dst", "", false))
+			_, err := s.PutObject("src", "obj.txt", strings.NewReader("data"), "text/plain",
+				nil, "", "", false, "", nil, nil, "")
+			require.NoError(t, err)
+			_, err = s.CopyObject("src", "obj.txt", "", "dst", "copy.txt",
+				"", nil, "", "", false, "", nil, nil, "", nil)
+			require.NoError(t, err)
+			tags, err := s.GetObjectTagging("dst", "copy.txt")
+			require.NoError(t, err)
+			assert.Empty(t, tags)
+		},
+	)
+
+	t.Run("same-key REPLACE updates tags in-place", func(t *testing.T) {
+		s := setup(t)
+		newTags := []Tag{{Key: "stage", Value: "dev"}}
+		_, err := s.CopyObject("src", "obj.txt", "", "src", "obj.txt",
+			"", nil, "", "", false, "", nil, nil, "", newTags)
+		require.NoError(t, err)
+		tags, err := s.GetObjectTagging("src", "obj.txt")
+		require.NoError(t, err)
+		require.Len(t, tags, 1)
+		assert.Equal(t, "stage", tags[0].Key)
+	})
+
+	t.Run("same-key COPY leaves existing tags unchanged", func(t *testing.T) {
+		s := setup(t)
+		_, err := s.CopyObject("src", "obj.txt", "", "src", "obj.txt",
+			"", nil, "", "", false, "", nil, nil, "", nil)
+		require.NoError(t, err)
+		tags, err := s.GetObjectTagging("src", "obj.txt")
+		require.NoError(t, err)
+		require.Len(t, tags, 2)
+	})
+
+	t.Run("versioned source COPY copies archived tags from specific version", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("b", "", false))
+		require.NoError(t, s.PutBucketVersioning("b", "Enabled"))
+		// v1: put with tags.
+		meta1, err := s.PutObject("b", "obj.txt", strings.NewReader("v1"), "text/plain",
+			nil, "", "", false, "", nil, nil, "")
+		require.NoError(t, err)
+		require.NoError(t, s.PutObjectTagging("b", "obj.txt", []Tag{{Key: "ver", Value: "one"}}))
+		// Overwrite → v1 is archived (along with its .tags.json) by our fix.
+		_, err = s.PutObject("b", "obj.txt", strings.NewReader("v2"), "text/plain",
+			nil, "", "", false, "", nil, nil, "")
+		require.NoError(t, err)
+		// Copy specifically from v1 (archived).
+		require.NoError(t, s.CreateBucket("dst", "", false))
+		_, err = s.CopyObject("b", "obj.txt", meta1.VersionID, "dst", "copy.txt",
+			"", nil, "", "", false, "", nil, nil, "", nil)
+		require.NoError(t, err)
+		tags, err := s.GetObjectTagging("dst", "copy.txt")
+		require.NoError(t, err)
+		require.Len(t, tags, 1)
+		assert.Equal(t, "ver", tags[0].Key)
+		assert.Equal(t, "one", tags[0].Value)
+	})
+}
+
+func TestApplyTagsLocked(t *testing.T) {
+	t.Run("removeFile error is returned", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("b", "", false))
+		_, err := s.PutObject("b", "obj.txt", strings.NewReader("data"), "text/plain",
+			nil, "", "", false, "", nil, nil, "")
+		require.NoError(t, err)
+		removeErr := errors.New("remove failed")
+		s.removeFile = func(_ string) error { return removeErr }
+		// applyTagsLocked with empty tags triggers removeFile.
+		_, err = s.CopyObject("b", "obj.txt", "", "b", "dst.txt",
+			"", nil, "", "", false, "", nil, nil, "", []Tag{})
+		assert.ErrorIs(t, err, removeErr)
 	})
 }
 
@@ -1824,6 +1991,7 @@ func TestStorageClass(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		meta, err := s.HeadObject("b", "dst.txt")
@@ -1851,6 +2019,7 @@ func TestStorageClass(t *testing.T) {
 			nil,
 			nil,
 			"STANDARD",
+			nil,
 		)
 		require.NoError(t, err)
 		meta, err := s.HeadObject("b", "dst.txt")
@@ -5673,6 +5842,7 @@ func TestVersioning(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		assert.NotEqual(t, m1.VersionID, m2.VersionID)
@@ -5717,6 +5887,7 @@ func TestVersioning(t *testing.T) {
 			"copy.txt",
 			"",
 			nil, "", "", false, "", nil, nil, "",
+			nil,
 		)
 		require.NoError(t, err)
 		assert.Equal(t, m1.ETag, dstMeta.ETag)
@@ -5758,6 +5929,7 @@ func TestVersioning(t *testing.T) {
 			dstMeta, err := s.CopyObject(
 				bucket, "obj.txt", m2.VersionID,
 				"dst-bucket", "copy.txt", "", nil, "", "", false, "", nil, nil, "",
+				nil,
 			)
 			require.NoError(t, err)
 			assert.Equal(t, m2.ETag, dstMeta.ETag)
@@ -6866,6 +7038,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 			_, err = s.CopyObject(
 				"my-bucket", "obj.txt", "deadbeefdeadbeef",
 				"dst-bucket", "copy.txt", "", nil, "", "", false, "", nil, nil, "",
+				nil,
 			)
 			assert.ErrorIs(t, err, ErrObjectNotFound)
 		},
@@ -6898,6 +7071,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 			_, err = s.CopyObject(
 				"my-bucket", "obj.txt", markerVID,
 				"dst-bucket", "copy.txt", "", nil, "", "", false, "", nil, nil, "",
+				nil,
 			)
 			assert.ErrorIs(t, err, ErrObjectNotFound)
 		},
@@ -7329,6 +7503,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 				nil,
 				nil,
 				"",
+				nil,
 			)
 			assert.ErrorIs(t, err, ErrObjectNotFound)
 		},
@@ -7378,6 +7553,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 			_, err = s.CopyObject(
 				"my-bucket", "obj.txt", m1.VersionID,
 				"dst-bucket", "copy.txt", "", nil, "", "", false, "", nil, nil, "",
+				nil,
 			)
 			assert.Error(t, err)
 			assert.NotErrorIs(t, err, ErrObjectNotFound)
@@ -7425,6 +7601,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 				nil,
 				nil,
 				"",
+				nil,
 			)
 			assert.Error(t, err)
 		},
@@ -7488,6 +7665,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 				nil,
 				nil,
 				"",
+				nil,
 			)
 			assert.Error(t, err)
 		},
@@ -7547,6 +7725,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 				nil,
 				nil,
 				"",
+				nil,
 			)
 			assert.Error(t, err)
 		},

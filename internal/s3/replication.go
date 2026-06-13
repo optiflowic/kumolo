@@ -82,6 +82,7 @@ func (ro *Router) replicateObject(bucket, key string, srcMeta ObjectMetadata) {
 			srcMeta.SSEAlgorithm, srcMeta.SSEKMSKeyID, srcMeta.SSEBucketKeyEnabled, "",
 			srcMeta.Retention, srcMeta.LegalHold,
 			rule.Destination.StorageClass,
+			nil, // COPY: replicate source tags
 		)
 		if copyErr != nil {
 			slog.Warn( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
