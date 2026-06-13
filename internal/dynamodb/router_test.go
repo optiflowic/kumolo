@@ -3354,6 +3354,25 @@ func TestHandleTagResource(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 
+	t.Run("tags via index ARN resolve to parent table", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		indexARN := tableARNFor("test-table") + "/index/my-gsi"
+		w := dynamo(
+			t,
+			ro,
+			"TagResource",
+			`{"ResourceArn":"`+indexARN+`","Tags":[{"Key":"via","Value":"index"}]}`,
+		)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		// Confirm the tag landed on the table.
+		tableARN := tableARNFor("test-table")
+		lw := dynamo(t, ro, "ListTagsOfResource", `{"ResourceArn":"`+tableARN+`"}`)
+		assert.Equal(t, http.StatusOK, lw.Code)
+		assert.Contains(t, lw.Body.String(), "via")
+	})
+
 	t.Run("500 when storage fails", func(t *testing.T) {
 		ro := &Router{storage: &mockStore{
 			tagResourceFn: func(string, map[string]string) error { return errInternal },
@@ -3377,6 +3396,25 @@ func TestHandleUntagResource(t *testing.T) {
 		)
 		w := dynamo(t, ro, "UntagResource", `{"ResourceArn":"`+arn+`","TagKeys":["env"]}`)
 		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("untags via index ARN resolve to parent table", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		tableARN := tableARNFor("test-table")
+		dynamo(
+			t,
+			ro,
+			"TagResource",
+			`{"ResourceArn":"`+tableARN+`","Tags":[{"Key":"env","Value":"dev"}]}`,
+		)
+		indexARN := tableARN + "/index/my-gsi"
+		w := dynamo(t, ro, "UntagResource", `{"ResourceArn":"`+indexARN+`","TagKeys":["env"]}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		lw := dynamo(t, ro, "ListTagsOfResource", `{"ResourceArn":"`+tableARN+`"}`)
+		assert.Equal(t, http.StatusOK, lw.Code)
+		assert.NotContains(t, lw.Body.String(), "env")
 	})
 
 	t.Run("400 for missing ResourceArn", func(t *testing.T) {

@@ -16,7 +16,7 @@
 
 | Parameter | Type | Required | Notes |
 |---|---|---|---|
-| `ResourceArn` | string | yes | Table ARN; 1–1283 chars |
+| `ResourceArn` | string | yes | Table ARN or GSI/LSI index ARN; 1–1283 chars |
 | `Tags` | []Tag | yes | Each Tag: `Key` (1–128 chars), `Value` (0–256 chars) |
 
 ### Response
@@ -29,7 +29,7 @@ HTTP 200, empty body.
 
 | Parameter | Type | Required | Notes |
 |---|---|---|---|
-| `ResourceArn` | string | yes | Table ARN; 1–1283 chars |
+| `ResourceArn` | string | yes | Table ARN or GSI/LSI index ARN; 1–1283 chars |
 | `TagKeys` | []string | yes | Keys to remove; non-existent keys silently ignored |
 
 ### Response
@@ -61,7 +61,6 @@ HTTP 200, empty body.
 
 ## kumolo-Specific Deviations
 
-- `ResourceArn` must be a table ARN; index ARNs are not supported.
 - `LimitExceededException` and `ResourceInUseException` are not enforced.
 - **ListTagsOfResource pagination is not implemented**: `NextToken` is accepted but ignored; all tags are returned in a single response.
 - Real AWS rate limits (TagResource/UntagResource: 5/sec; ListTagsOfResource: 10/sec) are not enforced.
