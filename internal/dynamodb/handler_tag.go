@@ -36,7 +36,7 @@ func (ro *Router) handleTagResource(w http.ResponseWriter, body []byte) {
 	}
 	tags := make(map[string]string, len(req.Tags))
 	for _, t := range req.Tags {
-		if utf8.RuneCountInString(t.Key) < 1 || utf8.RuneCountInString(t.Key) > 128 {
+		if n := utf8.RuneCountInString(t.Key); n < tagKeyMinLength || n > tagKeyMaxLength {
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -45,7 +45,7 @@ func (ro *Router) handleTagResource(w http.ResponseWriter, body []byte) {
 			)
 			return
 		}
-		if utf8.RuneCountInString(t.Value) > 256 {
+		if utf8.RuneCountInString(t.Value) > tagValueMaxLength {
 			writeError(
 				w,
 				http.StatusBadRequest,

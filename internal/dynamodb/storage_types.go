@@ -83,6 +83,13 @@ const (
 	OpBeginsWith = "begins_with"
 )
 
+const (
+	tagKeyMinLength   = 1
+	tagKeyMaxLength   = 128
+	tagValueMaxLength = 256
+	tagMaxCount       = 50
+)
+
 // SortKeyCondition describes an optional sort key filter applied during Query.
 type SortKeyCondition struct {
 	Name     string
