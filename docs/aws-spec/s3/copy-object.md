@@ -2,7 +2,7 @@
 
 **URL**: https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html  
 **SDK struct**: `s3.CopyObjectInput` / `s3.CopyObjectOutput`  
-**Last verified**: 2026-05-21
+**Last verified**: 2026-06-13
 
 ## Request
 
@@ -31,9 +31,19 @@ Source may include a `?versionId=<id>` query string to copy a specific version.
 | `x-amz-tagging-directive` | `COPY` (default) or `REPLACE`; controls tag inheritance |
 | `x-amz-tagging` | URL query-string-encoded tags applied when `x-amz-tagging-directive: REPLACE` |
 
+### Supported conditional headers
+
+| Header | Notes |
+|---|---|
+| `x-amz-copy-source-if-match` | Copy only if source ETag matches; 412 otherwise |
+| `x-amz-copy-source-if-none-match` | Copy only if source ETag does not match; 412 otherwise |
+| `x-amz-copy-source-if-modified-since` | Copy only if source was modified after the given time; 412 otherwise |
+| `x-amz-copy-source-if-unmodified-since` | Copy only if source was not modified after the given time; 412 otherwise |
+
+Precedence rules: `if-match` takes precedence over `if-unmodified-since`; `if-none-match` takes precedence over `if-modified-since`.
+
 ### Not implemented headers
 
-- `x-amz-copy-source-if-*` — conditional copy preconditions
 - `x-amz-acl` / `x-amz-grant-*` — ACL on copy
 - `x-amz-expected-bucket-owner` / `x-amz-source-expected-bucket-owner`
 - `x-amz-server-side-encryption-customer-*` — SSE-C
@@ -66,9 +76,9 @@ Source may include a `?versionId=<id>` query string to copy a specific version.
 | `InvalidArgument` | 400 | Missing or malformed `x-amz-copy-source` |
 | `InvalidArgument` | 400 | `x-amz-tagging-directive` value is not `COPY` or `REPLACE` |
 | `InvalidArgument` | 400 | `x-amz-tagging` value contains invalid percent-encoding |
+| `PreconditionFailed` | 412 | A `x-amz-copy-source-if-*` condition was not met |
 | `InternalError` | 500 | Storage failure |
 
 ## Kumolo deviations
 
-- `x-amz-copy-source-if-*` conditional headers are not evaluated.
 - SSE headers are stored in metadata but no actual encryption is applied. For aws:kms / aws:kms:dsse the key is validated and resolved to a canonical ARN via the KMS service; see `sse-algorithm-validation.md`.

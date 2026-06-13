@@ -318,6 +318,18 @@ func (ro *Router) handleCopyObject(
 			if !validateSSECOnRead(w, r, srcMeta, srcSSECKeyMD5) {
 				return
 			}
+			if hasCopySourceConditions(r) && !checkCopySourceConditions(r, srcMeta) {
+				slog.Debug( // #nosec G706 -- srcBucket/srcKey come from header; log injection risk accepted for a local dev emulator
+					"copy object source precondition failed",
+					"srcBucket",
+					srcBucket,
+					"srcKey",
+					srcKey,
+				)
+				writeError(w, r, http.StatusPreconditionFailed, "PreconditionFailed",
+					"At least one of the pre-conditions you specified did not hold")
+				return
+			}
 		}
 	}
 	retention, legalHold, ok := parseObjectLockHeaders(w, r)
