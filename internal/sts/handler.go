@@ -249,6 +249,11 @@ func (ro *Router) handleAssumeRole(w http.ResponseWriter, r *http.Request) {
 	if durationStr := r.Form.Get("DurationSeconds"); durationStr != "" {
 		d, err := strconv.Atoi(durationStr)
 		if err != nil || d < assumeRoleMinDuration {
+			slog.Debug(
+				"AssumeRole: DurationSeconds out of range",
+				"value",
+				durationStr,
+			) // #nosec G706 -- value comes from request form; log injection risk accepted for a local dev emulator
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -262,6 +267,11 @@ func (ro *Router) handleAssumeRole(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if d > assumeRoleMaxDuration {
+			slog.Debug(
+				"AssumeRole: DurationSeconds out of range",
+				"value",
+				durationStr,
+			) // #nosec G706 -- value comes from request form; log injection risk accepted for a local dev emulator
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -315,6 +325,11 @@ func (ro *Router) handleGetSessionToken(w http.ResponseWriter, r *http.Request) 
 	if durationStr := r.Form.Get("DurationSeconds"); durationStr != "" {
 		d, err := strconv.Atoi(durationStr)
 		if err != nil || d < getSessionTokenMinDuration {
+			slog.Debug(
+				"GetSessionToken: DurationSeconds out of range",
+				"value",
+				durationStr,
+			) // #nosec G706 -- value comes from request form; log injection risk accepted for a local dev emulator
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -328,6 +343,11 @@ func (ro *Router) handleGetSessionToken(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		if d > getSessionTokenMaxDuration {
+			slog.Debug(
+				"GetSessionToken: DurationSeconds out of range",
+				"value",
+				durationStr,
+			) // #nosec G706 -- value comes from request form; log injection risk accepted for a local dev emulator
 			writeError(
 				w,
 				http.StatusBadRequest,

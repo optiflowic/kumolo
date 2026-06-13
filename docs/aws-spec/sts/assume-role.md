@@ -2,7 +2,7 @@
 
 - Official URL: https://docs.aws.amazon.com/STS/latest/APIReference/API_AssumeRole.html
 - SDK struct: `sts.AssumeRoleInput` / `sts.AssumeRoleOutput`
-- Last verified: 2026-05-21
+- Last verified: 2026-06-13
 
 ## Request Parameters (implemented)
 

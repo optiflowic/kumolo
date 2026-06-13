@@ -2,7 +2,7 @@
 
 - Official URL: https://docs.aws.amazon.com/STS/latest/APIReference/API_GetSessionToken.html
 - SDK struct: `sts.GetSessionTokenInput` / `sts.GetSessionTokenOutput`
-- Last verified: 2026-05-21
+- Last verified: 2026-06-13
 
 ## Request Parameters
 
