@@ -21,9 +21,9 @@
 | `fetch-owner` | Include `Owner` in each `Contents` element if `true` |
 | `encoding-type` | Only `url` is valid |
 
-### Not implemented parameters
+### Implemented parameters
 
-- `encoding-type` — URL-encoding of keys with special characters
+- `encoding-type` — only `url` is valid; if absent or empty, no encoding applied; invalid values return `InvalidArgument`
 
 ### Not implemented headers
 
@@ -68,7 +68,12 @@ kumolo encodes the last returned key as base64 for the continuation token.
 | `NoSuchBucket` | 404 | Bucket does not exist |
 | `InternalError` | 500 | Storage failure |
 
+## Response with encoding-type=url
+
+When `encoding-type=url` is set, the response includes `<EncodingType>url</EncodingType>` and percent-encodes (space → `%20`, slash → `%2F`) these fields:
+`Prefix`, `Delimiter`, `StartAfter`, each `Contents.Key`, each `CommonPrefixes.Prefix`.
+`ContinuationToken` and `NextContinuationToken` are opaque base64 tokens and are NOT encoded.
+
 ## Kumolo deviations
 
-- `encoding-type=url` is not implemented; keys with special characters are returned as-is.
 - `KeyCount` includes both `Contents` and `CommonPrefixes` entries (matches spec).

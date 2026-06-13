@@ -143,6 +143,7 @@ type listObjectsResult struct {
 	NextMarker     string             `xml:"NextMarker,omitempty"`
 	Delimiter      string             `xml:"Delimiter,omitempty"`
 	MaxKeys        int                `xml:"MaxKeys"`
+	EncodingType   string             `xml:"EncodingType,omitempty"`
 	IsTruncated    bool               `xml:"IsTruncated"`
 	Contents       []xmlObjectContent `xml:"Contents"`
 	CommonPrefixes []xmlCommonPrefix  `xml:"CommonPrefixes"`
@@ -158,6 +159,7 @@ type listObjectsV2Result struct {
 	Prefix                string             `xml:"Prefix"`
 	Delimiter             string             `xml:"Delimiter,omitempty"`
 	MaxKeys               int                `xml:"MaxKeys"`
+	EncodingType          string             `xml:"EncodingType,omitempty"`
 	KeyCount              int                `xml:"KeyCount"`
 	IsTruncated           bool               `xml:"IsTruncated"`
 	ContinuationToken     string             `xml:"ContinuationToken,omitempty"`

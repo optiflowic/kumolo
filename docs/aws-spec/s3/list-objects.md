@@ -21,9 +21,9 @@ AWS recommends using ListObjectsV2 instead. Kept for backward compatibility.
 | `max-keys` | Max results; default/max is 1000 |
 | `encoding-type` | Only `url` is valid |
 
-### Not implemented parameters
+### Implemented parameters
 
-- `encoding-type` — URL-encoding of keys containing special characters
+- `encoding-type` — only `url` is valid; if absent or empty, no encoding applied; invalid values return `InvalidArgument`
 
 ### Not implemented headers
 
@@ -65,10 +65,14 @@ Per spec, `NextMarker` should only be included when `delimiter` is specified.
 | `NoSuchBucket` | 404 | Bucket does not exist |
 | `InternalError` | 500 | Storage failure |
 
+## Response with encoding-type=url
+
+When `encoding-type=url` is set, the response includes `<EncodingType>url</EncodingType>` and percent-encodes (space → `%20`, slash → `%2F`) these fields:
+`Prefix`, `Marker`, `NextMarker`, `Delimiter`, each `Contents.Key`, each `CommonPrefixes.Prefix`.
+
 ## Kumolo deviations
 
 - `NextMarker` is included in truncated responses even when `delimiter` is not set.
   Per spec, clients should use the last `Key` in the response as marker when `delimiter` is absent.
   This is a benign over-provision that does not break SDK clients.
-- `encoding-type=url` is not implemented; keys with special characters are returned as-is.
 - `Owner` is never included in `Contents` elements.
