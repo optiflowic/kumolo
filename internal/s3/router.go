@@ -68,6 +68,8 @@ const (
 	presignedURLMaxExpiry = 7 * 24 * 60 * 60 // 604800 seconds; AWS S3 maximum
 	maxPartNumber         = 10000            // AWS S3 maximum part number
 	minPartSize           = 5 * 1024 * 1024  // 5 MiB; AWS S3 minimum non-final part size
+
+	encodingTypeURL = "url" // the only valid encoding-type value per S3 spec
 )
 
 // Router handles S3 API requests using path-style URLs: /<bucket>/<key>
@@ -331,6 +333,40 @@ func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, bucket str
 	}
 }
 
+// urlEncode percent-encodes s for S3 encoding-type=url responses.
+// url.QueryEscape is intentional: unlike url.PathEscape, it encodes sub-delimiters
+// such as '!' and '$', matching real AWS behavior where every non-unreserved character
+// is percent-encoded. The trailing ReplaceAll converts QueryEscape's space-as-'+' to
+// the '%20' that AWS emits.
+func urlEncode(s string) string {
+	return strings.ReplaceAll(url.QueryEscape(s), "+", "%20")
+}
+
+func applyURLEncodingV1(r *listObjectsResult) {
+	r.Prefix = urlEncode(r.Prefix)
+	r.Marker = urlEncode(r.Marker)
+	r.NextMarker = urlEncode(r.NextMarker)
+	r.Delimiter = urlEncode(r.Delimiter)
+	for i := range r.Contents {
+		r.Contents[i].Key = urlEncode(r.Contents[i].Key)
+	}
+	for i := range r.CommonPrefixes {
+		r.CommonPrefixes[i].Prefix = urlEncode(r.CommonPrefixes[i].Prefix)
+	}
+}
+
+func applyURLEncodingV2(r *listObjectsV2Result) {
+	r.Prefix = urlEncode(r.Prefix)
+	r.Delimiter = urlEncode(r.Delimiter)
+	r.StartAfter = urlEncode(r.StartAfter)
+	for i := range r.Contents {
+		r.Contents[i].Key = urlEncode(r.Contents[i].Key)
+	}
+	for i := range r.CommonPrefixes {
+		r.CommonPrefixes[i].Prefix = urlEncode(r.CommonPrefixes[i].Prefix)
+	}
+}
+
 func (ro *Router) handleListObjects(w http.ResponseWriter, r *http.Request, bucket string) {
 	if isAnonymousRequest(r) {
 		bucketACL, err := ro.storage.GetBucketACL(bucket)
@@ -370,7 +406,7 @@ func (ro *Router) handleListObjects(w http.ResponseWriter, r *http.Request, buck
 	delimiter := q.Get("delimiter")
 	marker := q.Get("marker")
 	encodingType := q.Get("encoding-type")
-	if encodingType != "" && encodingType != "url" {
+	if encodingType != "" && encodingType != encodingTypeURL {
 		writeError(w, r, http.StatusBadRequest, "InvalidArgument",
 			"Invalid Encoding Method specified in Request")
 		return
@@ -474,23 +510,8 @@ func (ro *Router) handleListObjects(w http.ResponseWriter, r *http.Request, buck
 	if isTruncated {
 		result.NextMarker = nextMarker
 	}
-	if encodingType == "url" {
-		result.Prefix = strings.ReplaceAll(url.QueryEscape(result.Prefix), "+", "%20")
-		result.Marker = strings.ReplaceAll(url.QueryEscape(result.Marker), "+", "%20")
-		result.NextMarker = strings.ReplaceAll(url.QueryEscape(result.NextMarker), "+", "%20")
-		result.Delimiter = strings.ReplaceAll(url.QueryEscape(result.Delimiter), "+", "%20")
-		for i := range result.Contents {
-			result.Contents[i].Key = strings.ReplaceAll(
-				url.QueryEscape(result.Contents[i].Key),
-				"+",
-				"%20",
-			)
-		}
-		for i := range result.CommonPrefixes {
-			result.CommonPrefixes[i].Prefix = strings.ReplaceAll(
-				url.QueryEscape(result.CommonPrefixes[i].Prefix), "+", "%20",
-			)
-		}
+	if encodingType == encodingTypeURL {
+		applyURLEncodingV1(&result)
 	}
 	writeXML(w, http.StatusOK, result)
 }
@@ -536,7 +557,7 @@ func (ro *Router) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 	startAfter := q.Get("start-after")
 	fetchOwner := q.Get("fetch-owner") == "true"
 	encodingType := q.Get("encoding-type")
-	if encodingType != "" && encodingType != "url" {
+	if encodingType != "" && encodingType != encodingTypeURL {
 		writeError(w, r, http.StatusBadRequest, "InvalidArgument",
 			"Invalid Encoding Method specified in Request")
 		return
@@ -595,10 +616,8 @@ func (ro *Router) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 			ContinuationToken: continuationToken,
 			StartAfter:        startAfter,
 		}
-		if encodingType == "url" {
-			res.Prefix = strings.ReplaceAll(url.QueryEscape(res.Prefix), "+", "%20")
-			res.Delimiter = strings.ReplaceAll(url.QueryEscape(res.Delimiter), "+", "%20")
-			res.StartAfter = strings.ReplaceAll(url.QueryEscape(res.StartAfter), "+", "%20")
+		if encodingType == encodingTypeURL {
+			applyURLEncodingV2(&res)
 		}
 		writeXML(w, http.StatusOK, res)
 		return
@@ -706,22 +725,8 @@ func (ro *Router) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 			)
 		}
 	}
-	if encodingType == "url" {
-		result.Prefix = strings.ReplaceAll(url.QueryEscape(result.Prefix), "+", "%20")
-		result.Delimiter = strings.ReplaceAll(url.QueryEscape(result.Delimiter), "+", "%20")
-		result.StartAfter = strings.ReplaceAll(url.QueryEscape(result.StartAfter), "+", "%20")
-		for i := range result.Contents {
-			result.Contents[i].Key = strings.ReplaceAll(
-				url.QueryEscape(result.Contents[i].Key),
-				"+",
-				"%20",
-			)
-		}
-		for i := range result.CommonPrefixes {
-			result.CommonPrefixes[i].Prefix = strings.ReplaceAll(
-				url.QueryEscape(result.CommonPrefixes[i].Prefix), "+", "%20",
-			)
-		}
+	if encodingType == encodingTypeURL {
+		applyURLEncodingV2(&result)
 	}
 	writeXML(w, http.StatusOK, result)
 }
