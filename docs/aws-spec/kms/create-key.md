@@ -43,10 +43,14 @@ Returns `{"KeyMetadata": {...}}`. See [KeyMetadata fields](#keymetadata-fields).
 | Code | HTTP | Condition |
 |---|---|---|
 | `ValidationException` | 400 | invalid KeySpec, incompatible KeyUsage; Description > 8192 chars |
-| `UnsupportedOperationException` | 400 | Origin != `AWS_KMS` |
+| `UnsupportedOperationException` | 400 | Origin != `AWS_KMS`; KeySpec == `ECC_SECG_P256K1` (kumolo deviation) |
 | `TagException` | 400 | invalid tag key/value (reserved `aws:` prefix, length violation) |
 | `LimitExceededException` | 400 | Tags count > 50 |
 | `KMSInternalException` | 500 | storage failure |
+
+## kumolo Deviations
+
+- `ECC_SECG_P256K1`: real AWS accepts this spec at `CreateKey`; kumolo rejects it immediately with `UnsupportedOperationException` because the secp256k1 curve is not in Go's standard crypto library. Deferring the failure to `GetPublicKey` was a worse user experience.
 
 ## KeyMetadata fields
 

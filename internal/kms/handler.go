@@ -66,6 +66,16 @@ func (ro *Router) handleCreateKey(w http.ResponseWriter, body []byte) {
 			fmt.Sprintf("Invalid KeySpec: %s", req.KeySpec))
 		return
 	}
+	// secp256k1 is not available in Go's standard crypto library.
+	if req.KeySpec == "ECC_SECG_P256K1" {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"UnsupportedOperationException",
+			"kumolo does not support ECC_SECG_P256K1: secp256k1 curve is unavailable in Go's standard library",
+		)
+		return
+	}
 
 	if req.KeyUsage == "" {
 		req.KeyUsage = defaultKeyUsage[req.KeySpec]

@@ -138,6 +138,13 @@ func TestHandleCreateKey(t *testing.T) {
 		assertErrType(t, w, "UnsupportedOperationException")
 	})
 
+	t.Run("400 UnsupportedOperationException for ECC_SECG_P256K1", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "CreateKey", `{"KeySpec":"ECC_SECG_P256K1"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "UnsupportedOperationException")
+	})
+
 	t.Run("400 for invalid JSON", func(t *testing.T) {
 		ro := newTestRouter(t)
 		w := kmsReq(t, ro, "CreateKey", `{bad json}`)
