@@ -70,7 +70,7 @@ kumolo encodes the last returned key as base64 for the continuation token.
 
 ## Response with encoding-type=url
 
-When `encoding-type=url` is set, the response includes `<EncodingType>url</EncodingType>` and URL-encodes (`url.QueryEscape`) these fields:
+When `encoding-type=url` is set, the response includes `<EncodingType>url</EncodingType>` and percent-encodes (space → `%20`, slash → `%2F`) these fields:
 `Prefix`, `Delimiter`, `StartAfter`, each `Contents.Key`, each `CommonPrefixes.Prefix`.
 `ContinuationToken` and `NextContinuationToken` are opaque base64 tokens and are NOT encoded.
 

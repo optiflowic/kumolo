@@ -67,7 +67,7 @@ Per spec, `NextMarker` should only be included when `delimiter` is specified.
 
 ## Response with encoding-type=url
 
-When `encoding-type=url` is set, the response includes `<EncodingType>url</EncodingType>` and URL-encodes (`url.QueryEscape`) these fields:
+When `encoding-type=url` is set, the response includes `<EncodingType>url</EncodingType>` and percent-encodes (space → `%20`, slash → `%2F`) these fields:
 `Prefix`, `Marker`, `NextMarker`, `Delimiter`, each `Contents.Key`, each `CommonPrefixes.Prefix`.
 
 ## Kumolo deviations
