@@ -2828,6 +2828,15 @@ func TestTagResource(t *testing.T) {
 		assert.Equal(t, map[string]string{"source": "index"}, tags)
 	})
 
+	t.Run("returns ErrTableNotFound for ARN with empty table name", func(t *testing.T) {
+		s := newTestStorage(t)
+		err := s.TagResource(
+			"arn:aws:dynamodb:us-east-1:000000000000:table/",
+			map[string]string{"k": "v"},
+		)
+		assert.ErrorIs(t, err, ErrTableNotFound)
+	})
+
 	t.Run("returns ErrTableNotFound for invalid ARN", func(t *testing.T) {
 		s := newTestStorage(t)
 		err := s.TagResource("invalid-arn", map[string]string{"k": "v"})

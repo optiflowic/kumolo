@@ -8,7 +8,7 @@
   - `dynamodb.TagResourceInput` / `dynamodb.TagResourceOutput`
   - `dynamodb.UntagResourceInput` / `dynamodb.UntagResourceOutput`
   - `dynamodb.ListTagsOfResourceInput` / `dynamodb.ListTagsOfResourceOutput`
-- Last verified: 2026-05-21
+- Last verified: 2026-06-14
 
 ## TagResource
 
@@ -42,7 +42,7 @@ HTTP 200, empty body.
 
 | Parameter | Type | Required | Notes |
 |---|---|---|---|
-| `ResourceArn` | string | yes | Table ARN; 1–1283 chars |
+| `ResourceArn` | string | yes | Table ARN or GSI/LSI index ARN; 1–1283 chars |
 | `NextToken` | string | no | Pagination cursor (ignored by kumolo) |
 
 ### Response
