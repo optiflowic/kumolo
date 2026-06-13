@@ -56,7 +56,7 @@ HTTP 200, empty body.
 
 | Error | HTTP | Condition |
 |---|---|---|
-| `ResourceNotFoundException` | 400 | Table ARN not found |
+| `ResourceNotFoundException` | 400 | Table or index ARN not found |
 | `InternalServerError` | 500 | Storage failure |
 
 ## kumolo-Specific Deviations

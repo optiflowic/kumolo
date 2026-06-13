@@ -3366,11 +3366,24 @@ func TestHandleTagResource(t *testing.T) {
 		)
 		assert.Equal(t, http.StatusOK, w.Code)
 
-		// Confirm the tag landed on the table.
+		// Confirm the tag landed on the table (table ARN).
 		tableARN := tableARNFor("test-table")
 		lw := dynamo(t, ro, "ListTagsOfResource", `{"ResourceArn":"`+tableARN+`"}`)
 		assert.Equal(t, http.StatusOK, lw.Code)
-		assert.Contains(t, lw.Body.String(), "via")
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(lw.Body.Bytes(), &resp))
+		tags := resp["Tags"].([]any)
+		require.Len(t, tags, 1)
+		assert.Equal(t, "via", tags[0].(map[string]any)["Key"])
+
+		// Confirm the tag is also visible via the index ARN.
+		lw2 := dynamo(t, ro, "ListTagsOfResource", `{"ResourceArn":"`+indexARN+`"}`)
+		assert.Equal(t, http.StatusOK, lw2.Code)
+		var resp2 map[string]any
+		require.NoError(t, json.Unmarshal(lw2.Body.Bytes(), &resp2))
+		tags2 := resp2["Tags"].([]any)
+		require.Len(t, tags2, 1)
+		assert.Equal(t, "via", tags2[0].(map[string]any)["Key"])
 	})
 
 	t.Run("500 when storage fails", func(t *testing.T) {
@@ -3414,7 +3427,10 @@ func TestHandleUntagResource(t *testing.T) {
 
 		lw := dynamo(t, ro, "ListTagsOfResource", `{"ResourceArn":"`+tableARN+`"}`)
 		assert.Equal(t, http.StatusOK, lw.Code)
-		assert.NotContains(t, lw.Body.String(), "env")
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(lw.Body.Bytes(), &resp))
+		tags := resp["Tags"].([]any)
+		assert.Empty(t, tags)
 	})
 
 	t.Run("400 for missing ResourceArn", func(t *testing.T) {
