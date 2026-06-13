@@ -3898,10 +3898,13 @@ func TestRouterMultipartUpload(t *testing.T) {
 		tagW := httptest.NewRecorder()
 		ro.ServeHTTP(tagW, tagReq)
 		require.Equal(t, http.StatusOK, tagW.Code)
-		assert.Contains(t, tagW.Body.String(), "env")
-		assert.Contains(t, tagW.Body.String(), "prod")
-		assert.Contains(t, tagW.Body.String(), "team")
-		assert.Contains(t, tagW.Body.String(), "backend")
+		var tagging xmlTagging
+		require.NoError(t, xml.NewDecoder(tagW.Body).Decode(&tagging))
+		assert.ElementsMatch(
+			t,
+			[]xmlTag{{Key: "env", Value: "prod"}, {Key: "team", Value: "backend"}},
+			tagging.TagSet,
+		)
 	})
 
 	t.Run("invalid x-amz-tagging on CreateMultipartUpload returns 400", func(t *testing.T) {
