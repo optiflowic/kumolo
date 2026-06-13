@@ -8,7 +8,7 @@
   - `dynamodb.TagResourceInput` / `dynamodb.TagResourceOutput`
   - `dynamodb.UntagResourceInput` / `dynamodb.UntagResourceOutput`
   - `dynamodb.ListTagsOfResourceInput` / `dynamodb.ListTagsOfResourceOutput`
-- Last verified: 2026-05-21
+- Last verified: 2026-06-14
 
 ## TagResource
 
@@ -16,7 +16,7 @@
 
 | Parameter | Type | Required | Notes |
 |---|---|---|---|
-| `ResourceArn` | string | yes | Table ARN; 1–1283 chars |
+| `ResourceArn` | string | yes | Table ARN or GSI/LSI index ARN; 1–1283 chars |
 | `Tags` | []Tag | yes | Each Tag: `Key` (1–128 chars), `Value` (0–256 chars) |
 
 ### Response
@@ -29,7 +29,7 @@ HTTP 200, empty body.
 
 | Parameter | Type | Required | Notes |
 |---|---|---|---|
-| `ResourceArn` | string | yes | Table ARN; 1–1283 chars |
+| `ResourceArn` | string | yes | Table ARN or GSI/LSI index ARN; 1–1283 chars |
 | `TagKeys` | []string | yes | Keys to remove; non-existent keys silently ignored |
 
 ### Response
@@ -42,7 +42,7 @@ HTTP 200, empty body.
 
 | Parameter | Type | Required | Notes |
 |---|---|---|---|
-| `ResourceArn` | string | yes | Table ARN; 1–1283 chars |
+| `ResourceArn` | string | yes | Table ARN or GSI/LSI index ARN; 1–1283 chars |
 | `NextToken` | string | no | Pagination cursor (ignored by kumolo) |
 
 ### Response
@@ -56,12 +56,11 @@ HTTP 200, empty body.
 
 | Error | HTTP | Condition |
 |---|---|---|
-| `ResourceNotFoundException` | 400 | Table ARN not found |
+| `ResourceNotFoundException` | 400 | Table or index ARN not found |
 | `InternalServerError` | 500 | Storage failure |
 
 ## kumolo-Specific Deviations
 
-- `ResourceArn` must be a table ARN; index ARNs are not supported.
 - `LimitExceededException` and `ResourceInUseException` are not enforced.
 - **ListTagsOfResource pagination is not implemented**: `NextToken` is accepted but ignored; all tags are returned in a single response.
 - Real AWS rate limits (TagResource/UntagResource: 5/sec; ListTagsOfResource: 10/sec) are not enforced.

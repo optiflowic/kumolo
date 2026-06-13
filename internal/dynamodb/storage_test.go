@@ -2818,6 +2818,25 @@ func TestTagResource(t *testing.T) {
 		assert.Equal(t, map[string]string{"env": "dev", "app": "kumolo"}, tags)
 	})
 
+	t.Run("accepts index ARN and tags parent table", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		indexARN := testTableARN + "/index/my-gsi"
+		require.NoError(t, s.TagResource(indexARN, map[string]string{"source": "index"}))
+		tags, err := s.ListTagsOfResource(testTableARN)
+		require.NoError(t, err)
+		assert.Equal(t, map[string]string{"source": "index"}, tags)
+	})
+
+	t.Run("returns ErrTableNotFound for ARN with empty table name", func(t *testing.T) {
+		s := newTestStorage(t)
+		err := s.TagResource(
+			"arn:aws:dynamodb:us-east-1:000000000000:table/",
+			map[string]string{"k": "v"},
+		)
+		assert.ErrorIs(t, err, ErrTableNotFound)
+	})
+
 	t.Run("returns ErrTableNotFound for invalid ARN", func(t *testing.T) {
 		s := newTestStorage(t)
 		err := s.TagResource("invalid-arn", map[string]string{"k": "v"})
@@ -2858,6 +2877,20 @@ func TestUntagResource(t *testing.T) {
 			s.TagResource(testTableARN, map[string]string{"env": "dev", "app": "kumolo"}),
 		)
 		require.NoError(t, s.UntagResource(testTableARN, []string{"env"}))
+		tags, err := s.ListTagsOfResource(testTableARN)
+		require.NoError(t, err)
+		assert.Equal(t, map[string]string{"app": "kumolo"}, tags)
+	})
+
+	t.Run("accepts index ARN and untags parent table", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		require.NoError(
+			t,
+			s.TagResource(testTableARN, map[string]string{"env": "dev", "app": "kumolo"}),
+		)
+		indexARN := testTableARN + "/index/my-gsi"
+		require.NoError(t, s.UntagResource(indexARN, []string{"env"}))
 		tags, err := s.ListTagsOfResource(testTableARN)
 		require.NoError(t, err)
 		assert.Equal(t, map[string]string{"app": "kumolo"}, tags)

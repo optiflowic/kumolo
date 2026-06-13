@@ -3354,6 +3354,38 @@ func TestHandleTagResource(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 
+	t.Run("tags via index ARN resolve to parent table", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		indexARN := tableARNFor("test-table") + "/index/my-gsi"
+		w := dynamo(
+			t,
+			ro,
+			"TagResource",
+			`{"ResourceArn":"`+indexARN+`","Tags":[{"Key":"via","Value":"index"}]}`,
+		)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		// Confirm the tag landed on the table (table ARN).
+		tableARN := tableARNFor("test-table")
+		lw := dynamo(t, ro, "ListTagsOfResource", `{"ResourceArn":"`+tableARN+`"}`)
+		assert.Equal(t, http.StatusOK, lw.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(lw.Body.Bytes(), &resp))
+		tags := resp["Tags"].([]any)
+		require.Len(t, tags, 1)
+		assert.Equal(t, "via", tags[0].(map[string]any)["Key"])
+
+		// Confirm the tag is also visible via the index ARN.
+		lw2 := dynamo(t, ro, "ListTagsOfResource", `{"ResourceArn":"`+indexARN+`"}`)
+		assert.Equal(t, http.StatusOK, lw2.Code)
+		var resp2 map[string]any
+		require.NoError(t, json.Unmarshal(lw2.Body.Bytes(), &resp2))
+		tags2 := resp2["Tags"].([]any)
+		require.Len(t, tags2, 1)
+		assert.Equal(t, "via", tags2[0].(map[string]any)["Key"])
+	})
+
 	t.Run("500 when storage fails", func(t *testing.T) {
 		ro := &Router{storage: &mockStore{
 			tagResourceFn: func(string, map[string]string) error { return errInternal },
@@ -3377,6 +3409,28 @@ func TestHandleUntagResource(t *testing.T) {
 		)
 		w := dynamo(t, ro, "UntagResource", `{"ResourceArn":"`+arn+`","TagKeys":["env"]}`)
 		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("untags via index ARN resolve to parent table", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		tableARN := tableARNFor("test-table")
+		dynamo(
+			t,
+			ro,
+			"TagResource",
+			`{"ResourceArn":"`+tableARN+`","Tags":[{"Key":"env","Value":"dev"}]}`,
+		)
+		indexARN := tableARN + "/index/my-gsi"
+		w := dynamo(t, ro, "UntagResource", `{"ResourceArn":"`+indexARN+`","TagKeys":["env"]}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		lw := dynamo(t, ro, "ListTagsOfResource", `{"ResourceArn":"`+tableARN+`"}`)
+		assert.Equal(t, http.StatusOK, lw.Code)
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(lw.Body.Bytes(), &resp))
+		tags := resp["Tags"].([]any)
+		assert.Empty(t, tags)
 	})
 
 	t.Run("400 for missing ResourceArn", func(t *testing.T) {

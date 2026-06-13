@@ -2,13 +2,22 @@ package dynamodb
 
 import "strings"
 
-// tableNameFromARN extracts the table name from a DynamoDB table ARN.
+// tableNameFromARN extracts the table name from a DynamoDB table ARN or index ARN.
+// Both "…:table/<name>" and "…:table/<name>/index/<idx>" are accepted; the
+// latter resolves to the parent table, matching real AWS behaviour.
 func tableNameFromARN(arn string) (string, bool) {
 	const prefix = "arn:aws:dynamodb:us-east-1:000000000000:table/"
 	if !strings.HasPrefix(arn, prefix) {
 		return "", false
 	}
-	return strings.TrimPrefix(arn, prefix), true
+	rest := strings.TrimPrefix(arn, prefix)
+	if idx := strings.Index(rest, "/index/"); idx >= 0 {
+		rest = rest[:idx]
+	}
+	if rest == "" {
+		return "", false
+	}
+	return rest, true
 }
 
 func (s *Storage) TagResource(resourceARN string, tags map[string]string) error {
