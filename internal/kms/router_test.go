@@ -138,6 +138,23 @@ func TestHandleCreateKey(t *testing.T) {
 		assertErrType(t, w, "UnsupportedOperationException")
 	})
 
+	t.Run("400 UnsupportedOperationException for ECC_SECG_P256K1", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := kmsReq(t, ro, "CreateKey", `{"KeySpec":"ECC_SECG_P256K1"}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrType(t, w, "UnsupportedOperationException")
+	})
+
+	t.Run(
+		"400 UnsupportedOperationException for ECC_SECG_P256K1 via CustomerMasterKeySpec",
+		func(t *testing.T) {
+			ro := newTestRouter(t)
+			w := kmsReq(t, ro, "CreateKey", `{"CustomerMasterKeySpec":"ECC_SECG_P256K1"}`)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assertErrType(t, w, "UnsupportedOperationException")
+		},
+	)
+
 	t.Run("400 for invalid JSON", func(t *testing.T) {
 		ro := newTestRouter(t)
 		w := kmsReq(t, ro, "CreateKey", `{bad json}`)
@@ -898,7 +915,6 @@ func TestCreateKey_algorithmBranches(t *testing.T) {
 		{"ECC_NIST_P256", "SIGN_VERIFY"},
 		{"ECC_NIST_P384", "SIGN_VERIFY"},
 		{"ECC_NIST_P521", "SIGN_VERIFY"},
-		{"ECC_SECG_P256K1", "SIGN_VERIFY"},
 		{"ECC_NIST_EDWARDS25519", "SIGN_VERIFY"},
 		{"ML_DSA_44", "SIGN_VERIFY"},
 		{"ML_DSA_65", "SIGN_VERIFY"},

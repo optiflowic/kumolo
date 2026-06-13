@@ -258,14 +258,6 @@ func TestHandleGetPublicKey_errors(t *testing.T) {
 		assertErrType(t, w, "InvalidKeyUsageException")
 	})
 
-	t.Run("400 ECC_SECG_P256K1 — no material, unsupported spec", func(t *testing.T) {
-		ro := newTestRouter(t)
-		keyID := mustCreateKey(t, ro, `{"KeySpec":"ECC_SECG_P256K1","KeyUsage":"SIGN_VERIFY"}`)
-		w := kmsReq(t, ro, "GetPublicKey", `{"KeyId":"`+keyID+`"}`)
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrType(t, w, "UnsupportedOperationException")
-	})
-
 	t.Run("400 ML_DSA_44 — no material, unsupported spec", func(t *testing.T) {
 		ro := newTestRouter(t)
 		keyID := mustCreateKey(t, ro, `{"KeySpec":"ML_DSA_44","KeyUsage":"SIGN_VERIFY"}`)
