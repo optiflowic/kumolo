@@ -2965,6 +2965,54 @@ func TestRouterCopyObjectTaggingDirective(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assert.Contains(t, w.Body.String(), "InvalidArgument")
 	})
+
+	t.Run("REPLACE with more than 10 tags returns InvalidTag", func(t *testing.T) {
+		ro := setup(t)
+		req := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
+		req.Header.Set(amzCopySource, "/src-bucket/orig.txt")
+		req.Header.Set(amzTaggingDirective, "REPLACE")
+		req.Header.Set(amzTagging, "k1=v&k2=v&k3=v&k4=v&k5=v&k6=v&k7=v&k8=v&k9=v&k10=v&k11=v")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidTag")
+	})
+
+	t.Run("REPLACE with tag key exceeding 128 runes returns InvalidTag", func(t *testing.T) {
+		ro := setup(t)
+		req := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
+		req.Header.Set(amzCopySource, "/src-bucket/orig.txt")
+		req.Header.Set(amzTaggingDirective, "REPLACE")
+		req.Header.Set(amzTagging, strings.Repeat("a", 129)+"=value")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidTag")
+	})
+
+	t.Run("REPLACE with tag value exceeding 256 runes returns InvalidTag", func(t *testing.T) {
+		ro := setup(t)
+		req := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
+		req.Header.Set(amzCopySource, "/src-bucket/orig.txt")
+		req.Header.Set(amzTaggingDirective, "REPLACE")
+		req.Header.Set(amzTagging, "key="+strings.Repeat("v", 257))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidTag")
+	})
+
+	t.Run("REPLACE with duplicate tag key returns InvalidTag", func(t *testing.T) {
+		ro := setup(t)
+		req := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
+		req.Header.Set(amzCopySource, "/src-bucket/orig.txt")
+		req.Header.Set(amzTaggingDirective, "REPLACE")
+		req.Header.Set(amzTagging, "key=val1&key=val2")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidTag")
+	})
 }
 
 func TestRouterGetBucketLocation(t *testing.T) {

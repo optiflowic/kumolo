@@ -5591,6 +5591,29 @@ func TestVersioning(t *testing.T) {
 		assert.True(t, isMarker)
 	})
 
+	t.Run("DeleteObjectVersion removes archived version tag sidecar", func(t *testing.T) {
+		s, bucket := setup(t)
+		m1, err := s.PutObject(
+			bucket, "obj.txt", strings.NewReader("v1"), "text/plain",
+			nil, "", "", false, "", nil, nil, "",
+		)
+		require.NoError(t, err)
+		require.NoError(t, s.PutObjectTagging(bucket, "obj.txt", []Tag{{Key: "k", Value: "v"}}))
+		// Overwrite → m1 becomes an archived version with a .tags.json sidecar.
+		_, err = s.PutObject(
+			bucket, "obj.txt", strings.NewReader("v2"), "text/plain",
+			nil, "", "", false, "", nil, nil, "",
+		)
+		require.NoError(t, err)
+
+		_, err = s.DeleteObjectVersion(bucket, "obj.txt", m1.VersionID, false)
+		require.NoError(t, err)
+
+		vp := filepath.Join(bucket, ".ver", "obj.txt", m1.VersionID)
+		_, statErr := s.root.Stat(vp + ".tags.json")
+		assert.True(t, errors.Is(statErr, os.ErrNotExist), "archived tag sidecar should be removed")
+	})
+
 	t.Run("ListObjectVersions returns all versions and delete markers", func(t *testing.T) {
 		s, bucket := setup(t)
 		m1, err := s.PutObject(

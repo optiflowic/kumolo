@@ -575,13 +575,16 @@ func (s *Storage) CopyObject(
 	if tags == nil {
 		srcTags, readErr := readJSON[[]Tag](s, srcPath+".tags.json")
 		if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
-			return ObjectMetadata{}, readErr // untestable: root.Open failures on .tags.json cannot be injected
+			// untestable: root.Open failures on .tags.json cannot be injected
+			_ = s.deleteObjectFilesLocked(dstPath)
+			return ObjectMetadata{}, readErr
 		}
 		dstTags = srcTags
 	} else {
 		dstTags = tags
 	}
 	if err := s.applyTagsLocked(dstPath, dstTags); err != nil {
+		_ = s.deleteObjectFilesLocked(dstPath)
 		return ObjectMetadata{}, err
 	}
 	return dstMeta, nil
@@ -810,6 +813,15 @@ func (s *Storage) DeleteObjectVersion(
 	if err := s.removeFile(vp + ".meta.json"); err != nil && !errors.Is(err, os.ErrNotExist) {
 		slog.Warn( // #nosec G706 -- vp is an internal filesystem path derived from bucket/key, not direct user input
 			"failed to remove archived version metadata",
+			"path",
+			vp,
+			"err",
+			err,
+		)
+	}
+	if err := s.removeFile(vp + ".tags.json"); err != nil && !errors.Is(err, os.ErrNotExist) {
+		slog.Warn( // #nosec G706 -- vp is an internal filesystem path derived from bucket/key, not direct user input
+			"failed to remove archived version tags",
 			"path",
 			vp,
 			"err",

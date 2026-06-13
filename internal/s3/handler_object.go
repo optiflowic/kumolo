@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -1657,6 +1658,13 @@ func parseObjectLockHeaders(
 	return retention, legalHold, true
 }
 
+var (
+	errTooManyTags     = errors.New("too many tags")
+	errTagKeyTooLong   = errors.New("tag key too long")
+	errTagValueTooLong = errors.New("tag value too long")
+	errDuplicateTagKey = errors.New("duplicate tag key")
+)
+
 // parseTaggingDirectiveHeaders reads x-amz-tagging-directive and x-amz-tagging
 // from r and returns the tags to apply to the destination object.
 // nil means COPY (inherit source tags); non-nil (even empty) means REPLACE.
@@ -1669,8 +1677,17 @@ func parseTaggingDirectiveHeaders(w http.ResponseWriter, r *http.Request) ([]Tag
 	case "REPLACE":
 		tags, err := parseTagsFromHeader(r.Header.Get(amzTagging))
 		if err != nil {
-			writeError(w, r, http.StatusBadRequest, "InvalidArgument",
-				"Invalid x-amz-tagging value.")
+			switch {
+			case errors.Is(err, errTooManyTags),
+				errors.Is(err, errTagKeyTooLong),
+				errors.Is(err, errTagValueTooLong),
+				errors.Is(err, errDuplicateTagKey):
+				writeError(w, r, http.StatusBadRequest, "InvalidTag",
+					"The Tag you have provided is invalid.")
+			default:
+				writeError(w, r, http.StatusBadRequest, "InvalidArgument",
+					"Invalid x-amz-tagging value.")
+			}
 			return nil, false
 		}
 		return tags, true
@@ -1683,6 +1700,8 @@ func parseTaggingDirectiveHeaders(w http.ResponseWriter, r *http.Request) ([]Tag
 
 // parseTagsFromHeader parses the URL query-string-encoded tag set used in the
 // x-amz-tagging header (e.g. "key1=val1&key2=val2") into a []Tag.
+// Returns an error if the set violates S3 tag constraints (max 10 tags, key ≤128 runes,
+// value ≤256 runes, no duplicate keys).
 func parseTagsFromHeader(header string) ([]Tag, error) {
 	if header == "" {
 		return []Tag{}, nil
@@ -1691,9 +1710,26 @@ func parseTagsFromHeader(header string) ([]Tag, error) {
 	if err != nil {
 		return nil, err
 	}
-	tags := make([]Tag, 0, len(params))
+	if len(params) > 10 {
+		return nil, errTooManyTags
+	}
+	keys := make([]string, 0, len(params))
 	for k, vs := range params {
-		tags = append(tags, Tag{Key: k, Value: vs[0]})
+		if len(vs) > 1 {
+			return nil, errDuplicateTagKey
+		}
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	tags := make([]Tag, 0, len(params))
+	for _, k := range keys {
+		if utf8.RuneCountInString(k) > 128 {
+			return nil, errTagKeyTooLong
+		}
+		if utf8.RuneCountInString(params[k][0]) > 256 {
+			return nil, errTagValueTooLong
+		}
+		tags = append(tags, Tag{Key: k, Value: params[k][0]})
 	}
 	return tags, nil
 }
