@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"unicode/utf8"
 )
 
 func (ro *Router) handleTagResource(w http.ResponseWriter, body []byte) {
@@ -35,7 +36,7 @@ func (ro *Router) handleTagResource(w http.ResponseWriter, body []byte) {
 	}
 	tags := make(map[string]string, len(req.Tags))
 	for _, t := range req.Tags {
-		if len(t.Key) < 1 || len(t.Key) > 128 {
+		if utf8.RuneCountInString(t.Key) < 1 || utf8.RuneCountInString(t.Key) > 128 {
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -44,7 +45,7 @@ func (ro *Router) handleTagResource(w http.ResponseWriter, body []byte) {
 			)
 			return
 		}
-		if len(t.Value) > 256 {
+		if utf8.RuneCountInString(t.Value) > 256 {
 			writeError(
 				w,
 				http.StatusBadRequest,
