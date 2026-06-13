@@ -81,6 +81,7 @@ type multipartStore interface {
 		retention *ObjectRetention,
 		legalHold *ObjectLegalHold,
 		storageClass string,
+		tagging []Tag,
 	) (uploadID string, err error)
 	GetUploadMeta(uploadID string) (uploadMeta, error)
 	UploadPart(uploadID string, partNumber int, r io.Reader) (etag string, err error)

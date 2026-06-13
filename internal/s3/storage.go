@@ -1630,6 +1630,7 @@ type uploadMeta struct {
 	StorageClass        string           `json:"storageClass,omitempty"`
 	Retention           *ObjectRetention `json:"retention,omitempty"`
 	LegalHold           *ObjectLegalHold `json:"legalHold,omitempty"`
+	Tagging             []Tag            `json:"tagging,omitempty"`
 }
 
 // partMeta is stored as .mpu/<uploadID>/<partNumber>.part.meta.json.
@@ -1647,6 +1648,7 @@ func (s *Storage) CreateMultipartUpload(
 	retention *ObjectRetention,
 	legalHold *ObjectLegalHold,
 	storageClass string,
+	tagging []Tag,
 ) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1677,6 +1679,7 @@ func (s *Storage) CreateMultipartUpload(
 		StorageClass:        storageClass,
 		Retention:           retention,
 		LegalHold:           legalHold,
+		Tagging:             tagging,
 	}
 	data, _ := json.Marshal(meta) // json.Marshal never fails for uploadMeta
 	var uploadJSONWritten bool
@@ -1975,6 +1978,11 @@ func (s *Storage) CompleteMultipartUpload(
 	)
 	if err != nil {
 		return ObjectMetadata{}, err
+	}
+	if umeta.Tagging != nil {
+		if err := s.applyTagsLocked(objPath, umeta.Tagging); err != nil {
+			return ObjectMetadata{}, err
+		}
 	}
 	if err := s.removeUploadDir(uploadDir); err != nil {
 		slog.Warn( // #nosec G706 -- uploadDir is an internal path derived from the upload ID

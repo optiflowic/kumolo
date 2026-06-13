@@ -513,6 +513,7 @@ func (m *mockStore) CreateMultipartUpload(
 	_ *ObjectRetention,
 	_ *ObjectLegalHold,
 	_ string,
+	_ []Tag,
 ) (string, error) {
 	m.capturedCreateMPUSSEAlg = sseAlgorithm
 	m.capturedCreateMPUSSEKeyID = sseKMSKeyID
@@ -3852,6 +3853,83 @@ func TestRouterMultipartUpload(t *testing.T) {
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNoContent, w.Code)
 	})
+
+	t.Run("x-amz-tagging on CreateMultipartUpload is applied to final object", func(t *testing.T) {
+		ro, path := setup(t)
+		// Initiate with tagging.
+		initReq := httptest.NewRequest(http.MethodPost, path+"?uploads", nil)
+		initReq.Header.Set("Content-Type", "text/plain")
+		initReq.Header.Set(amzTagging, "env=prod&team=backend")
+		initW := httptest.NewRecorder()
+		ro.ServeHTTP(initW, initReq)
+		require.Equal(t, http.StatusOK, initW.Code)
+		var initResult initiateMultipartUploadResult
+		require.NoError(t, xml.NewDecoder(initW.Body).Decode(&initResult))
+		uploadID := initResult.UploadID
+
+		// Upload one part (≥5 MiB so it's the only part and EntityTooSmall doesn't apply).
+		partData := strings.Repeat("a", minPartSize)
+		partReq := httptest.NewRequest(
+			http.MethodPut,
+			path+"?partNumber=1&uploadId="+uploadID,
+			strings.NewReader(partData),
+		)
+		partW := httptest.NewRecorder()
+		ro.ServeHTTP(partW, partReq)
+		require.Equal(t, http.StatusOK, partW.Code)
+		etag := partW.Header().Get("ETag")
+
+		// Complete.
+		body, err := xml.Marshal(completeMultipartUploadRequest{
+			Parts: []xmlCompletePart{{PartNumber: 1, ETag: etag}},
+		})
+		require.NoError(t, err)
+		completeReq := httptest.NewRequest(
+			http.MethodPost,
+			path+"?uploadId="+uploadID,
+			strings.NewReader(string(body)),
+		)
+		completeW := httptest.NewRecorder()
+		ro.ServeHTTP(completeW, completeReq)
+		require.Equal(t, http.StatusOK, completeW.Code)
+
+		// Verify tags were applied.
+		tagReq := httptest.NewRequest(http.MethodGet, path+"?tagging", nil)
+		tagW := httptest.NewRecorder()
+		ro.ServeHTTP(tagW, tagReq)
+		require.Equal(t, http.StatusOK, tagW.Code)
+		assert.Contains(t, tagW.Body.String(), "env")
+		assert.Contains(t, tagW.Body.String(), "prod")
+		assert.Contains(t, tagW.Body.String(), "team")
+		assert.Contains(t, tagW.Body.String(), "backend")
+	})
+
+	t.Run("invalid x-amz-tagging on CreateMultipartUpload returns 400", func(t *testing.T) {
+		ro, path := setup(t)
+		initReq := httptest.NewRequest(http.MethodPost, path+"?uploads", nil)
+		initReq.Header.Set(amzTagging, "%zz=bad")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, initReq)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidArgument")
+	})
+
+	t.Run(
+		"no x-amz-tagging on CreateMultipartUpload results in no tags on final object",
+		func(t *testing.T) {
+			ro, path := setup(t)
+			uploadID := initiateUpload(t, ro, path)
+			part1Data := strings.Repeat("x", minPartSize)
+			etag1 := uploadPart(t, ro, path, uploadID, 1, part1Data)
+			completeUpload(t, ro, path, uploadID, []xmlCompletePart{{PartNumber: 1, ETag: etag1}})
+
+			tagReq := httptest.NewRequest(http.MethodGet, path+"?tagging", nil)
+			tagW := httptest.NewRecorder()
+			ro.ServeHTTP(tagW, tagReq)
+			require.Equal(t, http.StatusOK, tagW.Code)
+			assert.Contains(t, tagW.Body.String(), "<TagSet></TagSet>")
+		},
+	)
 }
 
 func TestRouterPresignedURL(t *testing.T) {
