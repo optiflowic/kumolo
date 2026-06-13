@@ -422,6 +422,7 @@ func (s *Storage) GetObject(bucket, key string) (*os.File, ObjectMetadata, error
 // empty map) and non-empty contentType mean REPLACE (use provided values).
 // srcVersionID, if non-empty, copies from that specific source version.
 // sseAlgorithm and sseKMSKeyID are applied to the destination object.
+// nil tags means COPY (inherit source tags); non-nil (even empty) means REPLACE.
 func (s *Storage) CopyObject(
 	srcBucket, srcKey, srcVersionID, dstBucket, dstKey string,
 	contentType string,
@@ -432,6 +433,7 @@ func (s *Storage) CopyObject(
 	retention *ObjectRetention,
 	legalHold *ObjectLegalHold,
 	storageClass string,
+	tags []Tag,
 ) (ObjectMetadata, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -529,6 +531,12 @@ func (s *Storage) CopyObject(
 		if err := s.writeMeta(dstPath, meta); err != nil {
 			return ObjectMetadata{}, err
 		}
+		// tags == nil means COPY; source tags already on dstPath — no action needed.
+		if tags != nil {
+			if err := s.applyTagsLocked(dstPath, tags); err != nil {
+				return ObjectMetadata{}, err
+			}
+		}
 		return meta, nil
 	}
 	srcFile, err := s.root.Open(srcPath)
@@ -544,7 +552,7 @@ func (s *Storage) CopyObject(
 			return ObjectMetadata{}, err
 		}
 	}
-	return s.writeObject(
+	dstMeta, err := s.writeObject(
 		dstPath,
 		srcFile,
 		contentType,
@@ -559,6 +567,40 @@ func (s *Storage) CopyObject(
 		legalHold,
 		storageClass,
 	)
+	if err != nil {
+		return ObjectMetadata{}, err
+	}
+	// Resolve the tag set to write: COPY reads source tags, REPLACE uses provided tags.
+	var dstTags []Tag
+	if tags == nil {
+		srcTags, readErr := readJSON[[]Tag](s, srcPath+".tags.json")
+		if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+			// untestable: root.Open failures on .tags.json cannot be injected
+			_ = s.deleteObjectFilesLocked(dstPath)
+			return ObjectMetadata{}, readErr
+		}
+		dstTags = srcTags
+	} else {
+		dstTags = tags
+	}
+	if err := s.applyTagsLocked(dstPath, dstTags); err != nil {
+		_ = s.deleteObjectFilesLocked(dstPath)
+		return ObjectMetadata{}, err
+	}
+	return dstMeta, nil
+}
+
+// applyTagsLocked writes tags to the .tags.json sidecar for objPath when the
+// set is non-empty, or removes a stale sidecar when the set is empty.
+// Caller must hold the write lock.
+func (s *Storage) applyTagsLocked(objPath string, tags []Tag) error {
+	if len(tags) > 0 {
+		return s.writeJSON(objPath+".tags.json", tags)
+	}
+	if err := s.removeFile(objPath + ".tags.json"); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
 }
 
 // checkObjectLockLocked returns ErrObjectLocked if the object at objPath is
@@ -771,6 +813,15 @@ func (s *Storage) DeleteObjectVersion(
 	if err := s.removeFile(vp + ".meta.json"); err != nil && !errors.Is(err, os.ErrNotExist) {
 		slog.Warn( // #nosec G706 -- vp is an internal filesystem path derived from bucket/key, not direct user input
 			"failed to remove archived version metadata",
+			"path",
+			vp,
+			"err",
+			err,
+		)
+	}
+	if err := s.removeFile(vp + ".tags.json"); err != nil && !errors.Is(err, os.ErrNotExist) {
+		slog.Warn( // #nosec G706 -- vp is an internal filesystem path derived from bucket/key, not direct user input
+			"failed to remove archived version tags",
 			"path",
 			vp,
 			"err",
@@ -1221,6 +1272,21 @@ func (s *Storage) archiveCurrentVersionLocked(bucket, key, objPath string) error
 	if err := s.writeJSON(vp+".meta.json", meta); err != nil {
 		_ = s.removeFile(vp)
 		return err
+	}
+	// Archive tags sidecar if present.
+	if tagsData, tagsErr := readJSON[[]Tag](s, objPath+".tags.json"); tagsErr == nil {
+		if writeErr := s.writeJSON(vp+".tags.json", tagsData); writeErr != nil {
+			// untestable: openFile failure on the version-specific tags path cannot be injected separately from the body path
+			_ = s.removeFile(vp)
+			_ = s.removeFile(vp + ".meta.json")
+			_ = s.removeFile(vp + ".tags.json")
+			return writeErr
+		}
+	} else if !errors.Is(tagsErr, os.ErrNotExist) {
+		// untestable: root.Open failures on .tags.json cannot be injected
+		_ = s.removeFile(vp)
+		_ = s.removeFile(vp + ".meta.json")
+		return tagsErr
 	}
 	return nil
 }

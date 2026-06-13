@@ -82,6 +82,7 @@ func (ro *Router) replicateObject(bucket, key string, srcMeta ObjectMetadata) {
 			srcMeta.SSEAlgorithm, srcMeta.SSEKMSKeyID, srcMeta.SSEBucketKeyEnabled, "",
 			srcMeta.Retention, srcMeta.LegalHold,
 			rule.Destination.StorageClass,
+			nil, // COPY: replicate source tags
 		)
 		if copyErr != nil {
 			slog.Warn( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
@@ -96,22 +97,6 @@ func (ro *Router) replicateObject(bucket, key string, srcMeta ObjectMetadata) {
 				copyErr,
 			)
 			continue
-		}
-
-		if tags, err := ro.storage.GetObjectTagging(bucket, key); err == nil && len(tags) > 0 {
-			if tagErr := ro.storage.PutObjectTagging(destBucket, key, tags); tagErr != nil {
-				slog.Warn( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-					"replication: failed to copy tags",
-					"src_bucket",
-					bucket,
-					"dest_bucket",
-					destBucket,
-					"key",
-					key,
-					"err",
-					tagErr,
-				)
-			}
 		}
 
 		if err := ro.storage.SetObjectReplicationStatus(destBucket, key, ReplicationStatusReplica); err != nil {

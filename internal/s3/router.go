@@ -26,6 +26,8 @@ const (
 	amzCopySourceIfModifiedSince   = "X-Amz-Copy-Source-If-Modified-Since"
 	amzCopySourceIfUnmodifiedSince = "X-Amz-Copy-Source-If-Unmodified-Since"
 	amzMetaPrefix                  = "X-Amz-Meta-"
+	amzTagging                     = "X-Amz-Tagging"
+	amzTaggingDirective            = "X-Amz-Tagging-Directive"
 	amzTaggingCount                = "X-Amz-Tagging-Count"
 	amzVersionID                   = "X-Amz-Version-Id"
 	amzDeleteMarker                = "X-Amz-Delete-Marker"

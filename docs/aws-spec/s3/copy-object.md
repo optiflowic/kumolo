@@ -28,11 +28,12 @@ Source may include a `?versionId=<id>` query string to copy a specific version.
 | `x-amz-object-lock-mode` | GOVERNANCE or COMPLIANCE |
 | `x-amz-object-lock-retain-until-date` | RFC3339 timestamp |
 | `x-amz-object-lock-legal-hold` | ON or OFF |
+| `x-amz-tagging-directive` | `COPY` (default) or `REPLACE`; controls tag inheritance |
+| `x-amz-tagging` | URL query-string-encoded tags applied when `x-amz-tagging-directive: REPLACE` |
 
 ### Not implemented headers
 
 - `x-amz-copy-source-if-*` — conditional copy preconditions
-- `x-amz-tagging` / `x-amz-tagging-directive` — tag copying
 - `x-amz-acl` / `x-amz-grant-*` — ACL on copy
 - `x-amz-expected-bucket-owner` / `x-amz-source-expected-bucket-owner`
 - `x-amz-server-side-encryption-customer-*` — SSE-C
@@ -63,10 +64,11 @@ Source may include a `?versionId=<id>` query string to copy a specific version.
 | `NoSuchKey` | 404 | Source object does not exist |
 | `AccessDenied` | 403 | Anonymous request denied by source object ACL or destination bucket ACL |
 | `InvalidArgument` | 400 | Missing or malformed `x-amz-copy-source` |
+| `InvalidArgument` | 400 | `x-amz-tagging-directive` value is not `COPY` or `REPLACE` |
+| `InvalidArgument` | 400 | `x-amz-tagging` value contains invalid percent-encoding |
 | `InternalError` | 500 | Storage failure |
 
 ## Kumolo deviations
 
 - `x-amz-copy-source-if-*` conditional headers are not evaluated.
-- Tags are not copied regardless of `x-amz-tagging-directive`.
 - SSE headers are stored in metadata but no actual encryption is applied. For aws:kms / aws:kms:dsse the key is validated and resolved to a canonical ARN via the KMS service; see `sse-algorithm-validation.md`.
