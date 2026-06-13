@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"slices"
 	"strconv"
@@ -368,6 +369,12 @@ func (ro *Router) handleListObjects(w http.ResponseWriter, r *http.Request, buck
 	prefix := q.Get("prefix")
 	delimiter := q.Get("delimiter")
 	marker := q.Get("marker")
+	encodingType := q.Get("encoding-type")
+	if encodingType != "" && encodingType != "url" {
+		writeError(w, r, http.StatusBadRequest, "InvalidArgument",
+			"Invalid Encoding Method specified in Request")
+		return
+	}
 	maxKeys := 1000
 	if s := q.Get("max-keys"); s != "" {
 		if n, err := strconv.Atoi(s); err == nil && n >= 0 {
@@ -459,12 +466,31 @@ func (ro *Router) handleListObjects(w http.ResponseWriter, r *http.Request, buck
 		Marker:         marker,
 		Delimiter:      delimiter,
 		MaxKeys:        maxKeys,
+		EncodingType:   encodingType,
 		IsTruncated:    isTruncated,
 		Contents:       contents,
 		CommonPrefixes: cps,
 	}
 	if isTruncated {
 		result.NextMarker = nextMarker
+	}
+	if encodingType == "url" {
+		result.Prefix = strings.ReplaceAll(url.QueryEscape(result.Prefix), "+", "%20")
+		result.Marker = strings.ReplaceAll(url.QueryEscape(result.Marker), "+", "%20")
+		result.NextMarker = strings.ReplaceAll(url.QueryEscape(result.NextMarker), "+", "%20")
+		result.Delimiter = strings.ReplaceAll(url.QueryEscape(result.Delimiter), "+", "%20")
+		for i := range result.Contents {
+			result.Contents[i].Key = strings.ReplaceAll(
+				url.QueryEscape(result.Contents[i].Key),
+				"+",
+				"%20",
+			)
+		}
+		for i := range result.CommonPrefixes {
+			result.CommonPrefixes[i].Prefix = strings.ReplaceAll(
+				url.QueryEscape(result.CommonPrefixes[i].Prefix), "+", "%20",
+			)
+		}
 	}
 	writeXML(w, http.StatusOK, result)
 }
@@ -509,6 +535,12 @@ func (ro *Router) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 	continuationToken := q.Get("continuation-token")
 	startAfter := q.Get("start-after")
 	fetchOwner := q.Get("fetch-owner") == "true"
+	encodingType := q.Get("encoding-type")
+	if encodingType != "" && encodingType != "url" {
+		writeError(w, r, http.StatusBadRequest, "InvalidArgument",
+			"Invalid Encoding Method specified in Request")
+		return
+	}
 	maxKeys := 1000
 	if s := q.Get("max-keys"); s != "" {
 		if n, err := strconv.Atoi(s); err == nil && n >= 0 {
@@ -552,16 +584,23 @@ func (ro *Router) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 
 	// maxKeys=0: return empty result without iterating (bucket existence already validated above).
 	if maxKeys == 0 {
-		writeXML(w, http.StatusOK, listObjectsV2Result{
+		res := listObjectsV2Result{
 			Name:              bucket,
 			Prefix:            prefix,
 			Delimiter:         delimiter,
 			MaxKeys:           0,
+			EncodingType:      encodingType,
 			KeyCount:          0,
 			IsTruncated:       false,
 			ContinuationToken: continuationToken,
 			StartAfter:        startAfter,
-		})
+		}
+		if encodingType == "url" {
+			res.Prefix = strings.ReplaceAll(url.QueryEscape(res.Prefix), "+", "%20")
+			res.Delimiter = strings.ReplaceAll(url.QueryEscape(res.Delimiter), "+", "%20")
+			res.StartAfter = strings.ReplaceAll(url.QueryEscape(res.StartAfter), "+", "%20")
+		}
+		writeXML(w, http.StatusOK, res)
 		return
 	}
 
@@ -646,6 +685,7 @@ func (ro *Router) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 		Prefix:            prefix,
 		Delimiter:         delimiter,
 		MaxKeys:           maxKeys,
+		EncodingType:      encodingType,
 		KeyCount:          len(contents) + len(cps),
 		IsTruncated:       isTruncated,
 		ContinuationToken: continuationToken,
@@ -663,6 +703,23 @@ func (ro *Router) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 		} else if lastCPAdded != "" {
 			result.NextContinuationToken = base64.URLEncoding.EncodeToString(
 				[]byte(lastCPAdded),
+			)
+		}
+	}
+	if encodingType == "url" {
+		result.Prefix = strings.ReplaceAll(url.QueryEscape(result.Prefix), "+", "%20")
+		result.Delimiter = strings.ReplaceAll(url.QueryEscape(result.Delimiter), "+", "%20")
+		result.StartAfter = strings.ReplaceAll(url.QueryEscape(result.StartAfter), "+", "%20")
+		for i := range result.Contents {
+			result.Contents[i].Key = strings.ReplaceAll(
+				url.QueryEscape(result.Contents[i].Key),
+				"+",
+				"%20",
+			)
+		}
+		for i := range result.CommonPrefixes {
+			result.CommonPrefixes[i].Prefix = strings.ReplaceAll(
+				url.QueryEscape(result.CommonPrefixes[i].Prefix), "+", "%20",
 			)
 		}
 	}

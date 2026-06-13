@@ -2384,6 +2384,98 @@ func TestRouterListObjectsV2(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Contains(t, w.Body.String(), "<StorageClass>GLACIER</StorageClass>")
 	})
+
+	t.Run(
+		"encoding-type=url URL-encodes keys prefix delimiter and start-after",
+		func(t *testing.T) {
+			ro := newTestRouter(t)
+			ro.ServeHTTP(
+				httptest.NewRecorder(),
+				httptest.NewRequest(http.MethodPut, "/my-bucket", nil),
+			)
+			ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/hello%20world.txt", "data"))
+			ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/foo/bar%20baz.txt", "data"))
+
+			req := httptest.NewRequest(
+				http.MethodGet,
+				"/my-bucket?list-type=2&encoding-type=url&delimiter=/",
+				nil,
+			)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			body := w.Body.String()
+			assert.Contains(t, body, "<EncodingType>url</EncodingType>")
+			assert.Contains(t, body, "<Key>hello%20world.txt</Key>")
+			assert.Contains(t, body, "<Prefix>foo%2F</Prefix>")
+			assert.Contains(t, body, "<Delimiter>%2F</Delimiter>")
+			assert.NotContains(t, body, "hello world.txt")
+		},
+	)
+
+	t.Run(
+		"max-keys=0 with encoding-type=url still encodes prefix delimiter start-after",
+		func(t *testing.T) {
+			ro := newTestRouter(t)
+			ro.ServeHTTP(
+				httptest.NewRecorder(),
+				httptest.NewRequest(http.MethodPut, "/my-bucket", nil),
+			)
+
+			req := httptest.NewRequest(
+				http.MethodGet,
+				"/my-bucket?list-type=2&encoding-type=url&max-keys=0&prefix=hello%20world%2F&delimiter=/&start-after=foo%20bar",
+				nil,
+			)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			body := w.Body.String()
+			assert.Contains(t, body, "<EncodingType>url</EncodingType>")
+			assert.Contains(t, body, "<Prefix>hello%20world%2F</Prefix>")
+			assert.Contains(t, body, "<Delimiter>%2F</Delimiter>")
+			assert.Contains(t, body, "<StartAfter>foo%20bar</StartAfter>")
+			assert.Contains(t, body, "<KeyCount>0</KeyCount>")
+		},
+	)
+
+	t.Run("encoding-type=url encodes start-after in response", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/b.txt", "data"))
+
+		// "logs%2F" decodes to "logs/" via url.ParseQuery; response should echo back as "logs%2F"
+		req := httptest.NewRequest(
+			http.MethodGet,
+			"/my-bucket?list-type=2&encoding-type=url&start-after=logs%2F",
+			nil,
+		)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		body := w.Body.String()
+		assert.Contains(t, body, "<EncodingType>url</EncodingType>")
+		assert.Contains(t, body, "<StartAfter>logs%2F</StartAfter>")
+	})
+
+	t.Run("invalid encoding-type returns 400 InvalidArgument", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+
+		req := httptest.NewRequest(
+			http.MethodGet,
+			"/my-bucket?list-type=2&encoding-type=base64",
+			nil,
+		)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidArgument")
+	})
 }
 
 func TestRouterCopyObject(t *testing.T) {
@@ -4167,6 +4259,63 @@ func TestRouterListObjects(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Contains(t, w.Body.String(), "<StorageClass>GLACIER</StorageClass>")
+	})
+
+	t.Run(
+		"encoding-type=url URL-encodes keys prefix marker delimiter and next-marker",
+		func(t *testing.T) {
+			ro := newTestRouter(t)
+			ro.ServeHTTP(
+				httptest.NewRecorder(),
+				httptest.NewRequest(http.MethodPut, "/my-bucket", nil),
+			)
+			ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/hello%20world.txt", "data"))
+			ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/foo/bar%20baz.txt", "data"))
+
+			req := httptest.NewRequest(
+				http.MethodGet,
+				"/my-bucket?encoding-type=url&delimiter=/",
+				nil,
+			)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			body := w.Body.String()
+			assert.Contains(t, body, "<EncodingType>url</EncodingType>")
+			assert.Contains(t, body, "<Key>hello%20world.txt</Key>")
+			assert.Contains(t, body, "<Prefix>foo%2F</Prefix>")
+			assert.Contains(t, body, "<Delimiter>%2F</Delimiter>")
+			assert.NotContains(t, body, "hello world.txt")
+		},
+	)
+
+	t.Run("encoding-type=url encodes next-marker on truncated response", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+		ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/a%20b.txt", "data"))
+		ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/c%20d.txt", "data"))
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket?encoding-type=url&max-keys=1", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		body := w.Body.String()
+		assert.Contains(t, body, "<IsTruncated>true</IsTruncated>")
+		assert.Contains(t, body, "<NextMarker>a%20b.txt</NextMarker>")
+	})
+
+	t.Run("invalid encoding-type returns 400 InvalidArgument", func(t *testing.T) {
+		ro := newTestRouter(t)
+		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
+
+		req := httptest.NewRequest(http.MethodGet, "/my-bucket?encoding-type=base64", nil)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidArgument")
 	})
 }
 
