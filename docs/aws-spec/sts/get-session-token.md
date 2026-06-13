@@ -2,15 +2,13 @@
 
 - Official URL: https://docs.aws.amazon.com/STS/latest/APIReference/API_GetSessionToken.html
 - SDK struct: `sts.GetSessionTokenInput` / `sts.GetSessionTokenOutput`
-- Last verified: 2026-05-21
+- Last verified: 2026-06-13
 
 ## Request Parameters
 
-All parameters are optional and ignored by kumolo.
-
 | Parameter | Type | Required | Notes |
 |---|---|---|---|
-| `DurationSeconds` | integer | no | Valid range: 900–129600 (default 43200); ignored |
+| `DurationSeconds` | integer | no | Valid range: 900–129600 (default 43200); non-numeric or out-of-range values return `ValidationError` |
 | `SerialNumber` | string | no | MFA device serial or ARN; ignored |
 | `TokenCode` | string | no | 6-digit MFA code; ignored |
 
@@ -25,10 +23,12 @@ All parameters are optional and ignored by kumolo.
 
 ## Implemented Errors
 
-None. `RegionDisabled` (HTTP 403) is not applicable to a local emulator.
+| Error | HTTP | Condition |
+|---|---|---|
+| `ValidationError` | 400 | `DurationSeconds` is provided and is less than 900 or greater than 129600 |
 
 ## kumolo Deviations
 
 - Always returns fixed credentials regardless of input.
-- `DurationSeconds` is ignored; expiration is always a far-future fixed timestamp.
+- `DurationSeconds` is validated but expiration is always a far-future fixed timestamp (not computed from the duration).
 - MFA parameters are accepted but not validated; MFA-protected call paths cannot be tested.
