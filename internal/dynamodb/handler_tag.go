@@ -37,21 +37,11 @@ func (ro *Router) handleTagResource(w http.ResponseWriter, body []byte) {
 	tags := make(map[string]string, len(req.Tags))
 	for _, t := range req.Tags {
 		if n := utf8.RuneCountInString(t.Key); n < tagKeyMinLength || n > tagKeyMaxLength {
-			writeError(
-				w,
-				http.StatusBadRequest,
-				ErrTypeValidationException,
-				"Tag keys must be between 1 and 128 characters in length",
-			)
+			writeError(w, http.StatusBadRequest, ErrTypeValidationException, errMsgTagKeyLength)
 			return
 		}
 		if utf8.RuneCountInString(t.Value) > tagValueMaxLength {
-			writeError(
-				w,
-				http.StatusBadRequest,
-				ErrTypeValidationException,
-				"Tag values must be between 0 and 256 characters in length",
-			)
+			writeError(w, http.StatusBadRequest, ErrTypeValidationException, errMsgTagValueLength)
 			return
 		}
 		tags[t.Key] = t.Value
@@ -68,12 +58,7 @@ func (ro *Router) handleTagResource(w http.ResponseWriter, body []byte) {
 			return
 		}
 		if errors.Is(err, ErrTagLimitExceeded) {
-			writeError(
-				w,
-				http.StatusBadRequest,
-				ErrTypeLimitExceededException,
-				"Too many tags. The table has more than 50 tags after this request.",
-			)
+			writeError(w, http.StatusBadRequest, ErrTypeLimitExceededException, errMsgTagLimit)
 			return
 		}
 		slog.Error("TagResource failed", "arn", req.ResourceArn, "err", err)
@@ -114,12 +99,7 @@ func (ro *Router) handleUntagResource(w http.ResponseWriter, body []byte) {
 	}
 	for _, k := range req.TagKeys {
 		if k == "" {
-			writeError(
-				w,
-				http.StatusBadRequest,
-				ErrTypeValidationException,
-				"Tag keys must not be empty",
-			)
+			writeError(w, http.StatusBadRequest, ErrTypeValidationException, errMsgTagKeyEmpty)
 			return
 		}
 	}
