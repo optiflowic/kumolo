@@ -575,7 +575,7 @@ func (s *Storage) CopyObject(
 	if tags == nil {
 		srcTags, readErr := readJSON[[]Tag](s, srcPath+".tags.json")
 		if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
-			return ObjectMetadata{}, readErr
+			return ObjectMetadata{}, readErr // untestable: root.Open failures on .tags.json cannot be injected
 		}
 		dstTags = srcTags
 	} else {
@@ -1267,6 +1267,7 @@ func (s *Storage) archiveCurrentVersionLocked(bucket, key, objPath string) error
 			// untestable: openFile failure on the version-specific tags path cannot be injected separately from the body path
 			_ = s.removeFile(vp)
 			_ = s.removeFile(vp + ".meta.json")
+			_ = s.removeFile(vp + ".tags.json")
 			return writeErr
 		}
 	} else if !errors.Is(tagsErr, os.ErrNotExist) {

@@ -1942,6 +1942,46 @@ func TestApplyTagsLocked(t *testing.T) {
 			"", nil, "", "", false, "", nil, nil, "", []Tag{})
 		assert.ErrorIs(t, err, removeErr)
 	})
+
+	t.Run("same-path REPLACE applyTagsLocked error is returned", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("b", "", false))
+		_, err := s.PutObject("b", "obj.txt", strings.NewReader("data"), "text/plain",
+			nil, "", "", false, "", nil, nil, "")
+		require.NoError(t, err)
+		tagErr := errors.New("tag write failure")
+		realOpenFile := s.openFile
+		s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+			if strings.HasSuffix(name, ".tags.json") {
+				return nil, tagErr
+			}
+			return realOpenFile(name, flag, perm)
+		}
+		_, err = s.CopyObject("b", "obj.txt", "", "b", "obj.txt",
+			"", nil, "", "", false, "", nil, nil, "", []Tag{{Key: "k", Value: "v"}})
+		assert.ErrorIs(t, err, tagErr)
+	})
+
+	t.Run("writeObject failure in CopyObject is returned", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("src", "", false))
+		require.NoError(t, s.CreateBucket("dst", "", false))
+		_, err := s.PutObject("src", "obj.txt", strings.NewReader("data"), "text/plain",
+			nil, "", "", false, "", nil, nil, "")
+		require.NoError(t, err)
+		writeErr := errors.New("write failure")
+		realOpenFile := s.openFile
+		s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+			if strings.HasPrefix(name, "dst/") && !strings.HasSuffix(name, ".meta.json") &&
+				!strings.HasSuffix(name, ".tags.json") {
+				return nil, writeErr
+			}
+			return realOpenFile(name, flag, perm)
+		}
+		_, err = s.CopyObject("src", "obj.txt", "", "dst", "copy.txt",
+			"", nil, "", "", false, "", nil, nil, "", nil)
+		assert.ErrorIs(t, err, writeErr)
+	})
 }
 
 func TestStorageClass(t *testing.T) {

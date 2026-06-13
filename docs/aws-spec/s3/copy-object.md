@@ -64,6 +64,8 @@ Source may include a `?versionId=<id>` query string to copy a specific version.
 | `NoSuchKey` | 404 | Source object does not exist |
 | `AccessDenied` | 403 | Anonymous request denied by source object ACL or destination bucket ACL |
 | `InvalidArgument` | 400 | Missing or malformed `x-amz-copy-source` |
+| `InvalidArgument` | 400 | `x-amz-tagging-directive` value is not `COPY` or `REPLACE` |
+| `InvalidArgument` | 400 | `x-amz-tagging` value contains invalid percent-encoding |
 | `InternalError` | 500 | Storage failure |
 
 ## Kumolo deviations
