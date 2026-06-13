@@ -37,6 +37,12 @@ func (ro *Router) handleCreateMultipartUpload(
 		return
 	}
 	storageClass := r.Header.Get(amzStorageClass)
+	tagging, err := parseTagsFromHeader(r.Header.Get(amzTagging))
+	if err != nil {
+		writeError(w, r, http.StatusBadRequest, "InvalidArgument",
+			"Invalid x-amz-tagging value.")
+		return
+	}
 	if isAnonymousRequest(r) {
 		bucketACL, err := ro.storage.GetBucketACL(bucket)
 		if err != nil {
@@ -83,6 +89,7 @@ func (ro *Router) handleCreateMultipartUpload(
 		retention,
 		legalHold,
 		storageClass,
+		tagging,
 	)
 	if err != nil {
 		switch {

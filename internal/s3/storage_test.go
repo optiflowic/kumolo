@@ -820,7 +820,7 @@ func TestPutObject(t *testing.T) {
 		s := newTestStorage(t)
 		require.NoError(t, s.CreateBucket("b", "", false))
 		uploadID, err := s.CreateMultipartUpload(
-			"b", "k", "text/plain", "", "", false, ssecMD5(), nil, nil, "",
+			"b", "k", "text/plain", "", "", false, ssecMD5(), nil, nil, "", nil,
 		)
 		require.NoError(t, err)
 
@@ -859,6 +859,7 @@ func TestPutObject(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		etag, err := s.UploadPart(
@@ -2096,6 +2097,7 @@ func TestStorageClass(t *testing.T) {
 			nil,
 			nil,
 			"GLACIER",
+			nil,
 		)
 		require.NoError(t, err)
 
@@ -2670,6 +2672,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		assert.NotEmpty(t, uploadID)
@@ -2710,6 +2713,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		_, err = s.UploadPart(uploadID, 1, strings.NewReader("data"))
@@ -2732,6 +2736,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		etag, err := s.UploadPart(uploadID, 1, strings.NewReader("data"))
@@ -2756,6 +2761,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		assert.ErrorIs(t, err, ErrBucketNotFound)
 	})
@@ -2786,6 +2792,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		_, err = s.CompleteMultipartUpload(uploadID, []CompletePart{})
@@ -2803,6 +2810,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		etag1, err := s.UploadPart(uploadID, 1, strings.NewReader("a"))
@@ -2829,6 +2837,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		_, err = s.UploadPart(uploadID, 1, strings.NewReader("data"))
@@ -2850,6 +2859,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		_, err = s.CompleteMultipartUpload(uploadID, []CompletePart{
@@ -2869,6 +2879,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		etag1, err := s.UploadPart(uploadID, 1, strings.NewReader("small")) // < 5 MiB
@@ -2893,6 +2904,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		etag, err := s.UploadPart(uploadID, 1, strings.NewReader("tiny"))
@@ -2916,6 +2928,7 @@ func TestMultipartUpload(t *testing.T) {
 				nil,
 				nil,
 				"",
+				nil,
 			)
 			require.NoError(t, err)
 			bigPart := strings.NewReader(strings.Repeat("x", minPartSize))
@@ -2948,6 +2961,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		_, err = s.UploadPart(uploadID, 1, strings.NewReader("data"))
@@ -2971,6 +2985,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		_, err = s.UploadPart(uploadID, 1, strings.NewReader("data"))
@@ -2994,6 +3009,7 @@ func TestMultipartUpload(t *testing.T) {
 				nil,
 				nil,
 				"",
+				nil,
 			)
 			require.NoError(t, err)
 			etag, err := s.UploadPart(uploadID, 1, strings.NewReader("data"))
@@ -3021,6 +3037,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		etag, err := s.UploadPart(uploadID, 1, strings.NewReader("data"))
@@ -3049,6 +3066,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		_, err = s.UploadPart(uploadID, 1, strings.NewReader("data"))
@@ -3073,6 +3091,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		_, err = s.UploadPart(uploadID, 1, strings.NewReader("data"))
@@ -3094,6 +3113,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		assert.Error(t, err)
 	})
@@ -3120,6 +3140,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		assert.Error(t, err)
 		assert.NoDirExists(t, capturedUploadDir)
@@ -3151,6 +3172,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		assert.Error(t, err)
 		assert.NoDirExists(t, capturedUploadDir)
@@ -3182,6 +3204,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		assert.Error(t, err)
 		assert.NoDirExists(t, capturedUploadDir)
@@ -3198,6 +3221,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		_, err = s.UploadPart(uploadID, 1, errReader{})
@@ -3226,6 +3250,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		// The close failure is logged as a warning; UploadPart still returns the ETag.
@@ -3256,6 +3281,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		_, err = s.UploadPart(uploadID, 1, strings.NewReader("data"))
@@ -3273,6 +3299,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		s.readAll = func(_ io.Reader) ([]byte, error) { return nil, errors.New("read error") }
@@ -3292,6 +3319,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		_, err = s.UploadPart(uploadID, 1, strings.NewReader("data"))
@@ -3317,6 +3345,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		etag, err := s.UploadPart(uploadID, 1, strings.NewReader("data"))
@@ -3339,6 +3368,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		etag, err := s.UploadPart(uploadID, 1, strings.NewReader("data"))
@@ -3365,6 +3395,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		// Replace upload dir with a file to make Stat of upload.json fail with "not a directory".
@@ -3387,6 +3418,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		// Create a subdirectory inside the upload dir; Remove on a non-empty dir fails.
@@ -3410,6 +3442,7 @@ func TestMultipartUpload(t *testing.T) {
 				nil,
 				nil,
 				"",
+				nil,
 			)
 			require.NoError(t, err)
 			require.NoError(t, os.WriteFile(
@@ -3437,6 +3470,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		_, err = s.UploadPart(uploadID, 1, strings.NewReader("data"))
@@ -3466,6 +3500,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		origListDir := s.listDirFn
@@ -3510,6 +3545,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		assert.Error(t, err)
 	})
@@ -3525,6 +3561,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		// Replace upload dir with a file so Stat of upload.json fails with ENOTDIR.
@@ -3547,6 +3584,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		etag, err := s.UploadPart(uploadID, 1, strings.NewReader("data"))
@@ -3568,6 +3606,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		etag, err := s.UploadPart(uploadID, 1, strings.NewReader("data"))
@@ -3595,6 +3634,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		etag, err := s.UploadPart(uploadID, 1, strings.NewReader("data"))
@@ -3624,6 +3664,7 @@ func TestMultipartUpload(t *testing.T) {
 				nil,
 				nil,
 				"",
+				nil,
 			)
 			require.NoError(t, err)
 			etag1, err := s.UploadPart(uploadID, 1, strings.NewReader("hello"))
@@ -3672,6 +3713,7 @@ func TestMultipartUpload(t *testing.T) {
 				nil,
 				nil,
 				"",
+				nil,
 			)
 			assert.Error(t, err)
 		},
@@ -3730,6 +3772,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		s.readAll = func(r io.Reader) ([]byte, error) {
@@ -3752,6 +3795,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		_, err = s.CreateMultipartUpload(
@@ -3765,6 +3809,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		uploads, err := s.ListMultipartUploads("my-bucket")
@@ -3792,6 +3837,7 @@ func TestMultipartUpload(t *testing.T) {
 				nil,
 				nil,
 				"",
+				nil,
 			)
 			require.NoError(t, err)
 			s.readAll = func(_ io.Reader) ([]byte, error) {
@@ -3814,6 +3860,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		origListDir := s.listDirFn
@@ -3838,6 +3885,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		uploadDir := filepath.Join(rootPath, mpuDir, uploadID)
@@ -3866,6 +3914,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		_, err = s.UploadPart(uploadID, 1, strings.NewReader("data"))
@@ -3899,6 +3948,7 @@ func TestMultipartUpload(t *testing.T) {
 				nil,
 				nil,
 				"",
+				nil,
 			)
 			require.NoError(t, err)
 			etag1, err := s.UploadPart(
@@ -3931,6 +3981,7 @@ func TestMultipartUpload(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		_, err = s.UploadPart(uploadID, 1, strings.NewReader("data"))
@@ -3955,6 +4006,7 @@ func TestMultipartUpload(t *testing.T) {
 				nil,
 				nil,
 				"",
+				nil,
 			)
 			require.NoError(t, err)
 			_, err = s.UploadPart(uploadID, 1, strings.NewReader("data"))
@@ -5128,6 +5180,7 @@ func TestBucketConfigStorage(t *testing.T) {
 				nil,
 				nil,
 				"",
+				nil,
 			)
 			require.NoError(t, err)
 
@@ -7450,6 +7503,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 				nil,
 				nil,
 				"",
+				nil,
 			)
 			require.NoError(t, err)
 			etag, err := s.UploadPart(uploadID, 1, strings.NewReader("data"))
@@ -7500,6 +7554,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 				nil,
 				nil,
 				"",
+				nil,
 			)
 			require.NoError(t, err)
 			etag, err := s.UploadPart(uploadID, 1, strings.NewReader("data"))
@@ -7552,6 +7607,7 @@ func TestVersioningErrorPaths(t *testing.T) {
 				nil,
 				nil,
 				"",
+				nil,
 			)
 			require.NoError(t, err)
 			etag, err := s.UploadPart(uploadID, 1, strings.NewReader("data"))
@@ -7912,6 +7968,7 @@ func TestUploadPartCopy(t *testing.T) {
 			nil,
 			nil,
 			"",
+			nil,
 		)
 		require.NoError(t, err)
 		return s, uploadID
@@ -8230,6 +8287,7 @@ func TestUploadPartCopy(t *testing.T) {
 				nil,
 				nil,
 				"",
+				nil,
 			)
 			require.NoError(t, err)
 
@@ -8288,6 +8346,7 @@ func TestUploadPartCopy(t *testing.T) {
 				nil,
 				nil,
 				"",
+				nil,
 			)
 			require.NoError(t, err)
 
