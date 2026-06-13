@@ -2,7 +2,7 @@
 
 **URL**: https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html  
 **SDK struct**: `s3.CopyObjectInput` / `s3.CopyObjectOutput`  
-**Last verified**: 2026-05-21
+**Last verified**: 2026-06-13
 
 ## Request
 
