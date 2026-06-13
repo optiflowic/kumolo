@@ -2846,157 +2846,101 @@ func TestRouterCopyObject(t *testing.T) {
 		assert.Contains(t, retW.Body.String(), "GOVERNANCE")
 	})
 
-	t.Run("returns 412 when x-amz-copy-source-if-match fails", func(t *testing.T) {
-		ro := setup(t)
-		req := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
-		req.Header.Set(amzCopySource, "/src-bucket/orig.txt")
-		req.Header.Set(amzCopySourceIfMatch, `"wrong-etag"`)
-		w := httptest.NewRecorder()
-		ro.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusPreconditionFailed, w.Code)
-		assert.Contains(t, w.Body.String(), "PreconditionFailed")
-		headW := httptest.NewRecorder()
-		ro.ServeHTTP(headW, httptest.NewRequest(http.MethodHead, "/dst-bucket/copy.txt", nil))
-		assert.Equal(t, http.StatusNotFound, headW.Code)
-	})
-
-	t.Run("returns 200 when x-amz-copy-source-if-match succeeds", func(t *testing.T) {
-		ro := setup(t)
-		headReq := httptest.NewRequest(http.MethodHead, "/src-bucket/orig.txt", nil)
-		headW := httptest.NewRecorder()
-		ro.ServeHTTP(headW, headReq)
-		require.Equal(t, http.StatusOK, headW.Code)
-		srcETag := headW.Header().Get("ETag")
-		require.NotEmpty(t, srcETag)
-
-		req := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
-		req.Header.Set(amzCopySource, "/src-bucket/orig.txt")
-		req.Header.Set(amzCopySourceIfMatch, srcETag)
-		w := httptest.NewRecorder()
-		ro.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusOK, w.Code)
-	})
-
-	t.Run("returns 412 when x-amz-copy-source-if-none-match matches", func(t *testing.T) {
-		ro := setup(t)
-		headReq := httptest.NewRequest(http.MethodHead, "/src-bucket/orig.txt", nil)
-		headW := httptest.NewRecorder()
-		ro.ServeHTTP(headW, headReq)
-		require.Equal(t, http.StatusOK, headW.Code)
-		srcETag := headW.Header().Get("ETag")
-		require.NotEmpty(t, srcETag)
-
-		req := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
-		req.Header.Set(amzCopySource, "/src-bucket/orig.txt")
-		req.Header.Set(amzCopySourceIfNoneMatch, srcETag)
-		w := httptest.NewRecorder()
-		ro.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusPreconditionFailed, w.Code)
-		assert.Contains(t, w.Body.String(), "PreconditionFailed")
-		dstW := httptest.NewRecorder()
-		ro.ServeHTTP(dstW, httptest.NewRequest(http.MethodHead, "/dst-bucket/copy.txt", nil))
-		assert.Equal(t, http.StatusNotFound, dstW.Code)
-	})
-
-	t.Run("returns 200 when x-amz-copy-source-if-none-match does not match", func(t *testing.T) {
-		ro := setup(t)
-		req := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
-		req.Header.Set(amzCopySource, "/src-bucket/orig.txt")
-		req.Header.Set(amzCopySourceIfNoneMatch, `"different-etag"`)
-		w := httptest.NewRecorder()
-		ro.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusOK, w.Code)
-	})
-
-	t.Run("returns 412 when x-amz-copy-source-if-unmodified-since fails", func(t *testing.T) {
-		ro := setup(t)
-		req := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
-		req.Header.Set(amzCopySource, "/src-bucket/orig.txt")
-		req.Header.Set(amzCopySourceIfUnmodifiedSince,
-			time.Now().Add(-24*time.Hour).UTC().Format(http.TimeFormat))
-		w := httptest.NewRecorder()
-		ro.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusPreconditionFailed, w.Code)
-		assert.Contains(t, w.Body.String(), "PreconditionFailed")
-		dstW := httptest.NewRecorder()
-		ro.ServeHTTP(dstW, httptest.NewRequest(http.MethodHead, "/dst-bucket/copy.txt", nil))
-		assert.Equal(t, http.StatusNotFound, dstW.Code)
-	})
-
-	t.Run("returns 200 when x-amz-copy-source-if-modified-since is met", func(t *testing.T) {
-		ro := setup(t)
-		req := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
-		req.Header.Set(amzCopySource, "/src-bucket/orig.txt")
-		req.Header.Set(amzCopySourceIfModifiedSince,
-			time.Now().Add(-24*time.Hour).UTC().Format(http.TimeFormat))
-		w := httptest.NewRecorder()
-		ro.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusOK, w.Code)
-	})
-
-	t.Run("returns 412 when x-amz-copy-source-if-modified-since fails", func(t *testing.T) {
-		ro := setup(t)
-		req := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
-		req.Header.Set(amzCopySource, "/src-bucket/orig.txt")
-		req.Header.Set(amzCopySourceIfModifiedSince,
-			time.Now().Add(24*time.Hour).UTC().Format(http.TimeFormat))
-		w := httptest.NewRecorder()
-		ro.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusPreconditionFailed, w.Code)
-		assert.Contains(t, w.Body.String(), "PreconditionFailed")
-		dstW := httptest.NewRecorder()
-		ro.ServeHTTP(dstW, httptest.NewRequest(http.MethodHead, "/dst-bucket/copy.txt", nil))
-		assert.Equal(t, http.StatusNotFound, dstW.Code)
-	})
-
-	t.Run("returns 200 when x-amz-copy-source-if-unmodified-since succeeds", func(t *testing.T) {
-		ro := setup(t)
-		req := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
-		req.Header.Set(amzCopySource, "/src-bucket/orig.txt")
-		req.Header.Set(amzCopySourceIfUnmodifiedSince,
-			time.Now().Add(24*time.Hour).UTC().Format(http.TimeFormat))
-		w := httptest.NewRecorder()
-		ro.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusOK, w.Code)
-	})
-
-	// Precedence: if-match takes priority over if-unmodified-since.
-	t.Run("if-match failure takes precedence over if-unmodified-since success", func(t *testing.T) {
-		ro := setup(t)
-		req := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
-		req.Header.Set(amzCopySource, "/src-bucket/orig.txt")
-		req.Header.Set(amzCopySourceIfMatch, `"wrong-etag"`)
-		req.Header.Set(amzCopySourceIfUnmodifiedSince,
-			time.Now().Add(24*time.Hour).UTC().Format(http.TimeFormat))
-		w := httptest.NewRecorder()
-		ro.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusPreconditionFailed, w.Code)
-		assert.Contains(t, w.Body.String(), "PreconditionFailed")
-	})
-
-	// Precedence: if-none-match takes priority over if-modified-since.
-	t.Run(
-		"if-none-match failure takes precedence over if-modified-since success",
-		func(t *testing.T) {
+	type copyCondCase struct {
+		name           string
+		headerKey      string
+		headerVal      string
+		useSrcETag     bool
+		extraHeaderKey string
+		extraHeaderVal string
+		wantStatus     int
+		checkNoDst     bool
+	}
+	past := time.Now().Add(-24 * time.Hour).UTC().Format(http.TimeFormat)
+	future := time.Now().Add(24 * time.Hour).UTC().Format(http.TimeFormat)
+	for _, tc := range []copyCondCase{
+		{
+			name: "if-match fails", headerKey: amzCopySourceIfMatch,
+			headerVal: `"wrong-etag"`, wantStatus: http.StatusPreconditionFailed, checkNoDst: true,
+		},
+		{
+			name: "if-match succeeds", headerKey: amzCopySourceIfMatch,
+			useSrcETag: true, wantStatus: http.StatusOK,
+		},
+		{
+			name: "if-none-match matches", headerKey: amzCopySourceIfNoneMatch,
+			useSrcETag: true, wantStatus: http.StatusPreconditionFailed, checkNoDst: true,
+		},
+		{
+			name: "if-none-match does not match", headerKey: amzCopySourceIfNoneMatch,
+			headerVal: `"different-etag"`, wantStatus: http.StatusOK,
+		},
+		{
+			name: "if-unmodified-since fails", headerKey: amzCopySourceIfUnmodifiedSince,
+			headerVal: past, wantStatus: http.StatusPreconditionFailed, checkNoDst: true,
+		},
+		{
+			name: "if-modified-since is met", headerKey: amzCopySourceIfModifiedSince,
+			headerVal: past, wantStatus: http.StatusOK,
+		},
+		{
+			name: "if-modified-since fails", headerKey: amzCopySourceIfModifiedSince,
+			headerVal: future, wantStatus: http.StatusPreconditionFailed, checkNoDst: true,
+		},
+		{
+			name: "if-unmodified-since succeeds", headerKey: amzCopySourceIfUnmodifiedSince,
+			headerVal: future, wantStatus: http.StatusOK,
+		},
+		// Precedence: if-match takes priority over if-unmodified-since.
+		{
+			name:      "if-match takes precedence over if-unmodified-since",
+			headerKey: amzCopySourceIfMatch, headerVal: `"wrong-etag"`,
+			extraHeaderKey: amzCopySourceIfUnmodifiedSince, extraHeaderVal: future,
+			wantStatus: http.StatusPreconditionFailed,
+		},
+		// Precedence: if-none-match takes priority over if-modified-since.
+		{
+			name:      "if-none-match takes precedence over if-modified-since",
+			headerKey: amzCopySourceIfNoneMatch, useSrcETag: true,
+			extraHeaderKey: amzCopySourceIfModifiedSince, extraHeaderVal: past,
+			wantStatus: http.StatusPreconditionFailed,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			ro := setup(t)
-			headReq := httptest.NewRequest(http.MethodHead, "/src-bucket/orig.txt", nil)
-			headW := httptest.NewRecorder()
-			ro.ServeHTTP(headW, headReq)
-			require.Equal(t, http.StatusOK, headW.Code)
-			srcETag := headW.Header().Get("ETag")
-			require.NotEmpty(t, srcETag)
-
+			headerVal := tc.headerVal
+			if tc.useSrcETag {
+				headW := httptest.NewRecorder()
+				ro.ServeHTTP(
+					headW,
+					httptest.NewRequest(http.MethodHead, "/src-bucket/orig.txt", nil),
+				)
+				require.Equal(t, http.StatusOK, headW.Code)
+				headerVal = headW.Header().Get("ETag")
+				require.NotEmpty(t, headerVal)
+			}
 			req := httptest.NewRequest(http.MethodPut, "/dst-bucket/copy.txt", nil)
 			req.Header.Set(amzCopySource, "/src-bucket/orig.txt")
-			req.Header.Set(amzCopySourceIfNoneMatch, srcETag)
-			req.Header.Set(amzCopySourceIfModifiedSince,
-				time.Now().Add(-24*time.Hour).UTC().Format(http.TimeFormat))
+			req.Header.Set(tc.headerKey, headerVal)
+			if tc.extraHeaderKey != "" {
+				req.Header.Set(tc.extraHeaderKey, tc.extraHeaderVal)
+			}
 			w := httptest.NewRecorder()
 			ro.ServeHTTP(w, req)
-			assert.Equal(t, http.StatusPreconditionFailed, w.Code)
-			assert.Contains(t, w.Body.String(), "PreconditionFailed")
-		},
-	)
+			assert.Equal(t, tc.wantStatus, w.Code)
+			if tc.wantStatus == http.StatusPreconditionFailed {
+				assert.Contains(t, w.Body.String(), "PreconditionFailed")
+			}
+			if tc.checkNoDst {
+				dstW := httptest.NewRecorder()
+				ro.ServeHTTP(
+					dstW,
+					httptest.NewRequest(http.MethodHead, "/dst-bucket/copy.txt", nil),
+				)
+				assert.Equal(t, http.StatusNotFound, dstW.Code)
+			}
+		})
+	}
 }
 
 func TestRouterCopyObjectTaggingDirective(t *testing.T) {
