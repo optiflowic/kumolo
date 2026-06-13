@@ -8,7 +8,7 @@
 
 | Parameter | Type | Required | Notes |
 |---|---|---|---|
-| `DurationSeconds` | integer | no | Valid range: 900–129600 (default 43200); out-of-range values return `ValidationError` |
+| `DurationSeconds` | integer | no | Valid range: 900–129600 (default 43200); non-numeric or out-of-range values return `ValidationError` |
 | `SerialNumber` | string | no | MFA device serial or ARN; ignored |
 | `TokenCode` | string | no | 6-digit MFA code; ignored |
 

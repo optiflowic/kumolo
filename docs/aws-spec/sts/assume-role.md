@@ -10,7 +10,7 @@
 |---|---|---|---|
 | `RoleArn` | string | yes | ARN of the role to assume (min 20, max 2048 chars) |
 | `RoleSessionName` | string | yes | Identifier for the session; reflected in response ARN and role ID (min 2, max 64, pattern `[\w+=,.@-]*`) |
-| `DurationSeconds` | integer | no | Valid range: 900–43200 (default 3600); out-of-range values return `ValidationError` |
+| `DurationSeconds` | integer | no | Valid range: 900–43200 (default 3600); non-numeric or out-of-range values return `ValidationError` |
 
 Ignored parameters (accepted without error): `ExternalId`, `Policy`, `PolicyArns`, `SerialNumber`, `SourceIdentity`, `Tags`, `TokenCode`, `TransitiveTagKeys`, `ProvidedContexts`.
 
