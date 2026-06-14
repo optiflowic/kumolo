@@ -103,7 +103,7 @@ fi
 # TagResource: input validation (#359)
 # ---------------------------------------------------------------------------
 
-# Tag limit: resource already has 2 tags; adding 49 more would make 51 → ValidationException.
+# Tag limit: resource already has 2 tags; adding 49 more would make 51 → LimitExceededException.
 TAGS_49=()
 for i in $(seq 1 49); do
   TAGS_49+=("Key=tag$i,Value=val$i")
@@ -111,10 +111,10 @@ done
 LIMIT_ERR=$($AWS tag-resource \
   --resource-arn "$TABLE_ARN" \
   --tags "${TAGS_49[@]}" 2>&1 || true)
-if echo "$LIMIT_ERR" | grep -q 'ValidationException'; then
-  ok "TagResource (tag limit: 51 total → ValidationException)"
+if echo "$LIMIT_ERR" | grep -q 'LimitExceededException'; then
+  ok "TagResource (tag limit: 51 total → LimitExceededException)"
 else
-  fail "TagResource (tag limit: expected ValidationException, got: $(echo "$LIMIT_ERR" | head -1))"
+  fail "TagResource (tag limit: expected LimitExceededException, got: $(echo "$LIMIT_ERR" | head -1))"
 fi
 
 # Tag key > 128 characters → ValidationException.

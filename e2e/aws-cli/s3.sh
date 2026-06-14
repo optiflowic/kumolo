@@ -102,19 +102,19 @@ $AWS s3api put-object --bucket "$BUCKET" --key "$SPECIAL_KEY" --body "$TMPFILE" 
 LIST_V1_OUT=$($AWS s3api list-objects --bucket "$BUCKET" \
   --prefix "folder/" --encoding-type url 2>/dev/null || true)
 LIST_V1_KEY=$(echo "$LIST_V1_OUT" | jq -r '.Contents[0].Key // empty' 2>/dev/null || true)
-if echo "$LIST_V1_KEY" | grep -q '%20\|+'; then
-  ok "ListObjects (encoding-type=url: space encoded)"
+if echo "$LIST_V1_KEY" | grep -q '%20'; then
+  ok "ListObjects (encoding-type=url: space encoded as %20)"
 else
-  fail "ListObjects (encoding-type=url: expected encoded space in key, got '$LIST_V1_KEY')"
+  fail "ListObjects (encoding-type=url: expected %20 in key, got '$LIST_V1_KEY')"
 fi
 
 LIST_V2_OUT=$($AWS s3api list-objects-v2 --bucket "$BUCKET" \
   --prefix "folder/" --encoding-type url 2>/dev/null || true)
 LIST_V2_KEY=$(echo "$LIST_V2_OUT" | jq -r '.Contents[0].Key // empty' 2>/dev/null || true)
-if echo "$LIST_V2_KEY" | grep -q '%20\|+'; then
-  ok "ListObjectsV2 (encoding-type=url: space encoded)"
+if echo "$LIST_V2_KEY" | grep -q '%20'; then
+  ok "ListObjectsV2 (encoding-type=url: space encoded as %20)"
 else
-  fail "ListObjectsV2 (encoding-type=url: expected encoded space in key, got '$LIST_V2_KEY')"
+  fail "ListObjectsV2 (encoding-type=url: expected %20 in key, got '$LIST_V2_KEY')"
 fi
 
 # Second version
