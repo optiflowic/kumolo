@@ -8900,5 +8900,19 @@ func TestSetObjectVersionStorageClass(t *testing.T) {
 		_, archivedMeta, err := s.GetObjectVersion("b", "obj.txt", v1.VersionID)
 		require.NoError(t, err)
 		assert.Equal(t, "GLACIER", archivedMeta.StorageClass)
+
+		// Verify ListObjectVersions also reflects the updated StorageClass,
+		// since the lifecycle enforcer reads it from listings to skip redundant transitions.
+		versions, _, err := s.ListObjectVersions("b")
+		require.NoError(t, err)
+		var found bool
+		for _, v := range versions {
+			if v.VersionID == v1.VersionID {
+				assert.Equal(t, "GLACIER", v.StorageClass)
+				found = true
+				break
+			}
+		}
+		assert.True(t, found, "v1 not found in ListObjectVersions result")
 	})
 }
