@@ -85,9 +85,9 @@ The same pattern applies to DynamoDB, KMS, STS, and other supported services.
 
 | Service      | Operations |
 |--------------|------------|
-| **S3**       | Bucket CRUD, Object CRUD, Multipart Upload, Versioning, Tagging, CORS, Policy, Lifecycle, ACL (enforced), Encryption (SSE-S3 / SSE-KMS / SSE-C), Object Lock, SelectObjectContent, BucketLogging, BucketReplication, and more |
 | **DynamoDB** | Table CRUD, Item operations (Get/Put/Delete/Update), Query, Scan, Batch operations, Transactions, PartiQL (ExecuteStatement / BatchExecuteStatement / ExecuteTransaction), Streams, TTL, Tags, Kinesis streaming destinations |
 | **KMS**      | Key management (Create/Describe/Enable/Disable/Schedule deletion), Data plane (Encrypt/Decrypt/GenerateDataKey/GenerateDataKeyPair), Aliases, Key rotation, Grants, Tags |
+| **S3**       | Bucket CRUD, Object CRUD, Multipart Upload, Versioning, Tagging, CORS, Policy, Lifecycle, ACL (enforced), Encryption (SSE-S3 / SSE-KMS / SSE-C), Object Lock, SelectObjectContent, BucketLogging, BucketReplication, and more |
 | **STS**      | GetCallerIdentity, AssumeRole, GetSessionToken |
 
 For the full list of supported operations, see the [documentation](https://optiflowic.github.io/kumolo-docs).
@@ -104,15 +104,20 @@ For the full list of supported operations, see the [documentation](https://optif
 
 kumolo aims for high fidelity, but some behaviors differ from real AWS by design or as a known gap.
 
-**S3**
-
-- Bucket Policy rules are stored and returned but not enforced — all requests are permitted regardless of policy content.
-- SigV4 request signatures are parsed but not cryptographically verified. This is intentional for local development.
-
 **DynamoDB**
 
 - `ConsumedCapacity` is returned when `ReturnConsumedCapacity` is `TOTAL` or `INDEXES`, but `CapacityUnits` is always `1.0` — actual RCU/WCU are not computed.
 - Number attribute comparisons use `float64` precision. Values with more than 15 significant digits may not compare correctly.
+
+**KMS**
+
+- Grant-based access control is not enforced — all KMS operations succeed regardless of grant `Operations` or `Constraints`.
+- Key rotation does not run on a schedule. Use `RotateKeyOnDemand` to trigger a rotation in tests.
+
+**S3**
+
+- Bucket Policy rules are stored and returned but not enforced — all requests are permitted regardless of policy content.
+- SigV4 request signatures are parsed but not cryptographically verified. This is intentional for local development.
 
 **STS**
 

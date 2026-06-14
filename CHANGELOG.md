@@ -5,9 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-06-14
+
+### Added
+
+#### DynamoDB
+
+- `TagResource` and `UntagResource` now accept index ARNs (e.g. `table/Name/index/IndexName`) in addition to table ARNs
+
+#### S3
+
+- `ListObjects` and `ListObjectsV2` now support `encoding-type=url`; key names, prefixes, delimiters, and markers are percent-encoded in the response
+- `CopyObject` now supports `x-amz-tagging-directive` (`COPY` or `REPLACE`); `COPY` (default) preserves source tags, `REPLACE` applies tags from `x-amz-tagging`
+- `CopyObject` now evaluates `x-amz-copy-source-if-match`, `x-amz-copy-source-if-none-match`, `x-amz-copy-source-if-modified-since`, and `x-amz-copy-source-if-unmodified-since`
+- `CompleteMultipartUpload` now applies `x-amz-tagging` from the `CreateMultipartUpload` request to the final object
+
+### Fixed
+
+#### DynamoDB
+
+- `TagResource` and `UntagResource` now enforce the 50-tag limit and key/value length constraints (key: 1–128, value: 0–256), returning `ValidationException` for violations
+
+#### KMS
+
+- `CreateKey` now rejects `ECC_SECG_P256K1` as `KeySpec` with `UnsupportedOperationException` immediately; previously the key was created but `GetPublicKey` failed later
+
+#### STS
+
+- `AssumeRole` and `GetSessionToken` now validate `DurationSeconds` (AssumeRole: 900–43200, GetSessionToken: 900–129600), returning `ValidationError` for out-of-range values
+
 ## [0.2.1] - 2026-06-12
 
 ### Fixed
+
+#### DynamoDB
+
+- `CreateTable` now persists the `Tags` parameter; previously tags were accepted but silently discarded
+
+#### KMS
+
+- `CreateKey` now persists the `Tags` parameter; previously tags were accepted but silently discarded, causing Terraform's `default_tags` mechanism to loop indefinitely on plan/apply
 
 #### S3
 
@@ -17,17 +54,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `AssumeRole` now validates `RoleArn` (length 20–2048) and `RoleSessionName` (length 2–64, pattern `[\w+=,.@-]*`), returning `ValidationError` for out-of-range or malformed inputs
 
-#### KMS
-
-- `CreateKey` now persists the `Tags` parameter; previously tags were accepted but silently discarded, causing Terraform's `default_tags` mechanism to loop indefinitely on plan/apply
-
-#### DynamoDB
-
-- `CreateTable` now persists the `Tags` parameter; previously tags were accepted but silently discarded
-
 ## [0.2.0] - 2026-06-11
 
 ### Added
+
+#### DynamoDB
+
+- PartiQL: `ExecuteStatement`, `BatchExecuteStatement`, `ExecuteTransaction`
+- `ReturnValuesOnConditionCheckFailure` on PartiQL write statements
+- DynamoDB Streams: `ListStreams`, `DescribeStream`, `GetShardIterator`, `GetRecords`
 
 #### KMS (new service)
 
@@ -50,26 +85,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - BucketLogging: access log records now delivered to the configured target bucket and prefix
 - BucketReplication: objects now replicated to the configured destination bucket on `PutObject`, `CopyObject`, and multipart upload completion
 
-#### DynamoDB
-
-- PartiQL: `ExecuteStatement`, `BatchExecuteStatement`, `ExecuteTransaction`
-- `ReturnValuesOnConditionCheckFailure` on PartiQL write statements
-- DynamoDB Streams: `ListStreams`, `DescribeStream`, `GetShardIterator`, `GetRecords`
-
 #### Go testing library
 
 - `pkg/kumolo`: in-process Go testing library — start kumolo in a `httptest.Server` with a single call, no Docker required
 
 ### Fixed
 
+#### DynamoDB
+
+- `ReturnConsumedCapacity`: `ConsumedCapacity` (or `ConsumedCapacities`) was accepted as a parameter but omitted from all responses; it is now included
+
 #### S3
 
 - ACL operations (`GetBucketAcl`, `PutBucketAcl`, `GetObjectAcl`, `PutObjectAcl`) stored grants but never enforced them — previously stored grants are now enforced on `GetObject` / `PutObject`
 - Lifecycle rule `Expiration.Date` (absolute expiry date) and `ExpiredObjectDeleteMarker` were never evaluated by the background enforcement loop
-
-#### DynamoDB
-
-- `ReturnConsumedCapacity`: `ConsumedCapacity` (or `ConsumedCapacities`) was accepted as a parameter but omitted from all responses; it is now included
 
 ## [0.1.1] - 2026-05-28
 
@@ -88,6 +117,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Initial release of kumolo — a high-fidelity AWS emulator for local development and testing.
 
 ### Added
+
+#### DynamoDB
+
+- Table operations: `CreateTable`, `DeleteTable`, `DescribeTable`, `ListTables`, `UpdateTable`
+- Item operations: `PutItem`, `GetItem`, `DeleteItem`, `UpdateItem`
+- Batch operations: `BatchGetItem`, `BatchWriteItem`
+- Transactions: `TransactGetItems`, `TransactWriteItems`
+- Querying: `Query`, `Scan` — with `FilterExpression`, `ProjectionExpression`, `KeyConditionExpression`, `Limit`, `ExclusiveStartKey`, `ScanIndexForward`
+- Parallel scan support
+- Expression language: `ConditionExpression`, `UpdateExpression` (`SET`, `REMOVE`, `ADD`, `DELETE` clauses), nested attribute paths, `if_not_exists()`, `list_append()`, `IN` operator
+- Secondary indexes: GSI and LSI (queries routed to correct index)
+- `ReturnValues`: `ALL_OLD`, `ALL_NEW`, `UPDATED_OLD`, `UPDATED_NEW`
+- TTL: `UpdateTimeToLive`, `DescribeTimeToLive`; background item expiry
+- Tagging: `TagResource`, `UntagResource`, `ListTagsOfResource`
+- `DescribeLimits`, `DescribeContinuousBackups`, `UpdateContinuousBackups`
+- Kinesis streaming destination: `EnableKinesisStreamingDestination`, `DisableKinesisStreamingDestination`, `DescribeKinesisStreamingDestination`
 
 #### S3
 
@@ -115,29 +160,13 @@ Initial release of kumolo — a high-fidelity AWS emulator for local development
 - Presigned URL support
 - 5 MB minimum part size enforcement on `UploadPart`
 
-#### DynamoDB
-
-- Table operations: `CreateTable`, `DeleteTable`, `DescribeTable`, `ListTables`, `UpdateTable`
-- Item operations: `PutItem`, `GetItem`, `DeleteItem`, `UpdateItem`
-- Batch operations: `BatchGetItem`, `BatchWriteItem`
-- Transactions: `TransactGetItems`, `TransactWriteItems`
-- Querying: `Query`, `Scan` — with `FilterExpression`, `ProjectionExpression`, `KeyConditionExpression`, `Limit`, `ExclusiveStartKey`, `ScanIndexForward`
-- Parallel scan support
-- Expression language: `ConditionExpression`, `UpdateExpression` (`SET`, `REMOVE`, `ADD`, `DELETE` clauses), nested attribute paths, `if_not_exists()`, `list_append()`, `IN` operator
-- Secondary indexes: GSI and LSI (queries routed to correct index)
-- `ReturnValues`: `ALL_OLD`, `ALL_NEW`, `UPDATED_OLD`, `UPDATED_NEW`
-- TTL: `UpdateTimeToLive`, `DescribeTimeToLive`; background item expiry
-- Tagging: `TagResource`, `UntagResource`, `ListTagsOfResource`
-- `DescribeLimits`, `DescribeContinuousBackups`, `UpdateContinuousBackups`
-- Kinesis streaming destination: `EnableKinesisStreamingDestination`, `DisableKinesisStreamingDestination`, `DescribeKinesisStreamingDestination`
-
 #### STS
 
 - `GetCallerIdentity`, `AssumeRole`, `GetSessionToken`
 
 #### Infrastructure
 
-- Single binary server on port 5566; dispatches S3, DynamoDB, and STS by path and `Host` header
+- Single binary server on port 5566; dispatches DynamoDB, S3, and STS by path and `Host` header
 - Filesystem-backed persistent storage under `KUMOLO_DATA_DIR`
 - Docker image published to `ghcr.io/optiflowic/kumolo`
 - GoReleaser-based binary releases for Linux and macOS (amd64 / arm64)
@@ -146,6 +175,7 @@ Initial release of kumolo — a high-fidelity AWS emulator for local development
 - AWS CLI and Terraform e2e verification suite (`e2e/`)
 - CI: build, vet, lint (golangci-lint), test with race detector, Docker image publish
 
+[0.2.2]: https://github.com/optiflowic/kumolo/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/optiflowic/kumolo/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/optiflowic/kumolo/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/optiflowic/kumolo/compare/v0.1.0...v0.1.1
