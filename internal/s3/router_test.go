@@ -9545,6 +9545,147 @@ func TestObjectLockConfigHandlers(t *testing.T) {
 	})
 }
 
+func TestObjectLockDefaultRetentionIntegration(t *testing.T) {
+	const lockXMLWithRetention = `<ObjectLockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>COMPLIANCE</Mode><Days>7</Days></DefaultRetention></Rule></ObjectLockConfiguration>`
+
+	fixedNow := time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)
+
+	newTimedRouter := func(t *testing.T) *Router {
+		t.Helper()
+		st, err := NewStorage(t.TempDir())
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = st.Close() })
+		st.now = func() time.Time { return fixedNow }
+		return &Router{storage: st, kms: nil, now: func() time.Time { return fixedNow }}
+	}
+
+	setupBucket := func(t *testing.T, ro *Router, bucket string) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPut, "/"+bucket, nil)
+		req.Header.Set(amzObjectLockEnabled, "true")
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		req = httptest.NewRequest(
+			http.MethodPut,
+			"/"+bucket+"?object-lock",
+			strings.NewReader(lockXMLWithRetention),
+		)
+		w = httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+	}
+
+	t.Run("PutObject applies DefaultRetention when no explicit headers", func(t *testing.T) {
+		ro := newTimedRouter(t)
+		setupBucket(t, ro, "b")
+
+		putW := httptest.NewRecorder()
+		ro.ServeHTTP(
+			putW,
+			httptest.NewRequest(http.MethodPut, "/b/obj.txt", strings.NewReader("hello")),
+		)
+		require.Equal(t, http.StatusOK, putW.Code)
+
+		getW := httptest.NewRecorder()
+		ro.ServeHTTP(getW, httptest.NewRequest(http.MethodGet, "/b/obj.txt?retention", nil))
+		assert.Equal(t, http.StatusOK, getW.Code)
+		assert.Contains(t, getW.Body.String(), "COMPLIANCE")
+		assert.Contains(t, getW.Body.String(), "2025-06-08")
+	})
+
+	t.Run("PutObject explicit headers override DefaultRetention", func(t *testing.T) {
+		ro := newTimedRouter(t)
+		setupBucket(t, ro, "b")
+
+		req := httptest.NewRequest(http.MethodPut, "/b/obj.txt", strings.NewReader("hello"))
+		req.Header.Set(amzObjectLockMode, "GOVERNANCE")
+		req.Header.Set(amzObjectLockRetainUntilDate, "2030-06-01T00:00:00Z")
+		putW := httptest.NewRecorder()
+		ro.ServeHTTP(putW, req)
+		require.Equal(t, http.StatusOK, putW.Code)
+
+		getW := httptest.NewRecorder()
+		ro.ServeHTTP(getW, httptest.NewRequest(http.MethodGet, "/b/obj.txt?retention", nil))
+		assert.Equal(t, http.StatusOK, getW.Code)
+		assert.Contains(t, getW.Body.String(), "GOVERNANCE")
+		assert.Contains(t, getW.Body.String(), "2030-06-01")
+	})
+
+	t.Run(
+		"CopyObject applies DefaultRetention to destination when no explicit headers",
+		func(t *testing.T) {
+			ro := newTimedRouter(t)
+			ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/src", nil))
+			ro.ServeHTTP(
+				httptest.NewRecorder(),
+				httptest.NewRequest(http.MethodPut, "/src/orig.txt", strings.NewReader("data")),
+			)
+			setupBucket(t, ro, "dst")
+
+			req := httptest.NewRequest(http.MethodPut, "/dst/copy.txt", nil)
+			req.Header.Set(amzCopySource, "/src/orig.txt")
+			copyW := httptest.NewRecorder()
+			ro.ServeHTTP(copyW, req)
+			require.Equal(t, http.StatusOK, copyW.Code)
+
+			getW := httptest.NewRecorder()
+			ro.ServeHTTP(getW, httptest.NewRequest(http.MethodGet, "/dst/copy.txt?retention", nil))
+			assert.Equal(t, http.StatusOK, getW.Code)
+			assert.Contains(t, getW.Body.String(), "COMPLIANCE")
+			assert.Contains(t, getW.Body.String(), "2025-06-08")
+		},
+	)
+
+	t.Run(
+		"CompleteMultipartUpload applies DefaultRetention set at CreateMultipartUpload",
+		func(t *testing.T) {
+			ro := newTimedRouter(t)
+			setupBucket(t, ro, "b")
+
+			initW := httptest.NewRecorder()
+			ro.ServeHTTP(initW, httptest.NewRequest(http.MethodPost, "/b/key?uploads", nil))
+			require.Equal(t, http.StatusOK, initW.Code)
+			var initResp struct {
+				UploadID string `xml:"UploadId"`
+			}
+			require.NoError(t, xml.NewDecoder(initW.Body).Decode(&initResp))
+			uploadID := initResp.UploadID
+
+			partReq := httptest.NewRequest(
+				http.MethodPut,
+				"/b/key?partNumber=1&uploadId="+uploadID,
+				strings.NewReader("part-data"),
+			)
+			partW := httptest.NewRecorder()
+			ro.ServeHTTP(partW, partReq)
+			require.Equal(t, http.StatusOK, partW.Code)
+			etag := partW.Header().Get("ETag")
+
+			completeBody, err := xml.Marshal(completeMultipartUploadRequest{
+				Parts: []xmlCompletePart{{PartNumber: 1, ETag: etag}},
+			})
+			require.NoError(t, err)
+			completeW := httptest.NewRecorder()
+			ro.ServeHTTP(
+				completeW,
+				httptest.NewRequest(
+					http.MethodPost,
+					"/b/key?uploadId="+uploadID,
+					strings.NewReader(string(completeBody)),
+				),
+			)
+			require.Equal(t, http.StatusOK, completeW.Code)
+
+			getW := httptest.NewRecorder()
+			ro.ServeHTTP(getW, httptest.NewRequest(http.MethodGet, "/b/key?retention", nil))
+			assert.Equal(t, http.StatusOK, getW.Code)
+			assert.Contains(t, getW.Body.String(), "COMPLIANCE")
+			assert.Contains(t, getW.Body.String(), "2025-06-08")
+		},
+	)
+}
+
 func TestObjectRetentionHandlers(t *testing.T) {
 	const validBody = `<Retention xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Mode>GOVERNANCE</Mode><RetainUntilDate>2030-01-01T00:00:00Z</RetainUntilDate></Retention>`
 
