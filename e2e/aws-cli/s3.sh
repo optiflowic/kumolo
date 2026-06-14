@@ -238,11 +238,12 @@ if [[ -n "$UPLOAD_ID" ]]; then
         --multipart-upload "$PARTS"
     MPU_TAGS=$($AWS s3api get-object-tagging \
       --bucket "$BUCKET" --key "multipart.bin" 2>/dev/null || true)
-    MPU_TAG_VAL=$(echo "$MPU_TAGS" | jq -r '.TagSet[] | select(.Key=="purpose") | .Value' 2>/dev/null || true)
-    if [[ "$MPU_TAG_VAL" == "e2e" ]]; then
+    MPU_TAG_PURPOSE=$(echo "$MPU_TAGS" | jq -r '.TagSet[] | select(.Key=="purpose") | .Value' 2>/dev/null || true)
+    MPU_TAG_ENV=$(echo "$MPU_TAGS" | jq -r '.TagSet[] | select(.Key=="env") | .Value' 2>/dev/null || true)
+    if [[ "$MPU_TAG_PURPOSE" == "e2e" && "$MPU_TAG_ENV" == "local" ]]; then
       ok "CompleteMultipartUpload (x-amz-tagging propagated to final object)"
     else
-      fail "CompleteMultipartUpload (x-amz-tagging: expected purpose=e2e, got '$MPU_TAG_VAL')"
+      fail "CompleteMultipartUpload (x-amz-tagging: expected purpose=e2e env=local, got purpose='$MPU_TAG_PURPOSE' env='$MPU_TAG_ENV')"
     fi
   else
     fail "UploadPart"
