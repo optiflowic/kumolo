@@ -2,7 +2,7 @@
 
 **URL**: https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectLockConfiguration.html  
 **SDK struct**: `s3.PutObjectLockConfigurationInput` / `s3.PutObjectLockConfigurationOutput`  
-**Last verified**: 2026-05-21
+**Last verified**: 2026-06-14
 
 ## Request
 
@@ -43,6 +43,13 @@ Stores an `ObjectLockConfiguration` XML document. Requires versioning to be enab
 | `InvalidBucketState` | 400 | Versioning is not enabled on the bucket |
 | `MalformedXML` | 400 | Request body is not valid XML |
 | `InternalError` | 500 | Storage failure |
+
+## Behavior notes
+
+When `Rule/DefaultRetention` is set, kumolo automatically applies `Mode` and `RetainUntilDate`
+to every new object written to the bucket via `PutObject`, `CopyObject`, and
+`CreateMultipartUpload` (propagated through to `CompleteMultipartUpload`), unless the request
+supplies explicit `x-amz-object-lock-mode` / `x-amz-object-lock-retain-until-date` headers.
 
 ## Kumolo deviations
 
