@@ -29,12 +29,13 @@ echo "=== STS ==="
 # GetSessionToken: DurationSeconds validation (#335)
 # ---------------------------------------------------------------------------
 
-# Below minimum (900) → ValidationError.
-GST_LOW_ERR=$($AWS get-session-token --duration-seconds 899 2>&1 || true)
-if echo "$GST_LOW_ERR" | grep -q 'ValidationError\|ValidationException'; then
-  ok "GetSessionToken (DurationSeconds=899 → ValidationError)"
+# Below minimum (900) → rejected.
+# The AWS CLI validates DurationSeconds >= 900 client-side before sending to kumolo,
+# so we check exit code rather than parsing a specific error string.
+if ! $AWS get-session-token --duration-seconds 899 > /dev/null 2>&1; then
+  ok "GetSessionToken (DurationSeconds=899 → rejected)"
 else
-  fail "GetSessionToken (DurationSeconds=899: expected ValidationError, got: $(echo "$GST_LOW_ERR" | head -1))"
+  fail "GetSessionToken (DurationSeconds=899: expected rejection, but succeeded)"
 fi
 
 # Above maximum (129600) → ValidationError.
@@ -54,15 +55,16 @@ run "GetSessionToken (DurationSeconds=900)" \
 # ---------------------------------------------------------------------------
 ROLE_ARN="arn:aws:iam::000000000000:role/kumolo-e2e-role"
 
-# Below minimum (900) → ValidationError.
-AR_LOW_ERR=$($AWS assume-role \
-  --role-arn "$ROLE_ARN" \
-  --role-session-name "e2e-test" \
-  --duration-seconds 899 2>&1 || true)
-if echo "$AR_LOW_ERR" | grep -q 'ValidationError\|ValidationException'; then
-  ok "AssumeRole (DurationSeconds=899 → ValidationError)"
+# Below minimum (900) → rejected.
+# The AWS CLI validates DurationSeconds >= 900 client-side before sending to kumolo,
+# so we check exit code rather than parsing a specific error string.
+if ! $AWS assume-role \
+    --role-arn "$ROLE_ARN" \
+    --role-session-name "e2e-test" \
+    --duration-seconds 899 > /dev/null 2>&1; then
+  ok "AssumeRole (DurationSeconds=899 → rejected)"
 else
-  fail "AssumeRole (DurationSeconds=899: expected ValidationError, got: $(echo "$AR_LOW_ERR" | head -1))"
+  fail "AssumeRole (DurationSeconds=899: expected rejection, but succeeded)"
 fi
 
 # Above maximum (43200) → ValidationError.
