@@ -92,6 +92,31 @@ run "HeadObject"       $AWS s3api head-object --bucket "$BUCKET" --key "hello.tx
 run "GetObject"        $AWS s3api get-object  --bucket "$BUCKET" --key "hello.txt" /dev/null
 run "ListObjectsV2"    $AWS s3api list-objects-v2 --bucket "$BUCKET"
 
+# ---------------------------------------------------------------------------
+# encoding-type=url — keys with spaces must be percent-encoded in response.
+# ---------------------------------------------------------------------------
+SPECIAL_KEY="folder/hello world.txt"
+echo "encoding test" > "$TMPFILE"
+$AWS s3api put-object --bucket "$BUCKET" --key "$SPECIAL_KEY" --body "$TMPFILE" > /dev/null 2>&1 || true
+
+LIST_V1_OUT=$($AWS s3api list-objects --bucket "$BUCKET" \
+  --prefix "folder/" --encoding-type url 2>/dev/null || true)
+LIST_V1_KEY=$(echo "$LIST_V1_OUT" | jq -r '.Contents[0].Key // empty' 2>/dev/null || true)
+if echo "$LIST_V1_KEY" | grep -q '%20\|+'; then
+  ok "ListObjects (encoding-type=url: space encoded)"
+else
+  fail "ListObjects (encoding-type=url: expected encoded space in key, got '$LIST_V1_KEY')"
+fi
+
+LIST_V2_OUT=$($AWS s3api list-objects-v2 --bucket "$BUCKET" \
+  --prefix "folder/" --encoding-type url 2>/dev/null || true)
+LIST_V2_KEY=$(echo "$LIST_V2_OUT" | jq -r '.Contents[0].Key // empty' 2>/dev/null || true)
+if echo "$LIST_V2_KEY" | grep -q '%20\|+'; then
+  ok "ListObjectsV2 (encoding-type=url: space encoded)"
+else
+  fail "ListObjectsV2 (encoding-type=url: expected encoded space in key, got '$LIST_V2_KEY')"
+fi
+
 # Second version
 echo "hello again" > "$TMPFILE"
 run "PutObject (v2)"   $AWS s3api put-object --bucket "$BUCKET" --key "hello.txt" --body "$TMPFILE"
@@ -120,8 +145,74 @@ run "CopyObject" \
     --key "hello-copy.txt" \
     --copy-source "$BUCKET/hello.txt"
 
-# Multipart upload
+# ---------------------------------------------------------------------------
+# CopyObject: x-amz-tagging-directive
+# ---------------------------------------------------------------------------
+$AWS s3api put-object-tagging \
+  --bucket "$BUCKET" --key "hello.txt" \
+  --tagging '{"TagSet":[{"Key":"src","Value":"original"}]}' > /dev/null 2>&1 || true
+
+run "CopyObject (tagging-directive=COPY)" \
+  $AWS s3api copy-object \
+    --bucket "$BUCKET" \
+    --key "copy-tagging-copy.txt" \
+    --copy-source "$BUCKET/hello.txt" \
+    --tagging-directive COPY
+
+COPY_TAGS=$($AWS s3api get-object-tagging \
+  --bucket "$BUCKET" --key "copy-tagging-copy.txt" 2>/dev/null || true)
+COPY_TAG_VAL=$(echo "$COPY_TAGS" | jq -r '.TagSet[] | select(.Key=="src") | .Value' 2>/dev/null || true)
+if [[ "$COPY_TAG_VAL" == "original" ]]; then
+  ok "CopyObject (tagging-directive=COPY: source tag preserved)"
+else
+  fail "CopyObject (tagging-directive=COPY: expected src=original, got '$COPY_TAG_VAL')"
+fi
+
+run "CopyObject (tagging-directive=REPLACE)" \
+  $AWS s3api copy-object \
+    --bucket "$BUCKET" \
+    --key "copy-tagging-replace.txt" \
+    --copy-source "$BUCKET/hello.txt" \
+    --tagging-directive REPLACE \
+    --tagging "purpose=replaced"
+
+REPLACE_TAGS=$($AWS s3api get-object-tagging \
+  --bucket "$BUCKET" --key "copy-tagging-replace.txt" 2>/dev/null || true)
+REPLACE_TAG_VAL=$(echo "$REPLACE_TAGS" | jq -r '.TagSet[] | select(.Key=="purpose") | .Value' 2>/dev/null || true)
+SRC_TAG_GONE=$(echo "$REPLACE_TAGS" | jq -r '.TagSet[] | select(.Key=="src") | .Value' 2>/dev/null || true)
+if [[ "$REPLACE_TAG_VAL" == "replaced" && -z "$SRC_TAG_GONE" ]]; then
+  ok "CopyObject (tagging-directive=REPLACE: new tag set, old tag absent)"
+else
+  fail "CopyObject (tagging-directive=REPLACE: purpose='$REPLACE_TAG_VAL' src='$SRC_TAG_GONE')"
+fi
+
+# ---------------------------------------------------------------------------
+# CopyObject: x-amz-copy-source-if-* conditional headers
+# ---------------------------------------------------------------------------
+SRC_ETAG=$($AWS s3api head-object --bucket "$BUCKET" --key "hello.txt" \
+  --query ETag --output text 2>/dev/null | tr -d '"')
+
+run "CopyObject (copy-source-if-match: matching ETag)" \
+  $AWS s3api copy-object \
+    --bucket "$BUCKET" \
+    --key "copy-if-match.txt" \
+    --copy-source "$BUCKET/hello.txt" \
+    --copy-source-if-match "\"$SRC_ETAG\""
+
+IFNM_ERR=$($AWS s3api copy-object \
+  --bucket "$BUCKET" \
+  --key "copy-if-none-match.txt" \
+  --copy-source "$BUCKET/hello.txt" \
+  --copy-source-if-none-match "\"$SRC_ETAG\"" 2>&1 || true)
+if echo "$IFNM_ERR" | grep -q '412\|PreconditionFailed'; then
+  ok "CopyObject (copy-source-if-none-match: matching ETag → 412)"
+else
+  fail "CopyObject (copy-source-if-none-match: expected 412, got: $(echo "$IFNM_ERR" | head -1))"
+fi
+
+# Multipart upload (with x-amz-tagging to verify tag propagation to final object)
 UPLOAD_ID=$($AWS s3api create-multipart-upload --bucket "$BUCKET" --key "multipart.bin" \
+  --tagging "purpose=e2e&env=local" \
   --query UploadId --output text 2>/dev/null)
 if [[ -n "$UPLOAD_ID" ]]; then
   ok "CreateMultipartUpload"
@@ -145,6 +236,14 @@ if [[ -n "$UPLOAD_ID" ]]; then
         --bucket "$BUCKET" --key "multipart.bin" \
         --upload-id "$UPLOAD_ID" \
         --multipart-upload "$PARTS"
+    MPU_TAGS=$($AWS s3api get-object-tagging \
+      --bucket "$BUCKET" --key "multipart.bin" 2>/dev/null || true)
+    MPU_TAG_VAL=$(echo "$MPU_TAGS" | jq -r '.TagSet[] | select(.Key=="purpose") | .Value' 2>/dev/null || true)
+    if [[ "$MPU_TAG_VAL" == "e2e" ]]; then
+      ok "CompleteMultipartUpload (x-amz-tagging propagated to final object)"
+    else
+      fail "CompleteMultipartUpload (x-amz-tagging: expected purpose=e2e, got '$MPU_TAG_VAL')"
+    fi
   else
     fail "UploadPart"
     $AWS s3api abort-multipart-upload \

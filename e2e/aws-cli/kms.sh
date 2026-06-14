@@ -38,6 +38,19 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# CreateKey: ECC_SECG_P256K1 must be rejected (#341)
+# ---------------------------------------------------------------------------
+SECP256K1_ERR=$($AWS create-key \
+  --key-spec ECC_SECG_P256K1 \
+  --key-usage SIGN_VERIFY \
+  --description "kumolo-e2e-secp256k1-should-fail" 2>&1 || true)
+if echo "$SECP256K1_ERR" | grep -q 'UnsupportedOperationException'; then
+  ok "CreateKey (ECC_SECG_P256K1 → UnsupportedOperationException)"
+else
+  fail "CreateKey (ECC_SECG_P256K1: expected UnsupportedOperationException, got: $(echo "$SECP256K1_ERR" | head -1))"
+fi
+
+# ---------------------------------------------------------------------------
 # DescribeKey
 # ---------------------------------------------------------------------------
 if [[ -n "$KEY_ID" ]]; then
