@@ -46,4 +46,4 @@ Stores an `ObjectLockConfiguration` XML document. Requires versioning to be enab
 
 ## Kumolo deviations
 
-- The configuration is stored verbatim; default retention from `Rule/DefaultRetention` is not automatically applied to new objects.
+None.
