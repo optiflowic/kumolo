@@ -59,13 +59,85 @@ run "DescribeTimeToLive" \
   $AWS describe-time-to-live --table-name "$TABLE"
 
 # Tags
+TABLE_ARN="arn:aws:dynamodb:us-east-1:000000000000:table/$TABLE"
+GSI_ARN="arn:aws:dynamodb:us-east-1:000000000000:table/$TABLE/index/email-index"
+
 run "TagResource" \
   $AWS tag-resource \
-    --resource-arn "arn:aws:dynamodb:us-east-1:000000000000:table/$TABLE" \
+    --resource-arn "$TABLE_ARN" \
     --tags Key=env,Value=local Key=managed-by,Value=cli
 run "ListTagsOfResource" \
   $AWS list-tags-of-resource \
-    --resource-arn "arn:aws:dynamodb:us-east-1:000000000000:table/$TABLE"
+    --resource-arn "$TABLE_ARN"
+
+# ---------------------------------------------------------------------------
+# TagResource: index ARN support (#340)
+# ---------------------------------------------------------------------------
+run "TagResource (GSI ARN)" \
+  $AWS tag-resource \
+    --resource-arn "$GSI_ARN" \
+    --tags Key=index-env,Value=local
+
+GSI_TAGS=$($AWS list-tags-of-resource --resource-arn "$GSI_ARN" 2>/dev/null || true)
+GSI_TAG_VAL=$(echo "$GSI_TAGS" | jq -r '.Tags[] | select(.Key=="index-env") | .Value' 2>/dev/null || true)
+if [[ "$GSI_TAG_VAL" == "local" ]]; then
+  ok "ListTagsOfResource (GSI ARN: tag present)"
+else
+  fail "ListTagsOfResource (GSI ARN: expected index-env=local, got '$GSI_TAG_VAL')"
+fi
+
+run "UntagResource (GSI ARN)" \
+  $AWS untag-resource \
+    --resource-arn "$GSI_ARN" \
+    --tag-keys index-env
+
+GSI_TAGS_AFTER=$($AWS list-tags-of-resource --resource-arn "$GSI_ARN" 2>/dev/null || true)
+GSI_TAG_GONE=$(echo "$GSI_TAGS_AFTER" | jq -r '.Tags[] | select(.Key=="index-env") | .Value' 2>/dev/null || true)
+if [[ -z "$GSI_TAG_GONE" ]]; then
+  ok "UntagResource (GSI ARN: tag removed)"
+else
+  fail "UntagResource (GSI ARN: expected tag removed, still got '$GSI_TAG_GONE')"
+fi
+
+# ---------------------------------------------------------------------------
+# TagResource: input validation (#359)
+# ---------------------------------------------------------------------------
+
+# Tag limit: resource already has 2 tags; adding 49 more would make 51 → LimitExceededException.
+TAGS_49=()
+for i in $(seq 1 49); do
+  TAGS_49+=("Key=tag$i,Value=val$i")
+done
+LIMIT_ERR=$($AWS tag-resource \
+  --resource-arn "$TABLE_ARN" \
+  --tags "${TAGS_49[@]}" 2>&1 || true)
+if echo "$LIMIT_ERR" | grep -q 'LimitExceededException'; then
+  ok "TagResource (tag limit: 51 total → LimitExceededException)"
+else
+  fail "TagResource (tag limit: expected LimitExceededException, got: $(echo "$LIMIT_ERR" | head -1))"
+fi
+
+# Tag key > 128 characters → ValidationException.
+LONG_KEY=$(python3 -c "print('k' * 129)" 2>/dev/null || printf 'k%.0s' {1..129})
+LONG_KEY_ERR=$($AWS tag-resource \
+  --resource-arn "$TABLE_ARN" \
+  --tags "Key=$LONG_KEY,Value=v" 2>&1 || true)
+if echo "$LONG_KEY_ERR" | grep -q 'ValidationException'; then
+  ok "TagResource (key > 128 chars → ValidationException)"
+else
+  fail "TagResource (key > 128 chars: expected ValidationException, got: $(echo "$LONG_KEY_ERR" | head -1))"
+fi
+
+# Tag value > 256 characters → ValidationException.
+LONG_VAL=$(python3 -c "print('v' * 257)" 2>/dev/null || printf 'v%.0s' {1..257})
+LONG_VAL_ERR=$($AWS tag-resource \
+  --resource-arn "$TABLE_ARN" \
+  --tags "Key=ok-key,Value=$LONG_VAL" 2>&1 || true)
+if echo "$LONG_VAL_ERR" | grep -q 'ValidationException'; then
+  ok "TagResource (value > 256 chars → ValidationException)"
+else
+  fail "TagResource (value > 256 chars: expected ValidationException, got: $(echo "$LONG_VAL_ERR" | head -1))"
+fi
 
 # Item operations
 run "PutItem (Alice)" \
