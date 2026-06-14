@@ -38,30 +38,33 @@ type fakeLCStore struct {
 	markers  map[string][]DeleteMarkerInfo    // bucket -> delete markers
 	uploads  map[string][]MultipartUploadInfo // bucket -> uploads
 
-	deletedObjects  []string // "bucket/key"
-	deletedVersions []string // "bucket/key/versionId"
-	abortedUploads  []string // uploadId
+	deletedObjects       []string          // "bucket/key"
+	deletedVersions      []string          // "bucket/key/versionId"
+	transitionedVersions map[string]string // "bucket/key/versionId" -> storageClass
+	abortedUploads       []string          // uploadId
 
 	// error injection
-	errListBuckets           error
-	errGetVersioning         error
-	errListObjects           error
-	errDeleteObject          error
-	errDeleteObjectVersioned error
-	errListObjectVersions    error
-	errDeleteObjectVersion   error
-	errListMultipartUploads  error
-	errAbortMultipartUpload  error
+	errListBuckets                  error
+	errGetVersioning                error
+	errListObjects                  error
+	errDeleteObject                 error
+	errDeleteObjectVersioned        error
+	errListObjectVersions           error
+	errDeleteObjectVersion          error
+	errSetObjectVersionStorageClass error
+	errListMultipartUploads         error
+	errAbortMultipartUpload         error
 }
 
 func newFakeLCStore() *fakeLCStore {
 	return &fakeLCStore{
-		lifecycle:  make(map[string]string),
-		versioning: make(map[string]string),
-		objects:    make(map[string][]ObjectInfo),
-		versions:   make(map[string][]VersionInfo),
-		markers:    make(map[string][]DeleteMarkerInfo),
-		uploads:    make(map[string][]MultipartUploadInfo),
+		lifecycle:            make(map[string]string),
+		versioning:           make(map[string]string),
+		objects:              make(map[string][]ObjectInfo),
+		versions:             make(map[string][]VersionInfo),
+		markers:              make(map[string][]DeleteMarkerInfo),
+		uploads:              make(map[string][]MultipartUploadInfo),
+		transitionedVersions: make(map[string]string),
 	}
 }
 
@@ -125,6 +128,18 @@ func (f *fakeLCStore) DeleteObjectVersion(bucket, key, versionID string, _ bool)
 	f.deletedVersions = append(f.deletedVersions, bucket+"/"+key+"/"+versionID)
 	f.mu.Unlock()
 	return false, nil
+}
+
+func (f *fakeLCStore) SetObjectVersionStorageClass(
+	bucket, key, versionID, storageClass string,
+) error {
+	if f.errSetObjectVersionStorageClass != nil {
+		return f.errSetObjectVersionStorageClass
+	}
+	f.mu.Lock()
+	f.transitionedVersions[bucket+"/"+key+"/"+versionID] = storageClass
+	f.mu.Unlock()
+	return nil
 }
 
 func (f *fakeLCStore) ListMultipartUploads(bucket string) ([]MultipartUploadInfo, error) {
@@ -511,6 +526,118 @@ func TestEnforceBucket_NoncurrentVersionExpirationRule(t *testing.T) {
 
 	assert.Contains(t, store.deletedVersions, "b/obj.txt/v1")
 	assert.NotContains(t, store.deletedVersions, "b/obj.txt/v2")
+}
+
+func TestEnforceBucket_NoncurrentVersionTransitionRule(t *testing.T) {
+	now := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+
+	store := newFakeLCStore()
+	store.buckets = []BucketInfo{{Name: "b"}}
+	store.versions["b"] = []VersionInfo{
+		// noncurrent, old enough → should transition
+		{
+			Key:          "obj.txt",
+			VersionID:    "v1",
+			IsLatest:     false,
+			LastModified: now.AddDate(0, 0, -8),
+			StorageClass: "STANDARD",
+		},
+		// current → must not transition
+		{
+			Key:          "obj.txt",
+			VersionID:    "v2",
+			IsLatest:     true,
+			LastModified: now.AddDate(0, 0, -1),
+			StorageClass: "STANDARD",
+		},
+		// noncurrent but already in target class → skip
+		{
+			Key:          "other.txt",
+			VersionID:    "v3",
+			IsLatest:     false,
+			LastModified: now.AddDate(0, 0, -8),
+			StorageClass: "GLACIER",
+		},
+		// noncurrent but too recent → skip
+		{
+			Key:          "new.txt",
+			VersionID:    "v4",
+			IsLatest:     false,
+			LastModified: now.AddDate(0, 0, -3),
+			StorageClass: "STANDARD",
+		},
+	}
+	store.lifecycle["b"] = buildLifecycleXML(t, lifecycleConfiguration{
+		Rules: []lifecycleRule{
+			{
+				Status: "Enabled",
+				NoncurrentVersionTransition: &lifecycleNoncurrentVersionTransition{
+					NoncurrentDays: 7,
+					StorageClass:   "GLACIER",
+				},
+			},
+		},
+	})
+
+	e := NewLifecycleEnforcer(store, time.Minute)
+	e.now = func() time.Time { return now }
+	e.runOnce()
+
+	assert.Equal(t, "GLACIER", store.transitionedVersions["b/obj.txt/v1"])
+	assert.Empty(t, store.transitionedVersions["b/obj.txt/v2"])
+	assert.Empty(t, store.transitionedVersions["b/other.txt/v3"])
+	assert.Empty(t, store.transitionedVersions["b/new.txt/v4"])
+}
+
+func TestEnforceBucket_NoncurrentVersionTransitionRule_ErrorLogged(t *testing.T) {
+	now := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+
+	store := newFakeLCStore()
+	store.buckets = []BucketInfo{{Name: "b"}}
+	store.versions["b"] = []VersionInfo{
+		{Key: "obj.txt", VersionID: "v1", IsLatest: false, LastModified: now.AddDate(0, 0, -8)},
+	}
+	store.errSetObjectVersionStorageClass = errFake
+	store.lifecycle["b"] = buildLifecycleXML(t, lifecycleConfiguration{
+		Rules: []lifecycleRule{
+			{
+				Status: "Enabled",
+				NoncurrentVersionTransition: &lifecycleNoncurrentVersionTransition{
+					NoncurrentDays: 7,
+					StorageClass:   "GLACIER",
+				},
+			},
+		},
+	})
+
+	e := NewLifecycleEnforcer(store, time.Minute)
+	e.now = func() time.Time { return now }
+	e.runOnce() // must not panic; error is logged
+}
+
+func TestEnforceBucket_NoncurrentVersionTransitionRule_ListVersionsError(t *testing.T) {
+	now := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+
+	store := newFakeLCStore()
+	store.buckets = []BucketInfo{{Name: "b"}}
+	store.errListObjectVersions = errFake
+	store.lifecycle["b"] = buildLifecycleXML(t, lifecycleConfiguration{
+		Rules: []lifecycleRule{
+			{
+				Status: "Enabled",
+				NoncurrentVersionTransition: &lifecycleNoncurrentVersionTransition{
+					NoncurrentDays: 7,
+					StorageClass:   "GLACIER",
+				},
+			},
+		},
+	})
+
+	e := NewLifecycleEnforcer(store, time.Minute)
+	e.now = func() time.Time { return now }
+	e.runOnce() // must not panic; error is logged
+
+	assert.Empty(t, store.transitionedVersions)
 }
 
 func TestEnforceBucket_AbortIncompleteRule(t *testing.T) {

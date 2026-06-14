@@ -21,6 +21,7 @@ type lifecycleStore interface {
 	) (versionID string, isDeleteMarker bool, err error)
 	ListObjectVersions(bucket string) ([]VersionInfo, []DeleteMarkerInfo, error)
 	DeleteObjectVersion(bucket, key, versionID string, bypassGovernance bool) (bool, error)
+	SetObjectVersionStorageClass(bucket, key, versionID, storageClass string) error
 	ListMultipartUploads(bucket string) ([]MultipartUploadInfo, error)
 	AbortMultipartUpload(uploadID string) error
 }
@@ -123,6 +124,17 @@ func (e *LifecycleEnforcer) enforceBucket(bucket string) {
 				bucket,
 				prefix,
 				rule.NoncurrentVersionExpiration.NoncurrentDays,
+				now,
+			)
+		}
+		if rule.NoncurrentVersionTransition != nil &&
+			rule.NoncurrentVersionTransition.NoncurrentDays > 0 &&
+			rule.NoncurrentVersionTransition.StorageClass != "" {
+			e.enforceNoncurrentTransition(
+				bucket,
+				prefix,
+				rule.NoncurrentVersionTransition.NoncurrentDays,
+				rule.NoncurrentVersionTransition.StorageClass,
 				now,
 			)
 		}
@@ -258,6 +270,53 @@ func (e *LifecycleEnforcer) enforceNoncurrentExpiration(
 			m.Key,
 			"versionId",
 			m.VersionID,
+		)
+	}
+}
+
+func (e *LifecycleEnforcer) enforceNoncurrentTransition(
+	bucket, prefix string,
+	noncurrentDays int,
+	storageClass string,
+	now time.Time,
+) {
+	cutoff := now.AddDate(0, 0, -noncurrentDays)
+
+	versions, _, err := e.storage.ListObjectVersions(bucket)
+	if err != nil {
+		slog.Error(
+			"lifecycle: list versions for noncurrent transition",
+			"bucket",
+			bucket,
+			"err",
+			err,
+		)
+		return
+	}
+
+	for _, v := range versions {
+		if v.IsLatest || !matchPrefix(v.Key, prefix) ||
+			!noncurrentBefore(v.NoncurrentSince, v.LastModified, cutoff) ||
+			v.StorageClass == storageClass {
+			continue
+		}
+		if err := e.storage.SetObjectVersionStorageClass(bucket, v.Key, v.VersionID, storageClass); err != nil {
+			slog.Error(
+				"lifecycle: transition noncurrent version",
+				"bucket", bucket,
+				"key", v.Key,
+				"versionId", v.VersionID,
+				"storageClass", storageClass,
+				"err", err,
+			)
+			continue
+		}
+		slog.Info(
+			"lifecycle: transitioned noncurrent version",
+			"bucket", bucket,
+			"key", v.Key,
+			"versionId", v.VersionID,
+			"storageClass", storageClass,
 		)
 	}
 }

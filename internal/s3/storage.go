@@ -1130,6 +1130,35 @@ func (s *Storage) SetObjectReplicationStatus(bucket, key, status string) error {
 	return s.writeMeta(objPath, meta)
 }
 
+// SetObjectVersionStorageClass updates the StorageClass field on a specific object
+// version (current or archived). Used by the lifecycle engine for NoncurrentVersionTransition.
+func (s *Storage) SetObjectVersionStorageClass(bucket, key, versionID, storageClass string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.bucketExistsLocked(bucket) {
+		return ErrBucketNotFound
+	}
+
+	// Check current version first.
+	objPath := filepath.Join(bucket, key)
+	if cm, err := s.readMeta(objPath); err == nil && cm.VersionID == versionID {
+		cm.StorageClass = storageClass
+		return s.writeMeta(objPath, cm)
+	}
+
+	// Fall back to archived version.
+	vp := verPath(bucket, key, versionID)
+	vm, err := s.readMeta(vp)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return ErrObjectNotFound
+		}
+		return err // untestable: non-ErrNotExist readMeta failure cannot be injected via current test helpers
+	}
+	vm.StorageClass = storageClass
+	return s.writeMeta(vp, vm)
+}
+
 func (s *Storage) ListObjects(bucket string) ([]ObjectInfo, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
