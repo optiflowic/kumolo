@@ -83,6 +83,18 @@ const (
 	OpBeginsWith = "begins_with"
 )
 
+const (
+	tagKeyMinLength   = 1
+	tagKeyMaxLength   = 128
+	tagValueMaxLength = 256
+	tagMaxCount       = 50
+
+	errMsgTagKeyLength   = "Tag keys must be between 1 and 128 characters in length"
+	errMsgTagValueLength = "Tag values must be between 0 and 256 characters in length"
+	errMsgTagKeyEmpty    = "Tag keys must not be empty"
+	errMsgTagLimit       = "Too many tags. The table has more than 50 tags after this request."
+)
+
 // SortKeyCondition describes an optional sort key filter applied during Query.
 type SortKeyCondition struct {
 	Name     string

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -3386,6 +3387,130 @@ func TestHandleTagResource(t *testing.T) {
 		assert.Equal(t, "via", tags2[0].(map[string]any)["Key"])
 	})
 
+	t.Run("400 for empty tag key", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		arn := tableARNFor("test-table")
+		w := dynamo(
+			t,
+			ro,
+			"TagResource",
+			`{"ResourceArn":"`+arn+`","Tags":[{"Key":"","Value":"v"}]}`,
+		)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, ErrTypeValidationException)
+	})
+
+	t.Run("400 for tag key exceeding 128 chars", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		arn := tableARNFor("test-table")
+		longKey := strings.Repeat("k", 129)
+		w := dynamo(
+			t,
+			ro,
+			"TagResource",
+			`{"ResourceArn":"`+arn+`","Tags":[{"Key":"`+longKey+`","Value":"v"}]}`,
+		)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, ErrTypeValidationException)
+	})
+
+	t.Run("200 for tag key at exactly 128 Unicode runes", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		arn := tableARNFor("test-table")
+		key128 := strings.Repeat("界", 128)
+		w := dynamo(
+			t,
+			ro,
+			"TagResource",
+			`{"ResourceArn":"`+arn+`","Tags":[{"Key":"`+key128+`","Value":"v"}]}`,
+		)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("400 for tag key exceeding 128 Unicode runes", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		arn := tableARNFor("test-table")
+		key129 := strings.Repeat("界", 129)
+		w := dynamo(
+			t,
+			ro,
+			"TagResource",
+			`{"ResourceArn":"`+arn+`","Tags":[{"Key":"`+key129+`","Value":"v"}]}`,
+		)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, ErrTypeValidationException)
+	})
+
+	t.Run("400 for tag value exceeding 256 chars", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		arn := tableARNFor("test-table")
+		longVal := strings.Repeat("v", 257)
+		w := dynamo(
+			t,
+			ro,
+			"TagResource",
+			`{"ResourceArn":"`+arn+`","Tags":[{"Key":"k","Value":"`+longVal+`"}]}`,
+		)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, ErrTypeValidationException)
+	})
+
+	t.Run("200 for tag value at exactly 256 Unicode runes", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		arn := tableARNFor("test-table")
+		val256 := strings.Repeat("界", 256)
+		w := dynamo(
+			t,
+			ro,
+			"TagResource",
+			`{"ResourceArn":"`+arn+`","Tags":[{"Key":"k","Value":"`+val256+`"}]}`,
+		)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("400 for tag value exceeding 256 Unicode runes", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		arn := tableARNFor("test-table")
+		val257 := strings.Repeat("界", 257)
+		w := dynamo(
+			t,
+			ro,
+			"TagResource",
+			`{"ResourceArn":"`+arn+`","Tags":[{"Key":"k","Value":"`+val257+`"}]}`,
+		)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, ErrTypeValidationException)
+	})
+
+	t.Run("400 when tag count would exceed 50", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		arn := tableARNFor("test-table")
+		// Add 50 tags first.
+		var tags []string
+		for i := range 50 {
+			tags = append(tags, `{"Key":"k`+strconv.Itoa(i)+`","Value":"v"}`)
+		}
+		body := `{"ResourceArn":"` + arn + `","Tags":[` + strings.Join(tags, ",") + `]}`
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "TagResource", body).Code)
+		// Adding one more should exceed 50.
+		w := dynamo(
+			t,
+			ro,
+			"TagResource",
+			`{"ResourceArn":"`+arn+`","Tags":[{"Key":"extra","Value":"v"}]}`,
+		)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, ErrTypeLimitExceededException)
+	})
+
 	t.Run("500 when storage fails", func(t *testing.T) {
 		ro := &Router{storage: &mockStore{
 			tagResourceFn: func(string, map[string]string) error { return errInternal },
@@ -3451,6 +3576,15 @@ func TestHandleUntagResource(t *testing.T) {
 		ro := newTestRouter(t)
 		w := dynamo(t, ro, "UntagResource", `{bad}`)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("400 for empty tag key in TagKeys", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
+		arn := tableARNFor("test-table")
+		w := dynamo(t, ro, "UntagResource", `{"ResourceArn":"`+arn+`","TagKeys":["valid",""]}`)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertErrorType(t, w, ErrTypeValidationException)
 	})
 
 	t.Run("500 when storage fails", func(t *testing.T) {

@@ -52,7 +52,26 @@ HTTP 200, empty body.
 | `Tags` | []Tag with `Key` and `Value` |
 | `NextToken` | Absent in kumolo (pagination not implemented) |
 
-## Implemented Errors (all three operations)
+## Implemented Errors
+
+### TagResource
+
+| Error | HTTP | Condition |
+|---|---|---|
+| `ValidationException` | 400 | Tag key is empty or exceeds 128 chars; tag value exceeds 256 chars |
+| `LimitExceededException` | 400 | Adding tags would result in more than 50 tags on the table |
+| `ResourceNotFoundException` | 400 | Table or index ARN not found |
+| `InternalServerError` | 500 | Storage failure |
+
+### UntagResource
+
+| Error | HTTP | Condition |
+|---|---|---|
+| `ValidationException` | 400 | Any key in `TagKeys` is empty |
+| `ResourceNotFoundException` | 400 | Table or index ARN not found |
+| `InternalServerError` | 500 | Storage failure |
+
+### ListTagsOfResource
 
 | Error | HTTP | Condition |
 |---|---|---|
@@ -61,6 +80,6 @@ HTTP 200, empty body.
 
 ## kumolo-Specific Deviations
 
-- `LimitExceededException` and `ResourceInUseException` are not enforced.
+- `ResourceInUseException` is not enforced.
 - **ListTagsOfResource pagination is not implemented**: `NextToken` is accepted but ignored; all tags are returned in a single response.
 - Real AWS rate limits (TagResource/UntagResource: 5/sec; ListTagsOfResource: 10/sec) are not enforced.

@@ -37,6 +37,15 @@ func (s *Storage) TagResource(resourceARN string, tags map[string]string) error 
 	if meta.Tags == nil {
 		meta.Tags = make(map[string]string, len(tags))
 	}
+	newCount := 0
+	for k := range tags {
+		if _, exists := meta.Tags[k]; !exists {
+			newCount++
+		}
+	}
+	if len(meta.Tags)+newCount > tagMaxCount {
+		return ErrTagLimitExceeded
+	}
 	for k, v := range tags {
 		meta.Tags[k] = v
 	}

@@ -2866,6 +2866,18 @@ func TestTagResource(t *testing.T) {
 		err := s.TagResource(testTableARN, map[string]string{"k": "v"})
 		assert.Error(t, err)
 	})
+
+	t.Run("returns ErrTagLimitExceeded when adding tags would exceed 50", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateTable(testMeta))
+		tags := make(map[string]string, 50)
+		for i := range 50 {
+			tags["k"+strconv.Itoa(i)] = "v"
+		}
+		require.NoError(t, s.TagResource(testTableARN, tags))
+		err := s.TagResource(testTableARN, map[string]string{"extra": "v"})
+		assert.ErrorIs(t, err, ErrTagLimitExceeded)
+	})
 }
 
 func TestUntagResource(t *testing.T) {

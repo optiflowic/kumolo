@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"unicode/utf8"
 )
 
 func (ro *Router) handleTagResource(w http.ResponseWriter, body []byte) {
@@ -35,6 +36,14 @@ func (ro *Router) handleTagResource(w http.ResponseWriter, body []byte) {
 	}
 	tags := make(map[string]string, len(req.Tags))
 	for _, t := range req.Tags {
+		if n := utf8.RuneCountInString(t.Key); n < tagKeyMinLength || n > tagKeyMaxLength {
+			writeError(w, http.StatusBadRequest, ErrTypeValidationException, errMsgTagKeyLength)
+			return
+		}
+		if utf8.RuneCountInString(t.Value) > tagValueMaxLength {
+			writeError(w, http.StatusBadRequest, ErrTypeValidationException, errMsgTagValueLength)
+			return
+		}
 		tags[t.Key] = t.Value
 	}
 	if err := ro.storage.TagResource(req.ResourceArn, tags); err != nil {
@@ -46,6 +55,10 @@ func (ro *Router) handleTagResource(w http.ResponseWriter, body []byte) {
 				ErrTypeResourceNotFoundException,
 				"Requested resource not found: "+req.ResourceArn,
 			)
+			return
+		}
+		if errors.Is(err, ErrTagLimitExceeded) {
+			writeError(w, http.StatusBadRequest, ErrTypeLimitExceededException, errMsgTagLimit)
 			return
 		}
 		slog.Error("TagResource failed", "arn", req.ResourceArn, "err", err)
@@ -83,6 +96,12 @@ func (ro *Router) handleUntagResource(w http.ResponseWriter, body []byte) {
 			"ResourceArn is required",
 		)
 		return
+	}
+	for _, k := range req.TagKeys {
+		if k == "" {
+			writeError(w, http.StatusBadRequest, ErrTypeValidationException, errMsgTagKeyEmpty)
+			return
+		}
 	}
 	if err := ro.storage.UntagResource(req.ResourceArn, req.TagKeys); err != nil {
 		if errors.Is(err, ErrTableNotFound) {
