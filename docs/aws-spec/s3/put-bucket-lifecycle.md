@@ -40,7 +40,7 @@ Deletes noncurrent (non-latest) object versions and delete markers that became n
 
 ## NoncurrentVersionTransition semantics (implementation contract)
 
-Updates the `StorageClass` metadata field on noncurrent versions that became noncurrent more than `NoncurrentDays` ago. No actual data movement occurs — the class is stored as metadata only. Versions already in the target class are skipped. Delete markers are not transitioned.
+Updates the `StorageClass` metadata field on noncurrent versions that became noncurrent more than `NoncurrentDays` ago. No actual data movement occurs — the class is stored as metadata only. Versions already in the target class are skipped. Delete markers are not transitioned. `NewerNoncurrentVersions` is accepted in XML but not evaluated.
 
 ## Kumolo deviations
 

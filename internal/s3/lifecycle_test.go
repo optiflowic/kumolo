@@ -589,6 +589,48 @@ func TestEnforceBucket_NoncurrentVersionTransitionRule(t *testing.T) {
 	assert.Empty(t, store.transitionedVersions["b/new.txt/v4"])
 }
 
+func TestEnforceBucket_NoncurrentVersionTransitionRule_PrefixFilter(t *testing.T) {
+	now := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+
+	store := newFakeLCStore()
+	store.buckets = []BucketInfo{{Name: "b"}}
+	store.versions["b"] = []VersionInfo{
+		// matches prefix → should transition
+		{
+			Key:          "logs/old.txt",
+			VersionID:    "v1",
+			IsLatest:     false,
+			LastModified: now.AddDate(0, 0, -8),
+		},
+		// does not match prefix → must not transition
+		{
+			Key:          "data/old.txt",
+			VersionID:    "v2",
+			IsLatest:     false,
+			LastModified: now.AddDate(0, 0, -8),
+		},
+	}
+	store.lifecycle["b"] = buildLifecycleXML(t, lifecycleConfiguration{
+		Rules: []lifecycleRule{
+			{
+				Status: "Enabled",
+				Filter: &lifecycleFilter{Prefix: "logs/"},
+				NoncurrentVersionTransition: &lifecycleNoncurrentVersionTransition{
+					NoncurrentDays: 7,
+					StorageClass:   "GLACIER",
+				},
+			},
+		},
+	})
+
+	e := NewLifecycleEnforcer(store, time.Minute)
+	e.now = func() time.Time { return now }
+	e.runOnce()
+
+	assert.Equal(t, "GLACIER", store.transitionedVersions["b/logs/old.txt/v1"])
+	assert.Empty(t, store.transitionedVersions["b/data/old.txt/v2"])
+}
+
 func TestEnforceBucket_NoncurrentVersionTransitionRule_ErrorLogged(t *testing.T) {
 	now := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
 

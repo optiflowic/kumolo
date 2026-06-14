@@ -8836,3 +8836,69 @@ func TestObjectLegalHold(t *testing.T) {
 		assert.ErrorAs(t, err, &dme)
 	})
 }
+
+func TestSetObjectVersionStorageClass(t *testing.T) {
+	putObject := func(t *testing.T, s *Storage, bucket, key, content string) ObjectMetadata {
+		t.Helper()
+		meta, err := s.PutObject(
+			bucket, key,
+			strings.NewReader(content),
+			"text/plain", nil,
+			"", "", false, "",
+			nil, nil, "",
+		)
+		require.NoError(t, err)
+		return meta
+	}
+
+	t.Run("returns ErrBucketNotFound for missing bucket", func(t *testing.T) {
+		s := newTestStorage(t)
+		err := s.SetObjectVersionStorageClass("no-bucket", "obj.txt", "v1", "GLACIER")
+		assert.ErrorIs(t, err, ErrBucketNotFound)
+	})
+
+	t.Run("updates StorageClass on current version", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("b", "", false))
+		require.NoError(t, s.PutBucketVersioning("b", "Enabled"))
+
+		meta := putObject(t, s, "b", "obj.txt", "data")
+		require.NotEmpty(t, meta.VersionID)
+
+		require.NoError(
+			t,
+			s.SetObjectVersionStorageClass("b", "obj.txt", meta.VersionID, "GLACIER"),
+		)
+
+		head, err := s.HeadObject("b", "obj.txt")
+		require.NoError(t, err)
+		assert.Equal(t, "GLACIER", head.StorageClass)
+	})
+
+	t.Run("returns ErrObjectNotFound for unknown versionID", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("b", "", false))
+		require.NoError(t, s.PutBucketVersioning("b", "Enabled"))
+		putObject(t, s, "b", "obj.txt", "data")
+
+		err := s.SetObjectVersionStorageClass("b", "obj.txt", "does-not-exist", "GLACIER")
+		assert.ErrorIs(t, err, ErrObjectNotFound)
+	})
+
+	t.Run("updates StorageClass on archived (noncurrent) version", func(t *testing.T) {
+		s := newTestStorage(t)
+		require.NoError(t, s.CreateBucket("b", "", false))
+		require.NoError(t, s.PutBucketVersioning("b", "Enabled"))
+
+		v1 := putObject(t, s, "b", "obj.txt", "v1")
+		require.NotEmpty(t, v1.VersionID)
+		// Second put archives v1.
+		putObject(t, s, "b", "obj.txt", "v2")
+
+		require.NoError(t, s.SetObjectVersionStorageClass("b", "obj.txt", v1.VersionID, "GLACIER"))
+
+		_, archivedMeta, err := s.GetObjectVersion("b", "obj.txt", v1.VersionID)
+		require.NoError(t, err)
+		assert.Equal(t, "GLACIER", archivedMeta.StorageClass)
+	})
+}
