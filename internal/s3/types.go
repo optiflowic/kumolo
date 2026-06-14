@@ -428,6 +428,7 @@ type lifecycleRule struct {
 
 	Expiration                     *lifecycleExpiration                     `xml:"Expiration"`
 	NoncurrentVersionExpiration    *lifecycleNoncurrentVersionExpiration    `xml:"NoncurrentVersionExpiration"`
+	NoncurrentVersionTransition    *lifecycleNoncurrentVersionTransition    `xml:"NoncurrentVersionTransition"`
 	AbortIncompleteMultipartUpload *lifecycleAbortIncompleteMultipartUpload `xml:"AbortIncompleteMultipartUpload"`
 }
 
@@ -443,6 +444,11 @@ type lifecycleExpiration struct {
 
 type lifecycleNoncurrentVersionExpiration struct {
 	NoncurrentDays int `xml:"NoncurrentDays"`
+}
+
+type lifecycleNoncurrentVersionTransition struct {
+	NoncurrentDays int    `xml:"NoncurrentDays"`
+	StorageClass   string `xml:"StorageClass"`
 }
 
 type lifecycleAbortIncompleteMultipartUpload struct {
