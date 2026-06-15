@@ -614,6 +614,72 @@ func TestReplicateDeleteMarker(t *testing.T) {
 		require.NoError(t, err)
 		assert.Len(t, dstMarkers, 2)
 	})
+
+	t.Run("explicit-version delete does not trigger DMR", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.NoError(t, ro.storage.CreateBucket("src", "us-east-1", false))
+		require.NoError(t, ro.storage.CreateBucket("dst", "us-east-1", false))
+		enableVersioning(t, ro, "src")
+		enableVersioning(t, ro, "dst")
+		require.NoError(t, ro.storage.PutBucketReplication("src",
+			buildReplicationCfgWithDMR("arn:aws:s3:::dst", "", "Enabled", "Enabled")))
+
+		putReq := httptest.NewRequest(http.MethodPut, "/src/obj.txt", strings.NewReader("hello"))
+		putReq.Header.Set("Content-Type", "text/plain")
+		putRR := httptest.NewRecorder()
+		ro.ServeHTTP(putRR, putReq)
+		require.Equal(t, http.StatusOK, putRR.Code)
+		versionID := putRR.Header().Get("x-amz-version-id")
+		require.NotEmpty(t, versionID)
+
+		delReq := httptest.NewRequest(http.MethodDelete, "/src/obj.txt?versionId="+versionID, nil)
+		delRR := httptest.NewRecorder()
+		ro.ServeHTTP(delRR, delReq)
+		require.Equal(t, http.StatusNoContent, delRR.Code)
+
+		_, dstMarkers, err := ro.storage.ListObjectVersions("dst")
+		require.NoError(t, err)
+		assert.Empty(t, dstMarkers)
+	})
+
+	t.Run("explicit-version batch delete does not trigger DMR", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.NoError(t, ro.storage.CreateBucket("src", "us-east-1", false))
+		require.NoError(t, ro.storage.CreateBucket("dst", "us-east-1", false))
+		enableVersioning(t, ro, "src")
+		enableVersioning(t, ro, "dst")
+		require.NoError(t, ro.storage.PutBucketReplication("src",
+			buildReplicationCfgWithDMR("arn:aws:s3:::dst", "", "Enabled", "Enabled")))
+
+		putAndGetVersionID := func(key, body string) string {
+			t.Helper()
+			req := httptest.NewRequest(http.MethodPut, "/src/"+key, strings.NewReader(body))
+			req.Header.Set("Content-Type", "text/plain")
+			rr := httptest.NewRecorder()
+			ro.ServeHTTP(rr, req)
+			require.Equal(t, http.StatusOK, rr.Code)
+			id := rr.Header().Get("x-amz-version-id")
+			require.NotEmpty(t, id)
+			return id
+		}
+
+		vidA := putAndGetVersionID("a.txt", "a")
+		vidB := putAndGetVersionID("b.txt", "b")
+
+		body := fmt.Sprintf(
+			`<Delete><Object><Key>a.txt</Key><VersionId>%s</VersionId></Object><Object><Key>b.txt</Key><VersionId>%s</VersionId></Object></Delete>`,
+			vidA,
+			vidB,
+		)
+		req := httptest.NewRequest(http.MethodPost, "/src?delete", strings.NewReader(body))
+		rr := httptest.NewRecorder()
+		ro.ServeHTTP(rr, req)
+		require.Equal(t, http.StatusOK, rr.Code)
+
+		_, dstMarkers, err := ro.storage.ListObjectVersions("dst")
+		require.NoError(t, err)
+		assert.Empty(t, dstMarkers)
+	})
 }
 
 func TestSetObjectReplicationStatus(t *testing.T) {
