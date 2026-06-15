@@ -34,9 +34,17 @@ After each successful `PutObject`, `CopyObject`, or `CompleteMultipartUpload`, k
 - If replication to a destination fails, the failure is logged; the source write succeeds and the source object is not marked `COMPLETED` (its `X-Amz-Replication-Status` remains unset).
 - Object tags are copied to the destination after the object body is replicated.
 
+## Delete marker replication behavior
+
+After each `DeleteObject` or `DeleteObjects` that creates a delete marker (versioning enabled), kumolo evaluates all `Enabled` rules whose `DeleteMarkerReplication.Status` is `Enabled`. For each matching rule:
+
+- A delete marker is written to the destination bucket for the same key via `DeleteObjectVersioned`.
+- The source delete marker is not marked with a replication status (AWS does not set `X-Amz-Replication-Status` on delete markers).
+- Failures are logged and do not affect the response to the caller.
+- `DeleteObject` with an explicit `versionId` permanently removes a version and never creates a delete marker, so it does not trigger delete marker replication.
+
 ## Kumolo deviations
 
 - Replication runs in the same request goroutine (no background job); when `X-Amz-Replication-Status` is present it is always `COMPLETED` or `REPLICA` — never `PENDING` or `FAILED` as in real AWS async replication.
 - Same-instance replication only; cross-instance / real-AWS destination is not supported.
-- Delete marker replication is not implemented.
 - Tag-based filter rules (`Filter/Tag`, `Filter/And/Tag`) are ignored; only key prefix matching is applied.
