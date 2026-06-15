@@ -368,7 +368,15 @@ func TestHandlePresignedPost(t *testing.T) {
 		req.Header.Set("Content-Type", ct)
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusNoContent, w.Code)
+		require.Equal(t, http.StatusNoContent, w.Code)
+
+		// ACL application failed: GetObjectACL returns default private ACL (no AllUsers grant).
+		aclW := httptest.NewRecorder()
+		ro.ServeHTTP(
+			aclW,
+			httptest.NewRequest(http.MethodGet, "/test-bucket/uploads/file.txt?acl", nil),
+		)
+		assert.NotContains(t, aclW.Body.String(), "AllUsers")
 	})
 
 	t.Run("PutObject internal error returns 500 InternalError", func(t *testing.T) {
