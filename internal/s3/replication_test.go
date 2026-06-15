@@ -406,21 +406,6 @@ func TestReplicateObject(t *testing.T) {
 }
 
 func TestReplicateDeleteMarker(t *testing.T) {
-	// enableVersioning enables versioning on the given bucket via the HTTP handler.
-	enableVersioning := func(t *testing.T, ro *Router, bucket string) {
-		t.Helper()
-		req := httptest.NewRequest(
-			http.MethodPut,
-			"/"+bucket+"?versioning",
-			strings.NewReader(
-				`<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`,
-			),
-		)
-		rr := httptest.NewRecorder()
-		ro.ServeHTTP(rr, req)
-		require.Equal(t, http.StatusOK, rr.Code)
-	}
-
 	// putObject creates an object and returns its version ID.
 	putObject := func(t *testing.T, ro *Router, bucket, key, body string) {
 		t.Helper()
@@ -575,6 +560,31 @@ func TestReplicateDeleteMarker(t *testing.T) {
 		// destination bucket does not exist → DeleteObjectVersioned returns ErrBucketNotFound
 		require.NoError(t, ro.storage.PutBucketReplication("src",
 			buildReplicationCfgWithDMR("arn:aws:s3:::nonexistent", "", "Enabled", "Enabled")))
+
+		putObject(t, ro, "src", "obj.txt", "hello")
+		_, isMarker := deleteObject(t, ro, "src", "obj.txt")
+		require.True(t, isMarker)
+		// test passes as long as no panic and response was 204
+	})
+
+	t.Run("malformed replication config is silently skipped", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.NoError(t, ro.storage.CreateBucket("src", "us-east-1", false))
+		enableVersioning(t, ro, "src")
+		require.NoError(t, ro.storage.PutBucketReplication("src", "not-valid-xml"))
+
+		putObject(t, ro, "src", "obj.txt", "hello")
+		_, isMarker := deleteObject(t, ro, "src", "obj.txt")
+		require.True(t, isMarker)
+		// test passes as long as no panic and response was 204
+	})
+
+	t.Run("empty destination ARN is skipped", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.NoError(t, ro.storage.CreateBucket("src", "us-east-1", false))
+		enableVersioning(t, ro, "src")
+		require.NoError(t, ro.storage.PutBucketReplication("src",
+			buildReplicationCfgWithDMR("", "", "Enabled", "Enabled")))
 
 		putObject(t, ro, "src", "obj.txt", "hello")
 		_, isMarker := deleteObject(t, ro, "src", "obj.txt")
