@@ -180,7 +180,7 @@ func TestRouterCreateBucket(t *testing.T) {
 	t.Run("x-amz-object-lock-enabled enables versioning and object lock", func(t *testing.T) {
 		ro := newTestRouter(t)
 		req := httptest.NewRequest(http.MethodPut, "/my-bucket", nil)
-		req.Header.Set(amzObjectLockEnabled, "true")
+		req.Header.Set(amzBucketObjectLockEnabled, "true")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		require.Equal(t, http.StatusOK, w.Code)
@@ -825,7 +825,7 @@ func TestRouterPutObject(t *testing.T) {
 			ro := newTestRouter(t)
 			// Create bucket with Object Lock enabled.
 			createReq := httptest.NewRequest(http.MethodPut, "/my-bucket", nil)
-			createReq.Header.Set(amzObjectLockEnabled, "true")
+			createReq.Header.Set(amzBucketObjectLockEnabled, "true")
 			ro.ServeHTTP(httptest.NewRecorder(), createReq)
 
 			putReq := httptest.NewRequest(
@@ -1732,7 +1732,7 @@ func TestRouterGetObject(t *testing.T) {
 	t.Run("returns Object Lock retention and legal hold headers", func(t *testing.T) {
 		ro := newTestRouter(t)
 		createReq := httptest.NewRequest(http.MethodPut, "/my-bucket", nil)
-		createReq.Header.Set(amzObjectLockEnabled, "true")
+		createReq.Header.Set(amzBucketObjectLockEnabled, "true")
 		ro.ServeHTTP(httptest.NewRecorder(), createReq)
 
 		putReq := httptest.NewRequest(
@@ -2023,7 +2023,7 @@ func TestRouterHeadObject(t *testing.T) {
 	t.Run("returns Object Lock retention and legal hold headers", func(t *testing.T) {
 		ro := newTestRouter(t)
 		createReq := httptest.NewRequest(http.MethodPut, "/my-bucket", nil)
-		createReq.Header.Set(amzObjectLockEnabled, "true")
+		createReq.Header.Set(amzBucketObjectLockEnabled, "true")
 		ro.ServeHTTP(httptest.NewRecorder(), createReq)
 
 		putReq := httptest.NewRequest(
@@ -2820,7 +2820,7 @@ func TestRouterCopyObject(t *testing.T) {
 		ro := newTestRouter(t)
 		// Create dst bucket with Object Lock enabled.
 		createReq := httptest.NewRequest(http.MethodPut, "/dst-bucket", nil)
-		createReq.Header.Set(amzObjectLockEnabled, "true")
+		createReq.Header.Set(amzBucketObjectLockEnabled, "true")
 		ro.ServeHTTP(httptest.NewRecorder(), createReq)
 
 		// Create src bucket and put source object.
@@ -9562,7 +9562,7 @@ func TestObjectLockDefaultRetentionIntegration(t *testing.T) {
 	setupBucket := func(t *testing.T, ro *Router, bucket string) {
 		t.Helper()
 		req := httptest.NewRequest(http.MethodPut, "/"+bucket, nil)
-		req.Header.Set(amzObjectLockEnabled, "true")
+		req.Header.Set(amzBucketObjectLockEnabled, "true")
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
 		require.Equal(t, http.StatusOK, w.Code)
