@@ -376,6 +376,7 @@ func TestHandlePresignedPost(t *testing.T) {
 			aclW,
 			httptest.NewRequest(http.MethodGet, "/test-bucket/uploads/file.txt?acl", nil),
 		)
+		require.Equal(t, http.StatusOK, aclW.Code)
 		assert.NotContains(t, aclW.Body.String(), "AllUsers")
 	})
 
