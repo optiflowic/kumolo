@@ -85,6 +85,14 @@ resource "aws_s3_bucket" "objectlock" {
   object_lock_enabled = true
 }
 
+resource "aws_s3_bucket_versioning" "objectlock" {
+  bucket = aws_s3_bucket.objectlock.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
 resource "aws_s3_bucket_object_lock_configuration" "objectlock" {
   bucket = aws_s3_bucket.objectlock.id
 
