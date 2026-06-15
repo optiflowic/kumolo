@@ -177,26 +177,29 @@ func TestRouterCreateBucket(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "BucketAlreadyOwnedByYou")
 	})
 
-	t.Run("x-amz-object-lock-enabled enables versioning and object lock", func(t *testing.T) {
-		ro := newTestRouter(t)
-		req := httptest.NewRequest(http.MethodPut, "/my-bucket", nil)
-		req.Header.Set(amzBucketObjectLockEnabled, "true")
-		w := httptest.NewRecorder()
-		ro.ServeHTTP(w, req)
-		require.Equal(t, http.StatusOK, w.Code)
+	t.Run(
+		"x-amz-bucket-object-lock-enabled enables versioning and object lock",
+		func(t *testing.T) {
+			ro := newTestRouter(t)
+			req := httptest.NewRequest(http.MethodPut, "/my-bucket", nil)
+			req.Header.Set(amzBucketObjectLockEnabled, "true")
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			require.Equal(t, http.StatusOK, w.Code)
 
-		// Versioning should be Enabled.
-		vReq := httptest.NewRequest(http.MethodGet, "/my-bucket?versioning", nil)
-		vW := httptest.NewRecorder()
-		ro.ServeHTTP(vW, vReq)
-		assert.Contains(t, vW.Body.String(), "Enabled")
+			// Versioning should be Enabled.
+			vReq := httptest.NewRequest(http.MethodGet, "/my-bucket?versioning", nil)
+			vW := httptest.NewRecorder()
+			ro.ServeHTTP(vW, vReq)
+			assert.Contains(t, vW.Body.String(), "Enabled")
 
-		// ObjectLock configuration should reflect enabled.
-		olReq := httptest.NewRequest(http.MethodGet, "/my-bucket?object-lock", nil)
-		olW := httptest.NewRecorder()
-		ro.ServeHTTP(olW, olReq)
-		assert.Contains(t, olW.Body.String(), "ObjectLockEnabled")
-	})
+			// ObjectLock configuration should reflect enabled.
+			olReq := httptest.NewRequest(http.MethodGet, "/my-bucket?object-lock", nil)
+			olW := httptest.NewRecorder()
+			ro.ServeHTTP(olW, olReq)
+			assert.Contains(t, olW.Body.String(), "ObjectLockEnabled")
+		},
+	)
 }
 
 func TestRouterDeleteBucket(t *testing.T) {
