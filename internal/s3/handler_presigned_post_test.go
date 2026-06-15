@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -143,10 +144,15 @@ func TestHandlePresignedPost(t *testing.T) {
 
 			assert.Equal(t, http.StatusSeeOther, w.Code)
 			loc := w.Header().Get("Location")
-			assert.Contains(t, loc, "https://example.com/done")
-			assert.Contains(t, loc, "bucket=test-bucket")
-			assert.Contains(t, loc, "key=uploads")
-			assert.Contains(t, loc, "etag=")
+			u, parseErr := url.Parse(loc)
+			require.NoError(t, parseErr)
+			q := u.Query()
+			assert.Equal(t, "https", u.Scheme)
+			assert.Equal(t, "example.com", u.Host)
+			assert.Equal(t, "/done", u.Path)
+			assert.Equal(t, "test-bucket", q.Get("bucket"))
+			assert.Equal(t, "uploads/photo.jpg", q.Get("key"))
+			assert.NotEmpty(t, q.Get("etag"))
 		},
 	)
 
@@ -337,7 +343,16 @@ func TestHandlePresignedPost(t *testing.T) {
 		req.Header.Set("Content-Type", ct)
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusNoContent, w.Code)
+		require.Equal(t, http.StatusNoContent, w.Code)
+
+		aclW := httptest.NewRecorder()
+		ro.ServeHTTP(
+			aclW,
+			httptest.NewRequest(http.MethodGet, "/test-bucket/uploads/photo.jpg?acl", nil),
+		)
+		assert.Equal(t, http.StatusOK, aclW.Code)
+		assert.Contains(t, aclW.Body.String(), "AllUsers")
+		assert.Contains(t, aclW.Body.String(), "READ")
 	})
 
 	t.Run("PutObject internal error returns 500 InternalError", func(t *testing.T) {
