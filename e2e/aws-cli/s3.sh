@@ -305,6 +305,50 @@ run "GetBucketLifecycleConfiguration" \
 run "DeleteBucketLifecycle" \
   $AWS s3api delete-bucket-lifecycle --bucket "$BUCKET"
 
+# ---------------------------------------------------------------------------
+# BucketLifecycle — NoncurrentVersionExpiration and NoncurrentVersionTransition.
+# Verifies rules are accepted and noncurrent versions are created; enforcement
+# is time-based (NoncurrentDays >= 1) and covered by unit tests.
+# ---------------------------------------------------------------------------
+NONCUR_BUCKET="kumolo-cli-s3-noncurrent-lc"
+cleanup_bucket "$NONCUR_BUCKET"
+run "CreateBucket (noncurrent lifecycle)" \
+  $AWS s3api create-bucket --bucket "$NONCUR_BUCKET"
+run "PutBucketVersioning (noncurrent lifecycle)" \
+  $AWS s3api put-bucket-versioning \
+    --bucket "$NONCUR_BUCKET" \
+    --versioning-configuration Status=Enabled
+
+run "PutBucketLifecycleConfiguration (NoncurrentVersionExpiration + Transition)" \
+  $AWS s3api put-bucket-lifecycle-configuration \
+    --bucket "$NONCUR_BUCKET" \
+    --lifecycle-configuration '{"Rules":[{"ID":"expire-nc","Status":"Enabled","Filter":{},"NoncurrentVersionExpiration":{"NoncurrentDays":1}},{"ID":"transition-nc","Status":"Enabled","Filter":{},"NoncurrentVersionTransitions":[{"NoncurrentDays":1,"StorageClass":"GLACIER"}]}]}'
+
+NONCUR_LC_RESP=$($AWS s3api get-bucket-lifecycle-configuration --bucket "$NONCUR_BUCKET" 2>/dev/null || true)
+NONCUR_RULE_COUNT=$(echo "$NONCUR_LC_RESP" | jq '.Rules | length' 2>/dev/null || echo 0)
+if [[ "$NONCUR_RULE_COUNT" -eq 2 ]]; then
+  ok "GetBucketLifecycleConfiguration (NoncurrentVersion rules: 2 rules stored)"
+else
+  fail "GetBucketLifecycleConfiguration (NoncurrentVersion: expected 2 rules, got $NONCUR_RULE_COUNT)"
+fi
+
+echo "v1-content" > "$TMPFILE"
+$AWS s3api put-object \
+  --bucket "$NONCUR_BUCKET" --key "noncurrent.txt" --body "$TMPFILE" > /dev/null 2>&1 || true
+echo "v2-content" > "$TMPFILE"
+$AWS s3api put-object \
+  --bucket "$NONCUR_BUCKET" --key "noncurrent.txt" --body "$TMPFILE" > /dev/null 2>&1 || true
+
+NONCUR_VERS=$($AWS s3api list-object-versions --bucket "$NONCUR_BUCKET" --prefix "noncurrent.txt" 2>/dev/null || true)
+NONCUR_COUNT=$(echo "$NONCUR_VERS" | jq '[.Versions[]? | select(.IsLatest == false)] | length' 2>/dev/null || echo 0)
+if [[ "$NONCUR_COUNT" -ge 1 ]]; then
+  ok "BucketLifecycle NoncurrentVersionExpiration (noncurrent version present)"
+else
+  fail "BucketLifecycle NoncurrentVersionExpiration (expected >=1 noncurrent version, got $NONCUR_COUNT)"
+fi
+
+cleanup_bucket "$NONCUR_BUCKET"
+
 run "PutBucketEncryption" \
   $AWS s3api put-bucket-encryption \
     --bucket "$BUCKET" \
@@ -409,6 +453,120 @@ else
 fi
 
 cleanup_bucket "$DEST_BUCKET"
+
+# ---------------------------------------------------------------------------
+# BucketReplication — DeleteMarkerReplication: delete marker propagates to dest.
+# ---------------------------------------------------------------------------
+DM_SRC="kumolo-cli-s3-dm-src"
+DM_DEST="kumolo-cli-s3-dm-dest"
+cleanup_bucket "$DM_SRC"
+cleanup_bucket "$DM_DEST"
+
+run "CreateBucket (delete-marker src)" $AWS s3api create-bucket --bucket "$DM_SRC"
+run "PutBucketVersioning (delete-marker src)" \
+  $AWS s3api put-bucket-versioning \
+    --bucket "$DM_SRC" \
+    --versioning-configuration Status=Enabled
+run "CreateBucket (delete-marker dest)" $AWS s3api create-bucket --bucket "$DM_DEST"
+run "PutBucketVersioning (delete-marker dest)" \
+  $AWS s3api put-bucket-versioning \
+    --bucket "$DM_DEST" \
+    --versioning-configuration Status=Enabled
+
+DM_REPL_CONFIG=$(cat <<'JSON'
+{
+  "Role": "arn:aws:iam::000000000000:role/replication-role",
+  "Rules": [{
+    "ID": "replicate-with-delete-markers",
+    "Status": "Enabled",
+    "Filter": {},
+    "Destination": {"Bucket": "arn:aws:s3:::kumolo-cli-s3-dm-dest"},
+    "DeleteMarkerReplication": {"Status": "Enabled"}
+  }]
+}
+JSON
+)
+run "PutBucketReplication (DeleteMarkerReplication enabled)" \
+  $AWS s3api put-bucket-replication \
+    --bucket "$DM_SRC" \
+    --replication-configuration "$DM_REPL_CONFIG"
+
+# Upload an object (replicates to dest), then delete it (creates a delete marker).
+echo "dm-repl-content" > "$TMPFILE"
+$AWS s3api put-object \
+  --bucket "$DM_SRC" --key "dm-obj.txt" --body "$TMPFILE" > /dev/null 2>&1 || true
+$AWS s3api delete-object \
+  --bucket "$DM_SRC" --key "dm-obj.txt" > /dev/null 2>&1 || true
+
+DM_DEST_VERS=$($AWS s3api list-object-versions --bucket "$DM_DEST" 2>/dev/null || true)
+DM_MARKER_COUNT=$(echo "$DM_DEST_VERS" | jq '[.DeleteMarkers[]? | select(.Key=="dm-obj.txt")] | length' 2>/dev/null || echo 0)
+if [[ "$DM_MARKER_COUNT" -ge 1 ]]; then
+  ok "BucketReplication DeleteMarkerReplication (delete marker replicated to destination)"
+else
+  fail "BucketReplication DeleteMarkerReplication (expected delete marker in dest, got $DM_MARKER_COUNT)"
+fi
+
+cleanup_bucket "$DM_SRC"
+cleanup_bucket "$DM_DEST"
+
+# ---------------------------------------------------------------------------
+# ObjectLock — DefaultRetention applied automatically to new objects.
+# Creates an object-lock-enabled bucket, sets DefaultRetention (GOVERNANCE,
+# 1 day), uploads an object, and verifies GetObjectRetention reflects the mode.
+# Cleanup bypasses GOVERNANCE retention.
+# ---------------------------------------------------------------------------
+OL_BUCKET="kumolo-cli-s3-objectlock-default"
+# Pre-cleanup: bypass retention from any previous run (guard against missing bucket).
+if $AWS s3api head-bucket --bucket "$OL_BUCKET" > /dev/null 2>&1; then
+  $AWS s3api list-object-versions --bucket "$OL_BUCKET" \
+      --output text --query 'Versions[].[Key,VersionId]' 2>/dev/null | \
+    while IFS=$'\t' read -r key vid _rest; do
+      [[ -z "$key" || "$key" == "None" ]] && continue
+      $AWS s3api delete-object \
+        --bucket "$OL_BUCKET" --key "$key" --version-id "$vid" \
+        --bypass-governance-retention > /dev/null 2>&1 || true
+    done || true
+  $AWS s3api delete-bucket --bucket "$OL_BUCKET" > /dev/null 2>&1 || true
+fi
+
+run "CreateBucket (ObjectLock enabled)" \
+  $AWS s3api create-bucket --bucket "$OL_BUCKET" --object-lock-enabled-for-bucket
+
+run "PutObjectLockConfiguration (DefaultRetention GOVERNANCE 1 day)" \
+  $AWS s3api put-object-lock-configuration \
+    --bucket "$OL_BUCKET" \
+    --object-lock-configuration '{"ObjectLockEnabled":"Enabled","Rule":{"DefaultRetention":{"Mode":"GOVERNANCE","Days":1}}}'
+
+OL_CONFIG=$($AWS s3api get-object-lock-configuration --bucket "$OL_BUCKET" 2>/dev/null || true)
+OL_CFG_MODE=$(echo "$OL_CONFIG" | jq -r '.ObjectLockConfiguration.Rule.DefaultRetention.Mode // empty' 2>/dev/null || true)
+if [[ "$OL_CFG_MODE" == "GOVERNANCE" ]]; then
+  ok "GetObjectLockConfiguration (DefaultRetention Mode=GOVERNANCE stored)"
+else
+  fail "GetObjectLockConfiguration (expected GOVERNANCE, got '$OL_CFG_MODE')"
+fi
+
+echo "locked-content" > "$TMPFILE"
+$AWS s3api put-object \
+  --bucket "$OL_BUCKET" --key "retained.txt" --body "$TMPFILE" > /dev/null 2>&1 || true
+
+OL_RET=$($AWS s3api get-object-retention --bucket "$OL_BUCKET" --key "retained.txt" 2>/dev/null || true)
+OL_RET_MODE=$(echo "$OL_RET" | jq -r '.Retention.Mode // empty' 2>/dev/null || true)
+if [[ "$OL_RET_MODE" == "GOVERNANCE" ]]; then
+  ok "ObjectLock DefaultRetention (new object inherits GOVERNANCE mode)"
+else
+  fail "ObjectLock DefaultRetention (expected GOVERNANCE retention on new object, got '$OL_RET_MODE')"
+fi
+
+# Cleanup: bypass GOVERNANCE retention before deleting the bucket.
+$AWS s3api list-object-versions --bucket "$OL_BUCKET" \
+    --output text --query 'Versions[].[Key,VersionId]' 2>/dev/null | \
+  while IFS=$'\t' read -r key vid _rest; do
+    [[ -z "$key" || "$key" == "None" ]] && continue
+    $AWS s3api delete-object \
+      --bucket "$OL_BUCKET" --key "$key" --version-id "$vid" \
+      --bypass-governance-retention > /dev/null 2>&1 || true
+  done || true
+$AWS s3api delete-bucket --bucket "$OL_BUCKET" > /dev/null 2>&1 || true
 
 # ---------------------------------------------------------------------------
 # SSE-KMS — PutObject with aws:kms; verify header echoed on HeadObject.
@@ -516,6 +674,54 @@ else
   fail "SelectObjectContent (JSON: command failed)"
 fi
 rm -f "$JSON_SELECT_OUT"
+
+# ---------------------------------------------------------------------------
+# PresignedPost — browser-based HTML form upload via POST policy (curl).
+# AWS CLI has no presigned-post command; tests use curl multipart/form-data.
+# Policy and SigV4 fields are accepted and ignored by kumolo.
+# ---------------------------------------------------------------------------
+echo "presigned-post-content" > "$TMPFILE"
+
+# Basic upload: default response is 204 No Content.
+POST_STATUS=$(curl -s -m 10 -o /dev/null -w "%{http_code}" \
+  -F "key=presigned/basic.txt" \
+  -F "Content-Type=text/plain" \
+  -F "file=@${TMPFILE};type=text/plain" \
+  "${ENDPOINT}/${BUCKET}")
+if [[ "$POST_STATUS" == "204" ]]; then
+  ok "PresignedPost (default 204 No Content)"
+else
+  fail "PresignedPost (default: expected 204, got $POST_STATUS)"
+fi
+
+run "HeadObject (PresignedPost basic upload)" \
+  $AWS s3api head-object --bucket "$BUCKET" --key "presigned/basic.txt"
+
+# success_action_status=201 returns 201 with PostResponse XML body.
+POST_201_BODY=$(curl -s -m 10 \
+  -F "key=presigned/status201.txt" \
+  -F "success_action_status=201" \
+  -F "file=@${TMPFILE};type=text/plain" \
+  "${ENDPOINT}/${BUCKET}")
+if echo "$POST_201_BODY" | grep -q "<PostResponse>"; then
+  ok "PresignedPost (success_action_status=201 returns PostResponse XML)"
+else
+  fail "PresignedPost (success_action_status=201: expected PostResponse XML, got: $(echo "$POST_201_BODY" | head -3))"
+fi
+
+# \${filename} substitution: key field contains \${filename}, resolved from the
+# filename parameter in the file part's Content-Disposition header.
+POST_FN_STATUS=$(curl -s -m 10 -o /dev/null -w "%{http_code}" \
+  -F 'key=presigned/${filename}' \
+  -F "file=@${TMPFILE};filename=uploaded.txt;type=text/plain" \
+  "${ENDPOINT}/${BUCKET}")
+if [[ "$POST_FN_STATUS" == "204" ]]; then
+  ok "PresignedPost (\${filename} substitution: 204)"
+else
+  fail "PresignedPost (\${filename} substitution: expected 204, got $POST_FN_STATUS)"
+fi
+run "HeadObject (PresignedPost \${filename} → presigned/uploaded.txt)" \
+  $AWS s3api head-object --bucket "$BUCKET" --key "presigned/uploaded.txt"
 
 # ---------------------------------------------------------------------------
 # ACL enforcement — verify anonymous access is controlled by object ACL.
