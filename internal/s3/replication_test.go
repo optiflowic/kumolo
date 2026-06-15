@@ -82,6 +82,18 @@ func buildReplicationCfg(destARN, prefix, status string) string {
 	)
 }
 
+// buildReplicationCfgWithDMR builds a ReplicationConfiguration that includes
+// a DeleteMarkerReplication element.
+func buildReplicationCfgWithDMR(destARN, prefix, ruleStatus, dmrStatus string) string {
+	return fmt.Sprintf(
+		`<ReplicationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Role>arn:aws:iam::000000000000:role/replication-role</Role><Rule><Status>%s</Status><Filter><Prefix>%s</Prefix></Filter><Destination><Bucket>%s</Bucket></Destination><DeleteMarkerReplication><Status>%s</Status></DeleteMarkerReplication></Rule></ReplicationConfiguration>`,
+		ruleStatus,
+		prefix,
+		destARN,
+		dmrStatus,
+	)
+}
+
 func TestReplicateObject(t *testing.T) {
 	t.Run("object is copied to destination bucket", func(t *testing.T) {
 		ro := newTestRouter(t)
@@ -390,6 +402,207 @@ func TestReplicateObject(t *testing.T) {
 		ro.ServeHTTP(gr2, get2)
 		require.Equal(t, http.StatusOK, gr2.Code)
 		assert.Equal(t, "REPLICA", gr2.Header().Get("X-Amz-Replication-Status"))
+	})
+}
+
+func TestReplicateDeleteMarker(t *testing.T) {
+	// enableVersioning enables versioning on the given bucket via the HTTP handler.
+	enableVersioning := func(t *testing.T, ro *Router, bucket string) {
+		t.Helper()
+		req := httptest.NewRequest(
+			http.MethodPut,
+			"/"+bucket+"?versioning",
+			strings.NewReader(
+				`<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`,
+			),
+		)
+		rr := httptest.NewRecorder()
+		ro.ServeHTTP(rr, req)
+		require.Equal(t, http.StatusOK, rr.Code)
+	}
+
+	// putObject creates an object and returns its version ID.
+	putObject := func(t *testing.T, ro *Router, bucket, key, body string) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPut, "/"+bucket+"/"+key, strings.NewReader(body))
+		req.Header.Set("Content-Type", "text/plain")
+		rr := httptest.NewRecorder()
+		ro.ServeHTTP(rr, req)
+		require.Equal(t, http.StatusOK, rr.Code)
+	}
+
+	// deleteObject performs a DELETE and returns (versionID, isDeleteMarker).
+	deleteObject := func(t *testing.T, ro *Router, bucket, key string) (string, bool) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodDelete, "/"+bucket+"/"+key, nil)
+		rr := httptest.NewRecorder()
+		ro.ServeHTTP(rr, req)
+		require.Equal(t, http.StatusNoContent, rr.Code)
+		return rr.Header().Get("x-amz-version-id"), rr.Header().Get("x-amz-delete-marker") == "true"
+	}
+
+	t.Run("delete marker is replicated when DMR enabled", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.NoError(t, ro.storage.CreateBucket("src", "us-east-1", false))
+		require.NoError(t, ro.storage.CreateBucket("dst", "us-east-1", false))
+		enableVersioning(t, ro, "src")
+		enableVersioning(t, ro, "dst")
+		require.NoError(t, ro.storage.PutBucketReplication("src",
+			buildReplicationCfgWithDMR("arn:aws:s3:::dst", "", "Enabled", "Enabled")))
+
+		putObject(t, ro, "src", "obj.txt", "hello")
+		_, isMarker := deleteObject(t, ro, "src", "obj.txt")
+		require.True(t, isMarker)
+
+		// destination should have a delete marker
+		_, dstMarkers, err := ro.storage.ListObjectVersions("dst")
+		require.NoError(t, err)
+		assert.Len(t, dstMarkers, 1)
+		assert.Equal(t, "obj.txt", dstMarkers[0].Key)
+
+		// GET on destination should return 404 with x-amz-delete-marker: true
+		// (unversioned access to a delete marker returns 404 per S3 spec)
+		get := httptest.NewRequest(http.MethodGet, "/dst/obj.txt", nil)
+		gr := httptest.NewRecorder()
+		ro.ServeHTTP(gr, get)
+		assert.Equal(t, http.StatusNotFound, gr.Code)
+		assert.Equal(t, "true", gr.Header().Get("x-amz-delete-marker"))
+	})
+
+	t.Run("delete marker not replicated when DMR disabled", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.NoError(t, ro.storage.CreateBucket("src", "us-east-1", false))
+		require.NoError(t, ro.storage.CreateBucket("dst", "us-east-1", false))
+		enableVersioning(t, ro, "src")
+		enableVersioning(t, ro, "dst")
+		require.NoError(t, ro.storage.PutBucketReplication("src",
+			buildReplicationCfgWithDMR("arn:aws:s3:::dst", "", "Enabled", "Disabled")))
+
+		putObject(t, ro, "src", "obj.txt", "hello")
+		_, isMarker := deleteObject(t, ro, "src", "obj.txt")
+		require.True(t, isMarker)
+
+		_, dstMarkers, err := ro.storage.ListObjectVersions("dst")
+		require.NoError(t, err)
+		assert.Empty(t, dstMarkers)
+	})
+
+	t.Run("delete marker not replicated when DMR element absent", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.NoError(t, ro.storage.CreateBucket("src", "us-east-1", false))
+		require.NoError(t, ro.storage.CreateBucket("dst", "us-east-1", false))
+		enableVersioning(t, ro, "src")
+		enableVersioning(t, ro, "dst")
+		// Config without DeleteMarkerReplication element
+		require.NoError(t, ro.storage.PutBucketReplication("src",
+			buildReplicationCfg("arn:aws:s3:::dst", "", "Enabled")))
+
+		putObject(t, ro, "src", "obj.txt", "hello")
+		_, isMarker := deleteObject(t, ro, "src", "obj.txt")
+		require.True(t, isMarker)
+
+		_, dstMarkers, err := ro.storage.ListObjectVersions("dst")
+		require.NoError(t, err)
+		assert.Empty(t, dstMarkers)
+	})
+
+	t.Run("prefix filter is respected", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.NoError(t, ro.storage.CreateBucket("src", "us-east-1", false))
+		require.NoError(t, ro.storage.CreateBucket("dst", "us-east-1", false))
+		enableVersioning(t, ro, "src")
+		enableVersioning(t, ro, "dst")
+		require.NoError(t, ro.storage.PutBucketReplication("src",
+			buildReplicationCfgWithDMR("arn:aws:s3:::dst", "logs/", "Enabled", "Enabled")))
+
+		putObject(t, ro, "src", "logs/2026.log", "log")
+		_, isMarker := deleteObject(t, ro, "src", "logs/2026.log")
+		require.True(t, isMarker)
+
+		_, dstMarkers, err := ro.storage.ListObjectVersions("dst")
+		require.NoError(t, err)
+		assert.Len(t, dstMarkers, 1)
+
+		// key outside prefix is not replicated
+		putObject(t, ro, "src", "data/file.txt", "data")
+		_, isMarker2 := deleteObject(t, ro, "src", "data/file.txt")
+		require.True(t, isMarker2)
+
+		_, dstMarkers2, err := ro.storage.ListObjectVersions("dst")
+		require.NoError(t, err)
+		assert.Len(t, dstMarkers2, 1) // still 1, data/file.txt not replicated
+	})
+
+	t.Run("disabled rule is skipped", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.NoError(t, ro.storage.CreateBucket("src", "us-east-1", false))
+		require.NoError(t, ro.storage.CreateBucket("dst", "us-east-1", false))
+		enableVersioning(t, ro, "src")
+		enableVersioning(t, ro, "dst")
+		require.NoError(t, ro.storage.PutBucketReplication("src",
+			buildReplicationCfgWithDMR("arn:aws:s3:::dst", "", "Disabled", "Enabled")))
+
+		putObject(t, ro, "src", "obj.txt", "hello")
+		_, isMarker := deleteObject(t, ro, "src", "obj.txt")
+		require.True(t, isMarker)
+
+		_, dstMarkers, err := ro.storage.ListObjectVersions("dst")
+		require.NoError(t, err)
+		assert.Empty(t, dstMarkers)
+	})
+
+	t.Run("non-versioned delete does not trigger DMR", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.NoError(t, ro.storage.CreateBucket("src", "us-east-1", false))
+		require.NoError(t, ro.storage.CreateBucket("dst", "us-east-1", false))
+		// versioning NOT enabled on src — DeleteObjectVersioned produces no marker
+		require.NoError(t, ro.storage.PutBucketReplication("src",
+			buildReplicationCfgWithDMR("arn:aws:s3:::dst", "", "Enabled", "Enabled")))
+
+		putObject(t, ro, "src", "obj.txt", "hello")
+		_, isMarker := deleteObject(t, ro, "src", "obj.txt")
+		require.False(t, isMarker)
+
+		_, dstMarkers, err := ro.storage.ListObjectVersions("dst")
+		require.NoError(t, err)
+		assert.Empty(t, dstMarkers)
+	})
+
+	t.Run("failure is silently logged", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.NoError(t, ro.storage.CreateBucket("src", "us-east-1", false))
+		enableVersioning(t, ro, "src")
+		// destination bucket does not exist → DeleteObjectVersioned returns ErrBucketNotFound
+		require.NoError(t, ro.storage.PutBucketReplication("src",
+			buildReplicationCfgWithDMR("arn:aws:s3:::nonexistent", "", "Enabled", "Enabled")))
+
+		putObject(t, ro, "src", "obj.txt", "hello")
+		_, isMarker := deleteObject(t, ro, "src", "obj.txt")
+		require.True(t, isMarker)
+		// test passes as long as no panic and response was 204
+	})
+
+	t.Run("delete marker replicated via DeleteObjects batch", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.NoError(t, ro.storage.CreateBucket("src", "us-east-1", false))
+		require.NoError(t, ro.storage.CreateBucket("dst", "us-east-1", false))
+		enableVersioning(t, ro, "src")
+		enableVersioning(t, ro, "dst")
+		require.NoError(t, ro.storage.PutBucketReplication("src",
+			buildReplicationCfgWithDMR("arn:aws:s3:::dst", "", "Enabled", "Enabled")))
+
+		putObject(t, ro, "src", "a.txt", "a")
+		putObject(t, ro, "src", "b.txt", "b")
+
+		body := `<Delete><Object><Key>a.txt</Key></Object><Object><Key>b.txt</Key></Object></Delete>`
+		req := httptest.NewRequest(http.MethodPost, "/src?delete", strings.NewReader(body))
+		rr := httptest.NewRecorder()
+		ro.ServeHTTP(rr, req)
+		require.Equal(t, http.StatusOK, rr.Code)
+
+		_, dstMarkers, err := ro.storage.ListObjectVersions("dst")
+		require.NoError(t, err)
+		assert.Len(t, dstMarkers, 2)
 	})
 }
 
