@@ -355,6 +355,22 @@ func TestHandlePresignedPost(t *testing.T) {
 		assert.Contains(t, aclW.Body.String(), "READ")
 	})
 
+	t.Run("PutObjectACL error is logged but upload still succeeds", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{
+			putObjectMeta:   ObjectMetadata{ETag: `"abc123"`},
+			putObjectACLErr: errors.New("disk full"),
+		})
+		fields := append(minPresignedFields("uploads/file.txt"),
+			presignedPostField{"acl", "public-read"},
+		)
+		body, ct := buildPresignedPostBody(t, fields, []byte("data"), "file.txt")
+		req := httptest.NewRequest(http.MethodPost, "/test-bucket", body)
+		req.Header.Set("Content-Type", ct)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNoContent, w.Code)
+	})
+
 	t.Run("PutObject internal error returns 500 InternalError", func(t *testing.T) {
 		ro := newRouterWithMock(&mockStore{putObjectErr: errors.New("disk full")})
 		body, ct := buildPresignedPostBody(t,
