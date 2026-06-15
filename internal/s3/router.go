@@ -1882,6 +1882,7 @@ func (ro *Router) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 			if err == nil && isMarker {
 				deleteMarker = true
 				deleteMarkerVersionID = vid
+				ro.replicateDeleteMarker(bucket, obj.Key)
 			}
 		}
 		if deleteErr != nil && !errors.Is(deleteErr, ErrObjectNotFound) {

@@ -1068,6 +1068,9 @@ func (ro *Router) handleDeleteObject(w http.ResponseWriter, r *http.Request, buc
 			w.Header().Set(amzDeleteMarker, "true")
 		}
 		w.WriteHeader(http.StatusNoContent)
+		if isMarker {
+			ro.replicateDeleteMarker(bucket, key)
+		}
 	case errors.Is(err, ErrObjectLocked):
 		slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
 			"delete rejected: object locked",

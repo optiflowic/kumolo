@@ -14,11 +14,16 @@ type replicationConfig struct {
 }
 
 type replicationRule struct {
-	ID          string             `xml:"ID"`
-	Status      string             `xml:"Status"`
-	Prefix      string             `xml:"Prefix"` // deprecated top-level prefix
-	Filter      *replicationFilter `xml:"Filter"`
-	Destination replicationDest    `xml:"Destination"`
+	ID                      string                   `xml:"ID"`
+	Status                  string                   `xml:"Status"`
+	Prefix                  string                   `xml:"Prefix"` // deprecated top-level prefix
+	Filter                  *replicationFilter       `xml:"Filter"`
+	Destination             replicationDest          `xml:"Destination"`
+	DeleteMarkerReplication *deleteMarkerReplication `xml:"DeleteMarkerReplication"`
+}
+
+type deleteMarkerReplication struct {
+	Status string `xml:"Status"`
 }
 
 type replicationFilter struct {
@@ -145,6 +150,70 @@ func ruleKeyPrefix(rule replicationRule) string {
 		return rule.Filter.Prefix
 	}
 	return rule.Prefix
+}
+
+// replicateDeleteMarker propagates a delete marker from bucket/key to each enabled
+// replication destination whose rule has DeleteMarkerReplication.Status=Enabled.
+// Errors are logged and never propagated to the caller.
+func (ro *Router) replicateDeleteMarker(bucket, key string) {
+	cfgXML, err := ro.storage.GetBucketReplication(bucket)
+	if err != nil || cfgXML == "" {
+		return
+	}
+
+	var cfg replicationConfig
+	// cfgXML is from a prior authenticated request, not direct external input.
+	if err := xml.Unmarshal([]byte(cfgXML), &cfg); err != nil { //nolint:gosec // G709
+		slog.Warn("replication: failed to parse config", "bucket", bucket, "err", err)
+		return
+	}
+
+	for _, rule := range cfg.Rules {
+		if rule.Status != "Enabled" {
+			continue
+		}
+		if rule.DeleteMarkerReplication == nil || rule.DeleteMarkerReplication.Status != "Enabled" {
+			continue
+		}
+		if prefix := ruleKeyPrefix(rule); !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		destBucket := bucketNameFromARN(rule.Destination.Bucket)
+		if destBucket == "" {
+			slog.Warn( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"replication: invalid destination ARN",
+				"bucket",
+				bucket,
+				"arn",
+				rule.Destination.Bucket,
+			)
+			continue
+		}
+
+		if _, _, err := ro.storage.DeleteObjectVersioned(destBucket, key, false); err != nil {
+			slog.Warn( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+				"replication: delete marker replication failed",
+				"src_bucket",
+				bucket,
+				"key",
+				key,
+				"dest_bucket",
+				destBucket,
+				"err",
+				err,
+			)
+			continue
+		}
+		slog.Info( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+			"replication: delete marker replicated",
+			"src_bucket",
+			bucket,
+			"dest_bucket",
+			destBucket,
+			"key",
+			key,
+		)
+	}
 }
 
 // bucketNameFromARN extracts the bucket name from an S3 ARN
