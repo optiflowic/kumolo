@@ -1514,6 +1514,10 @@ func (s *Storage) PutBucketVersioning(bucket, status string) error {
 		}
 		meta = bucketMeta{}
 	}
+	if status == "Suspended" &&
+		strings.Contains(meta.ObjectLock, "<ObjectLockEnabled>Enabled</ObjectLockEnabled>") {
+		return ErrInvalidBucketState
+	}
 	meta.VersioningStatus = status
 	return s.writeBucketMeta(bucket, meta)
 }

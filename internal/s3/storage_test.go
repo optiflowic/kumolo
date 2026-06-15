@@ -4543,6 +4543,24 @@ func TestBucketVersioning(t *testing.T) {
 		assert.ErrorIs(t, err, ErrBucketNotFound)
 	})
 
+	t.Run(
+		"PutBucketVersioning returns ErrInvalidBucketState when suspending on Object Lock bucket",
+		func(t *testing.T) {
+			s := newTestStorage(t)
+			bucket := "lock-bucket"
+			require.NoError(t, s.CreateBucket(bucket, "us-east-1", true))
+			err := s.PutBucketVersioning(bucket, "Suspended")
+			assert.ErrorIs(t, err, ErrInvalidBucketState)
+		},
+	)
+
+	t.Run("PutBucketVersioning allows Enabled on Object Lock bucket", func(t *testing.T) {
+		s := newTestStorage(t)
+		bucket := "lock-bucket"
+		require.NoError(t, s.CreateBucket(bucket, "us-east-1", true))
+		assert.NoError(t, s.PutBucketVersioning(bucket, "Enabled"))
+	})
+
 	t.Run("GetBucketVersioning returns ErrBucketNotFound for missing bucket", func(t *testing.T) {
 		s := newTestStorage(t)
 		_, err := s.GetBucketVersioning("no-bucket")

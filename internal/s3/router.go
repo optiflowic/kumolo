@@ -1497,7 +1497,8 @@ func (ro *Router) handlePutBucketVersioning(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if err := ro.storage.PutBucketVersioning(bucket, req.Status); err != nil {
-		if errors.Is(err, ErrBucketNotFound) {
+		switch {
+		case errors.Is(err, ErrBucketNotFound):
 			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
 				"bucket not found",
 				"bucket",
@@ -1505,16 +1506,29 @@ func (ro *Router) handlePutBucketVersioning(w http.ResponseWriter, r *http.Reque
 			)
 			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 				"The specified bucket does not exist.")
-			return
+		case errors.Is(err, ErrInvalidBucketState):
+			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"cannot suspend versioning on object lock bucket",
+				"bucket",
+				bucket,
+			)
+			writeError(
+				w,
+				r,
+				http.StatusConflict,
+				"InvalidBucketState",
+				"Object Lock is enabled on this bucket. You cannot suspend versioning on this bucket.",
+			)
+		default:
+			slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+				"failed to put bucket versioning",
+				"bucket",
+				bucket,
+				"err",
+				err,
+			)
+			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		}
-		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-			"failed to put bucket versioning",
-			"bucket",
-			bucket,
-			"err",
-			err,
-		)
-		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
 	slog.Info( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
