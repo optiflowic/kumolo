@@ -34,9 +34,17 @@ Once `now >= Date`, **all** qualified objects (matching filter/prefix) are expir
 ### `Expiration.ExpiredObjectDeleteMarker`
 Removes a delete marker that is `IsLatest` with **no remaining non-marker versions** for the same key. Cannot be specified together with `Days` or `Date` in the same rule.
 
+## NoncurrentVersionExpiration semantics (implementation contract)
+
+Deletes noncurrent (non-latest) object versions and delete markers that became noncurrent more than `NoncurrentDays` ago. Uses `NoncurrentSince` if set; falls back to `LastModified`.
+
+## NoncurrentVersionTransition semantics (implementation contract)
+
+Updates the `StorageClass` metadata field on noncurrent versions that became noncurrent more than `NoncurrentDays` ago. No actual data movement occurs — the class is stored as metadata only. Versions already in the target class are skipped. Delete markers are not transitioned. `NewerNoncurrentVersions` is accepted in XML but not evaluated.
+
 ## Kumolo deviations
 
 - Lifecycle rule evaluation runs on a background interval, not on every object access.
-- `Expiration.Days`, `Expiration.Date`, and `ExpiredObjectDeleteMarker` are evaluated.
-- `NoncurrentVersionTransition` / `NoncurrentVersionExpiration` rules are stored but not evaluated.
+- `Expiration.Days`, `Expiration.Date`, `ExpiredObjectDeleteMarker`, `NoncurrentVersionExpiration`, and `NoncurrentVersionTransition` are evaluated.
+- `NoncurrentVersionTransition` updates the `StorageClass` metadata field only; no actual data movement.
 - Mutual-exclusivity of `ExpiredObjectDeleteMarker` with `Days`/`Date` is not validated on PutBucketLifecycle (AWS returns `InvalidArgument` for this).
