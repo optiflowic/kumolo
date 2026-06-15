@@ -66,8 +66,32 @@ resource "aws_s3_bucket_replication_configuration" "main" {
     id     = "replicate-all"
     status = "Enabled"
 
+    delete_marker_replication {
+      status = "Enabled"
+    }
+
     destination {
       bucket = aws_s3_bucket.replica.arn
+    }
+  }
+}
+
+# ---------------------------------------------------------------------------
+# ObjectLock — DefaultRetention applied automatically to new objects
+# ---------------------------------------------------------------------------
+resource "aws_s3_bucket" "objectlock" {
+  bucket              = "kumolo-tf-verify-objectlock"
+  force_destroy       = true
+  object_lock_enabled = true
+}
+
+resource "aws_s3_bucket_object_lock_configuration" "objectlock" {
+  bucket = aws_s3_bucket.objectlock.id
+
+  rule {
+    default_retention {
+      mode = "GOVERNANCE"
+      days = 1
     }
   }
 }
