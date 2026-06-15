@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"mime"
 	"net/http"
 	"net/url"
 	"os"
@@ -321,6 +322,8 @@ func (ro *Router) routeBucket(w http.ResponseWriter, r *http.Request, bucket str
 	case http.MethodPost:
 		if q.Has("delete") {
 			ro.handleDeleteObjects(w, r, bucket)
+		} else if mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mt == "multipart/form-data" {
+			ro.handlePresignedPost(w, r, bucket)
 		} else {
 			writeNotImplemented(w, r)
 		}
