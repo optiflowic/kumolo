@@ -7,6 +7,7 @@ import (
 	"errors"
 	"hash"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -195,6 +196,15 @@ func (ro *Router) handleUploadPart(w http.ResponseWriter, r *http.Request, bucke
 	}
 	if md5Hash != nil && !bytes.Equal(md5Hash.Sum(nil), expected) {
 		if err := ro.storage.DeletePart(uploadID, partNumber); err != nil {
+			slog.Warn( // #nosec G706 -- uploadId comes from URL query; log injection risk accepted for a local dev emulator
+				"failed to roll back part after Content-MD5 mismatch",
+				"uploadId",
+				uploadID,
+				"partNumber",
+				partNumber,
+				"err",
+				err,
+			)
 		}
 		writeError(w, r, http.StatusBadRequest, "BadDigest",
 			"The Content-MD5 you specified did not match what we received.")
@@ -202,6 +212,15 @@ func (ro *Router) handleUploadPart(w http.ResponseWriter, r *http.Request, bucke
 	}
 	if checksumH != nil && !bytes.Equal(checksumH.Sum(nil), checksumExpected) {
 		if err := ro.storage.DeletePart(uploadID, partNumber); err != nil {
+			slog.Warn( // #nosec G706 -- uploadId comes from URL query; log injection risk accepted for a local dev emulator
+				"failed to roll back part after checksum mismatch",
+				"uploadId",
+				uploadID,
+				"partNumber",
+				partNumber,
+				"err",
+				err,
+			)
 		}
 		writeError(w, r, http.StatusBadRequest, "BadDigest",
 			"The checksum you specified did not match what we received.")

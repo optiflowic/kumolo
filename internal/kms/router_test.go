@@ -952,6 +952,18 @@ func TestWriteJSON_writeFails(t *testing.T) {
 	writeJSON(failWriter{httptest.NewRecorder()}, http.StatusOK, map[string]string{"k": "v"})
 }
 
+func TestResponseRecorderFlush(t *testing.T) {
+	t.Run("flushes when underlying writer implements http.Flusher", func(t *testing.T) {
+		rr := newResponseRecorder(httptest.NewRecorder())
+		rr.Flush() // httptest.ResponseRecorder implements http.Flusher
+	})
+
+	t.Run("no-op when underlying writer does not implement http.Flusher", func(t *testing.T) {
+		rr := newResponseRecorder(failWriter{httptest.NewRecorder()})
+		rr.Flush() // failWriter does not implement http.Flusher
+	})
+}
+
 // escapeJSON escapes a JSON string for embedding inside another JSON string.
 func escapeJSON(s string) string {
 	b, _ := json.Marshal(s)

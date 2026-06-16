@@ -4,6 +4,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -89,6 +90,15 @@ func (ro *Router) handlePresignedPost(w http.ResponseWriter, r *http.Request, bu
 			if cannedACL != "" {
 				if aclXML, aclErr := buildCannedACL(cannedACL); aclErr == nil {
 					if putACLErr := ro.storage.PutObjectACL(bucket, key, aclXML); putACLErr != nil {
+						slog.Error( // #nosec G706 -- bucket/key come from form fields; log injection risk accepted for a local dev emulator
+							"presigned post: failed to apply ACL",
+							"bucket",
+							bucket,
+							"key",
+							key,
+							"err",
+							putACLErr,
+						)
 					}
 				}
 			}

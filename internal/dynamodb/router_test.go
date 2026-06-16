@@ -2843,6 +2843,18 @@ func TestWriteErrorEncoderFail(t *testing.T) {
 	})
 }
 
+func TestResponseRecorderFlush(t *testing.T) {
+	t.Run("flushes when underlying writer implements http.Flusher", func(t *testing.T) {
+		rr := newResponseRecorder(httptest.NewRecorder())
+		rr.Flush() // httptest.ResponseRecorder implements http.Flusher
+	})
+
+	t.Run("no-op when underlying writer does not implement http.Flusher", func(t *testing.T) {
+		rr := newResponseRecorder(&failResponseWriter{})
+		rr.Flush() // failResponseWriter does not implement http.Flusher
+	})
+}
+
 func TestHandleBatchGetItem(t *testing.T) {
 	t.Run("returns found items", func(t *testing.T) {
 		ro := newTestRouter(t)

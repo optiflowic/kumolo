@@ -51,6 +51,12 @@ func (rr *responseRecorder) WriteHeader(status int) {
 	rr.ResponseWriter.WriteHeader(status)
 }
 
+func (rr *responseRecorder) Flush() {
+	if f, ok := rr.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 // emitRequestLog writes one structured log line per KMS request.
 // Level rules: 5xx → Error, 4xx → Debug, 2xx → Info.
 func emitRequestLog(op string, rec *responseRecorder, duration time.Duration) {
@@ -69,11 +75,17 @@ func emitRequestLog(op string, rec *responseRecorder, duration time.Duration) {
 
 	switch {
 	case status >= 500:
-		slog.Error("request", attrs...)
+		slog.Error( // #nosec G706 -- op comes from X-Amz-Target header; log injection risk accepted for a local dev emulator
+			"request",
+			attrs...)
 	case status >= 400:
-		slog.Debug("request", attrs...)
+		slog.Debug( // #nosec G706 -- op comes from X-Amz-Target header; log injection risk accepted for a local dev emulator
+			"request",
+			attrs...)
 	default:
-		slog.Info("request", attrs...)
+		slog.Info( // #nosec G706 -- op comes from X-Amz-Target header; log injection risk accepted for a local dev emulator
+			"request",
+			attrs...)
 	}
 }
 

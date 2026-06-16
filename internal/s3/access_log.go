@@ -191,13 +191,21 @@ func emitRequestLog(r *http.Request, rec *responseRecorder, duration time.Durati
 
 	switch {
 	case status >= 500:
-		slog.Error("request", attrs...)
+		slog.Error( // #nosec G706 -- path/method come from the HTTP request; log injection risk accepted for a local dev emulator
+			"request",
+			attrs...)
 	case status >= 400:
-		slog.Debug("request", attrs...)
+		slog.Debug( // #nosec G706 -- path/method come from the HTTP request; log injection risk accepted for a local dev emulator
+			"request",
+			attrs...)
 	case r.Method == http.MethodGet || r.Method == http.MethodHead:
-		slog.Debug("request", attrs...)
+		slog.Debug( // #nosec G706 -- path/method come from the HTTP request; log injection risk accepted for a local dev emulator
+			"request",
+			attrs...)
 	default:
-		slog.Info("request", attrs...)
+		slog.Info( // #nosec G706 -- path/method come from the HTTP request; log injection risk accepted for a local dev emulator
+			"request",
+			attrs...)
 	}
 }
 

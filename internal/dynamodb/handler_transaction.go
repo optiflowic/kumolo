@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 )
@@ -367,19 +368,32 @@ func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 			for i, r := range txErr.Reasons {
 				codes[i] = r.Code
 			}
+			msg := "Transaction cancelled, please refer cancellation reasons for specific reasons [" +
+				strings.Join(
+					codes,
+					", ",
+				) + "]"
 			type cancelResp struct {
 				Type                string               `json:"__type"`
 				Message             string               `json:"message"`
 				CancellationReasons []CancellationReason `json:"CancellationReasons"`
 			}
+			if rec, ok := w.(*responseRecorder); ok {
+				rec.errCode = ErrTypeTransactionCanceledException
+				rec.errMsg = msg
+			}
 			w.Header().Set("Content-Type", "application/x-amz-json-1.0")
 			w.WriteHeader(http.StatusBadRequest)
 			if encErr := json.NewEncoder(w).Encode(cancelResp{
-				Type: ErrTypeTransactionCanceledException,
-				Message: "Transaction cancelled, please refer cancellation reasons for specific reasons [" +
-					strings.Join(codes, ", ") + "]",
+				Type:                ErrTypeTransactionCanceledException,
+				Message:             msg,
 				CancellationReasons: txErr.Reasons,
 			}); encErr != nil {
+				slog.Warn(
+					"failed to encode TransactionCanceledException",
+					"err",
+					encErr,
+				) // untestable: cancelResp contains no unencodable types
 			}
 			return
 		}

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"hash"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -525,9 +526,24 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 	if md5Hash != nil && !bytes.Equal(md5Hash.Sum(nil), expected) {
 		if meta.VersionID != "" {
 			if _, err := ro.storage.DeleteObjectVersion(bucket, key, meta.VersionID, false); err != nil {
+				slog.Warn( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+					"failed to roll back object version after Content-MD5 mismatch",
+					"bucket",
+					bucket,
+					"key",
+					key,
+					"versionID",
+					meta.VersionID,
+					"err",
+					err,
+				)
 			}
 		} else {
 			if err := ro.storage.DeleteObject(bucket, key, false); err != nil {
+				slog.Warn( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+					"failed to roll back object after Content-MD5 mismatch",
+					"bucket", bucket, "key", key, "err", err,
+				)
 			}
 		}
 		writeError(w, r, http.StatusBadRequest, "BadDigest",
@@ -539,9 +555,24 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 		// storage.PutObject always sets it when versioning is active.
 		if meta.VersionID != "" {
 			if _, err := ro.storage.DeleteObjectVersion(bucket, key, meta.VersionID, false); err != nil {
+				slog.Warn( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+					"failed to roll back object version after checksum mismatch",
+					"bucket",
+					bucket,
+					"key",
+					key,
+					"versionID",
+					meta.VersionID,
+					"err",
+					err,
+				)
 			}
 		} else {
 			if err := ro.storage.DeleteObject(bucket, key, false); err != nil {
+				slog.Warn( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+					"failed to roll back object after checksum mismatch",
+					"bucket", bucket, "key", key, "err", err,
+				)
 			}
 		}
 		writeError(w, r, http.StatusBadRequest, "BadDigest",
@@ -553,9 +584,24 @@ func (ro *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 			if storeErr := ro.storage.PutObjectACL(bucket, key, aclXML); storeErr != nil {
 				if meta.VersionID != "" {
 					if _, err := ro.storage.DeleteObjectVersion(bucket, key, meta.VersionID, false); err != nil {
+						slog.Warn( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+							"failed to roll back object version after ACL persistence failure",
+							"bucket",
+							bucket,
+							"key",
+							key,
+							"versionID",
+							meta.VersionID,
+							"err",
+							err,
+						)
 					}
 				} else {
 					if err := ro.storage.DeleteObject(bucket, key, false); err != nil {
+						slog.Warn( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
+							"failed to roll back object after ACL persistence failure",
+							"bucket", bucket, "key", key, "err", err,
+						)
 					}
 				}
 				writeError(w, r, http.StatusInternalServerError, "InternalError", storeErr.Error())

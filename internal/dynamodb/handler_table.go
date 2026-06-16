@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sort"
 )
@@ -143,6 +144,7 @@ func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 		arn := fmt.Sprintf("arn:aws:dynamodb:us-east-1:000000000000:table/%s", req.TableName)
 		if err := ro.storage.TagResource(arn, tags); err != nil {
 			if delErr := ro.storage.DeleteTable(req.TableName); delErr != nil {
+				slog.Error("CreateTable: rollback failed", "table", req.TableName, "err", delErr)
 			}
 			writeError(
 				w,

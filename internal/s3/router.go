@@ -115,8 +115,9 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rec := newResponseRecorder(w)
 	start := ro.now()
 	ro.serveHTTP(rec, r)
+	duration := ro.now().Sub(start)
 	ro.appendAccessLog(r, rec, start)
-	emitRequestLog(r, rec, ro.now().Sub(start))
+	emitRequestLog(r, rec, duration)
 }
 
 func (ro *Router) serveHTTP(w http.ResponseWriter, r *http.Request) {
