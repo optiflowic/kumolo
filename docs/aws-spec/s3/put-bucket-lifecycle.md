@@ -23,6 +23,8 @@ Optional header sent by the Terraform AWS Provider v6 for general-purpose bucket
 kumolo stores this value in bucket metadata and returns it as `<TransitionDefaultMinimumObjectSize>` in `GetBucketLifecycleConfiguration` responses.
 If the header is absent on a PUT, the stored value is cleared (replaced with empty string).
 
+kumolo returns `InvalidArgument` (400) if the header is present but not one of the two valid values.
+
 ## Response
 
 `HTTP/1.1 200`

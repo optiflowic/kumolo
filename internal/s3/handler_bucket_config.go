@@ -571,65 +571,57 @@ func (ro *Router) handleGetBucketNotification(
 
 func (ro *Router) handlePutBucketLifecycle(w http.ResponseWriter, r *http.Request, bucket string) {
 	transitionMinSize := r.Header.Get("x-amz-transition-default-minimum-object-size")
+	if transitionMinSize != "" &&
+		transitionMinSize != "all_storage_classes_128K" &&
+		transitionMinSize != "varies_by_storage_class" {
+		writeError(w, r, http.StatusBadRequest, "InvalidArgument",
+			"Invalid value for x-amz-transition-default-minimum-object-size.")
+		return
+	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		slog.Debug(
+		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
 			"lifecycle configuration read error",
 			"bucket",
 			bucket,
 			"err",
 			err,
-		) // #nosec G706
-		writeError(
-			w,
-			r,
-			http.StatusBadRequest,
-			"MalformedXML",
-			"The XML you provided was not well-formed.",
 		)
+		writeError(w, r, http.StatusBadRequest, "MalformedXML",
+			"The XML you provided was not well-formed.")
 		return
 	}
 	if !isWellFormedXML(body) {
 		slog.Debug("lifecycle configuration malformed XML", "bucket", bucket) // #nosec G706
-		writeError(
-			w,
-			r,
-			http.StatusBadRequest,
-			"MalformedXML",
-			"The XML you provided was not well-formed.",
-		)
+		writeError(w, r, http.StatusBadRequest, "MalformedXML",
+			"The XML you provided was not well-formed.")
 		return
 	}
 	if err := ro.storage.PutBucketLifecycle(bucket, stripXMLDecl(string(body))); err != nil {
 		if errors.Is(err, ErrBucketNotFound) {
 			slog.Debug("bucket not found", "bucket", bucket) // #nosec G706
-			writeError(
-				w,
-				r,
-				http.StatusNotFound,
-				"NoSuchBucket",
-				"The specified bucket does not exist.",
-			)
+			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+				"The specified bucket does not exist.")
 			return
 		}
-		slog.Error(
+		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
 			"failed to put lifecycle configuration",
 			"bucket",
 			bucket,
 			"err",
 			err,
-		) // #nosec G706
+		)
 		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
 	if err := ro.storage.PutBucketLifecycleTransitionMinSize(bucket, transitionMinSize); err != nil {
-		slog.Error(
+		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
 			"failed to put lifecycle transition min size",
 			"bucket",
 			bucket,
 			"err",
 			err,
-		) // #nosec G706
+		)
 		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
@@ -642,45 +634,35 @@ func (ro *Router) handleGetBucketLifecycle(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		if errors.Is(err, ErrBucketNotFound) {
 			slog.Debug("bucket not found", "bucket", bucket) // #nosec G706
-			writeError(
-				w,
-				r,
-				http.StatusNotFound,
-				"NoSuchBucket",
-				"The specified bucket does not exist.",
-			)
+			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+				"The specified bucket does not exist.")
 			return
 		}
-		slog.Error(
+		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
 			"failed to get lifecycle configuration",
 			"bucket",
 			bucket,
 			"err",
 			err,
-		) // #nosec G706
+		)
 		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
 	if xmlBody == "" {
 		slog.Debug("lifecycle configuration not configured", "bucket", bucket) // #nosec G706
-		writeError(
-			w,
-			r,
-			http.StatusNotFound,
-			"NoSuchLifecycleConfiguration",
-			"The lifecycle configuration does not exist.",
-		)
+		writeError(w, r, http.StatusNotFound, "NoSuchLifecycleConfiguration",
+			"The lifecycle configuration does not exist.")
 		return
 	}
 	transitionMinSize, err := ro.storage.GetBucketLifecycleTransitionMinSize(bucket)
 	if err != nil {
-		slog.Error(
+		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
 			"failed to get lifecycle transition min size",
 			"bucket",
 			bucket,
 			"err",
 			err,
-		) // #nosec G706
+		)
 		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}

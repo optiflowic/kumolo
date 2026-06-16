@@ -7900,6 +7900,17 @@ func TestBucketConfigHandlers(t *testing.T) {
 			assert.Equal(t, http.StatusOK, w.Code)
 		},
 	)
+	t.Run(
+		"PUT lifecycle returns 400 on invalid x-amz-transition-default-minimum-object-size",
+		func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{})
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPut, "/b?lifecycle", strings.NewReader(validXML))
+			req.Header.Set("x-amz-transition-default-minimum-object-size", "invalid_value")
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+		},
+	)
 	t.Run("PUT lifecycle returns 500 when transition min size storage fails", func(t *testing.T) {
 		ro := newRouterWithMock(
 			ms(func(m *mockStore) {
