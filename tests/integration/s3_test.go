@@ -564,22 +564,28 @@ func TestLifecycleConfigRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 
 	// Build the desired rules exactly as Terraform AWS Provider v6 would for our e2e config.
+	const (
+		noncurrentExpirationDays = int32(90)
+		noncurrentTransitionDays = int32(30)
+		multipartAbortDays       = int32(7)
+	)
+	allObjectsPrefix := aws.String("")
 	desiredRules := []s3types.LifecycleRule{
 		{
 			ID:     aws.String("expire-noncurrent"),
 			Status: s3types.ExpirationStatusEnabled,
-			Filter: &s3types.LifecycleRuleFilter{Prefix: aws.String("")},
+			Filter: &s3types.LifecycleRuleFilter{Prefix: allObjectsPrefix},
 			NoncurrentVersionExpiration: &s3types.NoncurrentVersionExpiration{
-				NoncurrentDays: aws.Int32(90),
+				NoncurrentDays: aws.Int32(noncurrentExpirationDays),
 			},
 		},
 		{
 			ID:     aws.String("transition-noncurrent"),
 			Status: s3types.ExpirationStatusEnabled,
-			Filter: &s3types.LifecycleRuleFilter{Prefix: aws.String("")},
+			Filter: &s3types.LifecycleRuleFilter{Prefix: allObjectsPrefix},
 			NoncurrentVersionTransitions: []s3types.NoncurrentVersionTransition{
 				{
-					NoncurrentDays: aws.Int32(30),
+					NoncurrentDays: aws.Int32(noncurrentTransitionDays),
 					StorageClass:   s3types.TransitionStorageClassGlacier,
 				},
 			},
@@ -587,9 +593,9 @@ func TestLifecycleConfigRoundTrip(t *testing.T) {
 		{
 			ID:     aws.String("abort-multipart-uploads"),
 			Status: s3types.ExpirationStatusEnabled,
-			Filter: &s3types.LifecycleRuleFilter{Prefix: aws.String("")},
+			Filter: &s3types.LifecycleRuleFilter{Prefix: allObjectsPrefix},
 			AbortIncompleteMultipartUpload: &s3types.AbortIncompleteMultipartUpload{
-				DaysAfterInitiation: aws.Int32(7),
+				DaysAfterInitiation: aws.Int32(multipartAbortDays),
 			},
 		},
 	}
