@@ -3,14 +3,35 @@ package sts
 import (
 	"encoding/xml"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// testBuffer captures log output in tests.
+type testBuffer struct{ buf []byte }
+
+func (b *testBuffer) Write(p []byte) (int, error) {
+	b.buf = append(b.buf, p...)
+	return len(p), nil
+}
+
+func (b *testBuffer) String() string { return string(b.buf) }
+
+func setLogger(t *testing.T, buf *testBuffer) {
+	t.Helper()
+	orig := slog.Default()
+	slog.SetDefault(
+		slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug})),
+	)
+	t.Cleanup(func() { slog.SetDefault(orig) })
+}
 
 // failWriter is an http.ResponseWriter whose Write fails after failAfter successful calls.
 type failWriter struct {
@@ -292,4 +313,59 @@ func TestUnknownAction(t *testing.T) {
 	assert.Equal(t, "Sender", resp.Error.Type)
 	assert.Equal(t, "InvalidAction", resp.Error.Code)
 	assert.Contains(t, resp.Error.Message, "UnknownAction")
+}
+
+func TestResponseRecorderFlush(t *testing.T) {
+	t.Run("flushes when underlying writer implements http.Flusher", func(t *testing.T) {
+		rr := newResponseRecorder(httptest.NewRecorder())
+		rr.Flush() // httptest.ResponseRecorder implements http.Flusher
+	})
+
+	t.Run("no-op when underlying writer does not implement http.Flusher", func(t *testing.T) {
+		rr := newResponseRecorder(newFailWriter(0))
+		rr.Flush() // failWriter does not implement http.Flusher
+	})
+}
+
+func TestEmitRequestLog(t *testing.T) {
+	makeRec := func(status int, errCode, errMsg string) *responseRecorder {
+		rr := newResponseRecorder(httptest.NewRecorder())
+		rr.status = status
+		rr.errCode = errCode
+		rr.errMsg = errMsg
+		return rr
+	}
+
+	t.Run("2xx logs at INFO", func(t *testing.T) {
+		var buf testBuffer
+		setLogger(t, &buf)
+		emitRequestLog("GetCallerIdentity", makeRec(http.StatusOK, "", ""), time.Millisecond)
+		assert.Contains(t, buf.String(), "INFO")
+		assert.Contains(t, buf.String(), "op=GetCallerIdentity")
+	})
+
+	t.Run("4xx logs at DEBUG with code", func(t *testing.T) {
+		var buf testBuffer
+		setLogger(t, &buf)
+		emitRequestLog(
+			"AssumeRole",
+			makeRec(http.StatusBadRequest, "ValidationError", "bad input"),
+			time.Millisecond,
+		)
+		assert.Contains(t, buf.String(), "DEBUG")
+		assert.Contains(t, buf.String(), "code=ValidationError")
+	})
+
+	t.Run("5xx logs at ERROR with err", func(t *testing.T) {
+		var buf testBuffer
+		setLogger(t, &buf)
+		emitRequestLog(
+			"",
+			makeRec(http.StatusInternalServerError, "InternalFailure", "disk full"),
+			time.Millisecond,
+		)
+		assert.Contains(t, buf.String(), "ERROR")
+		assert.Contains(t, buf.String(), "err=")
+		assert.Contains(t, buf.String(), "disk full")
+	})
 }

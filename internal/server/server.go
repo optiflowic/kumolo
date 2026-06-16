@@ -9,7 +9,6 @@ import (
 
 	"github.com/optiflowic/kumolo/internal/dynamodb"
 	"github.com/optiflowic/kumolo/internal/kms"
-	"github.com/optiflowic/kumolo/internal/logging"
 	"github.com/optiflowic/kumolo/internal/s3"
 	"github.com/optiflowic/kumolo/internal/sts"
 )
@@ -91,5 +90,5 @@ func NewMux(
 		_ = dynamoStorage.Close()
 		_ = kmsStorage.Close()
 	}
-	return logging.Middleware(mux), cleanup, nil
+	return mux, cleanup, nil
 }
