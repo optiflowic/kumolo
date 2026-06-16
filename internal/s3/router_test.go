@@ -6874,6 +6874,20 @@ func TestBucketVersioningHandlers(t *testing.T) {
 			assert.Equal(t, http.StatusNotFound, w.Code)
 		})
 
+		t.Run("returns 409 when suspending versioning on Object Lock bucket", func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{putBucketVersioningErr: ErrInvalidBucketState})
+			body := `<VersioningConfiguration><Status>Suspended</Status></VersioningConfiguration>`
+			req := httptest.NewRequest(
+				http.MethodPut,
+				"/my-bucket?versioning",
+				strings.NewReader(body),
+			)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusConflict, w.Code)
+			assert.Contains(t, w.Body.String(), "InvalidBucketState")
+		})
+
 		t.Run("returns 500 on storage error", func(t *testing.T) {
 			ro := newRouterWithMock(&mockStore{putBucketVersioningErr: errors.New("disk full")})
 			body := `<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`

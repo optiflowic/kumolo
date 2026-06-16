@@ -4543,6 +4543,39 @@ func TestBucketVersioning(t *testing.T) {
 		assert.ErrorIs(t, err, ErrBucketNotFound)
 	})
 
+	t.Run(
+		"PutBucketVersioning returns ErrInvalidBucketState when suspending on Object Lock bucket",
+		func(t *testing.T) {
+			s := newTestStorage(t)
+			bucket := "lock-bucket"
+			require.NoError(t, s.CreateBucket(bucket, "us-east-1", true))
+			err := s.PutBucketVersioning(bucket, "Suspended")
+			assert.ErrorIs(t, err, ErrInvalidBucketState)
+			status, err := s.GetBucketVersioning(bucket)
+			require.NoError(t, err)
+			assert.Equal(t, "Enabled", status)
+		},
+	)
+
+	t.Run(
+		"PutBucketVersioning returns ErrInvalidBucketState when Object Lock XML is unparseable (fail-closed)",
+		func(t *testing.T) {
+			s := newTestStorage(t)
+			bucket := "lock-bucket"
+			require.NoError(t, s.CreateBucket(bucket, "us-east-1", true))
+			require.NoError(t, s.PutBucketObjectLock(bucket, "<invalid"))
+			err := s.PutBucketVersioning(bucket, "Suspended")
+			assert.ErrorIs(t, err, ErrInvalidBucketState)
+		},
+	)
+
+	t.Run("PutBucketVersioning allows Enabled on Object Lock bucket", func(t *testing.T) {
+		s := newTestStorage(t)
+		bucket := "lock-bucket"
+		require.NoError(t, s.CreateBucket(bucket, "us-east-1", true))
+		assert.NoError(t, s.PutBucketVersioning(bucket, "Enabled"))
+	})
+
 	t.Run("GetBucketVersioning returns ErrBucketNotFound for missing bucket", func(t *testing.T) {
 		s := newTestStorage(t)
 		_, err := s.GetBucketVersioning("no-bucket")

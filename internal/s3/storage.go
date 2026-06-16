@@ -1514,6 +1514,9 @@ func (s *Storage) PutBucketVersioning(bucket, status string) error {
 		}
 		meta = bucketMeta{}
 	}
+	if status == "Suspended" && objectLockIsEnabled(meta.ObjectLock) {
+		return ErrInvalidBucketState
+	}
 	meta.VersioningStatus = status
 	return s.writeBucketMeta(bucket, meta)
 }
@@ -2515,6 +2518,19 @@ func (s *Storage) verDirIsEmpty(verDir string) bool {
 		}
 	}
 	return true
+}
+
+func objectLockIsEnabled(xmlBody string) bool {
+	if xmlBody == "" {
+		return false
+	}
+	var cfg struct {
+		ObjectLockEnabled string `xml:"http://s3.amazonaws.com/doc/2006-03-01/ ObjectLockEnabled"`
+	}
+	if err := xml.Unmarshal([]byte(xmlBody), &cfg); err != nil {
+		return true // fail-closed: treat unparseable Object Lock XML as enabled to preserve the invariant
+	}
+	return cfg.ObjectLockEnabled == "Enabled"
 }
 
 // parseBucketDefaultRetention parses a stored ObjectLockConfiguration XML and

@@ -34,6 +34,7 @@ Status must be exactly `Enabled` or `Suspended`. Once enabled, versioning cannot
 |---|---|---|
 | `NoSuchBucket` | 404 | Bucket does not exist |
 | `IllegalVersioningConfigurationException` | 400 | Status is not `Enabled` or `Suspended` |
+| `InvalidBucketState` | 409 | Attempt to suspend versioning on an Object Lock-enabled bucket |
 | `MalformedXML` | 400 | Request body is not valid XML |
 | `InternalError` | 500 | Storage failure |
 
