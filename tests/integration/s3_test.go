@@ -616,11 +616,11 @@ func TestLifecycleConfigRoundTrip(t *testing.T) {
 	assert.Equal(t, desiredTransitionMinSize, getOut.TransitionDefaultMinimumObjectSize,
 		"TransitionDefaultMinimumObjectSize mismatch")
 
-	if !reflect.DeepEqual(desiredRules, getOut.Rules) {
-		t.Logf("desired rules: %#v", desiredRules)
-		t.Logf("actual rules:  %#v", getOut.Rules)
-		t.Fatal(
-			"rules mismatch: reflect.DeepEqual returned false (Terraform provider v6 lifecycleConfigEqual would time out)",
-		)
-	}
+	require.Truef(
+		t,
+		reflect.DeepEqual(desiredRules, getOut.Rules),
+		"rules mismatch: reflect.DeepEqual returned false (Terraform provider v6 lifecycleConfigEqual would time out)\ndesired: %#v\nactual: %#v",
+		desiredRules,
+		getOut.Rules,
+	)
 }
