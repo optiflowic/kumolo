@@ -163,3 +163,44 @@ resource "aws_s3_object" "kms_encrypted" {
   key     = "encrypted.txt"
   content = "KMS-encrypted content via Terraform"
 }
+
+# ---------------------------------------------------------------------------
+# BucketPolicy
+# ---------------------------------------------------------------------------
+resource "aws_s3_bucket_policy" "main" {
+  bucket = aws_s3_bucket.main.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "AllowOwnerGet"
+      Effect    = "Allow"
+      Principal = { AWS = "arn:aws:iam::000000000000:root" }
+      Action    = "s3:GetObject"
+      Resource  = "${aws_s3_bucket.main.arn}/*"
+    }]
+  })
+}
+
+# ---------------------------------------------------------------------------
+# PublicAccessBlock
+# ---------------------------------------------------------------------------
+resource "aws_s3_bucket_public_access_block" "main" {
+  bucket = aws_s3_bucket.main.id
+
+  block_public_acls       = true
+  ignore_public_acls      = true
+  block_public_policy     = true
+  restrict_public_buckets = true
+}
+
+# ---------------------------------------------------------------------------
+# OwnershipControls
+# ---------------------------------------------------------------------------
+resource "aws_s3_bucket_ownership_controls" "main" {
+  bucket = aws_s3_bucket.main.id
+
+  rule {
+    object_ownership = "BucketOwnerPreferred"
+  }
+}

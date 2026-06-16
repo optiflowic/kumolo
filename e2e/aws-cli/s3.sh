@@ -84,6 +84,8 @@ run "PutBucketVersioning (Enable)" \
     --versioning-configuration Status=Enabled
 run "GetBucketVersioning" \
   $AWS s3api get-bucket-versioning --bucket "$BUCKET"
+run "GetBucketLocation" \
+  $AWS s3api get-bucket-location --bucket "$BUCKET"
 
 # Object operations
 echo "hello, kumolo" > "$TMPFILE"
@@ -91,6 +93,7 @@ run "PutObject"        $AWS s3api put-object --bucket "$BUCKET" --key "hello.txt
 run "HeadObject"       $AWS s3api head-object --bucket "$BUCKET" --key "hello.txt"
 run "GetObject"        $AWS s3api get-object  --bucket "$BUCKET" --key "hello.txt" /dev/null
 run "ListObjectsV2"    $AWS s3api list-objects-v2 --bucket "$BUCKET"
+run "ListObjects (v1)" $AWS s3api list-objects    --bucket "$BUCKET"
 
 # ---------------------------------------------------------------------------
 # encoding-type=url — keys with spaces must be percent-encoded in response.
@@ -137,6 +140,8 @@ run "PutObjectTagging" \
     --tagging '{"TagSet":[{"Key":"purpose","Value":"verify"}]}'
 run "GetObjectTagging" \
   $AWS s3api get-object-tagging --bucket "$BUCKET" --key "meta.txt"
+run "DeleteObjectTagging" \
+  $AWS s3api delete-object-tagging --bucket "$BUCKET" --key "meta.txt"
 
 # Copy
 run "CopyObject" \
@@ -288,6 +293,12 @@ run "DeleteObjects" \
     --bucket "$BUCKET" \
     --delete '{"Objects":[{"Key":"hello-copy.txt"},{"Key":"meta.txt"}]}'
 
+# DeleteObject — single object deletion
+echo "delete-me" > "$TMPFILE"
+$AWS s3api put-object --bucket "$BUCKET" --key "to-delete.txt" --body "$TMPFILE" > /dev/null
+run "DeleteObject (single)" \
+  $AWS s3api delete-object --bucket "$BUCKET" --key "to-delete.txt"
+
 # Bucket config operations
 run "PutBucketTagging" \
   $AWS s3api put-bucket-tagging \
@@ -364,6 +375,54 @@ run "PutBucketCors" \
       '{"CORSRules":[{"AllowedOrigins":["*"],"AllowedMethods":["GET","PUT"]}]}'
 run "GetBucketCors"    $AWS s3api get-bucket-cors    --bucket "$BUCKET"
 run "DeleteBucketCors" $AWS s3api delete-bucket-cors --bucket "$BUCKET"
+
+# ---------------------------------------------------------------------------
+# BucketPolicy — store and retrieve an IAM-principal policy.
+# ---------------------------------------------------------------------------
+BUCKET_POLICY=$(cat <<'JSON'
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Sid": "AllowOwnerGet",
+    "Effect": "Allow",
+    "Principal": {"AWS": "arn:aws:iam::000000000000:root"},
+    "Action": "s3:GetObject",
+    "Resource": "arn:aws:s3:::kumolo-cli-s3-verify/*"
+  }]
+}
+JSON
+)
+run "PutBucketPolicy" \
+  $AWS s3api put-bucket-policy --bucket "$BUCKET" --policy "$BUCKET_POLICY"
+run "GetBucketPolicy" \
+  $AWS s3api get-bucket-policy --bucket "$BUCKET"
+run "DeleteBucketPolicy" \
+  $AWS s3api delete-bucket-policy --bucket "$BUCKET"
+
+# ---------------------------------------------------------------------------
+# PublicAccessBlock — store, retrieve, and remove block configuration.
+# ---------------------------------------------------------------------------
+run "PutPublicAccessBlock" \
+  $AWS s3api put-public-access-block \
+    --bucket "$BUCKET" \
+    --public-access-block-configuration \
+      '{"BlockPublicAcls":true,"IgnorePublicAcls":true,"BlockPublicPolicy":true,"RestrictPublicBuckets":true}'
+run "GetPublicAccessBlock" \
+  $AWS s3api get-public-access-block --bucket "$BUCKET"
+run "DeletePublicAccessBlock" \
+  $AWS s3api delete-public-access-block --bucket "$BUCKET"
+
+# ---------------------------------------------------------------------------
+# OwnershipControls — store, retrieve, and remove ownership setting.
+# ---------------------------------------------------------------------------
+run "PutBucketOwnershipControls" \
+  $AWS s3api put-bucket-ownership-controls \
+    --bucket "$BUCKET" \
+    --ownership-controls '{"Rules":[{"ObjectOwnership":"BucketOwnerEnforced"}]}'
+run "GetBucketOwnershipControls" \
+  $AWS s3api get-bucket-ownership-controls --bucket "$BUCKET"
+run "DeleteBucketOwnershipControls" \
+  $AWS s3api delete-bucket-ownership-controls --bucket "$BUCKET"
 
 # ---------------------------------------------------------------------------
 # BucketLogging — configure log delivery and verify a log object is written.
@@ -452,6 +511,9 @@ else
   fail "BucketReplication (expected ReplicationStatus=REPLICA, got '$REPL_STATUS')"
 fi
 
+run "DeleteBucketReplication" \
+  $AWS s3api delete-bucket-replication --bucket "$BUCKET"
+
 cleanup_bucket "$DEST_BUCKET"
 
 # ---------------------------------------------------------------------------
@@ -518,6 +580,16 @@ cleanup_bucket "$DM_DEST"
 OL_BUCKET="kumolo-cli-s3-objectlock-default"
 # Pre-cleanup: bypass retention from any previous run (guard against missing bucket).
 if $AWS s3api head-bucket --bucket "$OL_BUCKET" > /dev/null 2>&1; then
+  # Turn off any active legal holds before deletion (legal hold blocks delete-object
+  # even with --bypass-governance-retention).
+  $AWS s3api list-object-versions --bucket "$OL_BUCKET" \
+      --output text --query 'Versions[].[Key,VersionId]' 2>/dev/null | \
+    while IFS=$'\t' read -r key vid _rest; do
+      [[ -z "$key" || "$key" == "None" ]] && continue
+      $AWS s3api put-object-legal-hold \
+        --bucket "$OL_BUCKET" --key "$key" --version-id "$vid" \
+        --legal-hold '{"Status":"OFF"}' > /dev/null 2>&1 || true
+    done || true
   $AWS s3api list-object-versions --bucket "$OL_BUCKET" \
       --output text --query 'Versions[].[Key,VersionId]' 2>/dev/null | \
     while IFS=$'\t' read -r key vid _rest; do
@@ -556,6 +628,46 @@ if [[ "$OL_RET_MODE" == "GOVERNANCE" ]]; then
 else
   fail "ObjectLock DefaultRetention (expected GOVERNANCE retention on new object, got '$OL_RET_MODE')"
 fi
+
+# PutObjectRetention — explicitly set retention on a new object.
+echo "explicit-retention" > "$TMPFILE"
+$AWS s3api put-object \
+  --bucket "$OL_BUCKET" --key "explicit-retained.txt" --body "$TMPFILE" > /dev/null 2>&1 || true
+RETAIN_DATE="$(( $(date -u '+%Y') + 1 ))-01-01T00:00:00Z"
+run "PutObjectRetention (explicit GOVERNANCE)" \
+  $AWS s3api put-object-retention \
+    --bucket "$OL_BUCKET" \
+    --key "explicit-retained.txt" \
+    --retention "{\"Mode\":\"GOVERNANCE\",\"RetainUntilDate\":\"${RETAIN_DATE}\"}"
+OL_EXPLICIT_RET=$($AWS s3api get-object-retention \
+  --bucket "$OL_BUCKET" --key "explicit-retained.txt" 2>/dev/null || true)
+OL_EXPLICIT_MODE=$(echo "$OL_EXPLICIT_RET" | jq -r '.Retention.Mode // empty' 2>/dev/null || true)
+if [[ "$OL_EXPLICIT_MODE" == "GOVERNANCE" ]]; then
+  ok "GetObjectRetention (explicit: Mode=GOVERNANCE)"
+else
+  fail "GetObjectRetention (explicit: expected GOVERNANCE, got '$OL_EXPLICIT_MODE')"
+fi
+
+# ObjectLegalHold — enable and verify legal hold; disable before cleanup.
+echo "hold-content" > "$TMPFILE"
+$AWS s3api put-object \
+  --bucket "$OL_BUCKET" --key "held.txt" --body "$TMPFILE" > /dev/null 2>&1 || true
+run "PutObjectLegalHold (ON)" \
+  $AWS s3api put-object-legal-hold \
+    --bucket "$OL_BUCKET" \
+    --key "held.txt" \
+    --legal-hold '{"Status":"ON"}'
+OL_HOLD=$($AWS s3api get-object-legal-hold --bucket "$OL_BUCKET" --key "held.txt" 2>/dev/null || true)
+OL_HOLD_STATUS=$(echo "$OL_HOLD" | jq -r '.LegalHold.Status // empty' 2>/dev/null || true)
+if [[ "$OL_HOLD_STATUS" == "ON" ]]; then
+  ok "GetObjectLegalHold (Status=ON)"
+else
+  fail "GetObjectLegalHold (expected ON, got '$OL_HOLD_STATUS')"
+fi
+# Turn off legal hold before cleanup.
+$AWS s3api put-object-legal-hold \
+  --bucket "$OL_BUCKET" --key "held.txt" \
+  --legal-hold '{"Status":"OFF"}' > /dev/null 2>&1 || true
 
 # Cleanup: bypass GOVERNANCE retention before deleting the bucket.
 $AWS s3api list-object-versions --bucket "$OL_BUCKET" \
@@ -676,6 +788,42 @@ fi
 rm -f "$JSON_SELECT_OUT"
 
 # ---------------------------------------------------------------------------
+# UploadPartCopy, ListParts, AbortMultipartUpload — multipart copy flow.
+# ---------------------------------------------------------------------------
+UPC_UPLOAD_ID=$($AWS s3api create-multipart-upload \
+  --bucket "$BUCKET" --key "upc-result.bin" \
+  --query UploadId --output text 2>/dev/null || true)
+if [[ -n "$UPC_UPLOAD_ID" ]]; then
+  UPC_COPY_RESP=$($AWS s3api upload-part-copy \
+    --bucket "$BUCKET" \
+    --key "upc-result.bin" \
+    --upload-id "$UPC_UPLOAD_ID" \
+    --part-number 1 \
+    --copy-source "$BUCKET/hello.txt" 2>/dev/null || true)
+  UPC_ETAG=$(echo "$UPC_COPY_RESP" | jq -r '.CopyPartResult.ETag // empty' 2>/dev/null || true)
+  if [[ -n "$UPC_ETAG" ]]; then
+    ok "UploadPartCopy"
+    UPC_PARTS_RESP=$($AWS s3api list-parts \
+      --bucket "$BUCKET" --key "upc-result.bin" \
+      --upload-id "$UPC_UPLOAD_ID" 2>/dev/null || true)
+    UPC_PART_COUNT=$(echo "$UPC_PARTS_RESP" | jq '.Parts | length' 2>/dev/null || echo 0)
+    if [[ "$UPC_PART_COUNT" -eq 1 ]]; then
+      ok "ListParts (1 part listed)"
+    else
+      fail "ListParts (expected 1 part, got $UPC_PART_COUNT)"
+    fi
+  else
+    fail "UploadPartCopy"
+  fi
+  run "AbortMultipartUpload" \
+    $AWS s3api abort-multipart-upload \
+      --bucket "$BUCKET" --key "upc-result.bin" \
+      --upload-id "$UPC_UPLOAD_ID"
+else
+  fail "UploadPartCopy (CreateMultipartUpload failed)"
+fi
+
+# ---------------------------------------------------------------------------
 # PresignedPost — browser-based HTML form upload via POST policy (curl).
 # AWS CLI has no presigned-post command; tests use curl multipart/form-data.
 # Policy and SigV4 fields are accepted and ignored by kumolo.
@@ -744,6 +892,14 @@ fi
 
 run "PutObjectAcl (private)" \
   $AWS s3api put-object-acl --bucket "$BUCKET" --key "acl-test.txt" --acl private
+
+ACL_RESP=$($AWS s3api get-object-acl --bucket "$BUCKET" --key "acl-test.txt" 2>/dev/null || true)
+ACL_OWNER=$(echo "$ACL_RESP" | jq -r '.Owner.DisplayName // .Owner.ID // empty' 2>/dev/null || true)
+if [[ -n "$ACL_OWNER" ]]; then
+  ok "GetObjectACL (Owner present)"
+else
+  fail "GetObjectACL (expected Owner in response)"
+fi
 
 # Anonymous GET should now be denied.
 ACL_PRIVATE_STATUS=$(curl -s -m 10 -o /dev/null -w "%{http_code}" \
