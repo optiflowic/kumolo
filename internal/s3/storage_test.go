@@ -4863,6 +4863,41 @@ func TestBucketConfigStorage(t *testing.T) {
 		})
 	}
 
+	t.Run("PutBucketLifecycleConfig", func(t *testing.T) {
+		t.Run("writes lifecycle and transition min size atomically", func(t *testing.T) {
+			s, bucket := setup(t)
+			require.NoError(
+				t,
+				s.PutBucketLifecycleConfig(bucket, xmlBody, "all_storage_classes_128K"),
+			)
+			gotXML, err := s.GetBucketLifecycle(bucket)
+			require.NoError(t, err)
+			assert.Equal(t, xmlBody, gotXML)
+			gotMinSize, err := s.GetBucketLifecycleTransitionMinSize(bucket)
+			require.NoError(t, err)
+			assert.Equal(t, "all_storage_classes_128K", gotMinSize)
+		})
+		t.Run("clears transition min size when empty", func(t *testing.T) {
+			s, bucket := setup(t)
+			require.NoError(
+				t,
+				s.PutBucketLifecycleConfig(bucket, xmlBody, "all_storage_classes_128K"),
+			)
+			require.NoError(t, s.PutBucketLifecycleConfig(bucket, xmlBody, ""))
+			got, err := s.GetBucketLifecycleTransitionMinSize(bucket)
+			require.NoError(t, err)
+			assert.Empty(t, got)
+		})
+		t.Run("returns ErrBucketNotFound for missing bucket", func(t *testing.T) {
+			s, _ := setup(t)
+			assert.ErrorIs(
+				t,
+				s.PutBucketLifecycleConfig("no-bucket", xmlBody, ""),
+				ErrBucketNotFound,
+			)
+		})
+	})
+
 	t.Run("LifecycleTransitionMinSize", func(t *testing.T) {
 		t.Run("Put/Get roundtrip", func(t *testing.T) {
 			s, bucket := setup(t)

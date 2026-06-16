@@ -363,13 +363,13 @@ type mockStore struct {
 	putBucketNotificationErr                  error
 	getBucketNotificationResult               string
 	getBucketNotificationErr                  error
-	putBucketLifecycleErr                     error
+	putBucketLifecycleConfigErr               error
+	capturedLifecycleConfigBucket             string
+	capturedLifecycleConfigXML                string
+	capturedLifecycleConfigTransitionMinSize  string
 	getBucketLifecycleResult                  string
 	getBucketLifecycleErr                     error
 	deleteBucketLifecycleErr                  error
-	putBucketLifecycleTransitionMinSizeErr    error
-	capturedLifecycleTransitionMinSizeBucket  string
-	capturedLifecycleTransitionMinSizeValue   string
 	getBucketLifecycleTransitionMinSizeResult string
 	getBucketLifecycleTransitionMinSizeErr    error
 	putBucketWebsiteErr                       error
@@ -625,16 +625,16 @@ func (m *mockStore) GetBucketNotification(_ string) (string, error) {
 	return m.getBucketNotificationResult, m.getBucketNotificationErr
 }
 
-func (m *mockStore) PutBucketLifecycle(_, _ string) error { return m.putBucketLifecycleErr }
+func (m *mockStore) PutBucketLifecycleConfig(bucket, xmlBody, transitionMinSize string) error {
+	m.capturedLifecycleConfigBucket = bucket
+	m.capturedLifecycleConfigXML = xmlBody
+	m.capturedLifecycleConfigTransitionMinSize = transitionMinSize
+	return m.putBucketLifecycleConfigErr
+}
 func (m *mockStore) GetBucketLifecycle(_ string) (string, error) {
 	return m.getBucketLifecycleResult, m.getBucketLifecycleErr
 }
 func (m *mockStore) DeleteBucketLifecycle(_ string) error { return m.deleteBucketLifecycleErr }
-func (m *mockStore) PutBucketLifecycleTransitionMinSize(bucket, v string) error {
-	m.capturedLifecycleTransitionMinSizeBucket = bucket
-	m.capturedLifecycleTransitionMinSizeValue = v
-	return m.putBucketLifecycleTransitionMinSizeErr
-}
 func (m *mockStore) GetBucketLifecycleTransitionMinSize(_ string) (string, error) {
 	return m.getBucketLifecycleTransitionMinSizeResult, m.getBucketLifecycleTransitionMinSizeErr
 }
@@ -7870,7 +7870,7 @@ func TestBucketConfigHandlers(t *testing.T) {
 
 	t.Run("PUT lifecycle returns 404 on bucket not found", func(t *testing.T) {
 		ro := newRouterWithMock(
-			ms(func(m *mockStore) { m.putBucketLifecycleErr = ErrBucketNotFound }),
+			ms(func(m *mockStore) { m.putBucketLifecycleConfigErr = ErrBucketNotFound }),
 		)
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(
@@ -7881,7 +7881,7 @@ func TestBucketConfigHandlers(t *testing.T) {
 	})
 	t.Run("PUT lifecycle returns 500 on storage error", func(t *testing.T) {
 		ro := newRouterWithMock(
-			ms(func(m *mockStore) { m.putBucketLifecycleErr = errors.New("fail") }),
+			ms(func(m *mockStore) { m.putBucketLifecycleConfigErr = errors.New("fail") }),
 		)
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(
@@ -7903,11 +7903,11 @@ func TestBucketConfigHandlers(t *testing.T) {
 			)
 			ro.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusOK, w.Code)
-			assert.Equal(t, "b", store.capturedLifecycleTransitionMinSizeBucket)
+			assert.Equal(t, "b", store.capturedLifecycleConfigBucket)
 			assert.Equal(
 				t,
 				"all_storage_classes_128K",
-				store.capturedLifecycleTransitionMinSizeValue,
+				store.capturedLifecycleConfigTransitionMinSize,
 			)
 		},
 	)
@@ -7927,7 +7927,7 @@ func TestBucketConfigHandlers(t *testing.T) {
 			assert.Equal(
 				t,
 				"varies_by_storage_class",
-				store.capturedLifecycleTransitionMinSizeValue,
+				store.capturedLifecycleConfigTransitionMinSize,
 			)
 		},
 	)
@@ -7942,7 +7942,7 @@ func TestBucketConfigHandlers(t *testing.T) {
 				httptest.NewRequest(http.MethodPut, "/b?lifecycle", strings.NewReader(validXML)),
 			)
 			assert.Equal(t, http.StatusOK, w.Code)
-			assert.Equal(t, "", store.capturedLifecycleTransitionMinSizeValue)
+			assert.Equal(t, "", store.capturedLifecycleConfigTransitionMinSize)
 		},
 	)
 	t.Run(
@@ -7956,11 +7956,9 @@ func TestBucketConfigHandlers(t *testing.T) {
 			assert.Equal(t, http.StatusBadRequest, w.Code)
 		},
 	)
-	t.Run("PUT lifecycle returns 500 when transition min size storage fails", func(t *testing.T) {
+	t.Run("PUT lifecycle returns 500 on storage error (atomic write)", func(t *testing.T) {
 		ro := newRouterWithMock(
-			ms(func(m *mockStore) {
-				m.putBucketLifecycleTransitionMinSizeErr = errors.New("fail")
-			}),
+			ms(func(m *mockStore) { m.putBucketLifecycleConfigErr = errors.New("fail") }),
 		)
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(

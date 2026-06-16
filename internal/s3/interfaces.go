@@ -161,10 +161,9 @@ type bucketNotificationStore interface {
 
 // bucketLifecycleStore handles lifecycle configuration.
 type bucketLifecycleStore interface {
-	PutBucketLifecycle(bucket, xmlBody string) error
+	PutBucketLifecycleConfig(bucket, xmlBody, transitionMinSize string) error
 	GetBucketLifecycle(bucket string) (string, error)
 	DeleteBucketLifecycle(bucket string) error
-	PutBucketLifecycleTransitionMinSize(bucket, value string) error
 	GetBucketLifecycleTransitionMinSize(bucket string) (string, error)
 }
 

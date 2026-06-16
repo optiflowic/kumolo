@@ -597,7 +597,7 @@ func (ro *Router) handlePutBucketLifecycle(w http.ResponseWriter, r *http.Reques
 			"The XML you provided was not well-formed.")
 		return
 	}
-	if err := ro.storage.PutBucketLifecycle(bucket, stripXMLDecl(string(body))); err != nil {
+	if err := ro.storage.PutBucketLifecycleConfig(bucket, stripXMLDecl(string(body)), transitionMinSize); err != nil {
 		if errors.Is(err, ErrBucketNotFound) {
 			slog.Debug("bucket not found", "bucket", bucket) // #nosec G706
 			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
@@ -606,17 +606,6 @@ func (ro *Router) handlePutBucketLifecycle(w http.ResponseWriter, r *http.Reques
 		}
 		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
 			"failed to put lifecycle configuration",
-			"bucket",
-			bucket,
-			"err",
-			err,
-		)
-		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
-		return
-	}
-	if err := ro.storage.PutBucketLifecycleTransitionMinSize(bucket, transitionMinSize); err != nil {
-		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-			"failed to put lifecycle transition min size",
 			"bucket",
 			bucket,
 			"err",

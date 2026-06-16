@@ -2252,6 +2252,13 @@ func (s *Storage) GetBucketLifecycle(bucket string) (string, error) {
 	return s.getBucketConfigField(bucket, func(m bucketMeta) string { return m.Lifecycle })
 }
 
+func (s *Storage) PutBucketLifecycleConfig(bucket, xmlBody, transitionMinSize string) error {
+	return s.putBucketConfigField(bucket, func(m *bucketMeta) {
+		m.Lifecycle = xmlBody
+		m.LifecycleTransitionMinSize = transitionMinSize
+	})
+}
+
 func (s *Storage) DeleteBucketLifecycle(bucket string) error {
 	return s.putBucketConfigField(bucket, func(m *bucketMeta) {
 		m.Lifecycle = ""
