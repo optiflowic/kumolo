@@ -4863,6 +4863,50 @@ func TestBucketConfigStorage(t *testing.T) {
 		})
 	}
 
+	t.Run("LifecycleTransitionMinSize", func(t *testing.T) {
+		t.Run("Put/Get roundtrip", func(t *testing.T) {
+			s, bucket := setup(t)
+			require.NoError(
+				t,
+				s.PutBucketLifecycleTransitionMinSize(bucket, "all_storage_classes_128K"),
+			)
+			got, err := s.GetBucketLifecycleTransitionMinSize(bucket)
+			require.NoError(t, err)
+			assert.Equal(t, "all_storage_classes_128K", got)
+		})
+		t.Run("Get returns empty when not set", func(t *testing.T) {
+			s, bucket := setup(t)
+			got, err := s.GetBucketLifecycleTransitionMinSize(bucket)
+			require.NoError(t, err)
+			assert.Empty(t, got)
+		})
+		t.Run("DeleteBucketLifecycle also clears TransitionMinSize", func(t *testing.T) {
+			s, bucket := setup(t)
+			require.NoError(t, s.PutBucketLifecycle(bucket, xmlBody))
+			require.NoError(
+				t,
+				s.PutBucketLifecycleTransitionMinSize(bucket, "all_storage_classes_128K"),
+			)
+			require.NoError(t, s.DeleteBucketLifecycle(bucket))
+			got, err := s.GetBucketLifecycleTransitionMinSize(bucket)
+			require.NoError(t, err)
+			assert.Empty(t, got)
+		})
+		t.Run("Put returns ErrBucketNotFound for missing bucket", func(t *testing.T) {
+			s, _ := setup(t)
+			assert.ErrorIs(
+				t,
+				s.PutBucketLifecycleTransitionMinSize("no-bucket", "all_storage_classes_128K"),
+				ErrBucketNotFound,
+			)
+		})
+		t.Run("Get returns ErrBucketNotFound for missing bucket", func(t *testing.T) {
+			s, _ := setup(t)
+			_, err := s.GetBucketLifecycleTransitionMinSize("no-bucket")
+			assert.ErrorIs(t, err, ErrBucketNotFound)
+		})
+	})
+
 	// configs with Put / Get only (no Delete)
 	type configGetOnly struct {
 		name string

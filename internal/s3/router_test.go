@@ -348,42 +348,45 @@ type mockStore struct {
 	getBucketPolicyErr            error
 	deleteBucketPolicyErr         error
 
-	putPublicAccessBlockErr          error
-	getPublicAccessBlockResult       string
-	getPublicAccessBlockErr          error
-	deletePublicAccessBlockErr       error
-	putBucketEncryptionErr           error
-	getBucketEncryptionResult        string
-	getBucketEncryptionErr           error
-	deleteBucketEncryptionErr        error
-	putBucketOwnershipControlsErr    error
-	getBucketOwnershipControlsResult string
-	getBucketOwnershipControlsErr    error
-	deleteBucketOwnershipControlsErr error
-	putBucketNotificationErr         error
-	getBucketNotificationResult      string
-	getBucketNotificationErr         error
-	putBucketLifecycleErr            error
-	getBucketLifecycleResult         string
-	getBucketLifecycleErr            error
-	deleteBucketLifecycleErr         error
-	putBucketWebsiteErr              error
-	getBucketWebsiteResult           string
-	getBucketWebsiteErr              error
-	deleteBucketWebsiteErr           error
-	putBucketLoggingErr              error
-	getBucketLoggingResult           string
-	getBucketLoggingErr              error
-	putBucketAccelerateErr           error
-	getBucketAccelerateResult        string
-	getBucketAccelerateErr           error
-	putBucketReplicationErr          error
-	getBucketReplicationResult       string
-	getBucketReplicationErr          error
-	deleteBucketReplicationErr       error
-	putBucketRequestPaymentErr       error
-	getBucketRequestPaymentResult    string
-	getBucketRequestPaymentErr       error
+	putPublicAccessBlockErr                   error
+	getPublicAccessBlockResult                string
+	getPublicAccessBlockErr                   error
+	deletePublicAccessBlockErr                error
+	putBucketEncryptionErr                    error
+	getBucketEncryptionResult                 string
+	getBucketEncryptionErr                    error
+	deleteBucketEncryptionErr                 error
+	putBucketOwnershipControlsErr             error
+	getBucketOwnershipControlsResult          string
+	getBucketOwnershipControlsErr             error
+	deleteBucketOwnershipControlsErr          error
+	putBucketNotificationErr                  error
+	getBucketNotificationResult               string
+	getBucketNotificationErr                  error
+	putBucketLifecycleErr                     error
+	getBucketLifecycleResult                  string
+	getBucketLifecycleErr                     error
+	deleteBucketLifecycleErr                  error
+	putBucketLifecycleTransitionMinSizeErr    error
+	getBucketLifecycleTransitionMinSizeResult string
+	getBucketLifecycleTransitionMinSizeErr    error
+	putBucketWebsiteErr                       error
+	getBucketWebsiteResult                    string
+	getBucketWebsiteErr                       error
+	deleteBucketWebsiteErr                    error
+	putBucketLoggingErr                       error
+	getBucketLoggingResult                    string
+	getBucketLoggingErr                       error
+	putBucketAccelerateErr                    error
+	getBucketAccelerateResult                 string
+	getBucketAccelerateErr                    error
+	putBucketReplicationErr                   error
+	getBucketReplicationResult                string
+	getBucketReplicationErr                   error
+	deleteBucketReplicationErr                error
+	putBucketRequestPaymentErr                error
+	getBucketRequestPaymentResult             string
+	getBucketRequestPaymentErr                error
 
 	putBucketObjectLockErr    error
 	getBucketObjectLockResult string
@@ -625,6 +628,12 @@ func (m *mockStore) GetBucketLifecycle(_ string) (string, error) {
 	return m.getBucketLifecycleResult, m.getBucketLifecycleErr
 }
 func (m *mockStore) DeleteBucketLifecycle(_ string) error { return m.deleteBucketLifecycleErr }
+func (m *mockStore) PutBucketLifecycleTransitionMinSize(_, _ string) error {
+	return m.putBucketLifecycleTransitionMinSizeErr
+}
+func (m *mockStore) GetBucketLifecycleTransitionMinSize(_ string) (string, error) {
+	return m.getBucketLifecycleTransitionMinSizeResult, m.getBucketLifecycleTransitionMinSizeErr
+}
 
 func (m *mockStore) PutBucketWebsite(_, _ string) error { return m.putBucketWebsiteErr }
 func (m *mockStore) GetBucketWebsite(_ string) (string, error) {
@@ -7877,6 +7886,33 @@ func TestBucketConfigHandlers(t *testing.T) {
 		)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
+	t.Run(
+		"PUT lifecycle stores x-amz-transition-default-minimum-object-size header",
+		func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{})
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPut, "/b?lifecycle", strings.NewReader(validXML))
+			req.Header.Set(
+				"x-amz-transition-default-minimum-object-size",
+				"all_storage_classes_128K",
+			)
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+		},
+	)
+	t.Run("PUT lifecycle returns 500 when transition min size storage fails", func(t *testing.T) {
+		ro := newRouterWithMock(
+			ms(func(m *mockStore) {
+				m.putBucketLifecycleTransitionMinSizeErr = errors.New("fail")
+			}),
+		)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(
+			w,
+			httptest.NewRequest(http.MethodPut, "/b?lifecycle", strings.NewReader(validXML)),
+		)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
 
 	t.Run("PUT website returns 404 on bucket not found", func(t *testing.T) {
 		ro := newRouterWithMock(
@@ -8118,6 +8154,44 @@ func TestBucketConfigHandlers(t *testing.T) {
 		ro := newRouterWithMock(
 			ms(func(m *mockStore) { m.getBucketLifecycleErr = errors.New("fail") }),
 		)
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/b?lifecycle", nil))
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+	t.Run("GET lifecycle injects TransitionDefaultMinimumObjectSize when set", func(t *testing.T) {
+		const lcXML = `<LifecycleConfiguration><Rule><ID>r</ID><Status>Enabled</Status><Filter/><Expiration><Days>90</Days></Expiration></Rule></LifecycleConfiguration>`
+		ro := newRouterWithMock(ms(func(m *mockStore) {
+			m.getBucketLifecycleResult = lcXML
+			m.getBucketLifecycleTransitionMinSizeResult = "all_storage_classes_128K"
+		}))
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/b?lifecycle", nil))
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(
+			t,
+			w.Body.String(),
+			"<TransitionDefaultMinimumObjectSize>all_storage_classes_128K</TransitionDefaultMinimumObjectSize>",
+		)
+	})
+	t.Run(
+		"GET lifecycle omits TransitionDefaultMinimumObjectSize when not set",
+		func(t *testing.T) {
+			const lcXML = `<LifecycleConfiguration><Rule><ID>r</ID><Status>Enabled</Status><Filter/><Expiration><Days>90</Days></Expiration></Rule></LifecycleConfiguration>`
+			ro := newRouterWithMock(ms(func(m *mockStore) {
+				m.getBucketLifecycleResult = lcXML
+			}))
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/b?lifecycle", nil))
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.NotContains(t, w.Body.String(), "TransitionDefaultMinimumObjectSize")
+		},
+	)
+	t.Run("GET lifecycle 500 when transition min size storage fails", func(t *testing.T) {
+		const lcXML = `<LifecycleConfiguration><Rule><ID>r</ID><Status>Enabled</Status><Filter/><Expiration><Days>90</Days></Expiration></Rule></LifecycleConfiguration>`
+		ro := newRouterWithMock(ms(func(m *mockStore) {
+			m.getBucketLifecycleResult = lcXML
+			m.getBucketLifecycleTransitionMinSizeErr = errors.New("fail")
+		}))
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/b?lifecycle", nil))
 		assert.Equal(t, http.StatusInternalServerError, w.Code)

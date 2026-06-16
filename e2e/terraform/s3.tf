@@ -41,6 +41,38 @@ resource "aws_s3_object" "config" {
 }
 
 # ---------------------------------------------------------------------------
+# BucketLifecycle — NoncurrentVersionExpiration + NoncurrentVersionTransition
+# ---------------------------------------------------------------------------
+resource "aws_s3_bucket_lifecycle_configuration" "main" {
+  depends_on = [aws_s3_bucket_versioning.main]
+
+  bucket = aws_s3_bucket.main.id
+
+  rule {
+    id     = "expire-noncurrent"
+    status = "Enabled"
+
+    filter {}
+
+    noncurrent_version_expiration {
+      noncurrent_days = 90
+    }
+  }
+
+  rule {
+    id     = "transition-noncurrent"
+    status = "Enabled"
+
+    filter {}
+
+    noncurrent_version_transition {
+      noncurrent_days = 30
+      storage_class   = "GLACIER"
+    }
+  }
+}
+
+# ---------------------------------------------------------------------------
 # BucketReplication
 # ---------------------------------------------------------------------------
 resource "aws_s3_bucket" "replica" {

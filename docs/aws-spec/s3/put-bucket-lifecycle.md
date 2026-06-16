@@ -11,6 +11,18 @@
 
 Stores a `LifecycleConfiguration` XML document. Rules are parsed and stored; kumolo evaluates lifecycle rules for archival transitions and expiration.
 
+### Request header: `x-amz-transition-default-minimum-object-size`
+
+Optional header sent by the Terraform AWS Provider v6 for general-purpose buckets.
+
+| Value | Meaning |
+|---|---|
+| `all_storage_classes_128K` | 128 KiB minimum for all storage class transitions |
+| `varies_by_storage_class` | No minimum enforced |
+
+kumolo stores this value in bucket metadata and returns it as `<TransitionDefaultMinimumObjectSize>` in `GetBucketLifecycleConfiguration` responses.
+If the header is absent on a PUT, the stored value is cleared (replaced with empty string).
+
 ## Response
 
 `HTTP/1.1 200`

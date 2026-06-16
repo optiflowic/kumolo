@@ -570,16 +570,130 @@ func (ro *Router) handleGetBucketNotification(
 // --- LifecycleConfiguration (#81) ---
 
 func (ro *Router) handlePutBucketLifecycle(w http.ResponseWriter, r *http.Request, bucket string) {
-	ro.handlePutBucketRawXML(w, r, bucket, "lifecycle configuration", ro.storage.PutBucketLifecycle)
+	transitionMinSize := r.Header.Get("x-amz-transition-default-minimum-object-size")
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		slog.Debug(
+			"lifecycle configuration read error",
+			"bucket",
+			bucket,
+			"err",
+			err,
+		) // #nosec G706
+		writeError(
+			w,
+			r,
+			http.StatusBadRequest,
+			"MalformedXML",
+			"The XML you provided was not well-formed.",
+		)
+		return
+	}
+	if !isWellFormedXML(body) {
+		slog.Debug("lifecycle configuration malformed XML", "bucket", bucket) // #nosec G706
+		writeError(
+			w,
+			r,
+			http.StatusBadRequest,
+			"MalformedXML",
+			"The XML you provided was not well-formed.",
+		)
+		return
+	}
+	if err := ro.storage.PutBucketLifecycle(bucket, stripXMLDecl(string(body))); err != nil {
+		if errors.Is(err, ErrBucketNotFound) {
+			slog.Debug("bucket not found", "bucket", bucket) // #nosec G706
+			writeError(
+				w,
+				r,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
+			return
+		}
+		slog.Error(
+			"failed to put lifecycle configuration",
+			"bucket",
+			bucket,
+			"err",
+			err,
+		) // #nosec G706
+		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	if err := ro.storage.PutBucketLifecycleTransitionMinSize(bucket, transitionMinSize); err != nil {
+		slog.Error(
+			"failed to put lifecycle transition min size",
+			"bucket",
+			bucket,
+			"err",
+			err,
+		) // #nosec G706
+		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	slog.Info("lifecycle configuration updated", "bucket", bucket) // #nosec G706
+	w.WriteHeader(http.StatusOK)
 }
 
 func (ro *Router) handleGetBucketLifecycle(w http.ResponseWriter, r *http.Request, bucket string) {
-	ro.handleGetBucketRawXML(w, r, bucket, "lifecycle configuration",
-		ro.storage.GetBucketLifecycle,
-		"NoSuchLifecycleConfiguration",
-		"The lifecycle configuration does not exist.",
-		"",
-	)
+	xmlBody, err := ro.storage.GetBucketLifecycle(bucket)
+	if err != nil {
+		if errors.Is(err, ErrBucketNotFound) {
+			slog.Debug("bucket not found", "bucket", bucket) // #nosec G706
+			writeError(
+				w,
+				r,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
+			return
+		}
+		slog.Error(
+			"failed to get lifecycle configuration",
+			"bucket",
+			bucket,
+			"err",
+			err,
+		) // #nosec G706
+		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	if xmlBody == "" {
+		slog.Debug("lifecycle configuration not configured", "bucket", bucket) // #nosec G706
+		writeError(
+			w,
+			r,
+			http.StatusNotFound,
+			"NoSuchLifecycleConfiguration",
+			"The lifecycle configuration does not exist.",
+		)
+		return
+	}
+	transitionMinSize, err := ro.storage.GetBucketLifecycleTransitionMinSize(bucket)
+	if err != nil {
+		slog.Error(
+			"failed to get lifecycle transition min size",
+			"bucket",
+			bucket,
+			"err",
+			err,
+		) // #nosec G706
+		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	if transitionMinSize != "" {
+		xmlBody = strings.Replace(
+			xmlBody,
+			"</LifecycleConfiguration>",
+			"<TransitionDefaultMinimumObjectSize>"+transitionMinSize+"</TransitionDefaultMinimumObjectSize></LifecycleConfiguration>",
+			1,
+		)
+	}
+	slog.Debug("get lifecycle configuration", "bucket", bucket) // #nosec G706
+	writeRawXML(w, http.StatusOK, xmlBody)
 }
 
 func (ro *Router) handleDeleteBucketLifecycle(

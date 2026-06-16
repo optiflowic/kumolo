@@ -14,6 +14,7 @@
 `HTTP/1.1 200`
 
 Returns the stored `LifecycleConfiguration` XML.
+If `x-amz-transition-default-minimum-object-size` was set on the last `PutBucketLifecycleConfiguration`, kumolo injects `<TransitionDefaultMinimumObjectSize>value</TransitionDefaultMinimumObjectSize>` as a direct child of `<LifecycleConfiguration>` just before the closing tag.
 
 ## Errors
 
