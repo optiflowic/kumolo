@@ -190,6 +190,7 @@ resource "aws_s3_bucket_public_access_block" "main" {
 
   block_public_acls       = true
   ignore_public_acls      = true
+  # false because aws_s3_bucket_policy.main grants public s3:GetObject access.
   block_public_policy     = false
   restrict_public_buckets = false
 }

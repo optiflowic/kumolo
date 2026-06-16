@@ -295,7 +295,7 @@ run "DeleteObjects" \
 
 # DeleteObject — single object deletion
 echo "delete-me" > "$TMPFILE"
-$AWS s3api put-object --bucket "$BUCKET" --key "to-delete.txt" --body "$TMPFILE" > /dev/null 2>&1 || true
+$AWS s3api put-object --bucket "$BUCKET" --key "to-delete.txt" --body "$TMPFILE" > /dev/null
 run "DeleteObject (single)" \
   $AWS s3api delete-object --bucket "$BUCKET" --key "to-delete.txt"
 
@@ -633,11 +633,12 @@ fi
 echo "explicit-retention" > "$TMPFILE"
 $AWS s3api put-object \
   --bucket "$OL_BUCKET" --key "explicit-retained.txt" --body "$TMPFILE" > /dev/null 2>&1 || true
+RETAIN_DATE="$(( $(date -u '+%Y') + 1 ))-01-01T00:00:00Z"
 run "PutObjectRetention (explicit GOVERNANCE)" \
   $AWS s3api put-object-retention \
     --bucket "$OL_BUCKET" \
     --key "explicit-retained.txt" \
-    --retention '{"Mode":"GOVERNANCE","RetainUntilDate":"2030-01-01T00:00:00Z"}'
+    --retention "{\"Mode\":\"GOVERNANCE\",\"RetainUntilDate\":\"${RETAIN_DATE}\"}"
 OL_EXPLICIT_RET=$($AWS s3api get-object-retention \
   --bucket "$OL_BUCKET" --key "explicit-retained.txt" 2>/dev/null || true)
 OL_EXPLICIT_MODE=$(echo "$OL_EXPLICIT_RET" | jq -r '.Retention.Mode // empty' 2>/dev/null || true)
@@ -893,7 +894,7 @@ run "PutObjectAcl (private)" \
   $AWS s3api put-object-acl --bucket "$BUCKET" --key "acl-test.txt" --acl private
 
 ACL_RESP=$($AWS s3api get-object-acl --bucket "$BUCKET" --key "acl-test.txt" 2>/dev/null || true)
-ACL_OWNER=$(echo "$ACL_RESP" | jq -r '.Owner.DisplayName // empty' 2>/dev/null || true)
+ACL_OWNER=$(echo "$ACL_RESP" | jq -r '.Owner.DisplayName // .Owner.ID // empty' 2>/dev/null || true)
 if [[ -n "$ACL_OWNER" ]]; then
   ok "GetObjectACL (Owner present)"
 else
