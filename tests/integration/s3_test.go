@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -540,4 +541,92 @@ func TestS3MultipartUpload(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, content, string(got))
 	})
+}
+
+// TestLifecycleConfigRoundTrip checks that PutBucketLifecycleConfiguration + GetBucketLifecycleConfiguration
+// produces a response that the Terraform AWS Provider v6 lifecycleConfigEqual check would accept.
+// The provider compares desired rules (from PUT input) with actual rules (from GET output) using
+// reflect.DeepEqual, and also compares TransitionDefaultMinimumObjectSize.
+func TestLifecycleConfigRoundTrip(t *testing.T) {
+	clients := newTestClients(t)
+	ctx := context.Background()
+	const bucket = "test-lifecycle-roundtrip"
+
+	_, err := clients.s3.CreateBucket(ctx, &awss3.CreateBucketInput{Bucket: aws.String(bucket)})
+	require.NoError(t, err)
+
+	_, err = clients.s3.PutBucketVersioning(ctx, &awss3.PutBucketVersioningInput{
+		Bucket: aws.String(bucket),
+		VersioningConfiguration: &s3types.VersioningConfiguration{
+			Status: s3types.BucketVersioningStatusEnabled,
+		},
+	})
+	require.NoError(t, err)
+
+	// Build the desired rules exactly as Terraform AWS Provider v6 would for our e2e config.
+	const (
+		noncurrentExpirationDays = int32(90)
+		noncurrentTransitionDays = int32(30)
+		multipartAbortDays       = int32(7)
+	)
+	allObjectsPrefix := aws.String("")
+	desiredRules := []s3types.LifecycleRule{
+		{
+			ID:     aws.String("expire-noncurrent"),
+			Status: s3types.ExpirationStatusEnabled,
+			Filter: &s3types.LifecycleRuleFilter{Prefix: allObjectsPrefix},
+			NoncurrentVersionExpiration: &s3types.NoncurrentVersionExpiration{
+				NoncurrentDays: aws.Int32(noncurrentExpirationDays),
+			},
+		},
+		{
+			ID:     aws.String("transition-noncurrent"),
+			Status: s3types.ExpirationStatusEnabled,
+			Filter: &s3types.LifecycleRuleFilter{Prefix: allObjectsPrefix},
+			NoncurrentVersionTransitions: []s3types.NoncurrentVersionTransition{
+				{
+					NoncurrentDays: aws.Int32(noncurrentTransitionDays),
+					StorageClass:   s3types.TransitionStorageClassGlacier,
+				},
+			},
+		},
+		{
+			ID:     aws.String("abort-multipart-uploads"),
+			Status: s3types.ExpirationStatusEnabled,
+			Filter: &s3types.LifecycleRuleFilter{Prefix: allObjectsPrefix},
+			AbortIncompleteMultipartUpload: &s3types.AbortIncompleteMultipartUpload{
+				DaysAfterInitiation: aws.Int32(multipartAbortDays),
+			},
+		},
+	}
+	desiredTransitionMinSize := s3types.TransitionDefaultMinimumObjectSizeAllStorageClasses128k
+
+	putInput := &awss3.PutBucketLifecycleConfigurationInput{
+		Bucket: aws.String(bucket),
+		LifecycleConfiguration: &s3types.BucketLifecycleConfiguration{
+			Rules: desiredRules,
+		},
+		TransitionDefaultMinimumObjectSize: desiredTransitionMinSize,
+	}
+	_, err = clients.s3.PutBucketLifecycleConfiguration(ctx, putInput)
+	require.NoError(t, err)
+
+	getOut, err := clients.s3.GetBucketLifecycleConfiguration(
+		ctx,
+		&awss3.GetBucketLifecycleConfigurationInput{
+			Bucket: aws.String(bucket),
+		},
+	)
+	require.NoError(t, err)
+
+	assert.Equal(t, desiredTransitionMinSize, getOut.TransitionDefaultMinimumObjectSize,
+		"TransitionDefaultMinimumObjectSize mismatch")
+
+	require.Truef(
+		t,
+		reflect.DeepEqual(desiredRules, getOut.Rules),
+		"rules mismatch: reflect.DeepEqual returned false (Terraform provider v6 lifecycleConfigEqual would time out)\ndesired: %#v\nactual: %#v",
+		desiredRules,
+		getOut.Rules,
+	)
 }

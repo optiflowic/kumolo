@@ -570,16 +570,100 @@ func (ro *Router) handleGetBucketNotification(
 // --- LifecycleConfiguration (#81) ---
 
 func (ro *Router) handlePutBucketLifecycle(w http.ResponseWriter, r *http.Request, bucket string) {
-	ro.handlePutBucketRawXML(w, r, bucket, "lifecycle configuration", ro.storage.PutBucketLifecycle)
+	transitionMinSize := r.Header.Get("x-amz-transition-default-minimum-object-size")
+	switch transitionMinSize {
+	case "", "all_storage_classes_128K":
+		transitionMinSize = "all_storage_classes_128K"
+	case "varies_by_storage_class":
+		// valid; use as-is
+	default:
+		writeError(w, r, http.StatusBadRequest, "InvalidArgument",
+			"Invalid value for x-amz-transition-default-minimum-object-size.")
+		return
+	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			"lifecycle configuration read error",
+			"bucket",
+			bucket,
+			"err",
+			err,
+		)
+		writeError(w, r, http.StatusBadRequest, "MalformedXML",
+			"The XML you provided was not well-formed.")
+		return
+	}
+	if !isWellFormedXML(body) {
+		slog.Debug("lifecycle configuration malformed XML", "bucket", bucket) // #nosec G706
+		writeError(w, r, http.StatusBadRequest, "MalformedXML",
+			"The XML you provided was not well-formed.")
+		return
+	}
+	if err := ro.storage.PutBucketLifecycleConfig(bucket, stripXMLDecl(string(body)), transitionMinSize); err != nil {
+		if errors.Is(err, ErrBucketNotFound) {
+			slog.Debug("bucket not found", "bucket", bucket) // #nosec G706
+			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+				"The specified bucket does not exist.")
+			return
+		}
+		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			"failed to put lifecycle configuration",
+			"bucket",
+			bucket,
+			"err",
+			err,
+		)
+		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	slog.Info("lifecycle configuration updated", "bucket", bucket) // #nosec G706
+	w.WriteHeader(http.StatusOK)
 }
 
 func (ro *Router) handleGetBucketLifecycle(w http.ResponseWriter, r *http.Request, bucket string) {
-	ro.handleGetBucketRawXML(w, r, bucket, "lifecycle configuration",
-		ro.storage.GetBucketLifecycle,
-		"NoSuchLifecycleConfiguration",
-		"The lifecycle configuration does not exist.",
-		"",
-	)
+	xmlBody, err := ro.storage.GetBucketLifecycle(bucket)
+	if err != nil {
+		if errors.Is(err, ErrBucketNotFound) {
+			slog.Debug("bucket not found", "bucket", bucket) // #nosec G706
+			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+				"The specified bucket does not exist.")
+			return
+		}
+		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			"failed to get lifecycle configuration",
+			"bucket",
+			bucket,
+			"err",
+			err,
+		)
+		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	if xmlBody == "" {
+		slog.Debug("lifecycle configuration not configured", "bucket", bucket) // #nosec G706
+		writeError(w, r, http.StatusNotFound, "NoSuchLifecycleConfiguration",
+			"The lifecycle configuration does not exist.")
+		return
+	}
+	transitionMinSize, err := ro.storage.GetBucketLifecycleTransitionMinSize(bucket)
+	if err != nil {
+		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
+			"failed to get lifecycle transition min size",
+			"bucket",
+			bucket,
+			"err",
+			err,
+		)
+		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	if transitionMinSize == "" {
+		transitionMinSize = "all_storage_classes_128K"
+	}
+	w.Header().Set("x-amz-transition-default-minimum-object-size", transitionMinSize)
+	slog.Debug("get lifecycle configuration", "bucket", bucket) // #nosec G706
+	writeRawXML(w, http.StatusOK, xmlBody)
 }
 
 func (ro *Router) handleDeleteBucketLifecycle(

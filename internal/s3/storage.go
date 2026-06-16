@@ -22,23 +22,24 @@ import (
 
 // bucketMeta is stored as a <bucket>.bucket.json file at the storage root.
 type bucketMeta struct {
-	Region            string     `json:"region"`
-	Tags              []Tag      `json:"tags,omitempty"`
-	VersioningStatus  string     `json:"versioningStatus,omitempty"`
-	CORSRules         []CORSRule `json:"corsRules,omitempty"`
-	Policy            string     `json:"policy,omitempty"`
-	PublicAccessBlock string     `json:"publicAccessBlock,omitempty"`
-	Encryption        string     `json:"encryption,omitempty"`
-	OwnershipControls string     `json:"ownershipControls,omitempty"`
-	Notification      string     `json:"notification,omitempty"`
-	Lifecycle         string     `json:"lifecycle,omitempty"`
-	Website           string     `json:"website,omitempty"`
-	Logging           string     `json:"logging,omitempty"`
-	Accelerate        string     `json:"accelerate,omitempty"`
-	Replication       string     `json:"replication,omitempty"`
-	RequestPayment    string     `json:"requestPayment,omitempty"`
-	ObjectLock        string     `json:"objectLock,omitempty"`
-	ACL               string     `json:"acl,omitempty"`
+	Region                     string     `json:"region"`
+	Tags                       []Tag      `json:"tags,omitempty"`
+	VersioningStatus           string     `json:"versioningStatus,omitempty"`
+	CORSRules                  []CORSRule `json:"corsRules,omitempty"`
+	Policy                     string     `json:"policy,omitempty"`
+	PublicAccessBlock          string     `json:"publicAccessBlock,omitempty"`
+	Encryption                 string     `json:"encryption,omitempty"`
+	OwnershipControls          string     `json:"ownershipControls,omitempty"`
+	Notification               string     `json:"notification,omitempty"`
+	Lifecycle                  string     `json:"lifecycle,omitempty"`
+	LifecycleTransitionMinSize string     `json:"lifecycleTransitionMinSize,omitempty"`
+	Website                    string     `json:"website,omitempty"`
+	Logging                    string     `json:"logging,omitempty"`
+	Accelerate                 string     `json:"accelerate,omitempty"`
+	Replication                string     `json:"replication,omitempty"`
+	RequestPayment             string     `json:"requestPayment,omitempty"`
+	ObjectLock                 string     `json:"objectLock,omitempty"`
+	ACL                        string     `json:"acl,omitempty"`
 }
 
 // Storage is a filesystem-backed S3 backend. os.Root scopes all access to the
@@ -2243,16 +2244,29 @@ func (s *Storage) GetBucketNotification(bucket string) (string, error) {
 	return s.getBucketConfigField(bucket, func(m bucketMeta) string { return m.Notification })
 }
 
-func (s *Storage) PutBucketLifecycle(bucket, xmlBody string) error {
-	return s.putBucketConfigField(bucket, func(m *bucketMeta) { m.Lifecycle = xmlBody })
-}
-
 func (s *Storage) GetBucketLifecycle(bucket string) (string, error) {
 	return s.getBucketConfigField(bucket, func(m bucketMeta) string { return m.Lifecycle })
 }
 
+func (s *Storage) PutBucketLifecycleConfig(bucket, xmlBody, transitionMinSize string) error {
+	return s.putBucketConfigField(bucket, func(m *bucketMeta) {
+		m.Lifecycle = xmlBody
+		m.LifecycleTransitionMinSize = transitionMinSize
+	})
+}
+
 func (s *Storage) DeleteBucketLifecycle(bucket string) error {
-	return s.putBucketConfigField(bucket, func(m *bucketMeta) { m.Lifecycle = "" })
+	return s.putBucketConfigField(bucket, func(m *bucketMeta) {
+		m.Lifecycle = ""
+		m.LifecycleTransitionMinSize = ""
+	})
+}
+
+func (s *Storage) GetBucketLifecycleTransitionMinSize(bucket string) (string, error) {
+	return s.getBucketConfigField(
+		bucket,
+		func(m bucketMeta) string { return m.LifecycleTransitionMinSize },
+	)
 }
 
 func (s *Storage) PutBucketWebsite(bucket, xmlBody string) error {

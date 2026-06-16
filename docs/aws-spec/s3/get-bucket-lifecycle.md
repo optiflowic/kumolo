@@ -15,6 +15,8 @@
 
 Returns the stored `LifecycleConfiguration` XML.
 
+The response always includes the `x-amz-transition-default-minimum-object-size` response header. The value is whatever was stored by the last `PutBucketLifecycleConfiguration` call (default: `all_storage_classes_128K`). The AWS SDK Go v2 maps this header to `GetBucketLifecycleConfigurationOutput.TransitionDefaultMinimumObjectSize`.
+
 ## Errors
 
 | Code | HTTP | Condition |
