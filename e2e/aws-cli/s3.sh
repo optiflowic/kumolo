@@ -580,6 +580,16 @@ cleanup_bucket "$DM_DEST"
 OL_BUCKET="kumolo-cli-s3-objectlock-default"
 # Pre-cleanup: bypass retention from any previous run (guard against missing bucket).
 if $AWS s3api head-bucket --bucket "$OL_BUCKET" > /dev/null 2>&1; then
+  # Turn off any active legal holds before deletion (legal hold blocks delete-object
+  # even with --bypass-governance-retention).
+  $AWS s3api list-object-versions --bucket "$OL_BUCKET" \
+      --output text --query 'Versions[].[Key,VersionId]' 2>/dev/null | \
+    while IFS=$'\t' read -r key vid _rest; do
+      [[ -z "$key" || "$key" == "None" ]] && continue
+      $AWS s3api put-object-legal-hold \
+        --bucket "$OL_BUCKET" --key "$key" --version-id "$vid" \
+        --legal-hold '{"Status":"OFF"}' > /dev/null 2>&1 || true
+    done || true
   $AWS s3api list-object-versions --bucket "$OL_BUCKET" \
       --output text --query 'Versions[].[Key,VersionId]' 2>/dev/null | \
     while IFS=$'\t' read -r key vid _rest; do
