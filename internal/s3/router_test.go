@@ -7932,7 +7932,7 @@ func TestBucketConfigHandlers(t *testing.T) {
 		},
 	)
 	t.Run(
-		"PUT lifecycle clears transition min size when header is absent",
+		"PUT lifecycle defaults transition min size to all_storage_classes_128K when header is absent",
 		func(t *testing.T) {
 			store := &mockStore{}
 			ro := newRouterWithMock(store)
@@ -7942,7 +7942,11 @@ func TestBucketConfigHandlers(t *testing.T) {
 				httptest.NewRequest(http.MethodPut, "/b?lifecycle", strings.NewReader(validXML)),
 			)
 			assert.Equal(t, http.StatusOK, w.Code)
-			assert.Equal(t, "", store.capturedLifecycleConfigTransitionMinSize)
+			assert.Equal(
+				t,
+				"all_storage_classes_128K",
+				store.capturedLifecycleConfigTransitionMinSize,
+			)
 		},
 	)
 	t.Run(
@@ -8212,23 +8216,23 @@ func TestBucketConfigHandlers(t *testing.T) {
 		ro.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/b?lifecycle", nil))
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
-	t.Run("GET lifecycle injects TransitionDefaultMinimumObjectSize when set", func(t *testing.T) {
-		const lcXML = `<LifecycleConfiguration><Rule><ID>r</ID><Status>Enabled</Status><Filter/><Expiration><Days>90</Days></Expiration></Rule></LifecycleConfiguration>`
-		ro := newRouterWithMock(ms(func(m *mockStore) {
-			m.getBucketLifecycleResult = lcXML
-			m.getBucketLifecycleTransitionMinSizeResult = "all_storage_classes_128K"
-		}))
-		w := httptest.NewRecorder()
-		ro.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/b?lifecycle", nil))
-		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Contains(
-			t,
-			w.Body.String(),
-			"<TransitionDefaultMinimumObjectSize>all_storage_classes_128K</TransitionDefaultMinimumObjectSize>",
-		)
-	})
 	t.Run(
-		"GET lifecycle omits TransitionDefaultMinimumObjectSize when not set",
+		"GET lifecycle sets x-amz-transition-default-minimum-object-size header",
+		func(t *testing.T) {
+			const lcXML = `<LifecycleConfiguration><Rule><ID>r</ID><Status>Enabled</Status><Filter/><Expiration><Days>90</Days></Expiration></Rule></LifecycleConfiguration>`
+			ro := newRouterWithMock(ms(func(m *mockStore) {
+				m.getBucketLifecycleResult = lcXML
+				m.getBucketLifecycleTransitionMinSizeResult = "all_storage_classes_128K"
+			}))
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/b?lifecycle", nil))
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Equal(t, "all_storage_classes_128K",
+				w.Header().Get("x-amz-transition-default-minimum-object-size"))
+		},
+	)
+	t.Run(
+		"GET lifecycle defaults to all_storage_classes_128K when transition min size not stored",
 		func(t *testing.T) {
 			const lcXML = `<LifecycleConfiguration><Rule><ID>r</ID><Status>Enabled</Status><Filter/><Expiration><Days>90</Days></Expiration></Rule></LifecycleConfiguration>`
 			ro := newRouterWithMock(ms(func(m *mockStore) {
@@ -8237,7 +8241,8 @@ func TestBucketConfigHandlers(t *testing.T) {
 			w := httptest.NewRecorder()
 			ro.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/b?lifecycle", nil))
 			assert.Equal(t, http.StatusOK, w.Code)
-			assert.NotContains(t, w.Body.String(), "TransitionDefaultMinimumObjectSize")
+			assert.Equal(t, "all_storage_classes_128K",
+				w.Header().Get("x-amz-transition-default-minimum-object-size"))
 		},
 	)
 	t.Run("GET lifecycle 500 when transition min size storage fails", func(t *testing.T) {

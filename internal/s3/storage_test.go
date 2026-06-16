@@ -4800,7 +4800,7 @@ func TestBucketConfigStorage(t *testing.T) {
 		},
 		{
 			"Lifecycle",
-			func(s *Storage, b, x string) error { return s.PutBucketLifecycle(b, x) },
+			func(s *Storage, b, x string) error { return s.PutBucketLifecycleConfig(b, x, "") },
 			func(s *Storage, b string) (string, error) { return s.GetBucketLifecycle(b) },
 			func(s *Storage, b string) error { return s.DeleteBucketLifecycle(b) },
 		},
@@ -4903,7 +4903,7 @@ func TestBucketConfigStorage(t *testing.T) {
 			s, bucket := setup(t)
 			require.NoError(
 				t,
-				s.PutBucketLifecycleTransitionMinSize(bucket, "all_storage_classes_128K"),
+				s.PutBucketLifecycleConfig(bucket, xmlBody, "all_storage_classes_128K"),
 			)
 			got, err := s.GetBucketLifecycleTransitionMinSize(bucket)
 			require.NoError(t, err)
@@ -4917,23 +4917,14 @@ func TestBucketConfigStorage(t *testing.T) {
 		})
 		t.Run("DeleteBucketLifecycle also clears TransitionMinSize", func(t *testing.T) {
 			s, bucket := setup(t)
-			require.NoError(t, s.PutBucketLifecycle(bucket, xmlBody))
 			require.NoError(
 				t,
-				s.PutBucketLifecycleTransitionMinSize(bucket, "all_storage_classes_128K"),
+				s.PutBucketLifecycleConfig(bucket, xmlBody, "all_storage_classes_128K"),
 			)
 			require.NoError(t, s.DeleteBucketLifecycle(bucket))
 			got, err := s.GetBucketLifecycleTransitionMinSize(bucket)
 			require.NoError(t, err)
 			assert.Empty(t, got)
-		})
-		t.Run("Put returns ErrBucketNotFound for missing bucket", func(t *testing.T) {
-			s, _ := setup(t)
-			assert.ErrorIs(
-				t,
-				s.PutBucketLifecycleTransitionMinSize("no-bucket", "all_storage_classes_128K"),
-				ErrBucketNotFound,
-			)
 		})
 		t.Run("Get returns ErrBucketNotFound for missing bucket", func(t *testing.T) {
 			s, _ := setup(t)

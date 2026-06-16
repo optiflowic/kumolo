@@ -20,8 +20,8 @@ Optional header sent by the Terraform AWS Provider v6 for general-purpose bucket
 | `all_storage_classes_128K` | 128 KiB minimum for all storage class transitions |
 | `varies_by_storage_class` | No minimum enforced |
 
-kumolo stores this value in bucket metadata and returns it as `<TransitionDefaultMinimumObjectSize>` in `GetBucketLifecycleConfiguration` responses.
-If the header is absent on a PUT, the stored value is cleared (replaced with empty string).
+kumolo stores this value in bucket metadata and returns it as the `x-amz-transition-default-minimum-object-size` response header in `GetBucketLifecycleConfiguration` responses.
+If the header is absent on a PUT, kumolo stores `all_storage_classes_128K` (the AWS default for general-purpose buckets).
 
 kumolo returns `InvalidArgument` (400) if the header is present but not one of the two valid values.
 

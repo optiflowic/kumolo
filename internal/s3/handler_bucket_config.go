@@ -571,9 +571,12 @@ func (ro *Router) handleGetBucketNotification(
 
 func (ro *Router) handlePutBucketLifecycle(w http.ResponseWriter, r *http.Request, bucket string) {
 	transitionMinSize := r.Header.Get("x-amz-transition-default-minimum-object-size")
-	if transitionMinSize != "" &&
-		transitionMinSize != "all_storage_classes_128K" &&
-		transitionMinSize != "varies_by_storage_class" {
+	switch transitionMinSize {
+	case "", "all_storage_classes_128K":
+		transitionMinSize = "all_storage_classes_128K"
+	case "varies_by_storage_class":
+		// valid; use as-is
+	default:
 		writeError(w, r, http.StatusBadRequest, "InvalidArgument",
 			"Invalid value for x-amz-transition-default-minimum-object-size.")
 		return
@@ -655,14 +658,10 @@ func (ro *Router) handleGetBucketLifecycle(w http.ResponseWriter, r *http.Reques
 		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
-	if transitionMinSize != "" {
-		xmlBody = strings.Replace(
-			xmlBody,
-			"</LifecycleConfiguration>",
-			"<TransitionDefaultMinimumObjectSize>"+transitionMinSize+"</TransitionDefaultMinimumObjectSize></LifecycleConfiguration>",
-			1,
-		)
+	if transitionMinSize == "" {
+		transitionMinSize = "all_storage_classes_128K"
 	}
+	w.Header().Set("x-amz-transition-default-minimum-object-size", transitionMinSize)
 	slog.Debug("get lifecycle configuration", "bucket", bucket) // #nosec G706
 	writeRawXML(w, http.StatusOK, xmlBody)
 }

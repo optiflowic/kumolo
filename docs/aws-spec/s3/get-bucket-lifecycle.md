@@ -14,7 +14,8 @@
 `HTTP/1.1 200`
 
 Returns the stored `LifecycleConfiguration` XML.
-If `x-amz-transition-default-minimum-object-size` was set on the last `PutBucketLifecycleConfiguration`, kumolo injects `<TransitionDefaultMinimumObjectSize>value</TransitionDefaultMinimumObjectSize>` as a direct child of `<LifecycleConfiguration>` just before the closing tag.
+
+The response always includes the `x-amz-transition-default-minimum-object-size` response header. The value is whatever was stored by the last `PutBucketLifecycleConfiguration` call (default: `all_storage_classes_128K`). The AWS SDK Go v2 maps this header to `GetBucketLifecycleConfigurationOutput.TransitionDefaultMinimumObjectSize`.
 
 ## Errors
 
