@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"strings"
 )
@@ -87,7 +86,6 @@ func (ro *Router) handleTransactGetItems(w http.ResponseWriter, body []byte) {
 	items, err := ro.storage.TransactGetItems(gets)
 	if err != nil {
 		if errors.Is(err, ErrTableNotFound) {
-			slog.Debug("TransactGetItems: table not found")
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -97,7 +95,6 @@ func (ro *Router) handleTransactGetItems(w http.ResponseWriter, body []byte) {
 			return
 		}
 		if errors.Is(err, ErrValidationException) {
-			slog.Debug("TransactGetItems: validation error", "err", err)
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -106,7 +103,6 @@ func (ro *Router) handleTransactGetItems(w http.ResponseWriter, body []byte) {
 			)
 			return
 		}
-		slog.Error("TransactGetItems failed", "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -125,7 +121,6 @@ func (ro *Router) handleTransactGetItems(w http.ResponseWriter, body []byte) {
 			var projErr error
 			item, projErr = applyProjection(item, projections[i].expr, projections[i].names)
 			if projErr != nil {
-				slog.Debug("TransactGetItems: invalid ProjectionExpression", "err", projErr)
 				writeError(
 					w,
 					http.StatusBadRequest,
@@ -137,7 +132,6 @@ func (ro *Router) handleTransactGetItems(w http.ResponseWriter, body []byte) {
 		}
 		responses[i] = map[string]any{"Item": item}
 	}
-	slog.Debug("TransactGetItems", "count", len(items))
 	txResp := map[string]any{"Responses": responses}
 	if req.ReturnConsumedCapacity != "" && req.ReturnConsumedCapacity != "NONE" {
 		seen := make(map[string]struct{})
@@ -296,7 +290,6 @@ func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 				ti.Update.ExpressionAttributeValues,
 			)
 			if err != nil {
-				slog.Debug("TransactWriteItems: invalid UpdateExpression", "err", err)
 				writeError(
 					w,
 					http.StatusBadRequest,
@@ -370,7 +363,6 @@ func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 	if err != nil {
 		var txErr *TransactionCanceledError
 		if errors.As(err, &txErr) {
-			slog.Debug("TransactWriteItems: transaction canceled", "reasons", len(txErr.Reasons))
 			codes := make([]string, len(txErr.Reasons))
 			for i, r := range txErr.Reasons {
 				codes[i] = r.Code
@@ -388,16 +380,10 @@ func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 					strings.Join(codes, ", ") + "]",
 				CancellationReasons: txErr.Reasons,
 			}); encErr != nil {
-				slog.Warn(
-					"failed to encode TransactionCanceledException",
-					"err",
-					encErr,
-				) // untestable: cancelResp contains no unencodable types
 			}
 			return
 		}
 		if errors.Is(err, ErrTableNotFound) {
-			slog.Debug("TransactWriteItems: table not found")
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -407,7 +393,6 @@ func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 			return
 		}
 		if errors.Is(err, ErrValidationException) {
-			slog.Debug("TransactWriteItems: validation error", "err", err)
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -416,7 +401,6 @@ func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 			)
 			return
 		}
-		slog.Error("TransactWriteItems failed", "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -425,7 +409,6 @@ func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
-	slog.Info("TransactWriteItems succeeded", "count", len(actions))
 	txResp := map[string]any{}
 	if req.ReturnConsumedCapacity != "" && req.ReturnConsumedCapacity != "NONE" {
 		seen := make(map[string]struct{})

@@ -55,6 +55,10 @@ type errorResponse struct {
 }
 
 func writeError(w http.ResponseWriter, r *http.Request, status int, code, message string) {
+	if rec, ok := w.(*responseRecorder); ok {
+		rec.errCode = code
+		rec.errMsg = message
+	}
 	writeXML(w, status, errorResponse{
 		Code:      code,
 		Message:   message,

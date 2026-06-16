@@ -3,7 +3,6 @@ package dynamodb
 import (
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 	"regexp"
 	"time"
@@ -38,7 +37,6 @@ func (ro *Router) handleDescribeContinuousBackups(w http.ResponseWriter, body []
 	meta, err := ro.storage.DescribeContinuousBackups(req.TableName)
 	if err != nil {
 		if errors.Is(err, ErrTableNotFound) {
-			slog.Debug("DescribeContinuousBackups: table not found", "table", req.TableName)
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -47,7 +45,6 @@ func (ro *Router) handleDescribeContinuousBackups(w http.ResponseWriter, body []
 			)
 			return
 		}
-		slog.Error("DescribeContinuousBackups failed", "table", req.TableName, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -56,7 +53,6 @@ func (ro *Router) handleDescribeContinuousBackups(w http.ResponseWriter, body []
 		)
 		return
 	}
-	slog.Debug("described continuous backups", "table", req.TableName)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ContinuousBackupsDescription": toContinuousBackupsDescription(meta.PITR),
 	})
@@ -102,7 +98,6 @@ func (ro *Router) handleUpdateContinuousBackups(w http.ResponseWriter, body []by
 	)
 	if err != nil {
 		if errors.Is(err, ErrTableNotFound) {
-			slog.Debug("UpdateContinuousBackups: table not found", "table", req.TableName)
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -111,7 +106,6 @@ func (ro *Router) handleUpdateContinuousBackups(w http.ResponseWriter, body []by
 			)
 			return
 		}
-		slog.Error("UpdateContinuousBackups failed", "table", req.TableName, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -120,13 +114,6 @@ func (ro *Router) handleUpdateContinuousBackups(w http.ResponseWriter, body []by
 		)
 		return
 	}
-	slog.Info(
-		"updated continuous backups",
-		"table",
-		req.TableName,
-		"enabled",
-		req.PointInTimeRecoverySpecification.PointInTimeRecoveryEnabled,
-	)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ContinuousBackupsDescription": toContinuousBackupsDescription(meta.PITR),
 	})
@@ -178,11 +165,6 @@ func (ro *Router) handleDescribeKinesisStreamingDestination(w http.ResponseWrite
 	dests, err := ro.storage.DescribeKinesisStreamingDestination(req.TableName)
 	if err != nil {
 		if errors.Is(err, ErrTableNotFound) {
-			slog.Debug(
-				"DescribeKinesisStreamingDestination: table not found",
-				"table",
-				req.TableName,
-			)
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -191,7 +173,6 @@ func (ro *Router) handleDescribeKinesisStreamingDestination(w http.ResponseWrite
 			)
 			return
 		}
-		slog.Error("DescribeKinesisStreamingDestination failed", "table", req.TableName, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -204,7 +185,6 @@ func (ro *Router) handleDescribeKinesisStreamingDestination(w http.ResponseWrite
 	for _, d := range dests {
 		result = append(result, toKinesisDestinationMap(d))
 	}
-	slog.Debug("described kinesis streaming destination", "table", req.TableName)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"TableName":                     req.TableName,
 		"KinesisDataStreamDestinations": result,
@@ -277,7 +257,6 @@ func (ro *Router) handleEnableKinesisStreamingDestination(w http.ResponseWriter,
 	)
 	if err != nil {
 		if errors.Is(err, ErrTableNotFound) {
-			slog.Debug("EnableKinesisStreamingDestination: table not found", "table", req.TableName)
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -287,7 +266,6 @@ func (ro *Router) handleEnableKinesisStreamingDestination(w http.ResponseWriter,
 			return
 		}
 		if errors.Is(err, ErrKinesisLimitExceeded) {
-			slog.Debug("EnableKinesisStreamingDestination: limit exceeded", "table", req.TableName)
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -296,7 +274,6 @@ func (ro *Router) handleEnableKinesisStreamingDestination(w http.ResponseWriter,
 			)
 			return
 		}
-		slog.Error("EnableKinesisStreamingDestination failed", "table", req.TableName, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -305,13 +282,6 @@ func (ro *Router) handleEnableKinesisStreamingDestination(w http.ResponseWriter,
 		)
 		return
 	}
-	slog.Info(
-		"enabled kinesis streaming destination",
-		"table",
-		req.TableName,
-		"stream",
-		req.StreamArn,
-	)
 	destStatus := "ENABLING"
 	if wasActive {
 		destStatus = "UPDATING"
@@ -370,11 +340,6 @@ func (ro *Router) handleDisableKinesisStreamingDestination(w http.ResponseWriter
 	dest, err := ro.storage.DisableKinesisStreamingDestination(req.TableName, req.StreamArn)
 	if err != nil {
 		if errors.Is(err, ErrTableNotFound) {
-			slog.Debug(
-				"DisableKinesisStreamingDestination: table not found",
-				"table",
-				req.TableName,
-			)
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -384,13 +349,6 @@ func (ro *Router) handleDisableKinesisStreamingDestination(w http.ResponseWriter
 			return
 		}
 		if errors.Is(err, ErrKinesisDestinationNotFound) {
-			slog.Debug(
-				"DisableKinesisStreamingDestination: destination not found",
-				"table",
-				req.TableName,
-				"stream",
-				req.StreamArn,
-			)
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -399,7 +357,6 @@ func (ro *Router) handleDisableKinesisStreamingDestination(w http.ResponseWriter
 			)
 			return
 		}
-		slog.Error("DisableKinesisStreamingDestination failed", "table", req.TableName, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -408,13 +365,6 @@ func (ro *Router) handleDisableKinesisStreamingDestination(w http.ResponseWriter
 		)
 		return
 	}
-	slog.Info(
-		"disabled kinesis streaming destination",
-		"table",
-		req.TableName,
-		"stream",
-		req.StreamArn,
-	)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"TableName":         req.TableName,
 		"StreamArn":         dest.StreamARN,

@@ -4,7 +4,6 @@ import (
 	"encoding/xml"
 	"errors"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -84,40 +83,15 @@ func (ro *Router) handlePresignedPost(w http.ResponseWriter, r *http.Request, bu
 						"The specified bucket does not exist.")
 					return
 				}
-				slog.Error( // #nosec G706 -- bucket/key come from form fields; log injection risk accepted for a local dev emulator
-					"presigned post: failed to store object",
-					"bucket",
-					bucket,
-					"key",
-					key,
-					"err",
-					putErr,
-				)
 				writeError(w, r, http.StatusInternalServerError, "InternalError", putErr.Error())
 				return
 			}
 			if cannedACL != "" {
 				if aclXML, aclErr := buildCannedACL(cannedACL); aclErr == nil {
 					if putACLErr := ro.storage.PutObjectACL(bucket, key, aclXML); putACLErr != nil {
-						slog.Error( // #nosec G706 -- bucket/key come from form fields; log injection risk accepted for a local dev emulator
-							"presigned post: failed to apply ACL",
-							"bucket",
-							bucket,
-							"key",
-							key,
-							"err",
-							putACLErr,
-						)
 					}
 				}
 			}
-			slog.Info( // #nosec G706 -- bucket/key come from form fields; log injection risk accepted for a local dev emulator
-				"object created via presigned POST",
-				"bucket",
-				bucket,
-				"key",
-				key,
-			)
 			ro.replicateObject(bucket, key, meta)
 			writePresignedPostResponse(
 				w,

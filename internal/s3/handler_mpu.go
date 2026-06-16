@@ -7,7 +7,6 @@ import (
 	"errors"
 	"hash"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -47,33 +46,14 @@ func (ro *Router) handleCreateMultipartUpload(
 		bucketACL, err := ro.storage.GetBucketACL(bucket)
 		if err != nil {
 			if errors.Is(err, ErrBucketNotFound) {
-				slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-					"bucket not found",
-					"bucket",
-					bucket,
-				)
 				writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 					"The specified bucket does not exist.")
 				return
 			}
-			slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-				"failed to get bucket ACL",
-				"bucket",
-				bucket,
-				"err",
-				err,
-			)
 			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 			return
 		}
 		if !aclAllowsAnonymous(bucketACL, aclPermWrite) {
-			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-				"create multipart upload denied: ACL",
-				"bucket",
-				bucket,
-				"key",
-				key,
-			)
 			writeError(w, r, http.StatusForbidden, "AccessDenied", "Access Denied")
 			return
 		}
@@ -94,11 +74,6 @@ func (ro *Router) handleCreateMultipartUpload(
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrBucketNotFound):
-			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-				"bucket not found",
-				"bucket",
-				bucket,
-			)
 			writeError(
 				w,
 				r,
@@ -107,28 +82,10 @@ func (ro *Router) handleCreateMultipartUpload(
 				"The specified bucket does not exist.",
 			)
 		default:
-			slog.Error( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-				"failed to create multipart upload",
-				"bucket",
-				bucket,
-				"key",
-				key,
-				"err",
-				err,
-			)
 			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		}
 		return
 	}
-	slog.Info( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-		"multipart upload initiated",
-		"bucket",
-		bucket,
-		"key",
-		key,
-		"uploadId",
-		uploadID,
-	)
 	setSSEHeaders(
 		w,
 		ObjectMetadata{
@@ -191,33 +148,14 @@ func (ro *Router) handleUploadPart(w http.ResponseWriter, r *http.Request, bucke
 		bucketACL, err := ro.storage.GetBucketACL(umeta.Bucket)
 		if err != nil {
 			if errors.Is(err, ErrBucketNotFound) {
-				slog.Debug( // #nosec G706 -- umeta.Bucket is stored upload metadata; log injection risk accepted for a local dev emulator
-					"bucket not found",
-					"bucket",
-					umeta.Bucket,
-				)
 				writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 					"The specified bucket does not exist.")
 				return
 			}
-			slog.Error( // #nosec G706 -- umeta.Bucket is stored upload metadata; log injection risk accepted for a local dev emulator
-				"failed to get bucket ACL",
-				"bucket",
-				umeta.Bucket,
-				"err",
-				err,
-			)
 			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 			return
 		}
 		if !aclAllowsAnonymous(bucketACL, aclPermWrite) {
-			slog.Debug( // #nosec G706 -- umeta.Bucket/key are stored upload metadata; log injection risk accepted for a local dev emulator
-				"upload part denied: ACL",
-				"bucket",
-				umeta.Bucket,
-				"key",
-				key,
-			)
 			writeError(w, r, http.StatusForbidden, "AccessDenied", "Access Denied")
 			return
 		}
@@ -243,11 +181,6 @@ func (ro *Router) handleUploadPart(w http.ResponseWriter, r *http.Request, bucke
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrUploadNotFound):
-			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-				"upload not found",
-				"uploadId",
-				uploadID,
-			)
 			writeError(
 				w,
 				r,
@@ -256,34 +189,12 @@ func (ro *Router) handleUploadPart(w http.ResponseWriter, r *http.Request, bucke
 				"The specified upload does not exist.",
 			)
 		default:
-			slog.Error( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-				"failed to upload part",
-				"bucket",
-				bucket,
-				"key",
-				key,
-				"uploadId",
-				uploadID,
-				"partNumber",
-				partNumber,
-				"err",
-				err,
-			)
 			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		}
 		return
 	}
 	if md5Hash != nil && !bytes.Equal(md5Hash.Sum(nil), expected) {
 		if err := ro.storage.DeletePart(uploadID, partNumber); err != nil {
-			slog.Warn( // #nosec G706 -- uploadId comes from URL query; log injection risk accepted for a local dev emulator
-				"failed to roll back part after Content-MD5 mismatch",
-				"uploadId",
-				uploadID,
-				"partNumber",
-				partNumber,
-				"err",
-				err,
-			)
 		}
 		writeError(w, r, http.StatusBadRequest, "BadDigest",
 			"The Content-MD5 you specified did not match what we received.")
@@ -291,31 +202,11 @@ func (ro *Router) handleUploadPart(w http.ResponseWriter, r *http.Request, bucke
 	}
 	if checksumH != nil && !bytes.Equal(checksumH.Sum(nil), checksumExpected) {
 		if err := ro.storage.DeletePart(uploadID, partNumber); err != nil {
-			slog.Warn( // #nosec G706 -- uploadId comes from URL query; log injection risk accepted for a local dev emulator
-				"failed to roll back part after checksum mismatch",
-				"uploadId",
-				uploadID,
-				"partNumber",
-				partNumber,
-				"err",
-				err,
-			)
 		}
 		writeError(w, r, http.StatusBadRequest, "BadDigest",
 			"The checksum you specified did not match what we received.")
 		return
 	}
-	slog.Info( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-		"part uploaded",
-		"bucket",
-		bucket,
-		"key",
-		key,
-		"uploadId",
-		uploadID,
-		"partNumber",
-		partNumber,
-	)
 	w.Header().Set("ETag", etag)
 	w.WriteHeader(http.StatusOK)
 }
@@ -407,28 +298,12 @@ func (ro *Router) handleUploadPartCopy(w http.ResponseWriter, r *http.Request, b
 			srcMeta, headErr = ro.storage.HeadObject(srcBucket, srcKey)
 		}
 		if headErr != nil && !errors.Is(headErr, ErrObjectNotFound) {
-			slog.Error( // #nosec G706 -- srcBucket/srcKey come from header; log injection risk accepted for a local dev emulator
-				"failed to head source object",
-				"srcBucket",
-				srcBucket,
-				"srcKey",
-				srcKey,
-				"err",
-				headErr,
-			)
 			writeError(w, r, http.StatusInternalServerError, "InternalError",
 				"We encountered an internal error. Please try again.")
 			return
 		}
 		if headErr == nil {
 			if isAnonymousRequest(r) && !aclAllowsAnonymous(srcMeta.ACL, aclPermRead) {
-				slog.Debug( // #nosec G706 -- srcBucket/srcKey come from header; log injection risk accepted for a local dev emulator
-					"upload part copy source denied: ACL",
-					"srcBucket",
-					srcBucket,
-					"srcKey",
-					srcKey,
-				)
 				writeError(w, r, http.StatusForbidden, "AccessDenied", "Access Denied")
 				return
 			}
@@ -436,13 +311,6 @@ func (ro *Router) handleUploadPartCopy(w http.ResponseWriter, r *http.Request, b
 				return
 			}
 			if hasCopySourceConditions(r) && !checkCopySourceConditions(r, srcMeta) {
-				slog.Debug( // #nosec G706 -- srcBucket/srcKey come from header; log injection risk accepted for a local dev emulator
-					"copy source precondition failed",
-					"srcBucket",
-					srcBucket,
-					"srcKey",
-					srcKey,
-				)
 				writeError(w, r, http.StatusPreconditionFailed, "PreconditionFailed",
 					"At least one of the pre-conditions you specified did not hold")
 				return
@@ -458,13 +326,6 @@ func (ro *Router) handleUploadPartCopy(w http.ResponseWriter, r *http.Request, b
 					"The specified upload does not exist.")
 				return
 			}
-			slog.Error( // #nosec G706 -- uploadID comes from URL query; log injection risk accepted for a local dev emulator
-				"failed to get upload meta for ACL check",
-				"uploadId",
-				uploadID,
-				"err",
-				err,
-			)
 			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 			return
 		}
@@ -476,33 +337,14 @@ func (ro *Router) handleUploadPartCopy(w http.ResponseWriter, r *http.Request, b
 		bucketACL, err := ro.storage.GetBucketACL(umeta.Bucket)
 		if err != nil {
 			if errors.Is(err, ErrBucketNotFound) {
-				slog.Debug( // #nosec G706 -- umeta.Bucket is stored upload metadata; log injection risk accepted for a local dev emulator
-					"bucket not found",
-					"bucket",
-					umeta.Bucket,
-				)
 				writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 					"The specified bucket does not exist.")
 				return
 			}
-			slog.Error( // #nosec G706 -- umeta.Bucket is stored upload metadata; log injection risk accepted for a local dev emulator
-				"failed to get bucket ACL",
-				"bucket",
-				umeta.Bucket,
-				"err",
-				err,
-			)
 			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 			return
 		}
 		if !aclAllowsAnonymous(bucketACL, aclPermWrite) {
-			slog.Debug( // #nosec G706 -- umeta.Bucket/key are stored upload metadata; log injection risk accepted for a local dev emulator
-				"upload part copy denied: ACL",
-				"bucket",
-				umeta.Bucket,
-				"key",
-				key,
-			)
 			writeError(w, r, http.StatusForbidden, "AccessDenied", "Access Denied")
 			return
 		}
@@ -514,65 +356,20 @@ func (ro *Router) handleUploadPartCopy(w http.ResponseWriter, r *http.Request, b
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrUploadNotFound):
-			slog.Debug( // #nosec G706 -- uploadId comes from URL query; log injection risk accepted for a local dev emulator
-				"upload not found",
-				"uploadId",
-				uploadID,
-			)
 			writeError(w, r, http.StatusNotFound, "NoSuchUpload",
 				"The specified upload does not exist.")
 		case errors.Is(err, ErrBucketNotFound):
-			slog.Debug( // #nosec G706 -- srcBucket comes from header; log injection risk accepted for a local dev emulator
-				"source bucket not found",
-				"srcBucket",
-				srcBucket,
-			)
 			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 				"The specified bucket does not exist.")
 		case errors.Is(err, ErrObjectNotFound):
-			slog.Debug( // #nosec G706 -- srcBucket/srcKey come from header; log injection risk accepted for a local dev emulator
-				"source object not found",
-				"srcBucket",
-				srcBucket,
-				"srcKey",
-				srcKey,
-			)
 			writeError(w, r, http.StatusNotFound, "NoSuchKey",
 				"The specified key does not exist.")
 		default:
-			slog.Error( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-				"failed to upload part copy",
-				"bucket",
-				bucket,
-				"key",
-				key,
-				"uploadId",
-				uploadID,
-				"partNumber",
-				partNumber,
-				"err",
-				err,
-			)
 			writeError(w, r, http.StatusInternalServerError, "InternalError",
 				"We encountered an internal error. Please try again.")
 		}
 		return
 	}
-	slog.Info( // #nosec G706 -- bucket/key/srcBucket/srcKey come from URL path/header; log injection risk accepted for a local dev emulator
-		"part copy uploaded",
-		"bucket",
-		bucket,
-		"key",
-		key,
-		"uploadId",
-		uploadID,
-		"partNumber",
-		partNumber,
-		"srcBucket",
-		srcBucket,
-		"srcKey",
-		srcKey,
-	)
 	if copySourceVersionID != "" {
 		w.Header().Set(amzCopySourceVersionID, copySourceVersionID)
 	}
@@ -660,13 +457,6 @@ func (ro *Router) handleCompleteMultipartUpload(
 					"The specified upload does not exist.")
 				return
 			}
-			slog.Error( // #nosec G706 -- uploadID comes from URL query; log injection risk accepted for a local dev emulator
-				"failed to get upload meta for ACL check",
-				"uploadId",
-				uploadID,
-				"err",
-				err,
-			)
 			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 			return
 		}
@@ -678,33 +468,14 @@ func (ro *Router) handleCompleteMultipartUpload(
 		bucketACL, err := ro.storage.GetBucketACL(umeta.Bucket)
 		if err != nil {
 			if errors.Is(err, ErrBucketNotFound) {
-				slog.Debug( // #nosec G706 -- umeta.Bucket is stored upload metadata; log injection risk accepted for a local dev emulator
-					"bucket not found",
-					"bucket",
-					umeta.Bucket,
-				)
 				writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 					"The specified bucket does not exist.")
 				return
 			}
-			slog.Error( // #nosec G706 -- umeta.Bucket is stored upload metadata; log injection risk accepted for a local dev emulator
-				"failed to get bucket ACL",
-				"bucket",
-				umeta.Bucket,
-				"err",
-				err,
-			)
 			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 			return
 		}
 		if !aclAllowsAnonymous(bucketACL, aclPermWrite) {
-			slog.Debug( // #nosec G706 -- umeta.Bucket/key are stored upload metadata; log injection risk accepted for a local dev emulator
-				"complete multipart upload denied: ACL",
-				"bucket",
-				umeta.Bucket,
-				"key",
-				key,
-			)
 			writeError(w, r, http.StatusForbidden, "AccessDenied", "Access Denied")
 			return
 		}
@@ -728,11 +499,6 @@ func (ro *Router) handleCompleteMultipartUpload(
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrUploadNotFound):
-			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-				"upload not found",
-				"uploadId",
-				uploadID,
-			)
 			writeError(
 				w,
 				r,
@@ -741,11 +507,6 @@ func (ro *Router) handleCompleteMultipartUpload(
 				"The specified upload does not exist.",
 			)
 		case errors.Is(err, ErrInvalidPart):
-			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-				"invalid part",
-				"uploadId",
-				uploadID,
-			)
 			writeError(
 				w,
 				r,
@@ -754,11 +515,6 @@ func (ro *Router) handleCompleteMultipartUpload(
 				"One or more of the specified parts could not be found.",
 			)
 		case errors.Is(err, ErrInvalidPartOrder):
-			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-				"parts not in order",
-				"uploadId",
-				uploadID,
-			)
 			writeError(
 				w,
 				r,
@@ -767,11 +523,6 @@ func (ro *Router) handleCompleteMultipartUpload(
 				"The list of parts was not in ascending order.",
 			)
 		case errors.Is(err, ErrEntityTooSmall):
-			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-				"part too small",
-				"uploadId",
-				uploadID,
-			)
 			writeError(
 				w,
 				r,
@@ -780,11 +531,6 @@ func (ro *Router) handleCompleteMultipartUpload(
 				"Your proposed upload is smaller than the minimum allowed size.",
 			)
 		case errors.Is(err, ErrBucketNotFound):
-			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-				"bucket not found",
-				"bucket",
-				bucket,
-			)
 			writeError(
 				w,
 				r,
@@ -793,30 +539,10 @@ func (ro *Router) handleCompleteMultipartUpload(
 				"The specified bucket does not exist.",
 			)
 		default:
-			slog.Error( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-				"failed to complete multipart upload",
-				"bucket",
-				bucket,
-				"key",
-				key,
-				"uploadId",
-				uploadID,
-				"err",
-				err,
-			)
 			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		}
 		return
 	}
-	slog.Info( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-		"multipart upload completed",
-		"bucket",
-		bucket,
-		"key",
-		key,
-		"uploadId",
-		uploadID,
-	)
 	setSSEHeaders(w, meta)
 	writeXML(w, http.StatusOK, completeMultipartUploadResult{
 		Location: "/" + bucket + "/" + key,
@@ -849,13 +575,6 @@ func (ro *Router) handleAbortMultipartUpload(
 					"The specified upload does not exist.")
 				return
 			}
-			slog.Error( // #nosec G706 -- uploadID comes from URL query; log injection risk accepted for a local dev emulator
-				"failed to get upload meta for ACL check",
-				"uploadId",
-				uploadID,
-				"err",
-				err,
-			)
 			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 			return
 		}
@@ -867,33 +586,14 @@ func (ro *Router) handleAbortMultipartUpload(
 		bucketACL, err := ro.storage.GetBucketACL(umeta.Bucket)
 		if err != nil {
 			if errors.Is(err, ErrBucketNotFound) {
-				slog.Debug( // #nosec G706 -- umeta.Bucket is stored upload metadata; log injection risk accepted for a local dev emulator
-					"bucket not found",
-					"bucket",
-					umeta.Bucket,
-				)
 				writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 					"The specified bucket does not exist.")
 				return
 			}
-			slog.Error( // #nosec G706 -- umeta.Bucket is stored upload metadata; log injection risk accepted for a local dev emulator
-				"failed to get bucket ACL",
-				"bucket",
-				umeta.Bucket,
-				"err",
-				err,
-			)
 			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 			return
 		}
 		if !aclAllowsAnonymous(bucketACL, aclPermWrite) {
-			slog.Debug( // #nosec G706 -- umeta.Bucket/key are stored upload metadata; log injection risk accepted for a local dev emulator
-				"abort multipart upload denied: ACL",
-				"bucket",
-				umeta.Bucket,
-				"key",
-				key,
-			)
 			writeError(w, r, http.StatusForbidden, "AccessDenied", "Access Denied")
 			return
 		}
@@ -901,11 +601,6 @@ func (ro *Router) handleAbortMultipartUpload(
 	if err := ro.storage.AbortMultipartUpload(uploadID); err != nil {
 		switch {
 		case errors.Is(err, ErrUploadNotFound):
-			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-				"upload not found",
-				"uploadId",
-				uploadID,
-			)
 			writeError(
 				w,
 				r,
@@ -914,30 +609,10 @@ func (ro *Router) handleAbortMultipartUpload(
 				"The specified upload does not exist.",
 			)
 		default:
-			slog.Error( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-				"failed to abort multipart upload",
-				"bucket",
-				bucket,
-				"key",
-				key,
-				"uploadId",
-				uploadID,
-				"err",
-				err,
-			)
 			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		}
 		return
 	}
-	slog.Info( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-		"multipart upload aborted",
-		"bucket",
-		bucket,
-		"key",
-		key,
-		"uploadId",
-		uploadID,
-	)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -971,26 +646,10 @@ func (ro *Router) handleListParts(
 	umeta, parts, err := ro.storage.ListParts(uploadID)
 	if err != nil {
 		if errors.Is(err, ErrUploadNotFound) {
-			slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-				"upload not found",
-				"uploadId",
-				uploadID,
-			)
 			writeError(w, r, http.StatusNotFound, "NoSuchUpload",
 				"The specified upload does not exist.")
 			return
 		}
-		slog.Error( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-			"failed to list parts",
-			"bucket",
-			bucket,
-			"key",
-			key,
-			"uploadId",
-			uploadID,
-			"err",
-			err,
-		)
 		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
@@ -1015,18 +674,6 @@ func (ro *Router) handleListParts(
 		})
 		nextPartNumberMarker = p.PartNumber
 	}
-
-	slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-		"listed parts",
-		"bucket",
-		bucket,
-		"key",
-		key,
-		"uploadId",
-		uploadID,
-		"count",
-		len(xmlParts),
-	)
 
 	result := listPartsResult{
 		Bucket:           umeta.Bucket,

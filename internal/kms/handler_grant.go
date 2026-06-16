@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"regexp"
 )
@@ -81,7 +80,6 @@ func (ro *Router) handleCreateGrant(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	slog.Info("KMS CreateGrant", "keyID", keyID, "grantID", g.GrantId)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"GrantId":    g.GrantId,
 		"GrantToken": g.GrantToken,
@@ -91,15 +89,12 @@ func (ro *Router) handleCreateGrant(w http.ResponseWriter, body []byte) {
 func writeGrantCreateError(w http.ResponseWriter, keyID string, err error) {
 	switch {
 	case errors.Is(err, ErrKeyNotFound):
-		slog.Debug("KMS CreateGrant: key not found", "keyID", keyID)
 		writeError(w, http.StatusBadRequest, "NotFoundException",
 			fmt.Sprintf("Invalid keyId %s", keyID))
 	case errors.Is(err, ErrKeyDisabled):
-		slog.Debug("KMS CreateGrant: key disabled", "keyID", keyID)
 		writeError(w, http.StatusBadRequest, "DisabledException",
 			fmt.Sprintf("KMS key %s is disabled", keyID))
 	case errors.Is(err, ErrInvalidKeyState):
-		slog.Debug("KMS CreateGrant: invalid key state", "keyID", keyID)
 		writeError(
 			w,
 			http.StatusBadRequest,
@@ -110,11 +105,9 @@ func writeGrantCreateError(w http.ResponseWriter, keyID string, err error) {
 			),
 		)
 	case errors.Is(err, ErrGrantLimitExceeded):
-		slog.Debug("KMS CreateGrant: grant limit exceeded", "keyID", keyID)
 		writeError(w, http.StatusBadRequest, "LimitExceededException",
 			fmt.Sprintf("Grant limit exceeded for key %s", keyID))
 	default:
-		slog.Error("KMS CreateGrant storage failure", "keyID", keyID, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -179,7 +172,6 @@ func (ro *Router) handleListGrants(w http.ResponseWriter, body []byte) {
 		resp["NextMarker"] = nextMarker
 	}
 
-	slog.Debug("KMS ListGrants", "keyID", keyID, "count", len(entries))
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -211,7 +203,6 @@ func (ro *Router) handleRevokeGrant(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	slog.Info("KMS RevokeGrant", "keyID", keyID, "grantID", req.GrantId)
 	writeEmpty(w)
 }
 
@@ -240,12 +231,10 @@ func (ro *Router) handleRetireGrant(w http.ResponseWriter, body []byte) {
 	if req.GrantToken != "" {
 		if err := ro.storage.RetireGrantByToken(req.GrantToken); err != nil {
 			if errors.Is(err, ErrGrantNotFound) {
-				slog.Debug("KMS RetireGrant: grant not found by token")
 				writeError(w, http.StatusBadRequest, "NotFoundException",
 					"grant not found for the provided GrantToken")
 				return
 			}
-			slog.Error("KMS RetireGrant storage failure", "err", err)
 			writeError(
 				w,
 				http.StatusInternalServerError,
@@ -254,7 +243,6 @@ func (ro *Router) handleRetireGrant(w http.ResponseWriter, body []byte) {
 			)
 			return
 		}
-		slog.Info("KMS RetireGrant by token")
 		writeEmpty(w)
 		return
 	}
@@ -269,7 +257,6 @@ func (ro *Router) handleRetireGrant(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	slog.Info("KMS RetireGrant", "keyID", keyID, "grantID", req.GrantId)
 	writeEmpty(w)
 }
 
@@ -302,7 +289,6 @@ func (ro *Router) handleListRetirableGrants(w http.ResponseWriter, body []byte) 
 		req.Marker,
 	)
 	if err != nil {
-		slog.Error("KMS ListRetirableGrants storage failure", "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -325,13 +311,6 @@ func (ro *Router) handleListRetirableGrants(w http.ResponseWriter, body []byte) 
 		resp["NextMarker"] = nextMarker
 	}
 
-	slog.Debug(
-		"KMS ListRetirableGrants",
-		"retiringPrincipal",
-		req.RetiringPrincipal,
-		"count",
-		len(entries),
-	)
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -339,11 +318,9 @@ func (ro *Router) handleListRetirableGrants(w http.ResponseWriter, body []byte) 
 func writeGrantListError(w http.ResponseWriter, keyID, op string, err error) {
 	switch {
 	case errors.Is(err, ErrKeyNotFound):
-		slog.Debug("KMS "+op+": key not found", "keyID", keyID)
 		writeError(w, http.StatusBadRequest, "NotFoundException",
 			fmt.Sprintf("Invalid keyId %s", keyID))
 	case errors.Is(err, ErrInvalidKeyState):
-		slog.Debug("KMS "+op+": invalid key state", "keyID", keyID)
 		writeError(
 			w,
 			http.StatusBadRequest,
@@ -354,7 +331,6 @@ func writeGrantListError(w http.ResponseWriter, keyID, op string, err error) {
 			),
 		)
 	default:
-		slog.Error("KMS "+op+" storage failure", "keyID", keyID, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -368,15 +344,12 @@ func writeGrantListError(w http.ResponseWriter, keyID, op string, err error) {
 func writeGrantMutateError(w http.ResponseWriter, keyID, op string, err error) {
 	switch {
 	case errors.Is(err, ErrKeyNotFound):
-		slog.Debug("KMS "+op+": key not found", "keyID", keyID)
 		writeError(w, http.StatusBadRequest, "NotFoundException",
 			fmt.Sprintf("Invalid keyId %s", keyID))
 	case errors.Is(err, ErrGrantNotFound):
-		slog.Debug("KMS "+op+": grant not found", "keyID", keyID)
 		writeError(w, http.StatusBadRequest, "NotFoundException",
 			fmt.Sprintf("Grant not found for key %s", keyID))
 	case errors.Is(err, ErrInvalidKeyState):
-		slog.Debug("KMS "+op+": invalid key state", "keyID", keyID)
 		writeError(
 			w,
 			http.StatusBadRequest,
@@ -387,7 +360,6 @@ func writeGrantMutateError(w http.ResponseWriter, keyID, op string, err error) {
 			),
 		)
 	default:
-		slog.Error("KMS "+op+" storage failure", "keyID", keyID, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,

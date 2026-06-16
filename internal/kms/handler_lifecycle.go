@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"strings"
 )
@@ -41,7 +40,6 @@ func (ro *Router) handleEnableKey(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	slog.Info("KMS EnableKey", "keyID", keyID)
 	writeEmpty(w)
 }
 
@@ -68,7 +66,6 @@ func (ro *Router) handleDisableKey(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	slog.Info("KMS DisableKey", "keyID", keyID)
 	writeEmpty(w)
 }
 
@@ -108,7 +105,6 @@ func (ro *Router) handleScheduleKeyDeletion(w http.ResponseWriter, body []byte) 
 		return
 	}
 
-	slog.Info("KMS ScheduleKeyDeletion", "keyID", keyID, "pendingDays", pendingDays)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"KeyId":               meta.Arn,
 		"KeyState":            meta.KeyState,
@@ -141,7 +137,6 @@ func (ro *Router) handleCancelKeyDeletion(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	slog.Info("KMS CancelKeyDeletion", "keyID", keyID)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"KeyId": meta.Arn,
 	})
@@ -188,7 +183,6 @@ func (ro *Router) handleEnableKeyRotation(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	slog.Info("KMS EnableKeyRotation", "keyID", keyID, "rotationDays", rotationDays)
 	writeEmpty(w)
 }
 
@@ -215,7 +209,6 @@ func (ro *Router) handleDisableKeyRotation(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	slog.Info("KMS DisableKeyRotation", "keyID", keyID)
 	writeEmpty(w)
 }
 
@@ -252,7 +245,6 @@ func (ro *Router) handleGetKeyRotationStatus(w http.ResponseWriter, body []byte)
 		resp["NextRotationDate"] = cfg.NextRotationDate
 	}
 
-	slog.Debug("KMS GetKeyRotationStatus", "keyID", keyID, "enabled", cfg.Enabled)
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -306,7 +298,6 @@ func (ro *Router) handleTagResource(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	slog.Info("KMS TagResource", "keyID", keyID, "count", len(req.Tags))
 	writeEmpty(w)
 }
 
@@ -350,7 +341,6 @@ func (ro *Router) handleUntagResource(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	slog.Info("KMS UntagResource", "keyID", keyID, "count", len(req.TagKeys))
 	writeEmpty(w)
 }
 
@@ -358,11 +348,9 @@ func (ro *Router) handleUntagResource(w http.ResponseWriter, body []byte) {
 func writeTagError(w http.ResponseWriter, keyID, op string, err error) {
 	switch {
 	case errors.Is(err, ErrKeyNotFound):
-		slog.Debug("KMS "+op+": key not found", "keyID", keyID)
 		writeError(w, http.StatusBadRequest, "NotFoundException",
 			fmt.Sprintf("Invalid keyId %s", keyID))
 	case errors.Is(err, ErrInvalidKeyState):
-		slog.Debug("KMS "+op+": invalid key state", "keyID", keyID)
 		writeError(
 			w,
 			http.StatusBadRequest,
@@ -373,11 +361,9 @@ func writeTagError(w http.ResponseWriter, keyID, op string, err error) {
 			),
 		)
 	case errors.Is(err, ErrTagLimitExceeded):
-		slog.Debug("KMS "+op+": tag limit exceeded", "keyID", keyID)
 		writeError(w, http.StatusBadRequest, "LimitExceededException",
 			fmt.Sprintf("Key %s has reached the maximum number of tags (%d)", keyID, maxTagsPerKey))
 	default:
-		slog.Error("KMS "+op+" storage failure", "keyID", keyID, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -392,11 +378,9 @@ func writeTagError(w http.ResponseWriter, keyID, op string, err error) {
 func writeLifecycleError(w http.ResponseWriter, keyID, op string, err error) {
 	switch {
 	case errors.Is(err, ErrKeyNotFound):
-		slog.Debug("KMS "+op+": key not found", "keyID", keyID)
 		writeError(w, http.StatusBadRequest, "NotFoundException",
 			fmt.Sprintf("Invalid keyId %s", keyID))
 	case errors.Is(err, ErrInvalidKeyState):
-		slog.Debug("KMS "+op+": invalid key state", "keyID", keyID)
 		writeError(
 			w,
 			http.StatusBadRequest,
@@ -407,7 +391,6 @@ func writeLifecycleError(w http.ResponseWriter, keyID, op string, err error) {
 			),
 		)
 	default:
-		slog.Error("KMS "+op+" storage failure", "keyID", keyID, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -441,7 +424,6 @@ func (ro *Router) handleRotateKeyOnDemand(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	slog.Info("KMS RotateKeyOnDemand", "keyID", keyID)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"KeyId": meta.Arn,
 	})
@@ -498,7 +480,6 @@ func (ro *Router) handleListKeyRotations(w http.ResponseWriter, body []byte) {
 		resp["NextMarker"] = nextMarker
 	}
 
-	slog.Debug("KMS ListKeyRotations", "keyID", keyID, "count", len(records))
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -506,11 +487,9 @@ func (ro *Router) handleListKeyRotations(w http.ResponseWriter, body []byte) {
 func writeListKeyRotationsError(w http.ResponseWriter, keyID, marker string, err error) {
 	switch {
 	case errors.Is(err, ErrKeyNotFound):
-		slog.Debug("KMS ListKeyRotations: key not found", "keyID", keyID)
 		writeError(w, http.StatusBadRequest, "NotFoundException",
 			fmt.Sprintf("Invalid keyId %s", keyID))
 	case errors.Is(err, ErrInvalidKeyState):
-		slog.Debug("KMS ListKeyRotations: invalid key state", "keyID", keyID)
 		writeError(
 			w,
 			http.StatusBadRequest,
@@ -521,7 +500,6 @@ func writeListKeyRotationsError(w http.ResponseWriter, keyID, marker string, err
 			),
 		)
 	case errors.Is(err, ErrUnsupportedOp):
-		slog.Debug("KMS ListKeyRotations: unsupported operation", "keyID", keyID)
 		writeError(
 			w,
 			http.StatusBadRequest,
@@ -532,11 +510,9 @@ func writeListKeyRotationsError(w http.ResponseWriter, keyID, marker string, err
 			),
 		)
 	case errors.Is(err, ErrInvalidMarker):
-		slog.Debug("KMS ListKeyRotations: invalid marker", "keyID", keyID)
 		writeError(w, http.StatusBadRequest, "InvalidMarkerException",
 			fmt.Sprintf("The marker %s is not valid", marker))
 	default:
-		slog.Error("KMS ListKeyRotations storage failure", "keyID", keyID, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -550,15 +526,12 @@ func writeListKeyRotationsError(w http.ResponseWriter, keyID, marker string, err
 func writeOnDemandRotationError(w http.ResponseWriter, keyID string, err error) {
 	switch {
 	case errors.Is(err, ErrKeyNotFound):
-		slog.Debug("KMS RotateKeyOnDemand: key not found", "keyID", keyID)
 		writeError(w, http.StatusBadRequest, "NotFoundException",
 			fmt.Sprintf("Invalid keyId %s", keyID))
 	case errors.Is(err, ErrKeyDisabled):
-		slog.Debug("KMS RotateKeyOnDemand: key disabled", "keyID", keyID)
 		writeError(w, http.StatusBadRequest, "DisabledException",
 			fmt.Sprintf("KMS key %s is disabled", keyID))
 	case errors.Is(err, ErrInvalidKeyState):
-		slog.Debug("KMS RotateKeyOnDemand: invalid key state", "keyID", keyID)
 		writeError(
 			w,
 			http.StatusBadRequest,
@@ -569,7 +542,6 @@ func writeOnDemandRotationError(w http.ResponseWriter, keyID string, err error) 
 			),
 		)
 	case errors.Is(err, ErrUnsupportedOp):
-		slog.Debug("KMS RotateKeyOnDemand: unsupported operation", "keyID", keyID)
 		writeError(
 			w,
 			http.StatusBadRequest,
@@ -580,7 +552,6 @@ func writeOnDemandRotationError(w http.ResponseWriter, keyID string, err error) 
 			),
 		)
 	case errors.Is(err, ErrOnDemandRotationLimit):
-		slog.Debug("KMS RotateKeyOnDemand: limit exceeded", "keyID", keyID)
 		writeError(
 			w,
 			http.StatusBadRequest,
@@ -592,7 +563,6 @@ func writeOnDemandRotationError(w http.ResponseWriter, keyID string, err error) 
 			),
 		)
 	default:
-		slog.Error("KMS RotateKeyOnDemand storage failure", "keyID", keyID, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -607,15 +577,12 @@ func writeOnDemandRotationError(w http.ResponseWriter, keyID string, err error) 
 func writeRotationError(w http.ResponseWriter, keyID, op string, err error) {
 	switch {
 	case errors.Is(err, ErrKeyNotFound):
-		slog.Debug("KMS "+op+": key not found", "keyID", keyID)
 		writeError(w, http.StatusBadRequest, "NotFoundException",
 			fmt.Sprintf("Invalid keyId %s", keyID))
 	case errors.Is(err, ErrKeyDisabled):
-		slog.Debug("KMS "+op+": key disabled", "keyID", keyID)
 		writeError(w, http.StatusBadRequest, "DisabledException",
 			fmt.Sprintf("KMS key %s is disabled", keyID))
 	case errors.Is(err, ErrInvalidKeyState):
-		slog.Debug("KMS "+op+": invalid key state", "keyID", keyID)
 		writeError(
 			w,
 			http.StatusBadRequest,
@@ -626,7 +593,6 @@ func writeRotationError(w http.ResponseWriter, keyID, op string, err error) {
 			),
 		)
 	case errors.Is(err, ErrUnsupportedOp):
-		slog.Debug("KMS "+op+": unsupported operation", "keyID", keyID)
 		writeError(
 			w,
 			http.StatusBadRequest,
@@ -637,7 +603,6 @@ func writeRotationError(w http.ResponseWriter, keyID, op string, err error) {
 			),
 		)
 	default:
-		slog.Error("KMS "+op+" storage failure", "keyID", keyID, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,

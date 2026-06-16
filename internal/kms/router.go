@@ -3,9 +3,9 @@ package kms
 import (
 	"crypto/rand"
 	"io"
-	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // store is the storage interface used by Router.
@@ -75,9 +75,14 @@ func newRouterWithRand(s store, randRead func([]byte) (int, error)) *Router {
 }
 
 func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	target := r.Header.Get("X-Amz-Target")
-	op := strings.TrimPrefix(target, "TrentService.")
+	rec := newResponseRecorder(w)
+	start := time.Now()
+	op := strings.TrimPrefix(r.Header.Get("X-Amz-Target"), "TrentService.")
+	ro.serveHTTP(rec, r, op)
+	emitRequestLog(op, rec, time.Since(start))
+}
 
+func (ro *Router) serveHTTP(w http.ResponseWriter, r *http.Request, op string) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "ValidationException", "failed to read request body")
@@ -164,11 +169,6 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "ListRetirableGrants":
 		ro.handleListRetirableGrants(w, body)
 	default:
-		slog.Debug( // #nosec G706 -- target comes from the X-Amz-Target header; log injection risk accepted for a local dev emulator
-			"KMS operation not implemented",
-			"target",
-			target,
-		)
 		writeError(
 			w,
 			http.StatusNotImplemented,

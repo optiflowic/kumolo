@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"regexp"
 	"sort"
@@ -86,7 +85,6 @@ func (ro *Router) handleCreateAlias(w http.ResponseWriter, body []byte) {
 			writeError(w, http.StatusBadRequest, "NotFoundException",
 				fmt.Sprintf("Invalid keyId %s", targetKeyID))
 		default:
-			slog.Error("KMS CreateAlias storage failure", "err", err)
 			writeError(
 				w,
 				http.StatusInternalServerError,
@@ -97,7 +95,6 @@ func (ro *Router) handleCreateAlias(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	slog.Info("KMS CreateAlias", "aliasName", req.AliasName, "targetKeyID", targetKeyID)
 	w.Header().Set("Content-Type", "application/x-amz-json-1.1")
 	w.WriteHeader(http.StatusOK)
 }
@@ -121,7 +118,6 @@ func (ro *Router) handleDeleteAlias(w http.ResponseWriter, body []byte) {
 				fmt.Sprintf("Alias %s not found", req.AliasName))
 			return
 		}
-		slog.Error("KMS DeleteAlias storage failure", "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -131,7 +127,6 @@ func (ro *Router) handleDeleteAlias(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	slog.Info("KMS DeleteAlias", "aliasName", req.AliasName)
 	w.Header().Set("Content-Type", "application/x-amz-json-1.1")
 	w.WriteHeader(http.StatusOK)
 }
@@ -175,7 +170,6 @@ func (ro *Router) handleUpdateAlias(w http.ResponseWriter, body []byte) {
 				fmt.Sprintf("Alias %s not found", req.AliasName))
 			return
 		}
-		slog.Error("KMS UpdateAlias: ResolveAlias failure", "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -192,7 +186,6 @@ func (ro *Router) handleUpdateAlias(w http.ResponseWriter, body []byte) {
 				fmt.Sprintf("Invalid keyId %s", oldKeyID))
 			return
 		}
-		slog.Error("KMS UpdateAlias: GetKeyMetadata (old) failure", "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -209,7 +202,6 @@ func (ro *Router) handleUpdateAlias(w http.ResponseWriter, body []byte) {
 				fmt.Sprintf("Invalid keyId %s", newKeyID))
 			return
 		}
-		slog.Error("KMS UpdateAlias: GetKeyMetadata (new) failure", "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -247,7 +239,6 @@ func (ro *Router) handleUpdateAlias(w http.ResponseWriter, body []byte) {
 				fmt.Sprintf("KMS key %s is pending deletion", newKeyID))
 			return
 		}
-		slog.Error("KMS UpdateAlias storage failure", "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -257,7 +248,6 @@ func (ro *Router) handleUpdateAlias(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	slog.Info("KMS UpdateAlias", "aliasName", req.AliasName, "newKeyID", newKeyID)
 	w.Header().Set("Content-Type", "application/x-amz-json-1.1")
 	w.WriteHeader(http.StatusOK)
 }
@@ -302,7 +292,6 @@ func (ro *Router) handleListAliases(w http.ResponseWriter, body []byte) {
 					fmt.Sprintf("Invalid keyId %s", resolved))
 				return
 			}
-			slog.Error("KMS ListAliases: GetKeyMetadata failure", "err", err)
 			writeError(
 				w,
 				http.StatusInternalServerError,
@@ -316,7 +305,6 @@ func (ro *Router) handleListAliases(w http.ResponseWriter, body []byte) {
 
 	aliases, err := ro.storage.ListAliases(filterKeyID)
 	if err != nil {
-		slog.Error("KMS ListAliases storage failure", "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -369,6 +357,5 @@ func (ro *Router) handleListAliases(w http.ResponseWriter, body []byte) {
 		resp["NextMarker"] = aliases[len(aliases)-1].AliasName
 	}
 
-	slog.Debug("KMS ListAliases", "count", len(aliases))
 	writeJSON(w, http.StatusOK, resp)
 }

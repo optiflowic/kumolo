@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"sort"
 )
@@ -76,7 +75,6 @@ func (ro *Router) tryDecryptWithFallback(
 	}
 	prevMats, prevErr := ro.storage.GetPreviousKeyMaterials(keyID)
 	if prevErr != nil {
-		slog.Debug("kms: GetPreviousKeyMaterials failed", "keyID", keyID, "err", prevErr)
 		return mat, nil, err
 	}
 	for _, prev := range prevMats {
@@ -227,12 +225,10 @@ func (ro *Router) resolveAndValidateKey(
 	meta, err := ro.storage.GetKeyMetadata(keyID)
 	if err != nil {
 		if errors.Is(err, ErrKeyNotFound) {
-			slog.Debug("KMS: key not found", "keyID", keyID)
 			writeError(w, http.StatusBadRequest, "NotFoundException",
 				fmt.Sprintf("Invalid keyId %s", keyID))
 			return KeyMetadata{}, "", false
 		}
-		slog.Error("KMS: GetKeyMetadata failure", "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -296,7 +292,6 @@ func (ro *Router) loadSymmetricMaterial(
 				fmt.Sprintf("Key material not available for key %s", keyID))
 			return KeyMaterial{}, false
 		}
-		slog.Error("KMS: GetKeyMaterial failure", "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -358,7 +353,6 @@ func (ro *Router) handleEncrypt(w http.ResponseWriter, body []byte) {
 
 	var nonce [envelopeNonceLen]byte
 	if err := ro.readFullRand(nonce[:]); err != nil {
-		slog.Error("KMS Encrypt: seal failure", "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -370,7 +364,6 @@ func (ro *Router) handleEncrypt(w http.ResponseWriter, body []byte) {
 	ciphertext, err := sealEnvelope(keyID, mat, req.Plaintext, req.EncryptionContext, nonce)
 	if err != nil {
 		// untestable: sealEnvelope only fails on AES init which cannot fail with 32-byte keys
-		slog.Error("KMS Encrypt: seal failure", "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -380,7 +373,6 @@ func (ro *Router) handleEncrypt(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	slog.Info("KMS Encrypt", "keyID", keyID)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"CiphertextBlob":      ciphertext,
 		"KeyId":               meta.Arn,
@@ -490,13 +482,11 @@ func (ro *Router) handleDecrypt(w http.ResponseWriter, body []byte) {
 		keyID,
 	)
 	if err != nil {
-		slog.Debug("KMS Decrypt: open envelope failed", "err", err)
 		writeError(w, http.StatusBadRequest, "InvalidCiphertextException",
 			"ciphertext is invalid or the encryption context does not match")
 		return
 	}
 
-	slog.Debug("KMS Decrypt", "keyID", keyID)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"Plaintext":           plaintext,
 		"KeyId":               meta.Arn,
@@ -645,7 +635,6 @@ func (ro *Router) handleReEncrypt(w http.ResponseWriter, body []byte) {
 		srcKeyID,
 	)
 	if err != nil {
-		slog.Debug("KMS ReEncrypt: open envelope failed", "err", err)
 		writeError(w, http.StatusBadRequest, "InvalidCiphertextException",
 			"ciphertext is invalid or the source encryption context does not match")
 		return
@@ -663,7 +652,6 @@ func (ro *Router) handleReEncrypt(w http.ResponseWriter, body []byte) {
 
 	var nonce [envelopeNonceLen]byte
 	if err := ro.readFullRand(nonce[:]); err != nil {
-		slog.Error("KMS ReEncrypt: rand read failure", "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -681,7 +669,6 @@ func (ro *Router) handleReEncrypt(w http.ResponseWriter, body []byte) {
 	)
 	if err != nil {
 		// untestable: sealEnvelope only fails on AES init which cannot fail with 32-byte keys
-		slog.Error("KMS ReEncrypt: seal failure", "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -691,7 +678,6 @@ func (ro *Router) handleReEncrypt(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	slog.Info("KMS ReEncrypt", "sourceKeyID", srcKeyID, "destKeyID", dstKeyID)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"CiphertextBlob":                 newCiphertext,
 		"KeyId":                          dstMeta.Arn,
@@ -732,7 +718,6 @@ func (ro *Router) handleGenerateRandom(w http.ResponseWriter, body []byte) {
 
 	buf := make([]byte, n)
 	if err := ro.readFullRand(buf); err != nil {
-		slog.Error("KMS GenerateRandom: rand read failure", "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -742,7 +727,6 @@ func (ro *Router) handleGenerateRandom(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	slog.Debug("KMS GenerateRandom", "numberOfBytes", n)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"Plaintext": buf,
 	})
@@ -769,7 +753,6 @@ func (ro *Router) handleGenerateDataKeyPair(w http.ResponseWriter, body []byte) 
 	if !ok {
 		return
 	}
-	slog.Info("KMS GenerateDataKeyPair", "keyPairSpec", spec)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"KeyId":                    arn,
 		"KeyPairSpec":              spec,
@@ -788,7 +771,6 @@ func (ro *Router) handleGenerateDataKeyPairWithoutPlaintext(w http.ResponseWrite
 	if !ok {
 		return
 	}
-	slog.Info("KMS GenerateDataKeyPairWithoutPlaintext", "keyPairSpec", spec)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"KeyId":                    arn,
 		"KeyPairSpec":              spec,
@@ -842,7 +824,6 @@ func (ro *Router) generateDataKeyPairCommon(
 
 	privKeyDER, err := ro.generateEphemeralKeyPairFn(req.KeyPairSpec)
 	if err != nil {
-		slog.Error("KMS GenerateDataKeyPair: key generation failure", "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -859,7 +840,6 @@ func (ro *Router) generateDataKeyPairCommon(
 
 	pubKeyDER, err := extractPublicKeyDER(privKeyDER)
 	if err != nil {
-		slog.Error("KMS GenerateDataKeyPair: extract public key failure", "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -871,7 +851,6 @@ func (ro *Router) generateDataKeyPairCommon(
 
 	var nonce [envelopeNonceLen]byte
 	if err := ro.readFullRand(nonce[:]); err != nil {
-		slog.Error("KMS GenerateDataKeyPair: rand read failure", "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -883,7 +862,6 @@ func (ro *Router) generateDataKeyPairCommon(
 	ciphertextBlob, err := sealEnvelope(keyID, mat, privKeyDER, req.EncryptionContext, nonce)
 	if err != nil {
 		// untestable: sealEnvelope only fails on AES init which cannot fail with 32-byte keys
-		slog.Error("KMS GenerateDataKeyPair: seal failure", "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -962,7 +940,6 @@ func (ro *Router) generateDataKeyCommon(
 	// both derive from the same PRNG invocation, avoiding two-call ordering risks.
 	combined := make([]byte, numBytes+envelopeNonceLen)
 	if err := ro.readFullRand(combined); err != nil {
-		slog.Error("KMS GenerateDataKey: rand read failure", "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -978,7 +955,6 @@ func (ro *Router) generateDataKeyCommon(
 	ciphertextBlob, err := sealEnvelope(keyID, mat, dataKey, req.EncryptionContext, nonce)
 	if err != nil {
 		// untestable: sealEnvelope only fails on AES init which cannot fail with 32-byte keys
-		slog.Error("KMS GenerateDataKey: seal failure", "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -988,6 +964,5 @@ func (ro *Router) generateDataKeyCommon(
 		return nil, nil, "", "", false
 	}
 
-	slog.Info("KMS GenerateDataKey", "keyID", keyID, "numBytes", numBytes)
 	return dataKey, ciphertextBlob, meta.Arn, mat.KeyMaterialID, true
 }

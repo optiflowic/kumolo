@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 )
 
@@ -133,7 +132,6 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 	items, lastEvaluatedKey, err := ro.storage.Scan(req.TableName, opts)
 	if err != nil {
 		if errors.Is(err, ErrTableNotFound) {
-			slog.Debug("Scan: table not found", "table", req.TableName)
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -143,7 +141,6 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 			return
 		}
 		if errors.Is(err, ErrValidationException) {
-			slog.Debug("Scan: validation error", "table", req.TableName, "err", err)
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -152,7 +149,6 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 			)
 			return
 		}
-		slog.Error("Scan failed", "table", req.TableName, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -173,7 +169,6 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 			req.ExpressionAttributeValues,
 		)
 		if err != nil {
-			slog.Debug("Scan: invalid FilterExpression", "table", req.TableName, "err", err)
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -193,7 +188,6 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 			req.ExpressionAttributeNames,
 		)
 		if err != nil {
-			slog.Debug("Scan: invalid ProjectionExpression", "table", req.TableName, "err", err)
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -203,7 +197,6 @@ func (ro *Router) handleScan(w http.ResponseWriter, body []byte) {
 			return
 		}
 	}
-	slog.Debug("scanned DynamoDB table", "table", req.TableName, "count", len(items))
 	if req.Select == "COUNT" {
 		resp := map[string]any{
 			"Count":        len(items),
@@ -292,7 +285,6 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 		req.ExpressionAttributeValues,
 	)
 	if err != nil {
-		slog.Debug("Query: invalid KeyConditionExpression", "table", req.TableName, "err", err)
 		writeError(
 			w,
 			http.StatusBadRequest,
@@ -357,7 +349,6 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 	)
 	if err != nil {
 		if errors.Is(err, ErrTableNotFound) {
-			slog.Debug("Query: table not found", "table", req.TableName)
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -367,7 +358,6 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 			return
 		}
 		if errors.Is(err, ErrValidationException) {
-			slog.Debug("Query: validation error", "table", req.TableName, "err", err)
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -376,7 +366,6 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 			)
 			return
 		}
-		slog.Error("Query failed", "table", req.TableName, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -397,7 +386,6 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 			req.ExpressionAttributeValues,
 		)
 		if err != nil {
-			slog.Debug("Query: invalid FilterExpression", "table", req.TableName, "err", err)
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -417,7 +405,6 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 			req.ExpressionAttributeNames,
 		)
 		if err != nil {
-			slog.Debug("Query: invalid ProjectionExpression", "table", req.TableName, "err", err)
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -427,7 +414,6 @@ func (ro *Router) handleQuery(w http.ResponseWriter, body []byte) {
 			return
 		}
 	}
-	slog.Debug("queried DynamoDB table", "table", req.TableName, "count", len(items))
 	if req.Select == "COUNT" {
 		resp := map[string]any{
 			"Count":        len(items),
