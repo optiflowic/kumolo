@@ -2528,7 +2528,7 @@ func objectLockIsEnabled(xmlBody string) bool {
 		ObjectLockEnabled string `xml:"http://s3.amazonaws.com/doc/2006-03-01/ ObjectLockEnabled"`
 	}
 	if err := xml.Unmarshal([]byte(xmlBody), &cfg); err != nil {
-		return false // unreachable: callers only pass well-formed XML produced by kumolo itself
+		return true // fail-closed: treat unparseable Object Lock XML as enabled to preserve the invariant
 	}
 	return cfg.ObjectLockEnabled == "Enabled"
 }

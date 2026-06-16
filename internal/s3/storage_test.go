@@ -4557,6 +4557,18 @@ func TestBucketVersioning(t *testing.T) {
 		},
 	)
 
+	t.Run(
+		"PutBucketVersioning returns ErrInvalidBucketState when Object Lock XML is unparseable (fail-closed)",
+		func(t *testing.T) {
+			s := newTestStorage(t)
+			bucket := "lock-bucket"
+			require.NoError(t, s.CreateBucket(bucket, "us-east-1", true))
+			require.NoError(t, s.PutBucketObjectLock(bucket, "<invalid"))
+			err := s.PutBucketVersioning(bucket, "Suspended")
+			assert.ErrorIs(t, err, ErrInvalidBucketState)
+		},
+	)
+
 	t.Run("PutBucketVersioning allows Enabled on Object Lock bucket", func(t *testing.T) {
 		s := newTestStorage(t)
 		bucket := "lock-bucket"
