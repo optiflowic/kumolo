@@ -368,6 +368,8 @@ type mockStore struct {
 	getBucketLifecycleErr                     error
 	deleteBucketLifecycleErr                  error
 	putBucketLifecycleTransitionMinSizeErr    error
+	capturedLifecycleTransitionMinSizeBucket  string
+	capturedLifecycleTransitionMinSizeValue   string
 	getBucketLifecycleTransitionMinSizeResult string
 	getBucketLifecycleTransitionMinSizeErr    error
 	putBucketWebsiteErr                       error
@@ -628,7 +630,9 @@ func (m *mockStore) GetBucketLifecycle(_ string) (string, error) {
 	return m.getBucketLifecycleResult, m.getBucketLifecycleErr
 }
 func (m *mockStore) DeleteBucketLifecycle(_ string) error { return m.deleteBucketLifecycleErr }
-func (m *mockStore) PutBucketLifecycleTransitionMinSize(_, _ string) error {
+func (m *mockStore) PutBucketLifecycleTransitionMinSize(bucket, v string) error {
+	m.capturedLifecycleTransitionMinSizeBucket = bucket
+	m.capturedLifecycleTransitionMinSizeValue = v
 	return m.putBucketLifecycleTransitionMinSizeErr
 }
 func (m *mockStore) GetBucketLifecycleTransitionMinSize(_ string) (string, error) {
@@ -7889,7 +7893,8 @@ func TestBucketConfigHandlers(t *testing.T) {
 	t.Run(
 		"PUT lifecycle stores x-amz-transition-default-minimum-object-size header",
 		func(t *testing.T) {
-			ro := newRouterWithMock(&mockStore{})
+			store := &mockStore{}
+			ro := newRouterWithMock(store)
 			w := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodPut, "/b?lifecycle", strings.NewReader(validXML))
 			req.Header.Set(
@@ -7898,6 +7903,46 @@ func TestBucketConfigHandlers(t *testing.T) {
 			)
 			ro.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Equal(t, "b", store.capturedLifecycleTransitionMinSizeBucket)
+			assert.Equal(
+				t,
+				"all_storage_classes_128K",
+				store.capturedLifecycleTransitionMinSizeValue,
+			)
+		},
+	)
+	t.Run(
+		"PUT lifecycle accepts varies_by_storage_class header",
+		func(t *testing.T) {
+			store := &mockStore{}
+			ro := newRouterWithMock(store)
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPut, "/b?lifecycle", strings.NewReader(validXML))
+			req.Header.Set(
+				"x-amz-transition-default-minimum-object-size",
+				"varies_by_storage_class",
+			)
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Equal(
+				t,
+				"varies_by_storage_class",
+				store.capturedLifecycleTransitionMinSizeValue,
+			)
+		},
+	)
+	t.Run(
+		"PUT lifecycle clears transition min size when header is absent",
+		func(t *testing.T) {
+			store := &mockStore{}
+			ro := newRouterWithMock(store)
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(
+				w,
+				httptest.NewRequest(http.MethodPut, "/b?lifecycle", strings.NewReader(validXML)),
+			)
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Equal(t, "", store.capturedLifecycleTransitionMinSizeValue)
 		},
 	)
 	t.Run(

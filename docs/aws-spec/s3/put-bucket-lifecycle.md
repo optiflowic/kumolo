@@ -35,6 +35,7 @@ kumolo returns `InvalidArgument` (400) if the header is present but not one of t
 |---|---|---|
 | `NoSuchBucket` | 404 | Bucket does not exist |
 | `MalformedXML` | 400 | Request body is not valid XML |
+| `InvalidArgument` | 400 | `x-amz-transition-default-minimum-object-size` value is not `all_storage_classes_128K` or `varies_by_storage_class` |
 | `InternalError` | 500 | Storage failure |
 
 ## Expiration semantics (implementation contract)
