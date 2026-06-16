@@ -4551,6 +4551,9 @@ func TestBucketVersioning(t *testing.T) {
 			require.NoError(t, s.CreateBucket(bucket, "us-east-1", true))
 			err := s.PutBucketVersioning(bucket, "Suspended")
 			assert.ErrorIs(t, err, ErrInvalidBucketState)
+			status, err := s.GetBucketVersioning(bucket)
+			require.NoError(t, err)
+			assert.Equal(t, "Enabled", status)
 		},
 	)
 

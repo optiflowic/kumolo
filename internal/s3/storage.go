@@ -1514,8 +1514,7 @@ func (s *Storage) PutBucketVersioning(bucket, status string) error {
 		}
 		meta = bucketMeta{}
 	}
-	if status == "Suspended" &&
-		strings.Contains(meta.ObjectLock, "<ObjectLockEnabled>Enabled</ObjectLockEnabled>") {
+	if status == "Suspended" && objectLockIsEnabled(meta.ObjectLock) {
 		return ErrInvalidBucketState
 	}
 	meta.VersioningStatus = status
@@ -2519,6 +2518,19 @@ func (s *Storage) verDirIsEmpty(verDir string) bool {
 		}
 	}
 	return true
+}
+
+func objectLockIsEnabled(xmlBody string) bool {
+	if xmlBody == "" {
+		return false
+	}
+	var cfg struct {
+		ObjectLockEnabled string `xml:"http://s3.amazonaws.com/doc/2006-03-01/ ObjectLockEnabled"`
+	}
+	if err := xml.Unmarshal([]byte(xmlBody), &cfg); err != nil {
+		return false // unreachable: callers only pass well-formed XML produced by kumolo itself
+	}
+	return cfg.ObjectLockEnabled == "Enabled"
 }
 
 // parseBucketDefaultRetention parses a stored ObjectLockConfiguration XML and
