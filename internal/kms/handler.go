@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
@@ -128,7 +127,6 @@ func (ro *Router) handleCreateKey(w http.ResponseWriter, body []byte) {
 		Policy:      req.Policy,
 	})
 	if err != nil {
-		slog.Error("CreateKey storage failure", "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -145,7 +143,6 @@ func (ro *Router) handleCreateKey(w http.ResponseWriter, body []byte) {
 		}
 	}
 
-	slog.Info("KMS CreateKey", "keyID", meta.KeyID, "spec", meta.KeySpec, "tags", len(req.Tags))
 	writeJSON(w, http.StatusOK, map[string]any{"KeyMetadata": meta})
 }
 
@@ -178,7 +175,6 @@ func (ro *Router) resolveKeyRef(w http.ResponseWriter, keyRef string) (string, b
 			return "", false
 		}
 		if err != nil {
-			slog.Error("KMS: ResolveAlias failure", "err", err)
 			writeError(
 				w,
 				http.StatusInternalServerError,
@@ -216,12 +212,10 @@ func (ro *Router) handleDescribeKey(w http.ResponseWriter, body []byte) {
 	meta, err := ro.storage.GetKeyMetadata(keyID)
 	if err != nil {
 		if errors.Is(err, ErrKeyNotFound) {
-			slog.Debug("KMS DescribeKey: key not found", "keyID", keyID)
 			writeError(w, http.StatusBadRequest, "NotFoundException",
 				fmt.Sprintf("Invalid keyId %s", keyID))
 			return
 		}
-		slog.Error("DescribeKey storage failure", "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -231,7 +225,6 @@ func (ro *Router) handleDescribeKey(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	slog.Debug("KMS DescribeKey", "keyID", keyID)
 	writeJSON(w, http.StatusOK, map[string]any{"KeyMetadata": meta})
 }
 
@@ -260,7 +253,6 @@ func (ro *Router) handleListKeys(w http.ResponseWriter, body []byte) {
 
 	ids, err := ro.storage.ListKeyIDs()
 	if err != nil {
-		slog.Error("ListKeys storage failure", "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -316,7 +308,6 @@ func (ro *Router) handleListKeys(w http.ResponseWriter, body []byte) {
 		resp["NextMarker"] = ids[len(ids)-1]
 	}
 
-	slog.Debug("KMS ListKeys", "count", len(entries))
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -351,12 +342,10 @@ func (ro *Router) handleListResourceTags(w http.ResponseWriter, body []byte) {
 	tags, err := ro.storage.GetTags(keyID)
 	if err != nil {
 		if errors.Is(err, ErrKeyNotFound) {
-			slog.Debug("KMS ListResourceTags: key not found", "keyID", keyID)
 			writeError(w, http.StatusBadRequest, "NotFoundException",
 				fmt.Sprintf("Invalid keyId %s", keyID))
 			return
 		}
-		slog.Error("ListResourceTags storage failure", "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -396,7 +385,6 @@ func (ro *Router) handleListResourceTags(w http.ResponseWriter, body []byte) {
 		resp["NextMarker"] = tags[len(tags)-1].TagKey
 	}
 
-	slog.Debug("KMS ListResourceTags", "keyID", keyID, "count", len(tags))
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -411,7 +399,6 @@ func (ro *Router) resolveKeyMeta(w http.ResponseWriter, keyID string) (KeyMetada
 				fmt.Sprintf("Invalid keyId %s", keyID))
 			return KeyMetadata{}, false
 		}
-		slog.Error("GetKeyMetadata failure", "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -460,12 +447,10 @@ func (ro *Router) handleGetKeyPolicy(w http.ResponseWriter, body []byte) {
 	if err != nil {
 		if errors.Is(err, ErrKeyNotFound) {
 			// unreachable: GetKeyMetadata succeeded above
-			slog.Debug("KMS GetKeyPolicy: key not found", "keyID", keyID)
 			writeError(w, http.StatusBadRequest, "NotFoundException",
 				fmt.Sprintf("Invalid keyId %s", keyID))
 			return
 		}
-		slog.Error("GetKeyPolicy storage failure", "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -475,7 +460,6 @@ func (ro *Router) handleGetKeyPolicy(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	slog.Debug("KMS GetKeyPolicy", "keyID", keyID)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"Policy":     policy,
 		"PolicyName": "default",
@@ -524,12 +508,10 @@ func (ro *Router) handlePutKeyPolicy(w http.ResponseWriter, body []byte) {
 	if err := ro.storage.PutKeyPolicy(keyID, req.Policy); err != nil {
 		if errors.Is(err, ErrKeyNotFound) {
 			// unreachable: GetKeyMetadata succeeded above
-			slog.Debug("KMS PutKeyPolicy: key not found", "keyID", keyID)
 			writeError(w, http.StatusBadRequest, "NotFoundException",
 				fmt.Sprintf("Invalid keyId %s", keyID))
 			return
 		}
-		slog.Error("PutKeyPolicy storage failure", "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -539,7 +521,6 @@ func (ro *Router) handlePutKeyPolicy(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	slog.Info("KMS PutKeyPolicy", "keyID", keyID)
 	w.Header().Set("Content-Type", "application/x-amz-json-1.1")
 	w.WriteHeader(http.StatusOK)
 }

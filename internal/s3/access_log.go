@@ -23,13 +23,15 @@ type loggingEnabled struct {
 	TargetPrefix string `xml:"TargetPrefix"`
 }
 
-// responseRecorder wraps http.ResponseWriter to capture the status code and
-// the number of bytes written to the response body.
+// responseRecorder wraps http.ResponseWriter to capture the status code,
+// bytes written, and S3 error code/message set by writeError.
 type responseRecorder struct {
 	http.ResponseWriter
 	status        int
 	bytesWritten  int64
 	headerWritten bool
+	errCode       string
+	errMsg        string
 }
 
 func newResponseRecorder(w http.ResponseWriter) *responseRecorder {
@@ -168,6 +170,44 @@ func logOperationName(method string, isObject bool) string {
 		target = "OBJECT"
 	}
 	return "REST." + method + "." + target
+}
+
+// emitRequestLog writes one structured log line per HTTP request.
+// Level rules: 5xx → Error, 4xx → Info, GET/HEAD 2xx/3xx → Debug, other 2xx/3xx → Info.
+func emitRequestLog(r *http.Request, rec *responseRecorder, duration time.Duration) {
+	status := rec.status
+	attrs := []any{
+		"service", "s3",
+		"method", r.Method,
+		"path", r.URL.Path,
+		"status", status,
+	}
+	if rec.errCode != "" {
+		attrs = append(attrs, "code", rec.errCode)
+	}
+	if status >= 500 && rec.errMsg != "" {
+		attrs = append(attrs, "err", rec.errMsg)
+	}
+	attrs = append(attrs, "duration", duration.Round(time.Microsecond))
+
+	switch {
+	case status >= 500:
+		slog.Error( // #nosec G706 -- path/method come from the HTTP request; log injection risk accepted for a local dev emulator
+			"request",
+			attrs...)
+	case status >= 400:
+		slog.Info( // #nosec G706 -- path/method come from the HTTP request; log injection risk accepted for a local dev emulator
+			"request",
+			attrs...)
+	case r.Method == http.MethodGet || r.Method == http.MethodHead:
+		slog.Debug( // #nosec G706 -- path/method come from the HTTP request; log injection risk accepted for a local dev emulator
+			"request",
+			attrs...)
+	default:
+		slog.Info( // #nosec G706 -- path/method come from the HTTP request; log injection risk accepted for a local dev emulator
+			"request",
+			attrs...)
+	}
 }
 
 // logObjectKey generates an S3 object key for a log record under prefix.

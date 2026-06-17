@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -102,10 +103,17 @@ type Router struct{}
 func NewRouter() *Router { return &Router{} }
 
 func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	rec := newResponseRecorder(w)
+	start := time.Now()
+	action := ro.serveHTTP(rec, r)
+	emitRequestLog(action, rec, time.Since(start))
+}
+
+func (ro *Router) serveHTTP(w http.ResponseWriter, r *http.Request) string {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	if err := r.ParseForm(); err != nil {
 		writeError(w, http.StatusBadRequest, "InvalidRequest", "failed to parse request")
-		return
+		return ""
 	}
 	action := r.Form.Get("Action")
 	switch action {
@@ -124,6 +132,7 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "InvalidAction",
 			"Could not find operation for the given action: "+action)
 	}
+	return action
 }
 
 func (ro *Router) handleGetCallerIdentity(w http.ResponseWriter) {
@@ -388,6 +397,10 @@ func writeXML(w http.ResponseWriter, status int, v any) {
 }
 
 func writeError(w http.ResponseWriter, status int, code, message string) {
+	if rec, ok := w.(*responseRecorder); ok {
+		rec.errCode = code
+		rec.errMsg = message
+	}
 	writeXML(w, status, errorResponse{
 		Xmlns:     xmlns,
 		Error:     errorDetail{Type: "Sender", Code: code, Message: message},

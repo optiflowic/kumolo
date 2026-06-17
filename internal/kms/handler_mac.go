@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"hash"
-	"log/slog"
 	"net/http"
 )
 
@@ -47,12 +46,10 @@ func (ro *Router) resolveAndValidateMACKey(
 	meta, err := ro.storage.GetKeyMetadata(keyID)
 	if err != nil {
 		if errors.Is(err, ErrKeyNotFound) {
-			slog.Debug("KMS: key not found", "keyID", keyID)
 			writeError(w, http.StatusBadRequest, "NotFoundException",
 				fmt.Sprintf("Invalid keyId %s", keyID))
 			return KeyMetadata{}, KeyMaterial{}, false
 		}
-		slog.Error("KMS: GetKeyMetadata failure", "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -100,7 +97,6 @@ func (ro *Router) resolveAndValidateMACKey(
 				fmt.Sprintf("Key material not available for key %s", keyID))
 			return KeyMetadata{}, KeyMaterial{}, false
 		}
-		slog.Error("KMS: GetKeyMaterial failure", "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -154,7 +150,6 @@ func (ro *Router) handleGenerateMac(w http.ResponseWriter, body []byte) {
 	mac.Write(req.Message)
 	tag := mac.Sum(nil)
 
-	slog.Debug("KMS GenerateMac", "keyID", meta.KeyID, "algorithm", req.MacAlgorithm)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"KeyId":        meta.Arn,
 		"Mac":          tag,
@@ -219,7 +214,6 @@ func (ro *Router) handleVerifyMac(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	slog.Debug("KMS VerifyMac", "keyID", meta.KeyID, "algorithm", req.MacAlgorithm)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"KeyId":        meta.Arn,
 		"MacAlgorithm": req.MacAlgorithm,

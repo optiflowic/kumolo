@@ -2843,6 +2843,31 @@ func TestWriteErrorEncoderFail(t *testing.T) {
 	})
 }
 
+func TestResponseRecorderWriteHeader(t *testing.T) {
+	t.Run("second WriteHeader call is ignored", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		rr := newResponseRecorder(w)
+		rr.WriteHeader(http.StatusOK)
+		rr.WriteHeader(http.StatusInternalServerError)
+		assert.Equal(t, http.StatusOK, rr.status)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+}
+
+func TestResponseRecorderFlush(t *testing.T) {
+	t.Run("flushes when underlying writer implements http.Flusher", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		rr := newResponseRecorder(w)
+		rr.Flush() // httptest.ResponseRecorder implements http.Flusher
+		assert.True(t, w.Flushed)
+	})
+
+	t.Run("no-op when underlying writer does not implement http.Flusher", func(t *testing.T) {
+		rr := newResponseRecorder(&failResponseWriter{})
+		require.NotPanics(t, rr.Flush) // failResponseWriter does not implement http.Flusher
+	})
+}
+
 func TestHandleBatchGetItem(t *testing.T) {
 	t.Run("returns found items", func(t *testing.T) {
 		ro := newTestRouter(t)

@@ -3,7 +3,6 @@ package dynamodb
 import (
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 )
 
@@ -68,7 +67,6 @@ func (ro *Router) handlePutItem(w http.ResponseWriter, body []byte) {
 	old, err := ro.storage.PutItem(req.TableName, req.Item, cond)
 	if err != nil {
 		if errors.Is(err, ErrConditionalCheckFailed) {
-			slog.Debug("PutItem: condition check failed", "table", req.TableName)
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -78,7 +76,6 @@ func (ro *Router) handlePutItem(w http.ResponseWriter, body []byte) {
 			return
 		}
 		if errors.Is(err, ErrTableNotFound) {
-			slog.Debug("PutItem: table not found", "table", req.TableName)
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -88,7 +85,6 @@ func (ro *Router) handlePutItem(w http.ResponseWriter, body []byte) {
 			return
 		}
 		if errors.Is(err, ErrValidationException) {
-			slog.Debug("PutItem: validation error", "table", req.TableName, "err", err)
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -97,7 +93,6 @@ func (ro *Router) handlePutItem(w http.ResponseWriter, body []byte) {
 			)
 			return
 		}
-		slog.Error("PutItem failed", "table", req.TableName, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -106,7 +101,6 @@ func (ro *Router) handlePutItem(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
-	slog.Info("put DynamoDB item", "table", req.TableName)
 	resp := map[string]any{}
 	if req.ReturnValues == "ALL_OLD" && old != nil {
 		resp["Attributes"] = old
@@ -157,7 +151,6 @@ func (ro *Router) handleGetItem(w http.ResponseWriter, body []byte) {
 	item, err := ro.storage.GetItem(req.TableName, req.Key)
 	if err != nil {
 		if errors.Is(err, ErrTableNotFound) {
-			slog.Debug("GetItem: table not found", "table", req.TableName)
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -167,7 +160,6 @@ func (ro *Router) handleGetItem(w http.ResponseWriter, body []byte) {
 			return
 		}
 		if errors.Is(err, ErrValidationException) {
-			slog.Debug("GetItem: validation error", "table", req.TableName, "err", err)
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -176,7 +168,6 @@ func (ro *Router) handleGetItem(w http.ResponseWriter, body []byte) {
 			)
 			return
 		}
-		slog.Error("GetItem failed", "table", req.TableName, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -193,13 +184,6 @@ func (ro *Router) handleGetItem(w http.ResponseWriter, body []byte) {
 			req.ExpressionAttributeNames,
 		)
 		if projErr != nil {
-			slog.Debug(
-				"GetItem: invalid ProjectionExpression",
-				"table",
-				req.TableName,
-				"err",
-				projErr,
-			)
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -209,7 +193,6 @@ func (ro *Router) handleGetItem(w http.ResponseWriter, body []byte) {
 			return
 		}
 	}
-	slog.Debug("got DynamoDB item", "table", req.TableName)
 	resp := map[string]any{}
 	if item != nil {
 		resp["Item"] = item
@@ -281,7 +264,6 @@ func (ro *Router) handleDeleteItem(w http.ResponseWriter, body []byte) {
 	old, err := ro.storage.DeleteItem(req.TableName, req.Key, cond)
 	if err != nil {
 		if errors.Is(err, ErrConditionalCheckFailed) {
-			slog.Debug("DeleteItem: condition check failed", "table", req.TableName)
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -291,7 +273,6 @@ func (ro *Router) handleDeleteItem(w http.ResponseWriter, body []byte) {
 			return
 		}
 		if errors.Is(err, ErrTableNotFound) {
-			slog.Debug("DeleteItem: table not found", "table", req.TableName)
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -301,7 +282,6 @@ func (ro *Router) handleDeleteItem(w http.ResponseWriter, body []byte) {
 			return
 		}
 		if errors.Is(err, ErrValidationException) {
-			slog.Debug("DeleteItem: validation error", "table", req.TableName, "err", err)
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -310,7 +290,6 @@ func (ro *Router) handleDeleteItem(w http.ResponseWriter, body []byte) {
 			)
 			return
 		}
-		slog.Error("DeleteItem failed", "table", req.TableName, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -319,7 +298,6 @@ func (ro *Router) handleDeleteItem(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
-	slog.Info("deleted DynamoDB item", "table", req.TableName)
 	resp := map[string]any{}
 	if req.ReturnValues == "ALL_OLD" && old != nil {
 		resp["Attributes"] = old
@@ -397,7 +375,6 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 			req.ExpressionAttributeValues,
 		)
 		if err != nil {
-			slog.Debug("UpdateItem: invalid UpdateExpression", "table", req.TableName, "err", err)
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -439,7 +416,6 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 	before, after, err := ro.storage.UpdateItem(req.TableName, req.Key, updates, cond)
 	if err != nil {
 		if errors.Is(err, ErrConditionalCheckFailed) {
-			slog.Debug("UpdateItem: condition check failed", "table", req.TableName)
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -449,7 +425,6 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 			return
 		}
 		if errors.Is(err, ErrTableNotFound) {
-			slog.Debug("UpdateItem: table not found", "table", req.TableName)
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -459,7 +434,6 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 			return
 		}
 		if errors.Is(err, ErrValidationException) {
-			slog.Debug("UpdateItem: validation error", "table", req.TableName, "err", err)
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -468,7 +442,6 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 			)
 			return
 		}
-		slog.Error("UpdateItem failed", "table", req.TableName, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -477,7 +450,6 @@ func (ro *Router) handleUpdateItem(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
-	slog.Info("updated DynamoDB item", "table", req.TableName)
 	resp := map[string]any{}
 	if cc := buildConsumedCapacity(req.TableName, req.ReturnConsumedCapacity); cc != nil {
 		resp["ConsumedCapacity"] = cc

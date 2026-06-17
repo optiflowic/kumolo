@@ -459,6 +459,12 @@ else
   fail "BucketLogging (expected >=1 log object under logs/ in $LOG_BUCKET, got $LOG_OBJ_COUNT)"
 fi
 
+# Disable logging on the source bucket before deleting the log target bucket.
+# Without this, subsequent requests to $BUCKET would trigger appendAccessLog,
+# fail with "bucket not found", and emit a WRN for every remaining operation.
+$AWS s3api put-bucket-logging \
+  --bucket "$BUCKET" \
+  --bucket-logging-status '{}' > /dev/null 2>&1 || true
 cleanup_bucket "$LOG_BUCKET"
 
 # ---------------------------------------------------------------------------

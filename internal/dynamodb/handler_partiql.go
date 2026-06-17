@@ -53,7 +53,6 @@ func (ro *Router) handleExecuteStatement(w http.ResponseWriter, body []byte) {
 
 	stmt, err := parsePartiQL(req.Statement, req.Parameters)
 	if err != nil {
-		slog.Debug("ExecuteStatement: parse error", "err", err)
 		writeError(w, http.StatusBadRequest,
 			ErrTypeValidationException, err.Error())
 		return
@@ -78,7 +77,6 @@ func (ro *Router) handleExecuteStatement(w http.ResponseWriter, body []byte) {
 		if cc := buildConsumedCapacity(stmt.tableName, req.ReturnConsumedCapacity); cc != nil {
 			resp["ConsumedCapacity"] = cc
 		}
-		slog.Debug("ExecuteStatement SELECT", "table", stmt.tableName, "count", len(items))
 
 	case pqInsert:
 		if err := ro.executePartiQLInsert(stmt); err != nil {
@@ -88,7 +86,6 @@ func (ro *Router) handleExecuteStatement(w http.ResponseWriter, body []byte) {
 		if cc := buildConsumedCapacity(stmt.tableName, req.ReturnConsumedCapacity); cc != nil {
 			resp["ConsumedCapacity"] = cc
 		}
-		slog.Info("ExecuteStatement INSERT", "table", stmt.tableName)
 
 	case pqUpdate:
 		if err := ro.executePartiQLUpdate(stmt); err != nil {
@@ -98,7 +95,6 @@ func (ro *Router) handleExecuteStatement(w http.ResponseWriter, body []byte) {
 		if cc := buildConsumedCapacity(stmt.tableName, req.ReturnConsumedCapacity); cc != nil {
 			resp["ConsumedCapacity"] = cc
 		}
-		slog.Info("ExecuteStatement UPDATE", "table", stmt.tableName)
 
 	case pqDelete:
 		if err := ro.executePartiQLDelete(stmt); err != nil {
@@ -108,7 +104,6 @@ func (ro *Router) handleExecuteStatement(w http.ResponseWriter, body []byte) {
 		if cc := buildConsumedCapacity(stmt.tableName, req.ReturnConsumedCapacity); cc != nil {
 			resp["ConsumedCapacity"] = cc
 		}
-		slog.Info("ExecuteStatement DELETE", "table", stmt.tableName)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -233,7 +228,6 @@ func (ro *Router) handleBatchExecuteStatement(w http.ResponseWriter, body []byte
 		responses[i] = resp
 	}
 
-	slog.Debug("BatchExecuteStatement", "count", len(stmts))
 	out := map[string]any{"Responses": responses}
 	if req.ReturnConsumedCapacity != "" && req.ReturnConsumedCapacity != "NONE" {
 		ccs := make([]map[string]any, 0, len(consumedTables))
@@ -356,7 +350,6 @@ func (ro *Router) handleExecuteTransaction(w http.ResponseWriter, body []byte) {
 		resp["ConsumedCapacity"] = ccs
 	}
 
-	slog.Info("ExecuteTransaction", "count", len(stmts))
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -683,12 +676,10 @@ func pqWriteStorageError(
 ) {
 	switch {
 	case errors.Is(err, ErrTableNotFound):
-		slog.Debug(op + ": table not found")
 		writeError(w, http.StatusBadRequest,
 			ErrTypeResourceNotFoundException,
 			"Requested resource not found")
 	case errors.Is(err, ErrConditionalCheckFailed):
-		slog.Debug(op + ": condition check failed")
 		var item map[string]any
 		if returnValuesOnFailure == "ALL_OLD" {
 			var ccErr *ConditionalCheckFailedError
@@ -698,12 +689,10 @@ func pqWriteStorageError(
 		}
 		writeConditionalCheckFailedError(w, item)
 	case errors.Is(err, ErrValidationException):
-		slog.Debug(op+": validation error", "err", err)
 		writeError(w, http.StatusBadRequest,
 			ErrTypeValidationException,
 			err.Error())
 	default:
-		slog.Error(op+" failed", "err", err)
 		writeError(w, http.StatusInternalServerError,
 			ErrTypeInternalServerError,
 			"internal server error")
@@ -717,6 +706,10 @@ func writeConditionalCheckFailedError(w http.ResponseWriter, item map[string]any
 		Type    string         `json:"__type"`
 		Message string         `json:"message"`
 		Item    map[string]any `json:"Item,omitempty"`
+	}
+	if rec, ok := w.(*responseRecorder); ok {
+		rec.errCode = ErrTypeConditionalCheckFailedException
+		rec.errMsg = "The conditional request failed"
 	}
 	w.Header().Set("Content-Type", "application/x-amz-json-1.0")
 	w.WriteHeader(http.StatusBadRequest)
@@ -737,22 +730,26 @@ func writeConditionalCheckFailedError(w http.ResponseWriter, item map[string]any
 func pqWriteTransactError(w http.ResponseWriter, err error) {
 	var txErr *TransactionCanceledError
 	if errors.As(err, &txErr) {
-		slog.Debug("ExecuteTransaction: transaction canceled", "reasons", len(txErr.Reasons))
 		codes := make([]string, len(txErr.Reasons))
 		for i, r := range txErr.Reasons {
 			codes[i] = r.Code
 		}
+		msg := "Transaction cancelled, please refer cancellation reasons for specific reasons [" +
+			strings.Join(codes, ", ") + "]"
 		type cancelResp struct {
 			Type                string               `json:"__type"`
 			Message             string               `json:"message"`
 			CancellationReasons []CancellationReason `json:"CancellationReasons"`
 		}
+		if rec, ok := w.(*responseRecorder); ok {
+			rec.errCode = ErrTypeTransactionCanceledException
+			rec.errMsg = msg
+		}
 		w.Header().Set("Content-Type", "application/x-amz-json-1.0")
 		w.WriteHeader(http.StatusBadRequest)
 		if encErr := json.NewEncoder(w).Encode(cancelResp{
-			Type: ErrTypeTransactionCanceledException,
-			Message: "Transaction cancelled, please refer cancellation reasons for specific reasons [" +
-				strings.Join(codes, ", ") + "]",
+			Type:                ErrTypeTransactionCanceledException,
+			Message:             msg,
 			CancellationReasons: txErr.Reasons,
 		}); encErr != nil {
 			slog.Warn(

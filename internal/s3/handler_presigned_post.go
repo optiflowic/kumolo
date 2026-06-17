@@ -84,15 +84,6 @@ func (ro *Router) handlePresignedPost(w http.ResponseWriter, r *http.Request, bu
 						"The specified bucket does not exist.")
 					return
 				}
-				slog.Error( // #nosec G706 -- bucket/key come from form fields; log injection risk accepted for a local dev emulator
-					"presigned post: failed to store object",
-					"bucket",
-					bucket,
-					"key",
-					key,
-					"err",
-					putErr,
-				)
 				writeError(w, r, http.StatusInternalServerError, "InternalError", putErr.Error())
 				return
 			}
@@ -111,13 +102,6 @@ func (ro *Router) handlePresignedPost(w http.ResponseWriter, r *http.Request, bu
 					}
 				}
 			}
-			slog.Info( // #nosec G706 -- bucket/key come from form fields; log injection risk accepted for a local dev emulator
-				"object created via presigned POST",
-				"bucket",
-				bucket,
-				"key",
-				key,
-			)
 			ro.replicateObject(bucket, key, meta)
 			writePresignedPostResponse(
 				w,

@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 )
 
@@ -71,12 +70,10 @@ func (ro *Router) resolveAndValidateSignKey(
 	meta, err := ro.storage.GetKeyMetadata(keyID)
 	if err != nil {
 		if errors.Is(err, ErrKeyNotFound) {
-			slog.Debug("KMS: key not found", "keyID", keyID)
 			writeError(w, http.StatusBadRequest, "NotFoundException",
 				fmt.Sprintf("Invalid keyId %s", keyID))
 			return KeyMetadata{}, KeyMaterial{}, false
 		}
-		slog.Error("KMS: GetKeyMetadata failure", "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -125,7 +122,6 @@ func (ro *Router) resolveAndValidateSignKey(
 				))
 			return KeyMetadata{}, KeyMaterial{}, false
 		}
-		slog.Error("KMS: GetKeyMaterial failure", "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -313,7 +309,6 @@ func (ro *Router) handleSign(w http.ResponseWriter, body []byte) {
 	sig, err := signData(mat.PrivateKeyDER, req.SigningAlgorithm, h, dataToSign)
 	if err != nil {
 		// untestable: signData only fails when the private key is malformed; keys stored via generateKeyPair are always valid
-		slog.Error("KMS Sign: sign failure", "keyID", meta.KeyID, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -323,7 +318,6 @@ func (ro *Router) handleSign(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	slog.Debug("KMS Sign", "keyID", meta.KeyID, "algorithm", req.SigningAlgorithm)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"KeyId":            meta.Arn,
 		"Signature":        sig,
@@ -427,19 +421,16 @@ func (ro *Router) handleVerify(w http.ResponseWriter, body []byte) {
 
 	if err := verifyData(mat.PrivateKeyDER, req.SigningAlgorithm, h, dataToVerify, req.Signature); err != nil {
 		if errors.Is(err, ErrInvalidSignature) {
-			slog.Debug("KMS Verify: signature verification failed", "keyID", meta.KeyID, "err", err)
 			writeError(w, http.StatusBadRequest, "KMSInvalidSignatureException",
 				"The signature verification failed")
 		} else {
 			// untestable: only reachable if stored private key DER is malformed
-			slog.Error("KMS Verify: internal error", "keyID", meta.KeyID, "err", err)
 			writeError(w, http.StatusInternalServerError, "KMSInternalException",
 				"internal server error")
 		}
 		return
 	}
 
-	slog.Debug("KMS Verify", "keyID", meta.KeyID, "algorithm", req.SigningAlgorithm)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"KeyId":            meta.Arn,
 		"SignatureValid":   true,

@@ -3,7 +3,6 @@ package dynamodb
 import (
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 )
 
@@ -63,7 +62,6 @@ func (ro *Router) handleBatchGetItem(w http.ResponseWriter, body []byte) {
 		items, err := ro.storage.BatchGetItems(tableName, tableReq.Keys)
 		if err != nil {
 			if errors.Is(err, ErrTableNotFound) {
-				slog.Debug("BatchGetItem: table not found", "table", tableName)
 				writeError(
 					w,
 					http.StatusBadRequest,
@@ -73,7 +71,6 @@ func (ro *Router) handleBatchGetItem(w http.ResponseWriter, body []byte) {
 				return
 			}
 			if errors.Is(err, ErrValidationException) {
-				slog.Debug("BatchGetItem: validation error", "table", tableName, "err", err)
 				writeError(
 					w,
 					http.StatusBadRequest,
@@ -82,7 +79,6 @@ func (ro *Router) handleBatchGetItem(w http.ResponseWriter, body []byte) {
 				)
 				return
 			}
-			slog.Error("BatchGetItem failed", "table", tableName, "err", err)
 			writeError(
 				w,
 				http.StatusInternalServerError,
@@ -102,13 +98,6 @@ func (ro *Router) handleBatchGetItem(w http.ResponseWriter, body []byte) {
 				tableReq.ExpressionAttributeNames,
 			)
 			if projErr != nil {
-				slog.Debug(
-					"BatchGetItem: invalid ProjectionExpression",
-					"table",
-					tableName,
-					"err",
-					projErr,
-				)
 				writeError(
 					w,
 					http.StatusBadRequest,
@@ -120,7 +109,6 @@ func (ro *Router) handleBatchGetItem(w http.ResponseWriter, body []byte) {
 		}
 		responses[tableName] = items
 	}
-	slog.Debug("batch got DynamoDB items", "tables", len(req.RequestItems))
 	resp := map[string]any{
 		"Responses":       responses,
 		"UnprocessedKeys": map[string]any{},
@@ -193,7 +181,6 @@ func (ro *Router) handleBatchWriteItem(w http.ResponseWriter, body []byte) {
 		}
 		if err := ro.storage.BatchWriteItems(tableName, puts, deletes); err != nil {
 			if errors.Is(err, ErrTableNotFound) {
-				slog.Debug("BatchWriteItem: table not found", "table", tableName)
 				writeError(
 					w,
 					http.StatusBadRequest,
@@ -203,7 +190,6 @@ func (ro *Router) handleBatchWriteItem(w http.ResponseWriter, body []byte) {
 				return
 			}
 			if errors.Is(err, ErrValidationException) {
-				slog.Debug("BatchWriteItem: validation error", "table", tableName, "err", err)
 				writeError(
 					w,
 					http.StatusBadRequest,
@@ -212,7 +198,6 @@ func (ro *Router) handleBatchWriteItem(w http.ResponseWriter, body []byte) {
 				)
 				return
 			}
-			slog.Error("BatchWriteItem failed", "table", tableName, "err", err)
 			writeError(
 				w,
 				http.StatusInternalServerError,
@@ -222,7 +207,6 @@ func (ro *Router) handleBatchWriteItem(w http.ResponseWriter, body []byte) {
 			return
 		}
 	}
-	slog.Info("batch wrote DynamoDB items", "tables", len(req.RequestItems))
 	resp := map[string]any{
 		"UnprocessedItems": map[string]any{},
 	}

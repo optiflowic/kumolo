@@ -3,9 +3,9 @@ package dynamodb
 import (
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 )
 
 type store interface {
@@ -187,9 +187,14 @@ func NewRouter(storage *Storage) *Router {
 }
 
 func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	target := r.Header.Get("X-Amz-Target")
-	op := strings.TrimPrefix(target, "DynamoDB_20120810.")
+	rec := newResponseRecorder(w)
+	start := time.Now()
+	op := strings.TrimPrefix(r.Header.Get("X-Amz-Target"), "DynamoDB_20120810.")
+	ro.serveHTTP(rec, r, op)
+	emitRequestLog(op, rec, time.Since(start))
+}
 
+func (ro *Router) serveHTTP(w http.ResponseWriter, r *http.Request, op string) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		writeError(
@@ -263,11 +268,6 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "DescribeEndpoints":
 		ro.handleDescribeEndpoints(w)
 	default:
-		slog.Debug( // #nosec G706 -- target comes from the X-Amz-Target header; log injection risk accepted for a local dev emulator
-			"DynamoDB operation not implemented",
-			"target",
-			target,
-		)
 		writeError(
 			w,
 			http.StatusNotImplemented,

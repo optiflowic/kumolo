@@ -7,7 +7,6 @@ import (
 	"encoding/xml"
 	"errors"
 	"io"
-	"log/slog"
 	"mime"
 	"net/http"
 	"net/url"
@@ -116,19 +115,14 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rec := newResponseRecorder(w)
 	start := ro.now()
 	ro.serveHTTP(rec, r)
+	duration := ro.now().Sub(start)
 	ro.appendAccessLog(r, rec, start)
+	emitRequestLog(r, rec, duration)
 }
 
 func (ro *Router) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Has(amzQSignature) {
 		if status, code, msg := checkPresigned(r, ro.now()); status != 0 {
-			slog.Debug( // #nosec G706 -- path comes from URL; log injection risk accepted for a local dev emulator
-				"presigned request rejected",
-				"path",
-				r.URL.Path,
-				"code",
-				code,
-			)
 			writeError(w, r, status, code, msg)
 			return
 		}
@@ -377,31 +371,14 @@ func (ro *Router) handleListObjects(w http.ResponseWriter, r *http.Request, buck
 		bucketACL, err := ro.storage.GetBucketACL(bucket)
 		if err != nil {
 			if errors.Is(err, ErrBucketNotFound) {
-				slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-					"bucket not found",
-					"bucket",
-					bucket,
-				)
 				writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 					"The specified bucket does not exist.")
 				return
 			}
-			slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-				"failed to get bucket ACL",
-				"bucket",
-				bucket,
-				"err",
-				err,
-			)
 			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 			return
 		}
 		if !aclAllowsAnonymous(bucketACL, aclPermRead) {
-			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-				"list objects denied: ACL",
-				"bucket",
-				bucket,
-			)
 			writeError(w, r, http.StatusForbidden, "AccessDenied", "Access Denied")
 			return
 		}
@@ -426,22 +403,10 @@ func (ro *Router) handleListObjects(w http.ResponseWriter, r *http.Request, buck
 	objects, err := ro.storage.ListObjects(bucket)
 	if err != nil {
 		if errors.Is(err, ErrBucketNotFound) {
-			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-				"bucket not found",
-				"bucket",
-				bucket,
-			)
 			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 				"The specified bucket does not exist.")
 			return
 		}
-		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-			"failed to list objects",
-			"bucket",
-			bucket,
-			"err",
-			err,
-		)
 		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
@@ -493,14 +458,6 @@ func (ro *Router) handleListObjects(w http.ResponseWriter, r *http.Request, buck
 		return strings.Compare(a.Prefix, b.Prefix)
 	})
 
-	slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-		"listed objects",
-		"bucket",
-		bucket,
-		"count",
-		len(contents),
-	)
-
 	result := listObjectsResult{
 		Name:           bucket,
 		Prefix:         prefix,
@@ -526,31 +483,14 @@ func (ro *Router) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 		bucketACL, err := ro.storage.GetBucketACL(bucket)
 		if err != nil {
 			if errors.Is(err, ErrBucketNotFound) {
-				slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-					"bucket not found",
-					"bucket",
-					bucket,
-				)
 				writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 					"The specified bucket does not exist.")
 				return
 			}
-			slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-				"failed to get bucket ACL",
-				"bucket",
-				bucket,
-				"err",
-				err,
-			)
 			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 			return
 		}
 		if !aclAllowsAnonymous(bucketACL, aclPermRead) {
-			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-				"list objects v2 denied: ACL",
-				"bucket",
-				bucket,
-			)
 			writeError(w, r, http.StatusForbidden, "AccessDenied", "Access Denied")
 			return
 		}
@@ -588,22 +528,10 @@ func (ro *Router) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 	objects, err := ro.storage.ListObjects(bucket)
 	if err != nil {
 		if errors.Is(err, ErrBucketNotFound) {
-			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-				"bucket not found",
-				"bucket",
-				bucket,
-			)
 			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 				"The specified bucket does not exist.")
 			return
 		}
-		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-			"failed to list objects",
-			"bucket",
-			bucket,
-			"err",
-			err,
-		)
 		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
@@ -695,14 +623,6 @@ func (ro *Router) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 	slices.SortFunc(cps, func(a, b xmlCommonPrefix) int {
 		return strings.Compare(a.Prefix, b.Prefix)
 	})
-
-	slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-		"listed objects",
-		"bucket",
-		bucket,
-		"count",
-		len(contents),
-	)
 
 	result := listObjectsV2Result{
 		Name:              bucket,
@@ -819,11 +739,6 @@ func (ro *Router) routeObject(w http.ResponseWriter, r *http.Request, bucket, ke
 func (ro *Router) handlePutBucketTagging(w http.ResponseWriter, r *http.Request, bucket string) {
 	var req xmlTagging
 	if err := xml.NewDecoder(r.Body).Decode(&req); err != nil {
-		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-			"malformed tagging XML",
-			"bucket",
-			bucket,
-		)
 		writeError(
 			w,
 			r,
@@ -834,13 +749,6 @@ func (ro *Router) handlePutBucketTagging(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	if len(req.TagSet) > 50 {
-		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-			"too many tags",
-			"bucket",
-			bucket,
-			"count",
-			len(req.TagSet),
-		)
 		writeError(w, r, http.StatusBadRequest, "InvalidTag",
 			"Bucket tag cannot be greater than 50")
 		return
@@ -848,31 +756,16 @@ func (ro *Router) handlePutBucketTagging(w http.ResponseWriter, r *http.Request,
 	seen := make(map[string]struct{}, len(req.TagSet))
 	for _, t := range req.TagSet {
 		if utf8.RuneCountInString(t.Key) > 128 {
-			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-				"tag key too long",
-				"bucket",
-				bucket,
-			)
 			writeError(w, r, http.StatusBadRequest, "InvalidTag",
 				"The TagKey you have provided is invalid")
 			return
 		}
 		if utf8.RuneCountInString(t.Value) > 256 {
-			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-				"tag value too long",
-				"bucket",
-				bucket,
-			)
 			writeError(w, r, http.StatusBadRequest, "InvalidTag",
 				"The TagValue you have provided is invalid")
 			return
 		}
 		if _, dup := seen[t.Key]; dup {
-			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-				"duplicate tag key",
-				"bucket",
-				bucket,
-			)
 			writeError(w, r, http.StatusBadRequest, "InvalidTag",
 				"Cannot provide multiple Tags with the same key")
 			return
@@ -885,70 +778,31 @@ func (ro *Router) handlePutBucketTagging(w http.ResponseWriter, r *http.Request,
 	}
 	if err := ro.storage.PutBucketTagging(bucket, tags); err != nil {
 		if errors.Is(err, ErrBucketNotFound) {
-			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-				"bucket not found",
-				"bucket",
-				bucket,
-			)
 			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 				"The specified bucket does not exist.")
 			return
 		}
-		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-			"failed to put bucket tagging",
-			"bucket",
-			bucket,
-			"err",
-			err,
-		)
 		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
-	slog.Info( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-		"bucket tagging updated",
-		"bucket",
-		bucket,
-	)
 }
 
 func (ro *Router) handleGetBucketTagging(w http.ResponseWriter, r *http.Request, bucket string) {
 	tags, err := ro.storage.GetBucketTagging(bucket)
 	if err != nil {
 		if errors.Is(err, ErrBucketNotFound) {
-			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-				"bucket not found",
-				"bucket",
-				bucket,
-			)
 			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 				"The specified bucket does not exist.")
 			return
 		}
-		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-			"failed to get bucket tagging",
-			"bucket",
-			bucket,
-			"err",
-			err,
-		)
 		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
 	if len(tags) == 0 {
-		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-			"no tag set on bucket",
-			"bucket",
-			bucket,
-		)
 		writeError(w, r, http.StatusNotFound, "NoSuchTagSet",
 			"There is no tag set associated with the bucket.")
 		return
 	}
-	slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-		"get bucket tagging",
-		"bucket",
-		bucket,
-	)
 	xmlTags := make([]xmlTag, len(tags))
 	for i, t := range tags {
 		xmlTags[i] = xmlTag(t)
@@ -959,51 +813,24 @@ func (ro *Router) handleGetBucketTagging(w http.ResponseWriter, r *http.Request,
 func (ro *Router) handleDeleteBucketTagging(w http.ResponseWriter, r *http.Request, bucket string) {
 	if err := ro.storage.DeleteBucketTagging(bucket); err != nil {
 		if errors.Is(err, ErrBucketNotFound) {
-			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-				"bucket not found",
-				"bucket",
-				bucket,
-			)
 			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 				"The specified bucket does not exist.")
 			return
 		}
-		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-			"failed to delete bucket tagging",
-			"bucket",
-			bucket,
-			"err",
-			err,
-		)
 		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
-	slog.Info( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-		"bucket tagging deleted",
-		"bucket",
-		bucket,
-	)
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (ro *Router) handlePutBucketCors(w http.ResponseWriter, r *http.Request, bucket string) {
 	var req xmlCORSConfiguration
 	if err := xml.NewDecoder(r.Body).Decode(&req); err != nil {
-		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-			"malformed cors XML",
-			"bucket",
-			bucket,
-		)
 		writeError(w, r, http.StatusBadRequest, "MalformedXML",
 			"The XML you provided was not well-formed.")
 		return
 	}
 	if len(req.CORSRules) == 0 {
-		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-			"cors configuration has no rules",
-			"bucket",
-			bucket,
-		)
 		writeError(w, r, http.StatusBadRequest, "MalformedXML",
 			"The XML you provided was not well-formed.")
 		return
@@ -1011,24 +838,12 @@ func (ro *Router) handlePutBucketCors(w http.ResponseWriter, r *http.Request, bu
 	rules := make([]CORSRule, len(req.CORSRules))
 	for i, rule := range req.CORSRules {
 		if len(rule.AllowedOrigins) == 0 || len(rule.AllowedMethods) == 0 {
-			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-				"cors rule missing required fields",
-				"bucket",
-				bucket,
-			)
 			writeError(w, r, http.StatusBadRequest, "MalformedXML",
 				"The XML you provided was not well-formed.")
 			return
 		}
 		for _, method := range rule.AllowedMethods {
 			if !validCORSMethod(method) {
-				slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-					"invalid cors method",
-					"bucket",
-					bucket,
-					"method",
-					method,
-				)
 				writeError(w, r, http.StatusBadRequest, "InvalidArgument",
 					"Found invalid method in CORS rule.")
 				return
@@ -1038,32 +853,13 @@ func (ro *Router) handlePutBucketCors(w http.ResponseWriter, r *http.Request, bu
 	}
 	if err := ro.storage.PutBucketCors(bucket, rules); err != nil {
 		if errors.Is(err, ErrBucketNotFound) {
-			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-				"bucket not found",
-				"bucket",
-				bucket,
-			)
 			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 				"The specified bucket does not exist.")
 			return
 		}
-		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-			"failed to put bucket cors",
-			"bucket",
-			bucket,
-			"err",
-			err,
-		)
 		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
-	slog.Info( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-		"bucket cors updated",
-		"bucket",
-		bucket,
-		"rules",
-		len(rules),
-	)
 }
 
 func (ro *Router) handleGetBucketCors(w http.ResponseWriter, r *http.Request, bucket string) {
@@ -1071,40 +867,16 @@ func (ro *Router) handleGetBucketCors(w http.ResponseWriter, r *http.Request, bu
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrBucketNotFound):
-			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-				"bucket not found",
-				"bucket",
-				bucket,
-			)
 			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 				"The specified bucket does not exist.")
 		case errors.Is(err, ErrNoCORSConfiguration):
-			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-				"no cors configuration",
-				"bucket",
-				bucket,
-			)
 			writeError(w, r, http.StatusNotFound, "NoSuchCORSConfiguration",
 				"The CORS configuration does not exist.")
 		default:
-			slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-				"failed to get bucket cors",
-				"bucket",
-				bucket,
-				"err",
-				err,
-			)
 			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		}
 		return
 	}
-	slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-		"get bucket cors",
-		"bucket",
-		bucket,
-		"rules",
-		len(rules),
-	)
 	xmlRules := make([]xmlCORSRule, len(rules))
 	for i, rule := range rules {
 		xmlRules[i] = xmlCORSRule(rule)
@@ -1124,30 +896,13 @@ func validCORSMethod(method string) bool {
 func (ro *Router) handleDeleteBucketCors(w http.ResponseWriter, r *http.Request, bucket string) {
 	if err := ro.storage.DeleteBucketCors(bucket); err != nil {
 		if errors.Is(err, ErrBucketNotFound) {
-			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-				"bucket not found",
-				"bucket",
-				bucket,
-			)
 			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 				"The specified bucket does not exist.")
 			return
 		}
-		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-			"failed to delete bucket cors",
-			"bucket",
-			bucket,
-			"err",
-			err,
-		)
 		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
-	slog.Info( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-		"bucket cors deleted",
-		"bucket",
-		bucket,
-	)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1255,35 +1010,16 @@ func (ro *Router) handleCORSPreflight(w http.ResponseWriter, r *http.Request, bu
 	rules, err := ro.storage.GetBucketCors(bucket)
 	if err != nil {
 		if errors.Is(err, ErrBucketNotFound) {
-			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-				"cors preflight: bucket not found",
-				"bucket",
-				bucket,
-			)
 			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 				"The specified bucket does not exist.")
 			return
 		}
-		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-			"cors preflight: no cors configuration",
-			"bucket",
-			bucket,
-		)
 		writeError(w, r, http.StatusForbidden, "AccessForbidden", corsAccessDeniedMsg)
 		return
 	}
 
 	rule := findMatchingCORSRule(rules, origin, requestMethod, requestHeaders)
 	if rule == nil {
-		slog.Debug( // #nosec G706 -- bucket/origin come from request; log injection risk accepted for a local dev emulator
-			"cors preflight: no matching rule",
-			"bucket",
-			bucket,
-			"origin",
-			origin,
-			"method",
-			requestMethod,
-		)
 		writeError(w, r, http.StatusForbidden, "AccessForbidden", corsAccessDeniedMsg)
 		return
 	}
@@ -1305,15 +1041,6 @@ func (ro *Router) handleCORSPreflight(w http.ResponseWriter, r *http.Request, bu
 	if rule.MaxAgeSeconds > 0 {
 		h.Set("Access-Control-Max-Age", strconv.Itoa(rule.MaxAgeSeconds))
 	}
-	slog.Debug( // #nosec G706 -- bucket/origin come from request; log injection risk accepted for a local dev emulator
-		"cors preflight: allowed",
-		"bucket",
-		bucket,
-		"origin",
-		origin,
-		"method",
-		requestMethod,
-	)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -1348,52 +1075,25 @@ func (ro *Router) injectCORSHeaders(w http.ResponseWriter, r *http.Request, buck
 func (ro *Router) handlePutBucketPolicy(w http.ResponseWriter, r *http.Request, bucket string) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-			"failed to read policy body",
-			"bucket",
-			bucket,
-		)
 		writeError(w, r, http.StatusBadRequest, "MalformedPolicy",
 			"Policies must be valid JSON and the first byte must be '{'.")
 		return
 	}
 	trimmed := bytes.TrimSpace(body)
 	if !json.Valid(trimmed) || trimmed[0] != '{' {
-		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-			"invalid policy JSON",
-			"bucket",
-			bucket,
-		)
 		writeError(w, r, http.StatusBadRequest, "MalformedPolicy",
 			"Policies must be valid JSON and the first byte must be '{'.")
 		return
 	}
 	if err := ro.storage.PutBucketPolicy(bucket, string(trimmed)); err != nil {
 		if errors.Is(err, ErrBucketNotFound) {
-			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-				"bucket not found",
-				"bucket",
-				bucket,
-			)
 			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 				"The specified bucket does not exist.")
 			return
 		}
-		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-			"failed to put bucket policy",
-			"bucket",
-			bucket,
-			"err",
-			err,
-		)
 		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
-	slog.Info( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-		"bucket policy updated",
-		"bucket",
-		bucket,
-	)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1402,38 +1102,16 @@ func (ro *Router) handleGetBucketPolicy(w http.ResponseWriter, r *http.Request, 
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrBucketNotFound):
-			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-				"bucket not found",
-				"bucket",
-				bucket,
-			)
 			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 				"The specified bucket does not exist.")
 		case errors.Is(err, ErrNoBucketPolicy):
-			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-				"no bucket policy",
-				"bucket",
-				bucket,
-			)
 			writeError(w, r, http.StatusNotFound, "NoSuchBucketPolicy",
 				"The bucket policy does not exist.")
 		default:
-			slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-				"failed to get bucket policy",
-				"bucket",
-				bucket,
-				"err",
-				err,
-			)
 			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		}
 		return
 	}
-	slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-		"get bucket policy",
-		"bucket",
-		bucket,
-	)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.WriteString(
@@ -1445,53 +1123,24 @@ func (ro *Router) handleGetBucketPolicy(w http.ResponseWriter, r *http.Request, 
 func (ro *Router) handleDeleteBucketPolicy(w http.ResponseWriter, r *http.Request, bucket string) {
 	if err := ro.storage.DeleteBucketPolicy(bucket); err != nil {
 		if errors.Is(err, ErrBucketNotFound) {
-			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-				"bucket not found",
-				"bucket",
-				bucket,
-			)
 			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 				"The specified bucket does not exist.")
 			return
 		}
-		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-			"failed to delete bucket policy",
-			"bucket",
-			bucket,
-			"err",
-			err,
-		)
 		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
-	slog.Info( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-		"bucket policy deleted",
-		"bucket",
-		bucket,
-	)
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (ro *Router) handlePutBucketVersioning(w http.ResponseWriter, r *http.Request, bucket string) {
 	var req xmlVersioningConfiguration
 	if err := xml.NewDecoder(r.Body).Decode(&req); err != nil {
-		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-			"malformed versioning XML",
-			"bucket",
-			bucket,
-		)
 		writeError(w, r, http.StatusBadRequest, "MalformedXML",
 			"The XML you provided was not well-formed.")
 		return
 	}
 	if req.Status != "Enabled" && req.Status != "Suspended" {
-		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-			"invalid versioning status",
-			"bucket",
-			bucket,
-			"status",
-			req.Status,
-		)
 		writeError(w, r, http.StatusBadRequest, "IllegalVersioningConfigurationException",
 			"The versioning configuration specified is invalid.")
 		return
@@ -1499,19 +1148,9 @@ func (ro *Router) handlePutBucketVersioning(w http.ResponseWriter, r *http.Reque
 	if err := ro.storage.PutBucketVersioning(bucket, req.Status); err != nil {
 		switch {
 		case errors.Is(err, ErrBucketNotFound):
-			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-				"bucket not found",
-				"bucket",
-				bucket,
-			)
 			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 				"The specified bucket does not exist.")
 		case errors.Is(err, ErrInvalidBucketState):
-			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-				"cannot suspend versioning on object lock bucket",
-				"bucket",
-				bucket,
-			)
 			writeError(
 				w,
 				r,
@@ -1520,56 +1159,23 @@ func (ro *Router) handlePutBucketVersioning(w http.ResponseWriter, r *http.Reque
 				"Object Lock is enabled on this bucket. You cannot suspend versioning on this bucket.",
 			)
 		default:
-			slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-				"failed to put bucket versioning",
-				"bucket",
-				bucket,
-				"err",
-				err,
-			)
 			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		}
 		return
 	}
-	slog.Info( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-		"bucket versioning updated",
-		"bucket",
-		bucket,
-		"status",
-		req.Status,
-	)
 }
 
 func (ro *Router) handleGetBucketVersioning(w http.ResponseWriter, r *http.Request, bucket string) {
 	status, err := ro.storage.GetBucketVersioning(bucket)
 	if err != nil {
 		if errors.Is(err, ErrBucketNotFound) {
-			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-				"bucket not found",
-				"bucket",
-				bucket,
-			)
 			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 				"The specified bucket does not exist.")
 			return
 		}
-		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-			"failed to get bucket versioning",
-			"bucket",
-			bucket,
-			"err",
-			err,
-		)
 		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
-	slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-		"get bucket versioning",
-		"bucket",
-		bucket,
-		"status",
-		status,
-	)
 	writeXML(w, http.StatusOK, xmlVersioningConfiguration{Status: status})
 }
 
@@ -1577,41 +1183,22 @@ func (ro *Router) handleGetBucketLocation(w http.ResponseWriter, r *http.Request
 	region, err := ro.storage.GetBucketRegion(bucket)
 	if err != nil {
 		if errors.Is(err, ErrBucketNotFound) {
-			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-				"bucket not found",
-				"bucket",
-				bucket,
-			)
 			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 				"The specified bucket does not exist.")
 			return
 		}
-		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-			"failed to get bucket region",
-			"bucket",
-			bucket,
-			"err",
-			err,
-		)
 		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
-	slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-		"get bucket location",
-		"bucket",
-		bucket,
-	)
 	writeXML(w, http.StatusOK, locationConstraint{Location: region})
 }
 
 func (ro *Router) handleListBuckets(w http.ResponseWriter, r *http.Request) {
 	buckets, err := ro.storage.ListBuckets()
 	if err != nil {
-		slog.Error("failed to list buckets", "err", err)
 		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
-	slog.Debug("listed buckets", "count", len(buckets))
 	xmlBuckets := make([]xmlBucket, len(buckets))
 	for i, b := range buckets {
 		xmlBuckets[i] = xmlBucket{
@@ -1631,11 +1218,6 @@ func (ro *Router) handleCreateBucket(w http.ResponseWriter, r *http.Request, buc
 	objectLockEnabled := strings.EqualFold(r.Header.Get(amzBucketObjectLockEnabled), "true")
 	if err := ro.storage.CreateBucket(bucket, region, objectLockEnabled); err != nil {
 		if errors.Is(err, os.ErrExist) {
-			slog.Debug( // #nosec G706 -- bucket name is validated by S3 naming rules before reaching this point
-				"bucket already exists",
-				"bucket",
-				bucket,
-			)
 			writeError(
 				w,
 				r,
@@ -1645,21 +1227,9 @@ func (ro *Router) handleCreateBucket(w http.ResponseWriter, r *http.Request, buc
 			)
 			return
 		}
-		slog.Error( // #nosec G706 -- bucket name is validated by S3 naming rules before reaching this point
-			"failed to create bucket",
-			"bucket",
-			bucket,
-			"err",
-			err,
-		)
 		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
-	slog.Info( // #nosec G706 -- bucket name is validated by S3 naming rules before reaching this point
-		"bucket created",
-		"bucket",
-		bucket,
-	)
 	w.Header().Set("Location", "/"+bucket)
 	w.WriteHeader(http.StatusOK)
 }
@@ -1668,38 +1238,16 @@ func (ro *Router) handleDeleteBucket(w http.ResponseWriter, r *http.Request, buc
 	if err := ro.storage.DeleteBucket(bucket); err != nil {
 		switch {
 		case errors.Is(err, ErrBucketNotFound):
-			slog.Debug( // #nosec G706 -- bucket name is validated by S3 naming rules before reaching this point
-				"bucket not found",
-				"bucket",
-				bucket,
-			)
 			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 				"The specified bucket does not exist.")
 		case errors.Is(err, ErrBucketNotEmpty):
-			slog.Debug( // #nosec G706 -- bucket name is validated by S3 naming rules before reaching this point
-				"bucket not empty",
-				"bucket",
-				bucket,
-			)
 			writeError(w, r, http.StatusConflict, "BucketNotEmpty",
 				"The bucket you tried to delete is not empty.")
 		default:
-			slog.Error( // #nosec G706 -- bucket name is validated by S3 naming rules before reaching this point
-				"failed to delete bucket",
-				"bucket",
-				bucket,
-				"err",
-				err,
-			)
 			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		}
 		return
 	}
-	slog.Info( // #nosec G706 -- bucket name is validated by S3 naming rules before reaching this point
-		"bucket deleted",
-		"bucket",
-		bucket,
-	)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1725,22 +1273,10 @@ func (ro *Router) handleListMultipartUploads(
 	uploads, err := ro.storage.ListMultipartUploads(bucket)
 	if err != nil {
 		if errors.Is(err, ErrBucketNotFound) {
-			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-				"bucket not found",
-				"bucket",
-				bucket,
-			)
 			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 				"The specified bucket does not exist.")
 			return
 		}
-		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-			"failed to list multipart uploads",
-			"bucket",
-			bucket,
-			"err",
-			err,
-		)
 		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
@@ -1790,14 +1326,6 @@ func (ro *Router) handleListMultipartUploads(
 		return strings.Compare(a.Prefix, b.Prefix)
 	})
 
-	slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-		"listed multipart uploads",
-		"bucket",
-		bucket,
-		"count",
-		len(xmlUploads),
-	)
-
 	result := listMultipartUploadsResult{
 		Bucket:         bucket,
 		KeyMarker:      keyMarker,
@@ -1820,41 +1348,19 @@ func (ro *Router) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 		bucketACL, err := ro.storage.GetBucketACL(bucket)
 		if err != nil {
 			if errors.Is(err, ErrBucketNotFound) {
-				slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-					"bucket not found",
-					"bucket",
-					bucket,
-				)
 				writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 					"The specified bucket does not exist.")
 				return
 			}
-			slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-				"failed to get bucket ACL",
-				"bucket",
-				bucket,
-				"err",
-				err,
-			)
 			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 			return
 		}
 		if !aclAllowsAnonymous(bucketACL, aclPermWrite) {
-			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-				"delete objects denied: ACL",
-				"bucket",
-				bucket,
-			)
 			writeError(w, r, http.StatusForbidden, "AccessDenied", "Access Denied")
 			return
 		}
 	}
 	if !ro.storage.BucketExists(bucket) {
-		slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-			"bucket not found",
-			"bucket",
-			bucket,
-		)
 		writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 			"The specified bucket does not exist.")
 		return
@@ -1905,25 +1411,9 @@ func (ro *Router) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 		if deleteErr != nil && !errors.Is(deleteErr, ErrObjectNotFound) {
 			var code, message string
 			if errors.Is(deleteErr, ErrObjectLocked) {
-				slog.Debug( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-					"delete rejected: object locked",
-					"bucket",
-					bucket,
-					"key",
-					obj.Key,
-				)
 				code = "AccessDenied"
 				message = "Access Denied because the object is protected by Object Lock."
 			} else {
-				slog.Error( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
-					"failed to delete object",
-					"bucket",
-					bucket,
-					"key",
-					obj.Key,
-					"err",
-					deleteErr,
-				)
 				code = "InternalError"
 				message = deleteErr.Error()
 			}
@@ -1944,15 +1434,6 @@ func (ro *Router) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 			})
 		}
 	}
-	slog.Info( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-		"objects deleted",
-		"bucket",
-		bucket,
-		"deleted",
-		len(result.Deleted),
-		"errors",
-		len(result.Errors),
-	)
 	writeXML(w, http.StatusOK, result)
 }
 
@@ -1961,31 +1442,14 @@ func (ro *Router) handleListObjectVersions(w http.ResponseWriter, r *http.Reques
 		bucketACL, err := ro.storage.GetBucketACL(bucket)
 		if err != nil {
 			if errors.Is(err, ErrBucketNotFound) {
-				slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-					"bucket not found",
-					"bucket",
-					bucket,
-				)
 				writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 					"The specified bucket does not exist.")
 				return
 			}
-			slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-				"failed to get bucket ACL",
-				"bucket",
-				bucket,
-				"err",
-				err,
-			)
 			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 			return
 		}
 		if !aclAllowsAnonymous(bucketACL, aclPermRead) {
-			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-				"list object versions denied: ACL",
-				"bucket",
-				bucket,
-			)
 			writeError(w, r, http.StatusForbidden, "AccessDenied", "Access Denied")
 			return
 		}
@@ -2004,34 +1468,13 @@ func (ro *Router) handleListObjectVersions(w http.ResponseWriter, r *http.Reques
 	versions, deleteMarkers, err := ro.storage.ListObjectVersions(bucket)
 	if err != nil {
 		if errors.Is(err, ErrBucketNotFound) {
-			slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-				"bucket not found",
-				"bucket",
-				bucket,
-			)
 			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 				"The specified bucket does not exist.")
 			return
 		}
-		slog.Error( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-			"failed to list object versions",
-			"bucket",
-			bucket,
-			"err",
-			err,
-		)
 		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
-	slog.Debug( // #nosec G706 -- bucket comes from URL path; log injection risk accepted for a local dev emulator
-		"listed object versions",
-		"bucket",
-		bucket,
-		"versions",
-		len(versions),
-		"deleteMarkers",
-		len(deleteMarkers),
-	)
 
 	result := xmlListVersionsResult{
 		Xmlns:       "http://s3.amazonaws.com/doc/2006-03-01/",
@@ -2157,29 +1600,12 @@ func (ro *Router) handleHeadBucket(w http.ResponseWriter, r *http.Request, bucke
 	region, err := ro.storage.GetBucketRegion(bucket)
 	if err != nil {
 		if errors.Is(err, ErrBucketNotFound) {
-			slog.Debug( // #nosec G706 -- bucket name is validated by S3 naming rules before reaching this point
-				"bucket not found",
-				"bucket",
-				bucket,
-			)
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		slog.Error( // #nosec G706 -- bucket name is validated by S3 naming rules before reaching this point
-			"failed to get bucket region",
-			"bucket",
-			bucket,
-			"err",
-			err,
-		)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	slog.Debug( // #nosec G706 -- bucket name is validated by S3 naming rules before reaching this point
-		"bucket found",
-		"bucket",
-		bucket,
-	)
 	if region == "" {
 		region = "us-east-1"
 	}

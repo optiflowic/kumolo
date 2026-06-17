@@ -64,13 +64,6 @@ func (ro *Router) handleSelectObjectContent(
 ) {
 	var req xmlSelectRequest
 	if err := xml.NewDecoder(r.Body).Decode(&req); err != nil {
-		slog.Debug( // #nosec G706 -- bucket/key from URL path; log injection accepted for local dev emulator
-			"malformed SelectObjectContentRequest XML",
-			"bucket",
-			bucket,
-			"key",
-			key,
-		)
 		writeError(w, r, http.StatusBadRequest, "MalformedXML",
 			"The XML you provided was not well-formed.")
 		return
@@ -127,22 +120,12 @@ func (ro *Router) handleSelectObjectContent(
 		var dme *DeleteMarkerError
 		switch {
 		case errors.Is(err, ErrBucketNotFound):
-			slog.Debug( // #nosec G706
-				"bucket not found", "bucket", bucket, "key", key,
-			)
 			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 				"The specified bucket does not exist.")
 		case errors.As(err, &dme), errors.Is(err, ErrObjectNotFound):
-			slog.Debug( // #nosec G706
-				"object not found", "bucket", bucket, "key", key,
-			)
 			writeError(w, r, http.StatusNotFound, "NoSuchKey",
 				"The specified key does not exist.")
 		default:
-			slog.Error( // #nosec G706
-				"failed to get object for SelectObjectContent",
-				"bucket", bucket, "key", key, "err", err,
-			)
 			writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		}
 		return
@@ -162,9 +145,6 @@ func (ro *Router) handleSelectObjectContent(
 	case "GZIP":
 		gr, err := gzip.NewReader(f)
 		if err != nil {
-			slog.Error( // #nosec G706
-				"failed to create gzip reader", "bucket", bucket, "key", key, "err", err,
-			)
 			writeError(w, r, http.StatusBadRequest, "InvalidDataSource",
 				"Object is not a valid GZIP file.")
 			return
@@ -174,10 +154,6 @@ func (ro *Router) handleSelectObjectContent(
 	case "BZIP2":
 		reader = bzip2.NewReader(f)
 	default:
-		slog.Debug( // #nosec G706
-			"unsupported CompressionType", "bucket", bucket, "key", key,
-			"compression_type", req.InputSerialization.CompressionType,
-		)
 		writeError(w, r, http.StatusBadRequest, "InvalidArgument",
 			"Unsupported CompressionType: "+req.InputSerialization.CompressionType)
 		return
@@ -192,9 +168,6 @@ func (ro *Router) handleSelectObjectContent(
 		rows, bytesProcessed, err = readJSONRows(reader, req.InputSerialization.JSON)
 	}
 	if err != nil {
-		slog.Error( // #nosec G706
-			"failed to parse select input", "bucket", bucket, "key", key, "err", err,
-		)
 		writeError(w, r, http.StatusBadRequest, "InvalidDataType",
 			"Failed to parse object data: "+err.Error())
 		return
@@ -206,9 +179,6 @@ func (ro *Router) handleSelectObjectContent(
 
 	query, err := parseSQL(req.Expression)
 	if err != nil {
-		slog.Debug( // #nosec G706
-			"SQL parse error", "bucket", bucket, "key", key, "err", err,
-		)
 		writeError(w, r, http.StatusBadRequest, "ParseUnexpectedToken",
 			"SQL parse error: "+err.Error())
 		return
@@ -216,9 +186,6 @@ func (ro *Router) handleSelectObjectContent(
 
 	resultRows, err := query.execute(rows)
 	if err != nil { // unreachable: all AST nodes built by parseSQL return nil error
-		slog.Error( // #nosec G706
-			"SQL execution error", "bucket", bucket, "key", key, "err", err,
-		)
 		writeError(w, r, http.StatusBadRequest, "InvalidDataType",
 			"SQL execution error: "+err.Error())
 		return
@@ -231,9 +198,6 @@ func (ro *Router) handleSelectObjectContent(
 		payload, err = formatJSONOutput(resultRows, req.OutputSerialization.JSON)
 	}
 	if err != nil { // untestable: bytes.Buffer and json.Marshal(string) never fail
-		slog.Error( // #nosec G706
-			"failed to format select output", "bucket", bucket, "key", key, "err", err,
-		)
 		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
@@ -262,9 +226,4 @@ func (ro *Router) handleSelectObjectContent(
 		flusher.Flush()
 	}
 
-	slog.Info( // #nosec G706
-		"SelectObjectContent",
-		"bucket", bucket, "key", key,
-		"result_rows", len(resultRows), "bytes_returned", bytesReturned,
-	)
 }

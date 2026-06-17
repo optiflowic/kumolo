@@ -98,7 +98,6 @@ func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 		})
 	}
 	if err := validateTableIndexes(meta.KeySchema, meta.AttributeDefinitions, meta.GlobalSecondaryIndexes, meta.LocalSecondaryIndexes); err != nil {
-		slog.Debug("CreateTable: validation failed", "table", req.TableName, "err", err)
 		writeError(
 			w,
 			http.StatusBadRequest,
@@ -121,7 +120,6 @@ func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 	}
 	if err := ro.storage.CreateTable(meta); err != nil {
 		if errors.Is(err, ErrTableAlreadyExists) {
-			slog.Debug("CreateTable: table already exists", "table", req.TableName)
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -130,7 +128,6 @@ func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 			)
 			return
 		}
-		slog.Error("CreateTable failed", "table", req.TableName, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -146,7 +143,6 @@ func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 		}
 		arn := fmt.Sprintf("arn:aws:dynamodb:us-east-1:000000000000:table/%s", req.TableName)
 		if err := ro.storage.TagResource(arn, tags); err != nil {
-			slog.Error("CreateTable: failed to store tags", "table", req.TableName, "err", err)
 			if delErr := ro.storage.DeleteTable(req.TableName); delErr != nil {
 				slog.Error("CreateTable: rollback failed", "table", req.TableName, "err", delErr)
 			}
@@ -161,7 +157,6 @@ func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 	}
 	desc, err := ro.storage.DescribeTable(req.TableName)
 	if err != nil {
-		slog.Error("DescribeTable after CreateTable failed", "table", req.TableName, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -170,7 +165,6 @@ func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
-	slog.Info("created DynamoDB table", "table", req.TableName)
 	writeJSON(w, http.StatusOK, map[string]any{"TableDescription": toTableDescription(desc)})
 }
 
@@ -199,7 +193,6 @@ func (ro *Router) handleDeleteTable(w http.ResponseWriter, body []byte) {
 	desc, err := ro.storage.DescribeTable(req.TableName)
 	if err != nil {
 		if errors.Is(err, ErrTableNotFound) {
-			slog.Debug("DeleteTable: table not found", "table", req.TableName)
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -208,7 +201,6 @@ func (ro *Router) handleDeleteTable(w http.ResponseWriter, body []byte) {
 			)
 			return
 		}
-		slog.Error("DescribeTable before DeleteTable failed", "table", req.TableName, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -218,7 +210,6 @@ func (ro *Router) handleDeleteTable(w http.ResponseWriter, body []byte) {
 		return
 	}
 	if err := ro.storage.DeleteTable(req.TableName); err != nil {
-		slog.Error("DeleteTable failed", "table", req.TableName, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -227,7 +218,6 @@ func (ro *Router) handleDeleteTable(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
-	slog.Info("deleted DynamoDB table", "table", req.TableName)
 	d := toTableDescription(desc)
 	d.TableStatus = "DELETING"
 	writeJSON(w, http.StatusOK, map[string]any{"TableDescription": d})
@@ -258,7 +248,6 @@ func (ro *Router) handleDescribeTable(w http.ResponseWriter, body []byte) {
 	meta, err := ro.storage.DescribeTable(req.TableName)
 	if err != nil {
 		if errors.Is(err, ErrTableNotFound) {
-			slog.Debug("DescribeTable: table not found", "table", req.TableName)
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -267,7 +256,6 @@ func (ro *Router) handleDescribeTable(w http.ResponseWriter, body []byte) {
 			)
 			return
 		}
-		slog.Error("DescribeTable failed", "table", req.TableName, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -276,7 +264,6 @@ func (ro *Router) handleDescribeTable(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
-	slog.Debug("described DynamoDB table", "table", req.TableName)
 	writeJSON(w, http.StatusOK, map[string]any{"Table": toTableDescription(meta)})
 }
 
@@ -312,7 +299,6 @@ func (ro *Router) handleListTables(w http.ResponseWriter, body []byte) {
 	}
 	names, err := ro.storage.ListTables()
 	if err != nil {
-		slog.Error("ListTables failed", "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -347,7 +333,6 @@ func (ro *Router) handleListTables(w http.ResponseWriter, body []byte) {
 		names = names[:limit]
 	}
 	resp["TableNames"] = names
-	slog.Debug("listed DynamoDB tables", "count", len(names))
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -465,7 +450,6 @@ func (ro *Router) handleUpdateTable(w http.ResponseWriter, body []byte) {
 	meta, err := ro.storage.UpdateTable(req.TableName, in)
 	if err != nil {
 		if errors.Is(err, ErrTableNotFound) {
-			slog.Debug("UpdateTable: table not found", "table", req.TableName)
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -474,7 +458,6 @@ func (ro *Router) handleUpdateTable(w http.ResponseWriter, body []byte) {
 			)
 			return
 		}
-		slog.Error("UpdateTable failed", "table", req.TableName, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -483,6 +466,5 @@ func (ro *Router) handleUpdateTable(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
-	slog.Info("updated DynamoDB table", "table", req.TableName)
 	writeJSON(w, http.StatusOK, map[string]any{"TableDescription": toTableDescription(meta)})
 }

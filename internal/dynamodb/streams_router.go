@@ -2,9 +2,9 @@ package dynamodb
 
 import (
 	"io"
-	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 )
 
 const streamsErrPrefix = "com.amazonaws.dynamodb.v20120810#"
@@ -19,9 +19,14 @@ func NewStreamsRouter(storage *Storage) *StreamsRouter {
 }
 
 func (sr *StreamsRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	target := r.Header.Get("X-Amz-Target")
-	op := strings.TrimPrefix(target, "DynamoDBStreams_20120810.")
+	rec := newResponseRecorder(w)
+	start := time.Now()
+	op := strings.TrimPrefix(r.Header.Get("X-Amz-Target"), "DynamoDBStreams_20120810.")
+	sr.serveHTTP(rec, r, op)
+	emitRequestLog(op, rec, time.Since(start))
+}
 
+func (sr *StreamsRouter) serveHTTP(w http.ResponseWriter, r *http.Request, op string) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		// unreachable: io.ReadAll on an in-process httptest request body never errors.
@@ -44,11 +49,6 @@ func (sr *StreamsRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "GetRecords":
 		sr.handleGetRecords(w, body)
 	default:
-		slog.Debug( // #nosec G706 -- target comes from the X-Amz-Target header; log injection risk accepted for a local dev emulator
-			"DynamoDB Streams operation not implemented",
-			"target",
-			target,
-		)
 		writeError(
 			w,
 			http.StatusNotImplemented,

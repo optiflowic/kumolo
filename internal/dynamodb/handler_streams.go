@@ -3,7 +3,6 @@ package dynamodb
 import (
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 )
 
@@ -45,7 +44,6 @@ func (sr *StreamsRouter) handleListStreams(w http.ResponseWriter, body []byte) {
 				"Requested resource not found")
 			return
 		}
-		slog.Error("ListStreams failed", "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -86,7 +84,6 @@ func (sr *StreamsRouter) handleListStreams(w http.ResponseWriter, body []byte) {
 		}
 	}
 	resp["Streams"] = items
-	slog.Debug("listed DynamoDB streams", "count", len(items))
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -123,7 +120,6 @@ func (sr *StreamsRouter) handleDescribeStream(w http.ResponseWriter, body []byte
 	desc, err := sr.storage.DescribeStream(req.StreamArn)
 	if err != nil {
 		if errors.Is(err, ErrStreamNotFound) {
-			slog.Debug("DescribeStream: stream not found", "arn", req.StreamArn)
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -132,7 +128,6 @@ func (sr *StreamsRouter) handleDescribeStream(w http.ResponseWriter, body []byte
 			)
 			return
 		}
-		slog.Error("DescribeStream failed", "arn", req.StreamArn, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -178,7 +173,6 @@ func (sr *StreamsRouter) handleDescribeStream(w http.ResponseWriter, body []byte
 		}}
 	}
 
-	slog.Debug("described DynamoDB stream", "arn", req.StreamArn)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"StreamDescription": streamDescResp{
 			StreamArn:               desc.StreamARN,
@@ -240,7 +234,6 @@ func (sr *StreamsRouter) handleGetShardIterator(w http.ResponseWriter, body []by
 			)
 			return
 		}
-		slog.Error("GetShardIterator failed", "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -250,7 +243,6 @@ func (sr *StreamsRouter) handleGetShardIterator(w http.ResponseWriter, body []by
 		return
 	}
 
-	slog.Debug("got shard iterator", "stream", req.StreamArn)
 	writeJSON(w, http.StatusOK, map[string]any{"ShardIterator": iter})
 }
 
@@ -312,7 +304,6 @@ func (sr *StreamsRouter) handleGetRecords(w http.ResponseWriter, body []byte) {
 			)
 			return
 		}
-		slog.Error("GetRecords failed", "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -364,7 +355,6 @@ func (sr *StreamsRouter) handleGetRecords(w http.ResponseWriter, body []byte) {
 		}
 	}
 
-	slog.Debug("GetRecords", "count", len(out))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"Records":           out,
 		"NextShardIterator": nextIter,

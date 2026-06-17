@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 )
 
@@ -33,12 +32,10 @@ func (ro *Router) handleGetPublicKey(w http.ResponseWriter, body []byte) {
 	meta, err := ro.storage.GetKeyMetadata(keyID)
 	if err != nil {
 		if errors.Is(err, ErrKeyNotFound) {
-			slog.Debug("KMS GetPublicKey: key not found", "keyID", keyID)
 			writeError(w, http.StatusBadRequest, "NotFoundException",
 				fmt.Sprintf("Invalid keyId %s", keyID))
 			return
 		}
-		slog.Error("KMS GetPublicKey: GetKeyMetadata failure", "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -71,13 +68,6 @@ func (ro *Router) handleGetPublicKey(w http.ResponseWriter, body []byte) {
 	mat, err := ro.storage.GetKeyMaterial(keyID)
 	if err != nil {
 		if errors.Is(err, ErrKeyMaterialNotFound) {
-			slog.Debug(
-				"KMS GetPublicKey: no key material for spec",
-				"keyID",
-				keyID,
-				"spec",
-				meta.KeySpec,
-			)
 			writeError(
 				w,
 				http.StatusBadRequest,
@@ -89,7 +79,6 @@ func (ro *Router) handleGetPublicKey(w http.ResponseWriter, body []byte) {
 			)
 			return
 		}
-		slog.Error("KMS GetPublicKey: GetKeyMaterial failure", "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -102,7 +91,6 @@ func (ro *Router) handleGetPublicKey(w http.ResponseWriter, body []byte) {
 	pubDER, err := extractPublicKeyDER(mat.PrivateKeyDER)
 	if err != nil {
 		// untestable: only reached if stored key material is corrupt; the normal API cannot produce this
-		slog.Error("KMS GetPublicKey: extract public key failure", "keyID", keyID, "err", err)
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -129,7 +117,6 @@ func (ro *Router) handleGetPublicKey(w http.ResponseWriter, body []byte) {
 		resp["KeyAgreementAlgorithms"] = meta.KeyAgreementAlgorithms
 	}
 
-	slog.Debug("KMS GetPublicKey", "keyID", keyID, "spec", meta.KeySpec)
 	writeJSON(w, http.StatusOK, resp)
 }
 
