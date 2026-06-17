@@ -952,6 +952,17 @@ func TestWriteJSON_writeFails(t *testing.T) {
 	writeJSON(failWriter{httptest.NewRecorder()}, http.StatusOK, map[string]string{"k": "v"})
 }
 
+func TestResponseRecorderWriteHeader(t *testing.T) {
+	t.Run("second WriteHeader call is ignored", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		rr := newResponseRecorder(w)
+		rr.WriteHeader(http.StatusOK)
+		rr.WriteHeader(http.StatusInternalServerError)
+		assert.Equal(t, http.StatusOK, rr.status)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+}
+
 func TestResponseRecorderFlush(t *testing.T) {
 	t.Run("flushes when underlying writer implements http.Flusher", func(t *testing.T) {
 		w := httptest.NewRecorder()

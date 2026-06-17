@@ -315,6 +315,17 @@ func TestUnknownAction(t *testing.T) {
 	assert.Contains(t, resp.Error.Message, "UnknownAction")
 }
 
+func TestResponseRecorderWriteHeader(t *testing.T) {
+	t.Run("second WriteHeader call is ignored", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		rr := newResponseRecorder(w)
+		rr.WriteHeader(http.StatusOK)
+		rr.WriteHeader(http.StatusInternalServerError)
+		assert.Equal(t, http.StatusOK, rr.status)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+}
+
 func TestResponseRecorderFlush(t *testing.T) {
 	t.Run("flushes when underlying writer implements http.Flusher", func(t *testing.T) {
 		w := httptest.NewRecorder()
