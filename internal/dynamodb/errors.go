@@ -89,6 +89,7 @@ func (rr *responseRecorder) Flush() {
 func emitRequestLog(op string, rec *responseRecorder, duration time.Duration) {
 	status := rec.status
 	attrs := []any{
+		"service", "dynamodb",
 		"op", op,
 		"status", status,
 	}

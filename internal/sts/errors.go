@@ -38,6 +38,7 @@ func (rr *responseRecorder) Flush() {
 func emitRequestLog(action string, rec *responseRecorder, duration time.Duration) {
 	status := rec.status
 	attrs := []any{
+		"service", "sts",
 		"op", action,
 		"status", status,
 	}

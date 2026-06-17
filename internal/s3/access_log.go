@@ -177,6 +177,7 @@ func logOperationName(method string, isObject bool) string {
 func emitRequestLog(r *http.Request, rec *responseRecorder, duration time.Duration) {
 	status := rec.status
 	attrs := []any{
+		"service", "s3",
 		"method", r.Method,
 		"path", r.URL.Path,
 		"status", status,

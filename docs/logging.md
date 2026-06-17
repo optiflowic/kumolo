@@ -7,8 +7,8 @@ kumolo uses Go's `log/slog` for structured logging. All output goes to stderr.
 Log format (default):
 
 ```text
-[2006-01-02T15:04:05Z] [INFO] request op=CreateBucket status=200 duration=1.2ms
-[2006-01-02T15:04:05Z] [ERROR] request op=PutObject status=500 err="disk full" duration=0.8ms
+[2006-01-02T15:04:05Z] [INFO] request service=s3 method=PUT path=/bucket status=200 duration=1.2ms
+[2006-01-02T15:04:05Z] [ERROR] request service=s3 method=PUT path=/bucket/key status=500 err="disk full" duration=0.8ms
 ```
 
 ## Log Streams
@@ -63,11 +63,11 @@ Set `KUMOLO_LOG_LEVEL` to control which logs appear:
 **Terraform `apply` (default INFO):**
 
 ```text
-INFO  request  op=DescribeTable  status=400  code=ResourceNotFoundException  duration=1ms
-INFO  request  op=CreateTable    status=200  duration=3ms
-INFO  request  op=DescribeTable  status=200  duration=1ms
-INFO  request  method=PUT  path=/my-bucket  status=200  duration=2ms
-INFO  request  method=PUT  path=/my-bucket/key  status=200  duration=1ms
+INFO  request  service=dynamodb  op=DescribeTable  status=400  code=ResourceNotFoundException  duration=1ms
+INFO  request  service=dynamodb  op=CreateTable    status=200  duration=3ms
+INFO  request  service=dynamodb  op=DescribeTable  status=200  duration=1ms
+INFO  request  service=s3  method=PUT  path=/my-bucket  status=200  duration=2ms
+INFO  request  service=s3  method=PUT  path=/my-bucket/key  status=200  duration=1ms
 ```
 
 Polling responses (4xx before the resource exists, 2xx writes) are all visible. S3 HEAD verification calls after creation are at DEBUG and not shown.

@@ -354,6 +354,7 @@ func TestEmitRequestLog(t *testing.T) {
 		setLogger(t, &buf)
 		emitRequestLog("GetCallerIdentity", makeRec(http.StatusOK, "", ""), time.Millisecond)
 		assert.Contains(t, buf.String(), "INFO")
+		assert.Contains(t, buf.String(), "service=sts")
 		assert.Contains(t, buf.String(), "op=GetCallerIdentity")
 	})
 
