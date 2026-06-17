@@ -12,9 +12,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/lmittmann/tint"
 	"github.com/optiflowic/kumolo/internal/config"
-	"github.com/optiflowic/kumolo/internal/logging"
 	"github.com/optiflowic/kumolo/internal/server"
+	"golang.org/x/term"
 )
 
 var (
@@ -62,7 +63,11 @@ func run() error {
 		slog.Warn("unknown log level, defaulting to info", "level", cfg.LogLevel)
 		level = slog.LevelInfo
 	}
-	slog.SetDefault(slog.New(logging.NewBracketHandler(os.Stderr, level)))
+	noColor := os.Getenv("NO_COLOR") != "" || !term.IsTerminal(int(os.Stderr.Fd()))
+	slog.SetDefault(slog.New(tint.NewHandler(os.Stderr, &tint.Options{
+		Level:   level,
+		NoColor: noColor,
+	})))
 
 	dataDir := cfg.DataDir
 	if dataDir == "" {
