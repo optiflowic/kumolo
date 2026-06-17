@@ -84,7 +84,7 @@ func (rr *responseRecorder) Flush() {
 }
 
 // emitRequestLog writes one structured log line per DynamoDB request.
-// Level rules: 5xx → Error, 4xx → Debug, 2xx → Info.
+// Level rules: 5xx → Error, everything else → Info.
 func emitRequestLog(op string, rec *responseRecorder, duration time.Duration) {
 	status := rec.status
 	attrs := []any{
