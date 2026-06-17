@@ -53,10 +53,6 @@ func emitRequestLog(action string, rec *responseRecorder, duration time.Duration
 		slog.Error( // #nosec G706 -- action comes from the Action query parameter; log injection risk accepted for a local dev emulator
 			"request",
 			attrs...)
-	case status >= 400:
-		slog.Debug( // #nosec G706 -- action comes from the Action query parameter; log injection risk accepted for a local dev emulator
-			"request",
-			attrs...)
 	default:
 		slog.Info( // #nosec G706 -- action comes from the Action query parameter; log injection risk accepted for a local dev emulator
 			"request",

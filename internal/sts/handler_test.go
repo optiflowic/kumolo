@@ -344,7 +344,7 @@ func TestEmitRequestLog(t *testing.T) {
 		assert.Contains(t, buf.String(), "op=GetCallerIdentity")
 	})
 
-	t.Run("4xx logs at DEBUG with code", func(t *testing.T) {
+	t.Run("4xx logs at INFO with code", func(t *testing.T) {
 		var buf testBuffer
 		setLogger(t, &buf)
 		emitRequestLog(
@@ -352,7 +352,7 @@ func TestEmitRequestLog(t *testing.T) {
 			makeRec(http.StatusBadRequest, "ValidationError", "bad input"),
 			time.Millisecond,
 		)
-		assert.Contains(t, buf.String(), "DEBUG")
+		assert.Contains(t, buf.String(), "INFO")
 		assert.Contains(t, buf.String(), "code=ValidationError")
 	})
 
