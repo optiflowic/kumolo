@@ -2845,13 +2845,15 @@ func TestWriteErrorEncoderFail(t *testing.T) {
 
 func TestResponseRecorderFlush(t *testing.T) {
 	t.Run("flushes when underlying writer implements http.Flusher", func(t *testing.T) {
-		rr := newResponseRecorder(httptest.NewRecorder())
+		w := httptest.NewRecorder()
+		rr := newResponseRecorder(w)
 		rr.Flush() // httptest.ResponseRecorder implements http.Flusher
+		assert.True(t, w.Flushed)
 	})
 
 	t.Run("no-op when underlying writer does not implement http.Flusher", func(t *testing.T) {
 		rr := newResponseRecorder(&failResponseWriter{})
-		rr.Flush() // failResponseWriter does not implement http.Flusher
+		require.NotPanics(t, rr.Flush) // failResponseWriter does not implement http.Flusher
 	})
 }
 

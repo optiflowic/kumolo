@@ -6,7 +6,7 @@ kumolo uses Go's `log/slog` for structured logging. All output goes to stderr.
 
 Log format (default):
 
-```
+```text
 [2006-01-02T15:04:05Z] [INFO] request op=CreateBucket status=200 duration=1.2ms
 [2006-01-02T15:04:05Z] [ERROR] request op=PutObject status=500 err="disk full" duration=0.8ms
 ```
@@ -62,7 +62,7 @@ Set `KUMOLO_LOG_LEVEL` to control which logs appear:
 
 **Terraform `apply` (default INFO):**
 
-```
+```text
 INFO  request  op=DescribeTable  status=400  code=ResourceNotFoundException  duration=1ms
 INFO  request  op=CreateTable    status=200  duration=3ms
 INFO  request  op=DescribeTable  status=200  duration=1ms
@@ -74,7 +74,7 @@ Polling responses (4xx before the resource exists, 2xx writes) are all visible. 
 
 **Debugging a specific S3 read:**
 
-```
+```bash
 KUMOLO_LOG_LEVEL=debug kumolo
 ```
 
@@ -82,7 +82,7 @@ Now all GET/HEAD operations appear. Pipe through `grep op=GetObject` or similar 
 
 **CI / automated tests (reduce noise):**
 
-```
+```bash
 KUMOLO_LOG_LEVEL=warn kumolo
 ```
 

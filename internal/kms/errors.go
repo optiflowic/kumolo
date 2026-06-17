@@ -44,10 +44,11 @@ func newResponseRecorder(w http.ResponseWriter) *responseRecorder {
 }
 
 func (rr *responseRecorder) WriteHeader(status int) {
-	if !rr.headerWritten {
-		rr.status = status
-		rr.headerWritten = true
+	if rr.headerWritten {
+		return
 	}
+	rr.status = status
+	rr.headerWritten = true
 	rr.ResponseWriter.WriteHeader(status)
 }
 

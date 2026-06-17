@@ -173,7 +173,7 @@ func logOperationName(method string, isObject bool) string {
 }
 
 // emitRequestLog writes one structured log line per HTTP request.
-// Level rules: 5xx → Error, 4xx → Debug, GET/HEAD 2xx/3xx → Debug, other 2xx/3xx → Info.
+// Level rules: 5xx → Error, 4xx → Info, GET/HEAD 2xx/3xx → Debug, other 2xx/3xx → Info.
 func emitRequestLog(r *http.Request, rec *responseRecorder, duration time.Duration) {
 	status := rec.status
 	attrs := []any{

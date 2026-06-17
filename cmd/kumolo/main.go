@@ -63,7 +63,8 @@ func run() error {
 		slog.Warn("unknown log level, defaulting to info", "level", cfg.LogLevel)
 		level = slog.LevelInfo
 	}
-	noColor := os.Getenv("NO_COLOR") != "" || !term.IsTerminal(syscall.Stderr)
+	_, noColorSet := os.LookupEnv("NO_COLOR")
+	noColor := noColorSet || !term.IsTerminal(syscall.Stderr)
 	slog.SetDefault(slog.New(tint.NewHandler(os.Stderr, &tint.Options{
 		Level:   level,
 		NoColor: noColor,
