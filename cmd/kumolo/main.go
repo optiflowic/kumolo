@@ -64,7 +64,7 @@ func run() error {
 		level = slog.LevelInfo
 	}
 	_, noColorSet := os.LookupEnv("NO_COLOR")
-	noColor := noColorSet || !term.IsTerminal(syscall.Stderr)
+	noColor := noColorSet || !term.IsTerminal(int(os.Stderr.Fd()))
 	slog.SetDefault(slog.New(tint.NewHandler(os.Stderr, &tint.Options{
 		Level:   level,
 		NoColor: noColor,
