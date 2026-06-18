@@ -17,7 +17,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/kms v1.52.2
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.103.3
 	github.com/aws/aws-sdk-go-v2/service/sts v1.43.3
-	github.com/aws/smithy-go v1.27.1
+	github.com/aws/smithy-go v1.27.2
 	github.com/joho/godotenv v1.5.1
 	github.com/lmittmann/tint v1.1.3
 	github.com/stretchr/testify v1.11.1
