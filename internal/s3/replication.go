@@ -76,8 +76,19 @@ func (ro *Router) replicateObject(bucket, key string, srcMeta ObjectMetadata) {
 		}
 		if ruleHasTagFilter(rule) {
 			if !objTagsLoaded {
+				loadedTags, tagErr := ro.storage.GetObjectTagging(bucket, key)
 				objTagsLoaded = true
-				objTags, _ = ro.storage.GetObjectTagging(bucket, key)
+				if tagErr != nil {
+					slog.Warn( // #nosec G706
+						"replication: failed to load object tags",
+						"bucket", bucket,
+						"key", key,
+						"err", tagErr,
+					)
+					objTags = nil
+				} else {
+					objTags = loadedTags
+				}
 			}
 			if !ruleMatchesTags(rule, objTags) {
 				continue
