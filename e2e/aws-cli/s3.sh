@@ -916,6 +916,150 @@ else
   fail "ACL enforcement (private: expected 403, got $ACL_PRIVATE_STATUS)"
 fi
 
+# ---------------------------------------------------------------------------
+# BucketACL — set bucket-level ACL and verify owner is returned.
+# ---------------------------------------------------------------------------
+run "PutBucketAcl (private)" \
+  $AWS s3api put-bucket-acl --bucket "$BUCKET" --acl private
+
+BUCKET_ACL_RESP=$($AWS s3api get-bucket-acl --bucket "$BUCKET" 2>/dev/null || true)
+BUCKET_ACL_OWNER=$(echo "$BUCKET_ACL_RESP" | jq -r '.Owner.DisplayName // .Owner.ID // empty' 2>/dev/null || true)
+if [[ -n "$BUCKET_ACL_OWNER" ]]; then
+  ok "GetBucketAcl (Owner present)"
+else
+  fail "GetBucketAcl (expected Owner in response)"
+fi
+
+# ---------------------------------------------------------------------------
+# BucketWebsite — configure website, verify index document, and delete.
+# ---------------------------------------------------------------------------
+run "PutBucketWebsite" \
+  $AWS s3api put-bucket-website \
+    --bucket "$BUCKET" \
+    --website-configuration '{"IndexDocument":{"Suffix":"index.html"},"ErrorDocument":{"Key":"error.html"}}'
+
+WEBSITE_RESP=$($AWS s3api get-bucket-website --bucket "$BUCKET" 2>/dev/null || true)
+WEBSITE_SUFFIX=$(echo "$WEBSITE_RESP" | jq -r '.IndexDocument.Suffix // empty' 2>/dev/null || true)
+if [[ "$WEBSITE_SUFFIX" == "index.html" ]]; then
+  ok "GetBucketWebsite (IndexDocument.Suffix=index.html)"
+else
+  fail "GetBucketWebsite (expected IndexDocument.Suffix=index.html, got '$WEBSITE_SUFFIX')"
+fi
+run "DeleteBucketWebsite" \
+  $AWS s3api delete-bucket-website --bucket "$BUCKET"
+
+# ---------------------------------------------------------------------------
+# BucketAccelerate — enable transfer acceleration and verify status.
+# ---------------------------------------------------------------------------
+run "PutBucketAccelerateConfiguration (Enabled)" \
+  $AWS s3api put-bucket-accelerate-configuration \
+    --bucket "$BUCKET" \
+    --accelerate-configuration Status=Enabled
+
+ACCEL_RESP=$($AWS s3api get-bucket-accelerate-configuration --bucket "$BUCKET" 2>/dev/null || true)
+ACCEL_STATUS=$(echo "$ACCEL_RESP" | jq -r '.Status // empty' 2>/dev/null || true)
+if [[ "$ACCEL_STATUS" == "Enabled" ]]; then
+  ok "GetBucketAccelerateConfiguration (Status=Enabled)"
+else
+  fail "GetBucketAccelerateConfiguration (expected Status=Enabled, got '$ACCEL_STATUS')"
+fi
+
+# ---------------------------------------------------------------------------
+# BucketRequestPayment — set requester-pays payer and verify.
+# ---------------------------------------------------------------------------
+run "PutBucketRequestPayment (Requester)" \
+  $AWS s3api put-bucket-request-payment \
+    --bucket "$BUCKET" \
+    --request-payment-configuration Payer=Requester
+
+REQPAY_RESP=$($AWS s3api get-bucket-request-payment --bucket "$BUCKET" 2>/dev/null || true)
+REQPAY_PAYER=$(echo "$REQPAY_RESP" | jq -r '.Payer // empty' 2>/dev/null || true)
+if [[ "$REQPAY_PAYER" == "Requester" ]]; then
+  ok "GetBucketRequestPayment (Payer=Requester)"
+else
+  fail "GetBucketRequestPayment (expected Payer=Requester, got '$REQPAY_PAYER')"
+fi
+
+# ---------------------------------------------------------------------------
+# BucketReplication — tag-based filter round-trip (#390).
+# Verifies Filter.Tag (single) and Filter.And.Tags (multi) are stored and
+# retrieved correctly.
+# ---------------------------------------------------------------------------
+TAG_REPL_SRC="kumolo-cli-s3-tag-repl-src"
+TAG_REPL_DEST="kumolo-cli-s3-tag-repl-dest"
+cleanup_bucket "$TAG_REPL_SRC"
+cleanup_bucket "$TAG_REPL_DEST"
+
+run "CreateBucket (tag-filter replication src)" \
+  $AWS s3api create-bucket --bucket "$TAG_REPL_SRC"
+run "PutBucketVersioning (tag-filter replication src)" \
+  $AWS s3api put-bucket-versioning \
+    --bucket "$TAG_REPL_SRC" \
+    --versioning-configuration Status=Enabled
+run "CreateBucket (tag-filter replication dest)" \
+  $AWS s3api create-bucket --bucket "$TAG_REPL_DEST"
+run "PutBucketVersioning (tag-filter replication dest)" \
+  $AWS s3api put-bucket-versioning \
+    --bucket "$TAG_REPL_DEST" \
+    --versioning-configuration Status=Enabled
+
+TAG_REPL_CONFIG=$(cat <<'JSON'
+{
+  "Role": "arn:aws:iam::000000000000:role/replication-role",
+  "Rules": [{
+    "ID": "tag-filter-rule",
+    "Status": "Enabled",
+    "Filter": {"Tag": {"Key": "env", "Value": "prod"}},
+    "DeleteMarkerReplication": {"Status": "Disabled"},
+    "Destination": {"Bucket": "arn:aws:s3:::kumolo-cli-s3-tag-repl-dest"}
+  }]
+}
+JSON
+)
+run "PutBucketReplication (Filter.Tag)" \
+  $AWS s3api put-bucket-replication \
+    --bucket "$TAG_REPL_SRC" \
+    --replication-configuration "$TAG_REPL_CONFIG"
+
+TAG_REPL_RESP=$($AWS s3api get-bucket-replication --bucket "$TAG_REPL_SRC" 2>/dev/null || true)
+TAG_FILTER_KEY=$(echo "$TAG_REPL_RESP" | jq -r '.ReplicationConfiguration.Rules[0].Filter.Tag.Key // empty' 2>/dev/null || true)
+if [[ "$TAG_FILTER_KEY" == "env" ]]; then
+  ok "GetBucketReplication (Filter.Tag round-trip: Key=env)"
+else
+  fail "GetBucketReplication (Filter.Tag: expected Key=env, got '$TAG_FILTER_KEY')"
+fi
+
+AND_REPL_CONFIG=$(cat <<'JSON'
+{
+  "Role": "arn:aws:iam::000000000000:role/replication-role",
+  "Rules": [{
+    "ID": "and-tags-filter-rule",
+    "Status": "Enabled",
+    "Filter": {"And": {"Tags": [{"Key": "env", "Value": "prod"}, {"Key": "tier", "Value": "hot"}]}},
+    "DeleteMarkerReplication": {"Status": "Disabled"},
+    "Destination": {"Bucket": "arn:aws:s3:::kumolo-cli-s3-tag-repl-dest"}
+  }]
+}
+JSON
+)
+run "PutBucketReplication (Filter.And.Tags)" \
+  $AWS s3api put-bucket-replication \
+    --bucket "$TAG_REPL_SRC" \
+    --replication-configuration "$AND_REPL_CONFIG"
+
+AND_REPL_RESP=$($AWS s3api get-bucket-replication --bucket "$TAG_REPL_SRC" 2>/dev/null || true)
+AND_TAG_COUNT=$(echo "$AND_REPL_RESP" | jq '.ReplicationConfiguration.Rules[0].Filter.And.Tags | length' 2>/dev/null || echo 0)
+AND_ENV_VAL=$(echo "$AND_REPL_RESP" | jq -r '.ReplicationConfiguration.Rules[0].Filter.And.Tags[] | select(.Key=="env") | .Value' 2>/dev/null || true)
+AND_TIER_VAL=$(echo "$AND_REPL_RESP" | jq -r '.ReplicationConfiguration.Rules[0].Filter.And.Tags[] | select(.Key=="tier") | .Value' 2>/dev/null || true)
+if [[ "$AND_TAG_COUNT" -eq 2 && "$AND_ENV_VAL" == "prod" && "$AND_TIER_VAL" == "hot" ]]; then
+  ok "GetBucketReplication (Filter.And.Tags round-trip: env=prod tier=hot)"
+else
+  fail "GetBucketReplication (Filter.And.Tags: expected 2 tags env=prod tier=hot, got count=$AND_TAG_COUNT env='$AND_ENV_VAL' tier='$AND_TIER_VAL')"
+fi
+
+cleanup_bucket "$TAG_REPL_SRC"
+cleanup_bucket "$TAG_REPL_DEST"
+
 # Cleanup
 cleanup_bucket "$BUCKET"
 

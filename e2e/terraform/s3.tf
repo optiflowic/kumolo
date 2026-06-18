@@ -204,3 +204,57 @@ resource "aws_s3_bucket_ownership_controls" "main" {
     object_ownership = "BucketOwnerPreferred"
   }
 }
+
+# ---------------------------------------------------------------------------
+# BucketACL
+# ---------------------------------------------------------------------------
+resource "aws_s3_bucket_acl" "main" {
+  depends_on = [aws_s3_bucket_ownership_controls.main]
+  bucket     = aws_s3_bucket.main.id
+  acl        = "private"
+}
+
+# ---------------------------------------------------------------------------
+# CORS
+# ---------------------------------------------------------------------------
+resource "aws_s3_bucket_cors_configuration" "main" {
+  bucket = aws_s3_bucket.main.id
+
+  cors_rule {
+    allowed_headers = ["*"]
+    allowed_methods = ["GET", "PUT"]
+    allowed_origins = ["*"]
+    max_age_seconds = 3000
+  }
+}
+
+# ---------------------------------------------------------------------------
+# BucketWebsite
+# ---------------------------------------------------------------------------
+resource "aws_s3_bucket_website_configuration" "main" {
+  bucket = aws_s3_bucket.main.id
+
+  index_document {
+    suffix = "index.html"
+  }
+
+  error_document {
+    key = "error.html"
+  }
+}
+
+# ---------------------------------------------------------------------------
+# BucketAccelerate
+# ---------------------------------------------------------------------------
+resource "aws_s3_bucket_accelerate_configuration" "main" {
+  bucket = aws_s3_bucket.main.id
+  status = "Enabled"
+}
+
+# ---------------------------------------------------------------------------
+# BucketRequestPayment
+# ---------------------------------------------------------------------------
+resource "aws_s3_bucket_request_payment_configuration" "main" {
+  bucket = aws_s3_bucket.main.id
+  payer  = "Requester"
+}
