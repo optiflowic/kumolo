@@ -8096,27 +8096,44 @@ func TestBucketConfigHandlers(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assert.Contains(t, w.Body.String(), "MalformedXML")
 	})
-	t.Run("PUT replication rejects tag filter combined with DMR=Enabled", func(t *testing.T) {
-		ro := newRouterWithMock(&mockStore{})
-		body := `<ReplicationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Role>arn:aws:iam::000000000000:role/r</Role><Rule><Status>Enabled</Status><Filter><Tag><Key>env</Key><Value>prod</Value></Tag></Filter><Destination><Bucket>arn:aws:s3:::dst</Bucket></Destination><DeleteMarkerReplication><Status>Enabled</Status></DeleteMarkerReplication></Rule></ReplicationConfiguration>`
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{
+			name: "tag filter with DMR=Enabled",
+			body: `<ReplicationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Role>arn:aws:iam::000000000000:role/r</Role><Rule><Status>Enabled</Status><Filter><Tag><Key>env</Key><Value>prod</Value></Tag></Filter><Destination><Bucket>arn:aws:s3:::dst</Bucket></Destination><DeleteMarkerReplication><Status>Enabled</Status></DeleteMarkerReplication></Rule></ReplicationConfiguration>`,
+		},
+		{
+			name: "tag filter with DMR absent (nil)",
+			body: `<ReplicationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Role>arn:aws:iam::000000000000:role/r</Role><Rule><Status>Enabled</Status><Filter><Tag><Key>env</Key><Value>prod</Value></Tag></Filter><Destination><Bucket>arn:aws:s3:::dst</Bucket></Destination></Rule></ReplicationConfiguration>`,
+		},
+		{
+			name: "And.Tags filter with DMR=Enabled",
+			body: `<ReplicationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Role>arn:aws:iam::000000000000:role/r</Role><Rule><Status>Enabled</Status><Filter><And><Tag><Key>env</Key><Value>prod</Value></Tag></And></Filter><Destination><Bucket>arn:aws:s3:::dst</Bucket></Destination><DeleteMarkerReplication><Status>Enabled</Status></DeleteMarkerReplication></Rule></ReplicationConfiguration>`,
+		},
+	} {
+		tc := tc
+		t.Run("PUT replication rejects "+tc.name, func(t *testing.T) {
+			ro := newRouterWithMock(&mockStore{})
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(
+				w,
+				httptest.NewRequest(http.MethodPut, "/b?replication", strings.NewReader(tc.body)),
+			)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Contains(t, w.Body.String(), "InvalidRequest")
+		})
+	}
+	t.Run("PUT replication accepts tag filter with DMR=Disabled", func(t *testing.T) {
+		body := `<ReplicationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Role>arn:aws:iam::000000000000:role/r</Role><Rule><Status>Enabled</Status><Filter><Tag><Key>env</Key><Value>prod</Value></Tag></Filter><Destination><Bucket>arn:aws:s3:::dst</Bucket></Destination><DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication></Rule></ReplicationConfiguration>`
+		ro := newRouterWithMock(&mockStore{bucketExists: true})
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(
 			w,
 			httptest.NewRequest(http.MethodPut, "/b?replication", strings.NewReader(body)),
 		)
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assert.Contains(t, w.Body.String(), "InvalidRequest")
-	})
-	t.Run("PUT replication rejects And.Tags filter combined with DMR=Enabled", func(t *testing.T) {
-		ro := newRouterWithMock(&mockStore{})
-		body := `<ReplicationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Role>arn:aws:iam::000000000000:role/r</Role><Rule><Status>Enabled</Status><Filter><And><Tag><Key>env</Key><Value>prod</Value></Tag></And></Filter><Destination><Bucket>arn:aws:s3:::dst</Bucket></Destination><DeleteMarkerReplication><Status>Enabled</Status></DeleteMarkerReplication></Rule></ReplicationConfiguration>`
-		w := httptest.NewRecorder()
-		ro.ServeHTTP(
-			w,
-			httptest.NewRequest(http.MethodPut, "/b?replication", strings.NewReader(body)),
-		)
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assert.Contains(t, w.Body.String(), "InvalidRequest")
+		assert.Equal(t, http.StatusOK, w.Code)
 	})
 
 	t.Run("PUT requestPayment returns 404 on bucket not found", func(t *testing.T) {

@@ -565,10 +565,10 @@ func (ro *Router) handlePutBucketReplication(
 	}
 	for _, rule := range cfg.Rules {
 		if ruleHasTagFilter(rule) &&
-			rule.DeleteMarkerReplication != nil &&
-			rule.DeleteMarkerReplication.Status == "Enabled" {
+			(rule.DeleteMarkerReplication == nil ||
+				rule.DeleteMarkerReplication.Status != "Disabled") {
 			writeError(w, r, http.StatusBadRequest, "InvalidRequest",
-				"Tag filter and delete marker replication cannot both be enabled on the same rule.")
+				"DeleteMarkerReplication must be Disabled when using tag filters.")
 			return
 		}
 	}
