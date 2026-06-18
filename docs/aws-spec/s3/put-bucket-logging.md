@@ -11,6 +11,8 @@
 
 Stores a `BucketLoggingStatus` XML document. When `LoggingEnabled` is present,
 kumolo appends a server access log record to the target bucket after each request.
+When `LoggingEnabled` is absent, any existing logging configuration is deleted and
+logging is disabled.
 
 ## Response
 

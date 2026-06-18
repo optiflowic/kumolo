@@ -1080,6 +1080,7 @@ func TestBucketReplicationRoundTrip(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, "ReplicationConfigurationNotFoundError", apiErrorCode(err))
 
+	// Sub-tests run sequentially and share the bucket; each Put overwrites the previous config.
 	t.Run("PrefixFilter", func(t *testing.T) {
 		_, err := clients.s3.PutBucketReplication(ctx, &awss3.PutBucketReplicationInput{
 			Bucket: aws.String(bucket),
