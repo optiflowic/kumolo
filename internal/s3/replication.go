@@ -28,11 +28,13 @@ type deleteMarkerReplication struct {
 
 type replicationFilter struct {
 	Prefix string                `xml:"Prefix"`
+	Tag    *xmlTag               `xml:"Tag"`
 	And    *replicationFilterAnd `xml:"And"`
 }
 
 type replicationFilterAnd struct {
-	Prefix string `xml:"Prefix"`
+	Prefix string   `xml:"Prefix"`
+	Tags   []xmlTag `xml:"Tag"`
 }
 
 type replicationDest struct {
@@ -60,12 +62,37 @@ func (ro *Router) replicateObject(bucket, key string, srcMeta ObjectMetadata) {
 		return
 	}
 
+	var (
+		objTagsLoaded bool
+		objTags       []Tag
+	)
+
 	for _, rule := range cfg.Rules {
 		if rule.Status != "Enabled" {
 			continue
 		}
 		if prefix := ruleKeyPrefix(rule); !strings.HasPrefix(key, prefix) {
 			continue
+		}
+		if ruleHasTagFilter(rule) {
+			if !objTagsLoaded {
+				loadedTags, tagErr := ro.storage.GetObjectTagging(bucket, key)
+				objTagsLoaded = true
+				if tagErr != nil {
+					slog.Warn( // #nosec G706
+						"replication: failed to load object tags",
+						"bucket", bucket,
+						"key", key,
+						"err", tagErr,
+					)
+					objTags = nil
+				} else {
+					objTags = loadedTags
+				}
+			}
+			if !ruleMatchesTags(rule, objTags) {
+				continue
+			}
 		}
 		destBucket := bucketNameFromARN(rule.Destination.Bucket)
 		if destBucket == "" {
@@ -152,6 +179,46 @@ func ruleKeyPrefix(rule replicationRule) string {
 	return rule.Prefix
 }
 
+// ruleHasTagFilter reports whether a rule has a tag-based filter (Filter.Tag or Filter.And.Tags).
+func ruleHasTagFilter(rule replicationRule) bool {
+	if rule.Filter == nil {
+		return false
+	}
+	if rule.Filter.Tag != nil {
+		return true
+	}
+	return rule.Filter.And != nil && len(rule.Filter.And.Tags) > 0
+}
+
+// ruleMatchesTags reports whether the object tags satisfy the tag filter of the rule.
+// Returns true if the rule has no tag filter.
+func ruleMatchesTags(rule replicationRule, objTags []Tag) bool {
+	if rule.Filter == nil {
+		return true
+	}
+	if rule.Filter.Tag != nil {
+		return tagSetContains(objTags, *rule.Filter.Tag)
+	}
+	if rule.Filter.And != nil {
+		for _, want := range rule.Filter.And.Tags {
+			if !tagSetContains(objTags, want) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// tagSetContains reports whether tags contains an entry matching want.
+func tagSetContains(tags []Tag, want xmlTag) bool {
+	for _, t := range tags {
+		if t.Key == want.Key && t.Value == want.Value {
+			return true
+		}
+	}
+	return false
+}
+
 // replicateDeleteMarker propagates a delete marker from bucket/key to each enabled
 // replication destination whose rule has DeleteMarkerReplication.Status=Enabled.
 // Errors are logged and never propagated to the caller.
@@ -173,6 +240,10 @@ func (ro *Router) replicateDeleteMarker(bucket, key string) {
 			continue
 		}
 		if rule.DeleteMarkerReplication == nil || rule.DeleteMarkerReplication.Status != "Enabled" {
+			continue
+		}
+		if ruleHasTagFilter(rule) {
+			// delete markers carry no tags; tag-filtered rules can never match
 			continue
 		}
 		if prefix := ruleKeyPrefix(rule); !strings.HasPrefix(key, prefix) {

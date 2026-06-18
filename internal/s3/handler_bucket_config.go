@@ -550,13 +550,39 @@ func (ro *Router) handlePutBucketReplication(
 	r *http.Request,
 	bucket string,
 ) {
-	ro.handlePutBucketRawXML(
-		w,
-		r,
-		bucket,
-		"replication configuration",
-		ro.storage.PutBucketReplication,
-	)
+	body, err := io.ReadAll(r.Body)
+	if err != nil || !isWellFormedXML(body) {
+		writeError(w, r, http.StatusBadRequest, "MalformedXML",
+			"The XML you provided was not well-formed.")
+		return
+	}
+
+	var cfg replicationConfig
+	if err := xml.Unmarshal(body, &cfg); err != nil {
+		writeError(w, r, http.StatusBadRequest, "MalformedXML",
+			"The XML you provided was not well-formed.")
+		return
+	}
+	for _, rule := range cfg.Rules {
+		if ruleHasTagFilter(rule) &&
+			(rule.DeleteMarkerReplication == nil ||
+				rule.DeleteMarkerReplication.Status != "Disabled") {
+			writeError(w, r, http.StatusBadRequest, "InvalidRequest",
+				"DeleteMarkerReplication must be Disabled when using tag filters.")
+			return
+		}
+	}
+
+	if err := ro.storage.PutBucketReplication(bucket, stripXMLDecl(string(body))); err != nil {
+		if errors.Is(err, ErrBucketNotFound) {
+			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
+				"The specified bucket does not exist.")
+			return
+		}
+		writeError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 func (ro *Router) handleGetBucketReplication(

@@ -47,4 +47,5 @@ After each `DeleteObject` or `DeleteObjects` that creates a delete marker (versi
 
 - Replication runs in the same request goroutine (no background job); when `X-Amz-Replication-Status` is present it is always `COMPLETED` or `REPLICA` — never `PENDING` or `FAILED` as in real AWS async replication.
 - Same-instance replication only; cross-instance / real-AWS destination is not supported.
-- Tag-based filter rules (`Filter/Tag`, `Filter/And/Tag`) are ignored; only key prefix matching is applied.
+- `Filter.Tag` and `Filter.And.Tags` are evaluated at replication time by reading the object's `.tags.json` sidecar; tags are loaded lazily only when a rule with a tag filter is encountered.
+- Tag-filtered rules require `DeleteMarkerReplication.Status=Disabled` per AWS spec. `PutBucketReplication` rejects any rule combining a tag filter with `DeleteMarkerReplication.Status=Enabled` (`InvalidRequest`). Even if such a rule were stored, `replicateDeleteMarker` skips tag-filtered rules unconditionally because delete markers carry no tags.

@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -91,6 +93,173 @@ func buildReplicationCfgWithDMR(destARN, prefix, ruleStatus, dmrStatus string) s
 		prefix,
 		destARN,
 		dmrStatus,
+	)
+}
+
+func TestRuleHasTagFilter(t *testing.T) {
+	tests := []struct {
+		name string
+		rule replicationRule
+		want bool
+	}{
+		{
+			name: "no filter",
+			rule: replicationRule{},
+			want: false,
+		},
+		{
+			name: "filter prefix only",
+			rule: replicationRule{Filter: &replicationFilter{Prefix: "logs/"}},
+			want: false,
+		},
+		{
+			name: "filter single tag",
+			rule: replicationRule{
+				Filter: &replicationFilter{Tag: &xmlTag{Key: "env", Value: "prod"}},
+			},
+			want: true,
+		},
+		{
+			name: "filter and with no tags",
+			rule: replicationRule{
+				Filter: &replicationFilter{And: &replicationFilterAnd{Prefix: "p/"}},
+			},
+			want: false,
+		},
+		{
+			name: "filter and with tags",
+			rule: replicationRule{Filter: &replicationFilter{And: &replicationFilterAnd{
+				Tags: []xmlTag{{Key: "k", Value: "v"}},
+			}}},
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, ruleHasTagFilter(tt.rule))
+		})
+	}
+}
+
+func TestTagSetContains(t *testing.T) {
+	tags := []Tag{{Key: "env", Value: "prod"}, {Key: "team", Value: "platform"}}
+	tests := []struct {
+		name string
+		want xmlTag
+		ok   bool
+	}{
+		{"present", xmlTag{Key: "env", Value: "prod"}, true},
+		{"present second", xmlTag{Key: "team", Value: "platform"}, true},
+		{"wrong value", xmlTag{Key: "env", Value: "staging"}, false},
+		{"absent key", xmlTag{Key: "missing", Value: "x"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.ok, tagSetContains(tags, tt.want))
+		})
+	}
+	t.Run("empty tag set", func(t *testing.T) {
+		assert.False(t, tagSetContains(nil, xmlTag{Key: "k", Value: "v"}))
+	})
+}
+
+func TestRuleMatchesTags(t *testing.T) {
+	objTags := []Tag{{Key: "env", Value: "prod"}, {Key: "team", Value: "platform"}}
+
+	tests := []struct {
+		name    string
+		rule    replicationRule
+		objTags []Tag
+		want    bool
+	}{
+		{
+			name: "no filter always matches",
+			rule: replicationRule{},
+			want: true,
+		},
+		{
+			name: "filter prefix only always matches",
+			rule: replicationRule{Filter: &replicationFilter{Prefix: "logs/"}},
+			want: true,
+		},
+		{
+			name: "filter tag matches",
+			rule: replicationRule{
+				Filter: &replicationFilter{Tag: &xmlTag{Key: "env", Value: "prod"}},
+			},
+			objTags: objTags,
+			want:    true,
+		},
+		{
+			name: "filter tag wrong value",
+			rule: replicationRule{
+				Filter: &replicationFilter{Tag: &xmlTag{Key: "env", Value: "staging"}},
+			},
+			objTags: objTags,
+			want:    false,
+		},
+		{
+			name: "filter tag absent key",
+			rule: replicationRule{
+				Filter: &replicationFilter{Tag: &xmlTag{Key: "missing", Value: "x"}},
+			},
+			objTags: objTags,
+			want:    false,
+		},
+		{
+			name: "filter and tags all match",
+			rule: replicationRule{Filter: &replicationFilter{And: &replicationFilterAnd{
+				Tags: []xmlTag{{Key: "env", Value: "prod"}, {Key: "team", Value: "platform"}},
+			}}},
+			objTags: objTags,
+			want:    true,
+		},
+		{
+			name: "filter and tags partial match",
+			rule: replicationRule{Filter: &replicationFilter{And: &replicationFilterAnd{
+				Tags: []xmlTag{{Key: "env", Value: "prod"}, {Key: "team", Value: "other"}},
+			}}},
+			objTags: objTags,
+			want:    false,
+		},
+		{
+			name: "filter and no tags matches",
+			rule: replicationRule{
+				Filter: &replicationFilter{And: &replicationFilterAnd{Prefix: "p/"}},
+			},
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tags := tt.objTags
+			if tags == nil {
+				tags = objTags
+			}
+			assert.Equal(t, tt.want, ruleMatchesTags(tt.rule, tags))
+		})
+	}
+}
+
+func buildReplicationCfgWithFilterTag(destARN, tagKey, tagValue string) string {
+	return fmt.Sprintf(
+		`<ReplicationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Role>arn:aws:iam::000000000000:role/r</Role><Rule><Status>Enabled</Status><Filter><Tag><Key>%s</Key><Value>%s</Value></Tag></Filter><Destination><Bucket>%s</Bucket></Destination></Rule></ReplicationConfiguration>`,
+		tagKey,
+		tagValue,
+		destARN,
+	)
+}
+
+func buildReplicationCfgWithAndTags(destARN, prefix string, tags []xmlTag) string {
+	var tagXML strings.Builder
+	for _, tag := range tags {
+		fmt.Fprintf(&tagXML, "<Tag><Key>%s</Key><Value>%s</Value></Tag>", tag.Key, tag.Value)
+	}
+	return fmt.Sprintf(
+		`<ReplicationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Role>arn:aws:iam::000000000000:role/r</Role><Rule><Status>Enabled</Status><Filter><And><Prefix>%s</Prefix>%s</And></Filter><Destination><Bucket>%s</Bucket></Destination></Rule></ReplicationConfiguration>`,
+		prefix,
+		tagXML.String(),
+		destARN,
 	)
 }
 
@@ -378,6 +547,200 @@ func TestReplicateObject(t *testing.T) {
 		assert.Equal(t, []Tag{{Key: "env", Value: "prod"}, {Key: "team", Value: "platform"}}, tags)
 	})
 
+	t.Run("Filter.Tag: matching tag causes replication", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.NoError(t, ro.storage.CreateBucket("src", "us-east-1", false))
+		require.NoError(t, ro.storage.CreateBucket("dst", "us-east-1", false))
+		require.NoError(t, ro.storage.PutBucketReplication("src",
+			buildReplicationCfgWithFilterTag("arn:aws:s3:::dst", "env", "prod")))
+
+		_, err := ro.storage.PutObject("src", "obj.txt", strings.NewReader("data"),
+			"text/plain", nil, "", "", false, "", nil, nil, "")
+		require.NoError(t, err)
+		require.NoError(t, ro.storage.PutObjectTagging("src", "obj.txt", []Tag{
+			{Key: "env", Value: "prod"},
+		}))
+
+		srcMeta, err := ro.storage.HeadObject("src", "obj.txt")
+		require.NoError(t, err)
+		ro.replicateObject("src", "obj.txt", srcMeta)
+
+		_, _, err = ro.storage.GetObject("dst", "obj.txt")
+		assert.NoError(t, err)
+	})
+
+	t.Run("Filter.Tag: non-matching tag suppresses replication", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.NoError(t, ro.storage.CreateBucket("src", "us-east-1", false))
+		require.NoError(t, ro.storage.CreateBucket("dst", "us-east-1", false))
+		require.NoError(t, ro.storage.PutBucketReplication("src",
+			buildReplicationCfgWithFilterTag("arn:aws:s3:::dst", "env", "prod")))
+
+		_, err := ro.storage.PutObject("src", "obj.txt", strings.NewReader("data"),
+			"text/plain", nil, "", "", false, "", nil, nil, "")
+		require.NoError(t, err)
+		require.NoError(t, ro.storage.PutObjectTagging("src", "obj.txt", []Tag{
+			{Key: "env", Value: "staging"},
+		}))
+
+		srcMeta, err := ro.storage.HeadObject("src", "obj.txt")
+		require.NoError(t, err)
+		ro.replicateObject("src", "obj.txt", srcMeta)
+
+		_, _, err = ro.storage.GetObject("dst", "obj.txt")
+		assert.ErrorIs(t, err, ErrObjectNotFound)
+	})
+
+	t.Run("Filter.Tag: no tags on object suppresses replication", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.NoError(t, ro.storage.CreateBucket("src", "us-east-1", false))
+		require.NoError(t, ro.storage.CreateBucket("dst", "us-east-1", false))
+		require.NoError(t, ro.storage.PutBucketReplication("src",
+			buildReplicationCfgWithFilterTag("arn:aws:s3:::dst", "env", "prod")))
+
+		_, err := ro.storage.PutObject("src", "untagged.txt", strings.NewReader("data"),
+			"text/plain", nil, "", "", false, "", nil, nil, "")
+		require.NoError(t, err)
+
+		srcMeta, err := ro.storage.HeadObject("src", "untagged.txt")
+		require.NoError(t, err)
+		ro.replicateObject("src", "untagged.txt", srcMeta)
+
+		_, _, err = ro.storage.GetObject("dst", "untagged.txt")
+		assert.ErrorIs(t, err, ErrObjectNotFound)
+	})
+
+	t.Run("Filter.And.Tags: all tags match causes replication", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.NoError(t, ro.storage.CreateBucket("src", "us-east-1", false))
+		require.NoError(t, ro.storage.CreateBucket("dst", "us-east-1", false))
+		require.NoError(t, ro.storage.PutBucketReplication("src",
+			buildReplicationCfgWithAndTags("arn:aws:s3:::dst", "", []xmlTag{
+				{Key: "env", Value: "prod"},
+				{Key: "team", Value: "platform"},
+			})))
+
+		_, err := ro.storage.PutObject("src", "obj.txt", strings.NewReader("data"),
+			"text/plain", nil, "", "", false, "", nil, nil, "")
+		require.NoError(t, err)
+		require.NoError(t, ro.storage.PutObjectTagging("src", "obj.txt", []Tag{
+			{Key: "env", Value: "prod"},
+			{Key: "team", Value: "platform"},
+		}))
+
+		srcMeta, err := ro.storage.HeadObject("src", "obj.txt")
+		require.NoError(t, err)
+		ro.replicateObject("src", "obj.txt", srcMeta)
+
+		_, _, err = ro.storage.GetObject("dst", "obj.txt")
+		assert.NoError(t, err)
+	})
+
+	t.Run("Filter.And.Tags: partial tag match suppresses replication", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.NoError(t, ro.storage.CreateBucket("src", "us-east-1", false))
+		require.NoError(t, ro.storage.CreateBucket("dst", "us-east-1", false))
+		require.NoError(t, ro.storage.PutBucketReplication("src",
+			buildReplicationCfgWithAndTags("arn:aws:s3:::dst", "", []xmlTag{
+				{Key: "env", Value: "prod"},
+				{Key: "team", Value: "platform"},
+			})))
+
+		_, err := ro.storage.PutObject("src", "obj.txt", strings.NewReader("data"),
+			"text/plain", nil, "", "", false, "", nil, nil, "")
+		require.NoError(t, err)
+		require.NoError(t, ro.storage.PutObjectTagging("src", "obj.txt", []Tag{
+			{Key: "env", Value: "prod"},
+			// "team" tag is absent
+		}))
+
+		srcMeta, err := ro.storage.HeadObject("src", "obj.txt")
+		require.NoError(t, err)
+		ro.replicateObject("src", "obj.txt", srcMeta)
+
+		_, _, err = ro.storage.GetObject("dst", "obj.txt")
+		assert.ErrorIs(t, err, ErrObjectNotFound)
+	})
+
+	t.Run("Filter.And prefix+tag: both match causes replication", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.NoError(t, ro.storage.CreateBucket("src", "us-east-1", false))
+		require.NoError(t, ro.storage.CreateBucket("dst", "us-east-1", false))
+		require.NoError(t, ro.storage.PutBucketReplication("src",
+			buildReplicationCfgWithAndTags("arn:aws:s3:::dst", "logs/", []xmlTag{
+				{Key: "env", Value: "prod"},
+			})))
+
+		_, err := ro.storage.PutObject("src", "logs/2026.log", strings.NewReader("log"),
+			"text/plain", nil, "", "", false, "", nil, nil, "")
+		require.NoError(t, err)
+		require.NoError(t, ro.storage.PutObjectTagging("src", "logs/2026.log", []Tag{
+			{Key: "env", Value: "prod"},
+		}))
+
+		srcMeta, err := ro.storage.HeadObject("src", "logs/2026.log")
+		require.NoError(t, err)
+		ro.replicateObject("src", "logs/2026.log", srcMeta)
+
+		_, _, err = ro.storage.GetObject("dst", "logs/2026.log")
+		assert.NoError(t, err)
+	})
+
+	t.Run(
+		"Filter.And prefix+tag: prefix matches but tag absent suppresses replication",
+		func(t *testing.T) {
+			ro := newTestRouter(t)
+			require.NoError(t, ro.storage.CreateBucket("src", "us-east-1", false))
+			require.NoError(t, ro.storage.CreateBucket("dst", "us-east-1", false))
+			require.NoError(t, ro.storage.PutBucketReplication("src",
+				buildReplicationCfgWithAndTags("arn:aws:s3:::dst", "logs/", []xmlTag{
+					{Key: "env", Value: "prod"},
+				})))
+
+			_, err := ro.storage.PutObject("src", "logs/2026.log", strings.NewReader("log"),
+				"text/plain", nil, "", "", false, "", nil, nil, "")
+			require.NoError(t, err)
+			// object has no tags
+
+			srcMeta, err := ro.storage.HeadObject("src", "logs/2026.log")
+			require.NoError(t, err)
+			ro.replicateObject("src", "logs/2026.log", srcMeta)
+
+			_, _, err = ro.storage.GetObject("dst", "logs/2026.log")
+			assert.ErrorIs(t, err, ErrObjectNotFound)
+		},
+	)
+
+	t.Run("GetObjectTagging error suppresses replication (fail-closed)", func(t *testing.T) {
+		s, rootDir := newTestStorageWithRoot(t)
+		ro := NewRouter(s, nil)
+		require.NoError(t, s.CreateBucket("src", "us-east-1", false))
+		require.NoError(t, s.CreateBucket("dst", "us-east-1", false))
+		require.NoError(t, s.PutBucketReplication("src",
+			buildReplicationCfgWithFilterTag("arn:aws:s3:::dst", "env", "prod")))
+
+		_, err := s.PutObject("src", "obj.txt", strings.NewReader("data"),
+			"text/plain", nil, "", "", false, "", nil, nil, "")
+		require.NoError(t, err)
+
+		// corrupt .tags.json to force GetObjectTagging to return an error
+		require.NoError(
+			t,
+			os.WriteFile(
+				filepath.Join(rootDir, "src", "obj.txt.tags.json"),
+				[]byte("not-json"),
+				0o600,
+			),
+		)
+
+		srcMeta, err := s.HeadObject("src", "obj.txt")
+		require.NoError(t, err)
+		ro.replicateObject("src", "obj.txt", srcMeta)
+
+		_, _, err = s.GetObject("dst", "obj.txt")
+		assert.ErrorIs(t, err, ErrObjectNotFound)
+	})
+
 	t.Run("replication-status header on GetObject", func(t *testing.T) {
 		ro := newTestRouter(t)
 		require.NoError(t, ro.storage.CreateBucket("src", "us-east-1", false))
@@ -531,6 +894,26 @@ func TestReplicateDeleteMarker(t *testing.T) {
 		_, isMarker := deleteObject(t, ro, "src", "obj.txt")
 		require.True(t, isMarker)
 
+		_, dstMarkers, err := ro.storage.ListObjectVersions("dst")
+		require.NoError(t, err)
+		assert.Empty(t, dstMarkers)
+	})
+
+	t.Run("tag-filtered rule skips DMR regardless of DMR status", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.NoError(t, ro.storage.CreateBucket("src", "us-east-1", false))
+		require.NoError(t, ro.storage.CreateBucket("dst", "us-east-1", false))
+		enableVersioning(t, ro, "src")
+		enableVersioning(t, ro, "dst")
+		// bypass handler validation: store the invalid combo directly to test replicateDeleteMarker
+		tagFilterWithDMREnabled := `<ReplicationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Role>arn:aws:iam::000000000000:role/r</Role><Rule><Status>Enabled</Status><Filter><Tag><Key>env</Key><Value>prod</Value></Tag></Filter><Destination><Bucket>arn:aws:s3:::dst</Bucket></Destination><DeleteMarkerReplication><Status>Enabled</Status></DeleteMarkerReplication></Rule></ReplicationConfiguration>`
+		require.NoError(t, ro.storage.PutBucketReplication("src", tagFilterWithDMREnabled))
+
+		putObject(t, ro, "src", "obj.txt", "hello")
+		_, isMarker := deleteObject(t, ro, "src", "obj.txt")
+		require.True(t, isMarker)
+
+		// delete marker must NOT be replicated: delete markers have no tags
 		_, dstMarkers, err := ro.storage.ListObjectVersions("dst")
 		require.NoError(t, err)
 		assert.Empty(t, dstMarkers)
