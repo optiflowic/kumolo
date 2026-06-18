@@ -1010,6 +1010,7 @@ TAG_REPL_CONFIG=$(cat <<'JSON'
     "ID": "tag-filter-rule",
     "Status": "Enabled",
     "Filter": {"Tag": {"Key": "env", "Value": "prod"}},
+    "DeleteMarkerReplication": {"Status": "Disabled"},
     "Destination": {"Bucket": "arn:aws:s3:::kumolo-cli-s3-tag-repl-dest"}
   }]
 }
@@ -1035,6 +1036,7 @@ AND_REPL_CONFIG=$(cat <<'JSON'
     "ID": "and-tags-filter-rule",
     "Status": "Enabled",
     "Filter": {"And": {"Tags": [{"Key": "env", "Value": "prod"}, {"Key": "tier", "Value": "hot"}]}},
+    "DeleteMarkerReplication": {"Status": "Disabled"},
     "Destination": {"Bucket": "arn:aws:s3:::kumolo-cli-s3-tag-repl-dest"}
   }]
 }
@@ -1047,10 +1049,12 @@ run "PutBucketReplication (Filter.And.Tags)" \
 
 AND_REPL_RESP=$($AWS s3api get-bucket-replication --bucket "$TAG_REPL_SRC" 2>/dev/null || true)
 AND_TAG_COUNT=$(echo "$AND_REPL_RESP" | jq '.ReplicationConfiguration.Rules[0].Filter.And.Tags | length' 2>/dev/null || echo 0)
-if [[ "$AND_TAG_COUNT" -eq 2 ]]; then
-  ok "GetBucketReplication (Filter.And.Tags round-trip: 2 tags)"
+AND_ENV_VAL=$(echo "$AND_REPL_RESP" | jq -r '.ReplicationConfiguration.Rules[0].Filter.And.Tags[] | select(.Key=="env") | .Value' 2>/dev/null || true)
+AND_TIER_VAL=$(echo "$AND_REPL_RESP" | jq -r '.ReplicationConfiguration.Rules[0].Filter.And.Tags[] | select(.Key=="tier") | .Value' 2>/dev/null || true)
+if [[ "$AND_TAG_COUNT" -eq 2 && "$AND_ENV_VAL" == "prod" && "$AND_TIER_VAL" == "hot" ]]; then
+  ok "GetBucketReplication (Filter.And.Tags round-trip: env=prod tier=hot)"
 else
-  fail "GetBucketReplication (Filter.And.Tags: expected 2 tags, got $AND_TAG_COUNT)"
+  fail "GetBucketReplication (Filter.And.Tags: expected 2 tags env=prod tier=hot, got count=$AND_TAG_COUNT env='$AND_ENV_VAL' tier='$AND_TIER_VAL')"
 fi
 
 cleanup_bucket "$TAG_REPL_SRC"
