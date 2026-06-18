@@ -7704,7 +7704,7 @@ func TestBucketConfigHandlers(t *testing.T) {
 	t.Run("PUT returns 200 on valid XML", func(t *testing.T) {
 		for _, q := range []string{
 			"publicAccessBlock", "encryption", "ownershipControls", "notification",
-			"lifecycle", "website", "logging", "accelerate", "replication", "requestPayment",
+			"lifecycle", "website", "logging", "accelerate", "requestPayment",
 			"object-lock",
 		} {
 			q := q
@@ -7721,6 +7721,19 @@ func TestBucketConfigHandlers(t *testing.T) {
 			ro := newRouterWithMock(&mockStore{bucketExists: true})
 			req := httptest.NewRequest(http.MethodPut, "/b?acl",
 				strings.NewReader(`<AccessControlPolicy/>`))
+			w := httptest.NewRecorder()
+			ro.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+		})
+		// replication requires a valid ReplicationConfiguration XML root element.
+		t.Run("replication", func(t *testing.T) {
+			const validReplicationXML = `<ReplicationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Role>arn:aws:iam::000000000000:role/r</Role><Rule><Status>Enabled</Status><Filter><Prefix></Prefix></Filter><Destination><Bucket>arn:aws:s3:::dst</Bucket></Destination></Rule></ReplicationConfiguration>`
+			ro := newRouterWithMock(&mockStore{bucketExists: true})
+			req := httptest.NewRequest(
+				http.MethodPut,
+				"/b?replication",
+				strings.NewReader(validReplicationXML),
+			)
 			w := httptest.NewRecorder()
 			ro.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusOK, w.Code)
@@ -8045,10 +8058,15 @@ func TestBucketConfigHandlers(t *testing.T) {
 		ro := newRouterWithMock(
 			ms(func(m *mockStore) { m.putBucketReplicationErr = ErrBucketNotFound }),
 		)
+		const validReplicationXML = `<ReplicationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Role>arn:aws:iam::000000000000:role/r</Role><Rule><Status>Enabled</Status><Filter><Prefix></Prefix></Filter><Destination><Bucket>arn:aws:s3:::dst</Bucket></Destination></Rule></ReplicationConfiguration>`
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(
 			w,
-			httptest.NewRequest(http.MethodPut, "/b?replication", strings.NewReader(validXML)),
+			httptest.NewRequest(
+				http.MethodPut,
+				"/b?replication",
+				strings.NewReader(validReplicationXML),
+			),
 		)
 		assert.Equal(t, http.StatusNotFound, w.Code)
 	})
@@ -8056,12 +8074,39 @@ func TestBucketConfigHandlers(t *testing.T) {
 		ro := newRouterWithMock(
 			ms(func(m *mockStore) { m.putBucketReplicationErr = errors.New("fail") }),
 		)
+		const validReplicationXML = `<ReplicationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Role>arn:aws:iam::000000000000:role/r</Role><Rule><Status>Enabled</Status><Filter><Prefix></Prefix></Filter><Destination><Bucket>arn:aws:s3:::dst</Bucket></Destination></Rule></ReplicationConfiguration>`
 		w := httptest.NewRecorder()
 		ro.ServeHTTP(
 			w,
-			httptest.NewRequest(http.MethodPut, "/b?replication", strings.NewReader(validXML)),
+			httptest.NewRequest(
+				http.MethodPut,
+				"/b?replication",
+				strings.NewReader(validReplicationXML),
+			),
 		)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+	t.Run("PUT replication rejects tag filter combined with DMR=Enabled", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{})
+		body := `<ReplicationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Role>arn:aws:iam::000000000000:role/r</Role><Rule><Status>Enabled</Status><Filter><Tag><Key>env</Key><Value>prod</Value></Tag></Filter><Destination><Bucket>arn:aws:s3:::dst</Bucket></Destination><DeleteMarkerReplication><Status>Enabled</Status></DeleteMarkerReplication></Rule></ReplicationConfiguration>`
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(
+			w,
+			httptest.NewRequest(http.MethodPut, "/b?replication", strings.NewReader(body)),
+		)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidRequest")
+	})
+	t.Run("PUT replication rejects And.Tags filter combined with DMR=Enabled", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{})
+		body := `<ReplicationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Role>arn:aws:iam::000000000000:role/r</Role><Rule><Status>Enabled</Status><Filter><And><Tag><Key>env</Key><Value>prod</Value></Tag></And></Filter><Destination><Bucket>arn:aws:s3:::dst</Bucket></Destination><DeleteMarkerReplication><Status>Enabled</Status></DeleteMarkerReplication></Rule></ReplicationConfiguration>`
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(
+			w,
+			httptest.NewRequest(http.MethodPut, "/b?replication", strings.NewReader(body)),
+		)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "InvalidRequest")
 	})
 
 	t.Run("PUT requestPayment returns 404 on bucket not found", func(t *testing.T) {

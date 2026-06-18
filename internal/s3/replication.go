@@ -242,6 +242,10 @@ func (ro *Router) replicateDeleteMarker(bucket, key string) {
 		if rule.DeleteMarkerReplication == nil || rule.DeleteMarkerReplication.Status != "Enabled" {
 			continue
 		}
+		if ruleHasTagFilter(rule) {
+			// delete markers carry no tags; tag-filtered rules can never match
+			continue
+		}
 		if prefix := ruleKeyPrefix(rule); !strings.HasPrefix(key, prefix) {
 			continue
 		}

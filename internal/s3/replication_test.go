@@ -867,6 +867,26 @@ func TestReplicateDeleteMarker(t *testing.T) {
 		assert.Empty(t, dstMarkers)
 	})
 
+	t.Run("tag-filtered rule skips DMR regardless of DMR status", func(t *testing.T) {
+		ro := newTestRouter(t)
+		require.NoError(t, ro.storage.CreateBucket("src", "us-east-1", false))
+		require.NoError(t, ro.storage.CreateBucket("dst", "us-east-1", false))
+		enableVersioning(t, ro, "src")
+		enableVersioning(t, ro, "dst")
+		// bypass handler validation: store the invalid combo directly to test replicateDeleteMarker
+		tagFilterWithDMREnabled := `<ReplicationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Role>arn:aws:iam::000000000000:role/r</Role><Rule><Status>Enabled</Status><Filter><Tag><Key>env</Key><Value>prod</Value></Tag></Filter><Destination><Bucket>arn:aws:s3:::dst</Bucket></Destination><DeleteMarkerReplication><Status>Enabled</Status></DeleteMarkerReplication></Rule></ReplicationConfiguration>`
+		require.NoError(t, ro.storage.PutBucketReplication("src", tagFilterWithDMREnabled))
+
+		putObject(t, ro, "src", "obj.txt", "hello")
+		_, isMarker := deleteObject(t, ro, "src", "obj.txt")
+		require.True(t, isMarker)
+
+		// delete marker must NOT be replicated: delete markers have no tags
+		_, dstMarkers, err := ro.storage.ListObjectVersions("dst")
+		require.NoError(t, err)
+		assert.Empty(t, dstMarkers)
+	})
+
 	t.Run("non-versioned delete does not trigger DMR", func(t *testing.T) {
 		ro := newTestRouter(t)
 		require.NoError(t, ro.storage.CreateBucket("src", "us-east-1", false))
