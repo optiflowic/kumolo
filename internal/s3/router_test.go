@@ -8086,6 +8086,16 @@ func TestBucketConfigHandlers(t *testing.T) {
 		)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
+	t.Run("PUT replication returns 400 on wrong XML root element", func(t *testing.T) {
+		ro := newRouterWithMock(&mockStore{})
+		w := httptest.NewRecorder()
+		ro.ServeHTTP(
+			w,
+			httptest.NewRequest(http.MethodPut, "/b?replication", strings.NewReader(validXML)),
+		)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "MalformedXML")
+	})
 	t.Run("PUT replication rejects tag filter combined with DMR=Enabled", func(t *testing.T) {
 		ro := newRouterWithMock(&mockStore{})
 		body := `<ReplicationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Role>arn:aws:iam::000000000000:role/r</Role><Rule><Status>Enabled</Status><Filter><Tag><Key>env</Key><Value>prod</Value></Tag></Filter><Destination><Bucket>arn:aws:s3:::dst</Bucket></Destination><DeleteMarkerReplication><Status>Enabled</Status></DeleteMarkerReplication></Rule></ReplicationConfiguration>`

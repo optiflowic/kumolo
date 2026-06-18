@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -708,6 +710,36 @@ func TestReplicateObject(t *testing.T) {
 			assert.ErrorIs(t, err, ErrObjectNotFound)
 		},
 	)
+
+	t.Run("GetObjectTagging error suppresses replication (fail-closed)", func(t *testing.T) {
+		s, rootDir := newTestStorageWithRoot(t)
+		ro := NewRouter(s, nil)
+		require.NoError(t, s.CreateBucket("src", "us-east-1", false))
+		require.NoError(t, s.CreateBucket("dst", "us-east-1", false))
+		require.NoError(t, s.PutBucketReplication("src",
+			buildReplicationCfgWithFilterTag("arn:aws:s3:::dst", "env", "prod")))
+
+		_, err := s.PutObject("src", "obj.txt", strings.NewReader("data"),
+			"text/plain", nil, "", "", false, "", nil, nil, "")
+		require.NoError(t, err)
+
+		// corrupt .tags.json to force GetObjectTagging to return an error
+		require.NoError(
+			t,
+			os.WriteFile(
+				filepath.Join(rootDir, "src", "obj.txt.tags.json"),
+				[]byte("not-json"),
+				0o600,
+			),
+		)
+
+		srcMeta, err := s.HeadObject("src", "obj.txt")
+		require.NoError(t, err)
+		ro.replicateObject("src", "obj.txt", srcMeta)
+
+		_, _, err = s.GetObject("dst", "obj.txt")
+		assert.ErrorIs(t, err, ErrObjectNotFound)
+	})
 
 	t.Run("replication-status header on GetObject", func(t *testing.T) {
 		ro := newTestRouter(t)
