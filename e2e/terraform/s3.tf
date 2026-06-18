@@ -229,21 +229,6 @@ resource "aws_s3_bucket_cors_configuration" "main" {
 }
 
 # ---------------------------------------------------------------------------
-# BucketLogging
-# ---------------------------------------------------------------------------
-resource "aws_s3_bucket" "log_target" {
-  bucket        = "kumolo-tf-verify-logs"
-  force_destroy = true
-}
-
-resource "aws_s3_bucket_logging" "main" {
-  bucket = aws_s3_bucket.main.id
-
-  target_bucket = aws_s3_bucket.log_target.id
-  target_prefix = "logs/"
-}
-
-# ---------------------------------------------------------------------------
 # BucketWebsite
 # ---------------------------------------------------------------------------
 resource "aws_s3_bucket_website_configuration" "main" {
