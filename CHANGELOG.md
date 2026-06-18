@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] - 2026-06-19
+
+### Added
+
+#### S3
+
+- `PutObjectLockConfiguration` with `DefaultRetention` now enforces the configured mode (GOVERNANCE / COMPLIANCE) and period (days or years) on every new object uploaded via `PutObject`, `CopyObject`, and `CompleteMultipartUpload`
+- BucketLifecycle now evaluates `NoncurrentVersionExpiration` and `NoncurrentVersionTransition` rules
+- BucketLifecycle now accepts the `x-amz-transition-default-minimum-object-size` request header (required by Terraform AWS Provider v6)
+- BucketReplication now replicates delete markers when `DeleteMarkerReplication` is enabled in the replication configuration
+- BucketReplication now supports tag-based filter rules (`Filter.Tag` and `Filter.And.Tags`) in addition to key prefix matching
+- Presigned POST (`POST Object`): browser-based direct-to-S3 uploads via HTML multipart form; supports `${filename}` substitution in the object key and `success_action_status` / `success_action_redirect` response control
+
+#### Server
+
+- Request logs now include method, path, status code, and latency in a structured, color-coded format; color is disabled automatically when stderr is not a terminal or `NO_COLOR` is set
+
+### Fixed
+
+#### S3
+
+- `PutBucketVersioning` now returns `InvalidBucketState` when attempting to suspend versioning on an Object Lock-enabled bucket
+
 ## [0.2.2] - 2026-06-14
 
 ### Added
@@ -175,6 +198,7 @@ Initial release of kumolo — a high-fidelity AWS emulator for local development
 - AWS CLI and Terraform e2e verification suite (`e2e/`)
 - CI: build, vet, lint (golangci-lint), test with race detector, Docker image publish
 
+[0.2.3]: https://github.com/optiflowic/kumolo/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/optiflowic/kumolo/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/optiflowic/kumolo/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/optiflowic/kumolo/compare/v0.1.1...v0.2.0
