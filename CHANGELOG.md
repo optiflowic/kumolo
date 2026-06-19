@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `PutBucketVersioning` now returns `InvalidBucketState` when attempting to suspend versioning on an Object Lock-enabled bucket
 
+#### Server
+
+- Fixed Windows build failure caused by `syscall.Stderr` (`uintptr`) being incompatible with `term.IsTerminal` after `golang.org/x/term` v0.44.0 unified the signature to `int`; replaced with `int(os.Stderr.Fd())`
+
 ## [0.2.2] - 2026-06-14
 
 ### Added
