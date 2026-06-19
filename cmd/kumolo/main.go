@@ -64,10 +64,8 @@ func run() error {
 		level = slog.LevelInfo
 	}
 	_, noColorSet := os.LookupEnv("NO_COLOR")
-	noColor := noColorSet ||
-		!term.IsTerminal(
-			int(os.Stderr.Fd()),
-		) //nolint:gosec // fd is always stderr (2), safe to convert
+	stderrFd := int(os.Stderr.Fd()) //nolint:gosec // G115: fd is stderr (2), uintptr→int is safe
+	noColor := noColorSet || !term.IsTerminal(stderrFd)
 	slog.SetDefault(slog.New(tint.NewHandler(os.Stderr, &tint.Options{
 		Level:   level,
 		NoColor: noColor,
