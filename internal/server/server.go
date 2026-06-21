@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/optiflowic/kumolo/internal/cognito"
 	"github.com/optiflowic/kumolo/internal/dynamodb"
 	"github.com/optiflowic/kumolo/internal/kms"
 	"github.com/optiflowic/kumolo/internal/s3"
@@ -54,12 +55,20 @@ func NewMux(
 		_ = dynamoStorage.Close()
 		return nil, nil, err
 	}
+	cognitoStorage, err := cognito.NewStorage(dataDir)
+	if err != nil {
+		_ = s3Storage.Close()
+		_ = dynamoStorage.Close()
+		_ = kmsStorage.Close()
+		return nil, nil, err
+	}
 
 	s3Router := s3.NewRouter(s3Storage, &kmsAdapter{s: kmsStorage})
 	dynamoRouter := dynamodb.NewRouter(dynamoStorage)
 	dynamoStreamsRouter := dynamodb.NewStreamsRouter(dynamoStorage)
 	stsRouter := sts.NewRouter()
 	kmsRouter := kms.NewRouter(kmsStorage)
+	cognitoRouter := cognito.NewRouter(cognitoStorage)
 
 	s3.NewLifecycleEnforcer(s3Storage, lifecycleInterval).Start(ctx)
 
@@ -82,6 +91,10 @@ func NewMux(
 			kmsRouter.ServeHTTP(w, r)
 			return
 		}
+		if strings.HasPrefix(r.Header.Get("X-Amz-Target"), "AWSCognitoIdentityProviderService.") {
+			cognitoRouter.ServeHTTP(w, r)
+			return
+		}
 		s3Router.ServeHTTP(w, r)
 	}))
 
@@ -89,6 +102,7 @@ func NewMux(
 		_ = s3Storage.Close()
 		_ = dynamoStorage.Close()
 		_ = kmsStorage.Close()
+		_ = cognitoStorage.Close()
 	}
 	return mux, cleanup, nil
 }
