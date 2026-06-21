@@ -62,9 +62,13 @@ func emitRequestLog(op string, rec *responseRecorder, duration time.Duration) {
 
 	switch {
 	case status >= 500:
-		slog.Error("request", attrs...) // #nosec G706
+		slog.Error(
+			"request",
+			attrs...) // #nosec G706 -- op comes from X-Amz-Target header; log injection risk accepted for a local dev emulator
 	default:
-		slog.Info("request", attrs...) // #nosec G706
+		slog.Info(
+			"request",
+			attrs...) // #nosec G706 -- op comes from X-Amz-Target header; log injection risk accepted for a local dev emulator
 	}
 }
 

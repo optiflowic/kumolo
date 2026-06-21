@@ -39,7 +39,7 @@ func (ro *Router) serveHTTP(w http.ResponseWriter, r *http.Request, op string) {
 		)
 		return
 	}
-	_ = body // passed to operation handlers added in subsequent issues
+	_ = body
 
 	switch op {
 	default:

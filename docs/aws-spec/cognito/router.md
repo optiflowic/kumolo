@@ -24,7 +24,7 @@ No namespace prefix (unlike DynamoDB which uses `com.amazonaws.dynamodb...#Excep
 
 | Error Type | HTTP Status | Notes |
 |-----------|------------|-------|
-| UnknownOperationException | 400 | Unrecognized operation name |
+| UnknownOperationException | 400 | Unrecognized operation name (AWS docs say 404; kumolo uses 400 — needs verification against real AWS) |
 | InvalidParameterException | 400 | Missing or malformed input |
 | NotAuthorizedException | 400 | Invalid credentials or token |
 | ResourceNotFoundException | 400 | User pool or client not found |
