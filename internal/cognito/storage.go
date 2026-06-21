@@ -1,12 +1,9 @@
 package cognito
 
-import "sync"
-
 // Storage persists Cognito user pool data under dataDir.
 // Methods are added incrementally as operations are implemented.
 type Storage struct {
 	dataDir string
-	mu      sync.RWMutex
 }
 
 func NewStorage(dataDir string) (*Storage, error) {
