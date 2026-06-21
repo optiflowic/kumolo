@@ -56,7 +56,7 @@ func NewMux(
 		return nil, nil, err
 	}
 	cognitoStorage, err := cognito.NewStorage(dataDir)
-	if err != nil {
+	if err != nil { // unreachable: cognito.NewStorage always succeeds until storage performs filesystem I/O
 		_ = s3Storage.Close()
 		_ = dynamoStorage.Close()
 		_ = kmsStorage.Close()

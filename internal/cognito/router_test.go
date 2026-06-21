@@ -2,14 +2,25 @@ package cognito
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/iotest"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// failWriter is an http.ResponseWriter whose Write always returns an error.
+type failWriter struct{ header http.Header }
+
+func newFailWriter() *failWriter                { return &failWriter{header: http.Header{}} }
+func (f *failWriter) Header() http.Header       { return f.header }
+func (f *failWriter) WriteHeader(int)           {}
+func (f *failWriter) Write([]byte) (int, error) { return 0, errors.New("write failed") }
 
 func newTestRouter(t *testing.T) *Router {
 	t.Helper()
@@ -61,6 +72,56 @@ func TestRouter_UnknownOperation(t *testing.T) {
 			assert.Contains(t, resp.Message, tt.wantOp)
 		})
 	}
+}
+
+func TestResponseRecorder_WriteHeaderIdempotent(t *testing.T) {
+	w := httptest.NewRecorder()
+	rec := newResponseRecorder(w)
+	rec.WriteHeader(http.StatusOK)
+	rec.WriteHeader(http.StatusBadRequest) // second call must be ignored
+	assert.Equal(t, http.StatusOK, rec.status)
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestResponseRecorder_Flush(t *testing.T) {
+	w := httptest.NewRecorder()
+	rec := newResponseRecorder(w)
+	rec.Flush()
+	assert.True(t, w.Flushed)
+}
+
+func TestEmitRequestLog_5xx(t *testing.T) {
+	w := httptest.NewRecorder()
+	rec := newResponseRecorder(w)
+	rec.WriteHeader(http.StatusInternalServerError)
+	rec.errCode = ErrTypeInternalErrorException
+	rec.errMsg = "something went wrong"
+	emitRequestLog("SomeOp", rec, time.Millisecond) // exercises status>=500 logging branch
+}
+
+func TestWriteError_BrokenWriter(t *testing.T) {
+	// exercises the slog.Warn path when json encoding fails due to a broken writer
+	writeError(newFailWriter(), http.StatusBadRequest, ErrTypeInvalidParameterException, "test")
+}
+
+func TestRouter_ReadBodyError(t *testing.T) {
+	ro := newTestRouter(t)
+	req := httptest.NewRequest(http.MethodPost, "/", iotest.ErrReader(errors.New("read error")))
+	req.Header.Set("X-Amz-Target", "AWSCognitoIdentityProviderService.InitiateAuth")
+	w := httptest.NewRecorder()
+
+	ro.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	var resp errResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, ErrTypeInvalidParameterException, resp.Type)
+}
+
+func TestStorage_Close(t *testing.T) {
+	storage, err := NewStorage(t.TempDir())
+	require.NoError(t, err)
+	assert.NoError(t, storage.Close())
 }
 
 func TestRouter_ErrorResponseFormat(t *testing.T) {
