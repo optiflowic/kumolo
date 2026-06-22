@@ -98,6 +98,5 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 func writeEmpty(w http.ResponseWriter) {
-	w.Header().Set("Content-Type", "application/x-amz-json-1.1")
-	w.WriteHeader(http.StatusOK)
+	writeJSON(w, http.StatusOK, struct{}{})
 }

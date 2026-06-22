@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 )
 
@@ -111,7 +112,11 @@ func buildSchemaAttributes(customSchema json.RawMessage) (json.RawMessage, error
 		}
 		attrs = append(attrs, custom...)
 	}
-	data, _ := json.Marshal(attrs)
+	data, err := json.Marshal(attrs)
+	if err != nil {
+		// unreachable: schemaAttr contains only plain types with no unencodable fields
+		return nil, fmt.Errorf("encode schema: %w", err)
+	}
 	return json.RawMessage(data), nil
 }
 

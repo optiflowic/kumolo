@@ -63,7 +63,6 @@ func newStorage(dataDir string, openRoot func(string) (*os.Root, error)) (*Stora
 func (s *Storage) writeJSON(path string, v any) (retErr error) {
 	data, err := json.Marshal(v)
 	if err != nil {
-		// untestable: json.Marshal cannot fail for UserPoolMetadata (no channels or funcs)
 		return fmt.Errorf("marshal json: %w", err)
 	}
 	f, err := s.openFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o640)
@@ -75,8 +74,10 @@ func (s *Storage) writeJSON(path string, v any) (retErr error) {
 			retErr = cerr
 		}
 	}()
-	_, err = f.Write(data)
-	return err
+	if _, err = f.Write(data); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
 }
 
 func readJSON[T any](s *Storage, path string) (T, error) {
