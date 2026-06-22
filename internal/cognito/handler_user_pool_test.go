@@ -124,6 +124,28 @@ func TestCreateUserPool_WithCustomSchema(t *testing.T) {
 	assert.Contains(t, names, "custom:dept")
 }
 
+func TestCreateUserPool_InvalidSchema(t *testing.T) {
+	ro := newTestRouter(t)
+	w := doOp(t, ro, "CreateUserPool", `{"PoolName":"pool","Schema":42}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	var resp errResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, ErrTypeInvalidParameterException, resp.Type)
+}
+
+func TestListUserPools_InvalidNextToken(t *testing.T) {
+	ro := newTestRouter(t)
+	createPool(t, ro, "pool-0")
+
+	w := doOp(t, ro, "ListUserPools", `{"MaxResults":10,"NextToken":"nonexistent-token"}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	var resp errResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, ErrTypeInvalidParameterException, resp.Type)
+}
+
 func TestCreateUserPool_MissingPoolName(t *testing.T) {
 	ro := newTestRouter(t)
 	w := doOp(t, ro, "CreateUserPool", `{}`)

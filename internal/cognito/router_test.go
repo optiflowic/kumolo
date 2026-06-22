@@ -104,6 +104,11 @@ func TestWriteError_BrokenWriter(t *testing.T) {
 	writeError(newFailWriter(), http.StatusBadRequest, ErrTypeInvalidParameterException, "test")
 }
 
+func TestWriteJSON_BrokenWriter(t *testing.T) {
+	// exercises the slog.Warn path when json encoding fails due to a broken writer
+	writeJSON(newFailWriter(), http.StatusOK, map[string]string{"key": "value"})
+}
+
 func TestRouter_ReadBodyError(t *testing.T) {
 	ro := newTestRouter(t)
 	req := httptest.NewRequest(http.MethodPost, "/", iotest.ErrReader(errors.New("read error")))

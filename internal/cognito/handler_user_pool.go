@@ -13,12 +13,19 @@ const (
 )
 
 func generatePoolID() (string, error) {
+	const n = len(poolIDChars)
+	const limit = byte((256 / n) * n) // reject values ≥ limit to eliminate modular bias
 	b := make([]byte, poolIDLen)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	for i, v := range b {
-		b[i] = poolIDChars[v%byte(len(poolIDChars))]
+	for i := range b {
+		for {
+			if _, err := rand.Read(b[i : i+1]); err != nil {
+				return "", err
+			}
+			if b[i] < limit {
+				b[i] = poolIDChars[b[i]%byte(n)]
+				break
+			}
+		}
 	}
 	return poolRegion + "_" + string(b), nil
 }
@@ -94,16 +101,17 @@ func standardSchemaAttrs() []schemaAttr {
 	}
 }
 
-func buildSchemaAttributes(customSchema json.RawMessage) json.RawMessage {
+func buildSchemaAttributes(customSchema json.RawMessage) (json.RawMessage, error) {
 	attrs := standardSchemaAttrs()
 	if len(customSchema) > 0 {
 		var custom []schemaAttr
-		if err := json.Unmarshal(customSchema, &custom); err == nil {
-			attrs = append(attrs, custom...)
+		if err := json.Unmarshal(customSchema, &custom); err != nil {
+			return nil, errors.New("invalid schema: value must be an array")
 		}
+		attrs = append(attrs, custom...)
 	}
 	data, _ := json.Marshal(attrs)
-	return json.RawMessage(data)
+	return json.RawMessage(data), nil
 }
 
 func defaultStr(v, fallback string) string {
@@ -197,6 +205,12 @@ func (ro *Router) handleCreateUserPool(w http.ResponseWriter, body []byte) {
 		return
 	}
 
+	schemaAttrs, err := buildSchemaAttributes(req.Schema)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException, err.Error())
+		return
+	}
+
 	ts := nowUnix()
 	meta := &UserPoolMetadata{
 		ID:                          poolID,
@@ -208,7 +222,7 @@ func (ro *Router) handleCreateUserPool(w http.ResponseWriter, body []byte) {
 		MfaConfiguration:            defaultStr(req.MfaConfiguration, "OFF"),
 		DeletionProtection:          req.DeletionProtection,
 		Policies:                    req.Policies,
-		SchemaAttributes:            buildSchemaAttributes(req.Schema),
+		SchemaAttributes:            schemaAttrs,
 		AliasAttributes:             req.AliasAttributes,
 		AutoVerifiedAttributes:      req.AutoVerifiedAttributes,
 		UsernameAttributes:          req.UsernameAttributes,
@@ -480,6 +494,15 @@ func (ro *Router) handleListUserPools(w http.ResponseWriter, body []byte) {
 
 	pools, nextToken, err := ro.storage.ListUserPools(*req.MaxResults, req.NextToken)
 	if err != nil {
+		if errors.Is(err, errInvalidNextToken) {
+			writeError(
+				w,
+				http.StatusBadRequest,
+				ErrTypeInvalidParameterException,
+				"Invalid pagination token.",
+			)
+			return
+		}
 		writeError(
 			w,
 			http.StatusInternalServerError,

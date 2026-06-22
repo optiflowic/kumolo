@@ -46,8 +46,6 @@ func (ro *Router) serveHTTP(w http.ResponseWriter, r *http.Request, op string) {
 		)
 		return
 	}
-	_ = body
-
 	switch op {
 	case "CreateUserPool":
 		ro.handleCreateUserPool(w, body)

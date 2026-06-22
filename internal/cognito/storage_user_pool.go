@@ -10,7 +10,10 @@ import (
 	"time"
 )
 
-var errUserPoolNotFound = errors.New("user pool not found")
+var (
+	errUserPoolNotFound = errors.New("user pool not found")
+	errInvalidNextToken = errors.New("invalid pagination token")
+)
 
 const (
 	poolRegion  = "us-east-1"
@@ -146,14 +149,17 @@ func (s *Storage) ListUserPools(
 	sort.Strings(poolIDs)
 
 	if nextToken != "" {
-		start := len(poolIDs)
+		found := false
 		for i, id := range poolIDs {
 			if id == nextToken {
-				start = i + 1
+				poolIDs = poolIDs[i+1:]
+				found = true
 				break
 			}
 		}
-		poolIDs = poolIDs[start:]
+		if !found {
+			return nil, "", errInvalidNextToken
+		}
 	}
 
 	var retNextToken string
