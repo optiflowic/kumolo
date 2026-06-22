@@ -167,6 +167,26 @@ func TestCreateUserPool_InvalidBody(t *testing.T) {
 	assert.Equal(t, ErrTypeInvalidParameterException, resp.Type)
 }
 
+func TestCreateUserPool_InvalidPoolName(t *testing.T) {
+	tests := []struct {
+		name     string
+		poolName string
+	}{
+		{name: "invalid chars", poolName: "pool!invalid"},
+		{name: "too long", poolName: strings.Repeat("a", 129)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ro := newTestRouter(t)
+			w := doOp(t, ro, "CreateUserPool", fmt.Sprintf(`{"PoolName":%q}`, tt.poolName))
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			var resp errResponse
+			require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+			assert.Equal(t, ErrTypeInvalidParameterException, resp.Type)
+		})
+	}
+}
+
 func TestDescribeUserPool_Success(t *testing.T) {
 	ro := newTestRouter(t)
 	poolID := createPool(t, ro, "describe-pool")
@@ -484,14 +504,24 @@ func TestUpdateUserPool_AllOptionalFields(t *testing.T) {
 	require.Equal(t, http.StatusOK, w2.Code)
 	var resp struct {
 		UserPool struct {
-			DeletionProtection       string            `json:"DeletionProtection"`
-			AutoVerifiedAttributes   []string          `json:"AutoVerifiedAttributes"`
-			UserPoolTags             map[string]string `json:"UserPoolTags"`
-			UserPoolTier             string            `json:"UserPoolTier"`
-			EmailVerificationMessage string            `json:"EmailVerificationMessage"`
-			EmailVerificationSubject string            `json:"EmailVerificationSubject"`
-			SmsAuthenticationMessage string            `json:"SmsAuthenticationMessage"`
-			SmsVerificationMessage   string            `json:"SmsVerificationMessage"`
+			DeletionProtection          string            `json:"DeletionProtection"`
+			AutoVerifiedAttributes      []string          `json:"AutoVerifiedAttributes"`
+			UserPoolTags                map[string]string `json:"UserPoolTags"`
+			UserPoolTier                string            `json:"UserPoolTier"`
+			EmailVerificationMessage    string            `json:"EmailVerificationMessage"`
+			EmailVerificationSubject    string            `json:"EmailVerificationSubject"`
+			SmsAuthenticationMessage    string            `json:"SmsAuthenticationMessage"`
+			SmsVerificationMessage      string            `json:"SmsVerificationMessage"`
+			Policies                    json.RawMessage   `json:"Policies"`
+			LambdaConfig                json.RawMessage   `json:"LambdaConfig"`
+			EmailConfiguration          json.RawMessage   `json:"EmailConfiguration"`
+			SmsConfiguration            json.RawMessage   `json:"SmsConfiguration"`
+			DeviceConfiguration         json.RawMessage   `json:"DeviceConfiguration"`
+			AdminCreateUserConfig       json.RawMessage   `json:"AdminCreateUserConfig"`
+			AccountRecoverySetting      json.RawMessage   `json:"AccountRecoverySetting"`
+			UserAttributeUpdateSettings json.RawMessage   `json:"UserAttributeUpdateSettings"`
+			UserPoolAddOns              json.RawMessage   `json:"UserPoolAddOns"`
+			VerificationMessageTemplate json.RawMessage   `json:"VerificationMessageTemplate"`
 		} `json:"UserPool"`
 	}
 	require.NoError(t, json.NewDecoder(w2.Body).Decode(&resp))
@@ -504,49 +534,82 @@ func TestUpdateUserPool_AllOptionalFields(t *testing.T) {
 	assert.Equal(t, "Verify", pool.EmailVerificationSubject)
 	assert.Equal(t, "code {####}", pool.SmsAuthenticationMessage)
 	assert.Equal(t, "code {####}", pool.SmsVerificationMessage)
+	assert.JSONEq(t, `{"PasswordPolicy":{"MinimumLength":8}}`, string(pool.Policies))
+	assert.JSONEq(
+		t,
+		`{"PreSignUp":"arn:aws:lambda:us-east-1:000:function:fn"}`,
+		string(pool.LambdaConfig),
+	)
+	assert.JSONEq(t, `{"EmailSendingAccount":"COGNITO_DEFAULT"}`, string(pool.EmailConfiguration))
+	assert.JSONEq(t, `{"SnsCallerArn":"arn:aws:iam::000:role/r"}`, string(pool.SmsConfiguration))
+	assert.JSONEq(t, `{"ChallengeRequiredOnNewDevice":true}`, string(pool.DeviceConfiguration))
+	assert.JSONEq(t, `{"AllowAdminCreateUserOnly":true}`, string(pool.AdminCreateUserConfig))
+	assert.JSONEq(
+		t,
+		`{"RecoveryMechanisms":[{"Name":"verified_email","Priority":1}]}`,
+		string(pool.AccountRecoverySetting),
+	)
+	assert.JSONEq(
+		t,
+		`{"AttributesRequireVerificationBeforeUpdate":["email"]}`,
+		string(pool.UserAttributeUpdateSettings),
+	)
+	assert.JSONEq(t, `{"AdvancedSecurityMode":"ENFORCED"}`, string(pool.UserPoolAddOns))
+	assert.JSONEq(
+		t,
+		`{"DefaultEmailOption":"CONFIRM_WITH_CODE"}`,
+		string(pool.VerificationMessageTemplate),
+	)
 }
 
-func TestCreateUserPool_StorageError(t *testing.T) {
-	ro := &Router{storage: &mockStore{createErr: errors.New("storage error")}}
-	w := doOp(t, ro, "CreateUserPool", `{"PoolName":"pool"}`)
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	var resp errResponse
-	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
-	assert.Equal(t, ErrTypeInternalErrorException, resp.Type)
-}
-
-func TestDescribeUserPool_StorageError(t *testing.T) {
-	ro := &Router{storage: &mockStore{getErr: errors.New("storage error")}}
-	w := doOp(t, ro, "DescribeUserPool", `{"UserPoolId":"us-east-1_Test12345"}`)
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	var resp errResponse
-	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
-	assert.Equal(t, ErrTypeInternalErrorException, resp.Type)
-}
-
-func TestUpdateUserPool_StorageError(t *testing.T) {
-	ro := &Router{storage: &mockStore{updateErr: errors.New("storage error")}}
-	w := doOp(t, ro, "UpdateUserPool", `{"UserPoolId":"us-east-1_Test12345","PoolName":"x"}`)
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	var resp errResponse
-	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
-	assert.Equal(t, ErrTypeInternalErrorException, resp.Type)
-}
-
-func TestDeleteUserPool_StorageError(t *testing.T) {
-	ro := &Router{storage: &mockStore{deleteErr: errors.New("storage error")}}
-	w := doOp(t, ro, "DeleteUserPool", `{"UserPoolId":"us-east-1_Test12345"}`)
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	var resp errResponse
-	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
-	assert.Equal(t, ErrTypeInternalErrorException, resp.Type)
-}
-
-func TestListUserPools_StorageError(t *testing.T) {
-	ro := &Router{storage: &mockStore{listErr: errors.New("storage error")}}
-	w := doOp(t, ro, "ListUserPools", `{"MaxResults":10}`)
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	var resp errResponse
-	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
-	assert.Equal(t, ErrTypeInternalErrorException, resp.Type)
+func TestStorageErrors(t *testing.T) {
+	storageErr := errors.New("storage error")
+	tests := []struct {
+		name  string
+		store mockStore
+		op    string
+		body  string
+	}{
+		{
+			name:  "CreateUserPool",
+			store: mockStore{createErr: storageErr},
+			op:    "CreateUserPool",
+			body:  `{"PoolName":"pool"}`,
+		},
+		{
+			name:  "DescribeUserPool",
+			store: mockStore{getErr: storageErr},
+			op:    "DescribeUserPool",
+			body:  `{"UserPoolId":"us-east-1_Test12345"}`,
+		},
+		{
+			name:  "UpdateUserPool",
+			store: mockStore{updateErr: storageErr},
+			op:    "UpdateUserPool",
+			body:  `{"UserPoolId":"us-east-1_Test12345","PoolName":"x"}`,
+		},
+		{
+			name:  "DeleteUserPool",
+			store: mockStore{deleteErr: storageErr},
+			op:    "DeleteUserPool",
+			body:  `{"UserPoolId":"us-east-1_Test12345"}`,
+		},
+		{
+			name:  "ListUserPools",
+			store: mockStore{listErr: storageErr},
+			op:    "ListUserPools",
+			body:  `{"MaxResults":10}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := tt.store
+			ro := &Router{storage: &store}
+			w := doOp(t, ro, tt.op, tt.body)
+			assert.Equal(t, http.StatusInternalServerError, w.Code)
+			var resp errResponse
+			require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+			assert.Equal(t, ErrTypeInternalErrorException, resp.Type)
+		})
+	}
 }
