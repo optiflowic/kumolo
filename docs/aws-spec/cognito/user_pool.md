@@ -42,13 +42,13 @@ kumolo generates: `us-east-1_` + 9 random alphanumeric chars (A-Z, a-z, 0-9).
   `UserPoolTags`, `UserPoolTier`, `AutoVerifiedAttributes`, `SmsAuthenticationMessage`,
   `SmsVerificationMessage`, `EmailVerificationMessage`, `EmailVerificationSubject`
 - Immutable after creation (not accepted in Update): `Schema`, `AliasAttributes`, `UsernameAttributes`, `UsernameConfiguration`
-- Returns: empty HTTP 200 body
+- Returns: `{}` HTTP 200
 - Errors: ResourceNotFoundException (400), InvalidParameterException (400), InternalErrorException (500)
 
 ## DeleteUserPool
 
 - Required: `UserPoolId`
-- Returns: empty HTTP 200 body
+- Returns: `{}` HTTP 200
 - kumolo deviation: DeletionProtection is NOT enforced (always allows deletion for test ergonomics)
 - Errors: ResourceNotFoundException (400), InvalidParameterException (400), InternalErrorException (500)
 

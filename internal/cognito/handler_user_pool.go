@@ -6,12 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 )
 
 const (
 	poolIDLen   = 9
 	poolIDChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 )
+
+var rePoolName = regexp.MustCompile(`^[\w\s+=,.@-]{1,128}$`)
 
 func generatePoolID() (string, error) {
 	const n = len(poolIDChars)
@@ -21,7 +24,7 @@ func generatePoolID() (string, error) {
 		for {
 			if _, err := rand.Read(b[i : i+1]); err != nil {
 				// untestable: crypto/rand.Read only fails on OS-level entropy source errors
-				return "", err
+				return "", fmt.Errorf("read entropy: %w", err)
 			}
 			if b[i] < limit {
 				b[i] = poolIDChars[b[i]%byte(n)]
@@ -195,6 +198,15 @@ func (ro *Router) handleCreateUserPool(w http.ResponseWriter, body []byte) {
 			http.StatusBadRequest,
 			ErrTypeInvalidParameterException,
 			"PoolName is required",
+		)
+		return
+	}
+	if !rePoolName.MatchString(req.PoolName) {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"PoolName must be 1-128 characters and match pattern [\\w\\s+=,.@-]+",
 		)
 		return
 	}
