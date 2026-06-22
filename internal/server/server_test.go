@@ -164,6 +164,14 @@ func TestNewMux(t *testing.T) {
 		assert.Contains(t, w.Header().Get("Content-Type"), "text/xml")
 	})
 
+	t.Run("routes Cognito requests via X-Amz-Target", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{}`))
+		req.Header.Set("X-Amz-Target", "AWSCognitoIdentityProviderService.InitiateAuth")
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		assert.Equal(t, "application/x-amz-json-1.1", w.Header().Get("Content-Type"))
+	})
+
 	t.Run("routes KMS requests via X-Amz-Target", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{}`))
 		req.Header.Set("X-Amz-Target", "TrentService.ListKeys")
