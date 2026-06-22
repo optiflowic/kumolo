@@ -29,6 +29,8 @@ func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (ro *Router) serveHTTP(w http.ResponseWriter, r *http.Request, op string) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	defer r.Body.Close()
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		writeError(

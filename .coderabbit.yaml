@@ -45,7 +45,7 @@ reviews:
         - Enforce 100% test coverage per package. Flag any new code paths not covered by tests.
         - Use testify (require/assert) for assertions. Flag usage of standard library testing assertions.
         - Prefer table-driven tests for similar cases.
-        - Logging conventions: reads→Debug, writes→Info, 4xx→Debug, 5xx→Error.
+        - Logging conventions: reads→Debug, writes→Info, 4xx→Info, 5xx→Error. Note: 4xx is Info (not Debug or Warn) — client errors and Terraform polling responses (404 while a resource is still being created) must remain visible at the default log level. See docs/logging.md.
         - Do not add godoc comments to unchanged code.
         - Do not refactor beyond task scope.
 
