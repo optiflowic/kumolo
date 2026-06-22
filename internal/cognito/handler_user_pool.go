@@ -19,6 +19,7 @@ func generatePoolID() (string, error) {
 	for i := range b {
 		for {
 			if _, err := rand.Read(b[i : i+1]); err != nil {
+				// untestable: crypto/rand.Read only fails on OS-level entropy source errors
 				return "", err
 			}
 			if b[i] < limit {

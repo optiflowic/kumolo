@@ -2,6 +2,7 @@ package cognito
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -450,4 +451,102 @@ func TestListUserPools_InvalidBody(t *testing.T) {
 	ro := newTestRouter(t)
 	w := doOp(t, ro, "ListUserPools", `not-json`)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestUpdateUserPool_AllOptionalFields(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "all-fields-pool")
+
+	w := doOp(t, ro, "UpdateUserPool", fmt.Sprintf(`{
+		"UserPoolId": %q,
+		"DeletionProtection": "ACTIVE",
+		"Policies": {"PasswordPolicy": {"MinimumLength": 8}},
+		"AutoVerifiedAttributes": ["email"],
+		"LambdaConfig": {"PreSignUp": "arn:aws:lambda:us-east-1:000:function:fn"},
+		"EmailConfiguration": {"EmailSendingAccount": "COGNITO_DEFAULT"},
+		"SmsConfiguration": {"SnsCallerArn": "arn:aws:iam::000:role/r"},
+		"DeviceConfiguration": {"ChallengeRequiredOnNewDevice": true},
+		"AdminCreateUserConfig": {"AllowAdminCreateUserOnly": true},
+		"AccountRecoverySetting": {"RecoveryMechanisms": [{"Name":"verified_email","Priority":1}]},
+		"UserAttributeUpdateSettings": {"AttributesRequireVerificationBeforeUpdate": ["email"]},
+		"UserPoolAddOns": {"AdvancedSecurityMode": "ENFORCED"},
+		"VerificationMessageTemplate": {"DefaultEmailOption": "CONFIRM_WITH_CODE"},
+		"UserPoolTags": {"env": "test"},
+		"UserPoolTier": "PLUS",
+		"EmailVerificationMessage": "code {####}",
+		"EmailVerificationSubject": "Verify",
+		"SmsAuthenticationMessage": "code {####}",
+		"SmsVerificationMessage": "code {####}"
+	}`, poolID))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	w2 := doOp(t, ro, "DescribeUserPool", fmt.Sprintf(`{"UserPoolId":%q}`, poolID))
+	require.Equal(t, http.StatusOK, w2.Code)
+	var resp struct {
+		UserPool struct {
+			DeletionProtection       string            `json:"DeletionProtection"`
+			AutoVerifiedAttributes   []string          `json:"AutoVerifiedAttributes"`
+			UserPoolTags             map[string]string `json:"UserPoolTags"`
+			UserPoolTier             string            `json:"UserPoolTier"`
+			EmailVerificationMessage string            `json:"EmailVerificationMessage"`
+			EmailVerificationSubject string            `json:"EmailVerificationSubject"`
+			SmsAuthenticationMessage string            `json:"SmsAuthenticationMessage"`
+			SmsVerificationMessage   string            `json:"SmsVerificationMessage"`
+		} `json:"UserPool"`
+	}
+	require.NoError(t, json.NewDecoder(w2.Body).Decode(&resp))
+	pool := resp.UserPool
+	assert.Equal(t, "ACTIVE", pool.DeletionProtection)
+	assert.Equal(t, []string{"email"}, pool.AutoVerifiedAttributes)
+	assert.Equal(t, map[string]string{"env": "test"}, pool.UserPoolTags)
+	assert.Equal(t, "PLUS", pool.UserPoolTier)
+	assert.Equal(t, "code {####}", pool.EmailVerificationMessage)
+	assert.Equal(t, "Verify", pool.EmailVerificationSubject)
+	assert.Equal(t, "code {####}", pool.SmsAuthenticationMessage)
+	assert.Equal(t, "code {####}", pool.SmsVerificationMessage)
+}
+
+func TestCreateUserPool_StorageError(t *testing.T) {
+	ro := &Router{storage: &mockStore{createErr: errors.New("storage error")}}
+	w := doOp(t, ro, "CreateUserPool", `{"PoolName":"pool"}`)
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	var resp errResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, ErrTypeInternalErrorException, resp.Type)
+}
+
+func TestDescribeUserPool_StorageError(t *testing.T) {
+	ro := &Router{storage: &mockStore{getErr: errors.New("storage error")}}
+	w := doOp(t, ro, "DescribeUserPool", `{"UserPoolId":"us-east-1_Test12345"}`)
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	var resp errResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, ErrTypeInternalErrorException, resp.Type)
+}
+
+func TestUpdateUserPool_StorageError(t *testing.T) {
+	ro := &Router{storage: &mockStore{updateErr: errors.New("storage error")}}
+	w := doOp(t, ro, "UpdateUserPool", `{"UserPoolId":"us-east-1_Test12345","PoolName":"x"}`)
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	var resp errResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, ErrTypeInternalErrorException, resp.Type)
+}
+
+func TestDeleteUserPool_StorageError(t *testing.T) {
+	ro := &Router{storage: &mockStore{deleteErr: errors.New("storage error")}}
+	w := doOp(t, ro, "DeleteUserPool", `{"UserPoolId":"us-east-1_Test12345"}`)
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	var resp errResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, ErrTypeInternalErrorException, resp.Type)
+}
+
+func TestListUserPools_StorageError(t *testing.T) {
+	ro := &Router{storage: &mockStore{listErr: errors.New("storage error")}}
+	w := doOp(t, ro, "ListUserPools", `{"MaxResults":10}`)
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	var resp errResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, ErrTypeInternalErrorException, resp.Type)
 }
