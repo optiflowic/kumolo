@@ -88,3 +88,16 @@ func writeError(w http.ResponseWriter, status int, errType, message string) {
 		slog.Warn("failed to encode Cognito error response", "err", err)
 	}
 }
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/x-amz-json-1.1")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		slog.Warn("failed to encode Cognito response", "err", err)
+	}
+}
+
+func writeEmpty(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/x-amz-json-1.1")
+	w.WriteHeader(http.StatusOK)
+}

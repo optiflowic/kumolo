@@ -9,7 +9,13 @@ import (
 
 // store is the storage interface used by Router.
 // Methods are added incrementally as operations are implemented.
-type store interface{}
+type store interface {
+	CreateUserPool(meta *UserPoolMetadata) error
+	GetUserPool(poolID string) (*UserPoolMetadata, error)
+	UpdateUserPool(poolID string, fn func(*UserPoolMetadata) error) error
+	DeleteUserPool(poolID string) error
+	ListUserPools(maxResults int, nextToken string) ([]*UserPoolMetadata, string, error)
+}
 
 // Router handles Cognito User Pools API requests dispatched via the X-Amz-Target header.
 type Router struct {
@@ -43,6 +49,16 @@ func (ro *Router) serveHTTP(w http.ResponseWriter, r *http.Request, op string) {
 	_ = body
 
 	switch op {
+	case "CreateUserPool":
+		ro.handleCreateUserPool(w, body)
+	case "DescribeUserPool":
+		ro.handleDescribeUserPool(w, body)
+	case "UpdateUserPool":
+		ro.handleUpdateUserPool(w, body)
+	case "DeleteUserPool":
+		ro.handleDeleteUserPool(w, body)
+	case "ListUserPools":
+		ro.handleListUserPools(w, body)
 	default:
 		writeError(
 			w,
