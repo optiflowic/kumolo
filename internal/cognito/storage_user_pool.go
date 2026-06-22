@@ -118,6 +118,9 @@ func (s *Storage) DeleteUserPool(poolID string) error {
 		}
 		return err
 	}
+	if err := s.deleteClientsDirLocked(poolID); err != nil {
+		return err
+	}
 	if err := s.removeFile(filepath.Join("pools", poolID)); err != nil &&
 		!errors.Is(err, os.ErrNotExist) {
 		return err

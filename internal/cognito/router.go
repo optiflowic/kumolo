@@ -15,6 +15,15 @@ type store interface {
 	UpdateUserPool(poolID string, fn func(*UserPoolMetadata) error) error
 	DeleteUserPool(poolID string) error
 	ListUserPools(maxResults int, nextToken string) ([]*UserPoolMetadata, string, error)
+	CreateUserPoolClient(meta *UserPoolClientMetadata) error
+	GetUserPoolClient(poolID, clientID string) (*UserPoolClientMetadata, error)
+	UpdateUserPoolClient(poolID, clientID string, fn func(*UserPoolClientMetadata) error) error
+	DeleteUserPoolClient(poolID, clientID string) error
+	ListUserPoolClients(
+		poolID string,
+		maxResults int,
+		nextToken string,
+	) ([]*UserPoolClientMetadata, string, error)
 }
 
 // Router handles Cognito User Pools API requests dispatched via the X-Amz-Target header.
@@ -57,6 +66,16 @@ func (ro *Router) serveHTTP(w http.ResponseWriter, r *http.Request, op string) {
 		ro.handleDeleteUserPool(w, body)
 	case "ListUserPools":
 		ro.handleListUserPools(w, body)
+	case "CreateUserPoolClient":
+		ro.handleCreateUserPoolClient(w, body)
+	case "DescribeUserPoolClient":
+		ro.handleDescribeUserPoolClient(w, body)
+	case "UpdateUserPoolClient":
+		ro.handleUpdateUserPoolClient(w, body)
+	case "DeleteUserPoolClient":
+		ro.handleDeleteUserPoolClient(w, body)
+	case "ListUserPoolClients":
+		ro.handleListUserPoolClients(w, body)
 	default:
 		writeError(
 			w,
