@@ -234,6 +234,21 @@ func TestSignUp_CreateUserError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }
 
+func TestSignUp_ConfirmationCodeEntropyError(t *testing.T) {
+	wantErr := errors.New("entropy source failed")
+	ro := &Router{
+		storage: &mockStore{
+			getPoolForClient: func(string) (string, error) { return "pool-1", nil },
+		},
+		codeReader: &errorReader{err: wantErr},
+	}
+	body, _ := json.Marshal(map[string]string{
+		"ClientId": "c", "Username": "u", "Password": "Password123!",
+	})
+	w := doOp(t, ro, "SignUp", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
 // ── ConfirmSignUp ─────────────────────────────────────────────────────────────
 
 func TestConfirmSignUp_Success(t *testing.T) {

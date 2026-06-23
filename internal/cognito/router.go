@@ -49,11 +49,12 @@ type store interface {
 
 // Router handles Cognito User Pools API requests dispatched via the X-Amz-Target header.
 type Router struct {
-	storage store
+	storage    store
+	codeReader io.Reader // injectable for testing; defaults to crypto/rand.Reader
 }
 
 func NewRouter(storage *Storage) *Router {
-	return &Router{storage: storage}
+	return &Router{storage: storage, codeReader: randReader}
 }
 
 func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {

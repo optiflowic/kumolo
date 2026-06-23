@@ -24,11 +24,8 @@ const (
 	userStatusForceChangePasswd = "FORCE_CHANGE_PASSWORD"
 )
 
-// generateConfirmationCode returns a random 6-digit numeric string, matching
-// the format AWS Cognito sends via email/SMS during sign-up verification.
-func generateConfirmationCode() (string, error) {
-	return generateConfirmationCodeFrom(rand.Reader)
-}
+// randReader is the default entropy source; overridden in tests via Router.codeReader.
+var randReader = rand.Reader
 
 func generateConfirmationCodeFrom(r io.Reader) (string, error) {
 	var b [4]byte
@@ -121,7 +118,11 @@ func (ro *Router) handleSignUp(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	code, err := generateConfirmationCode()
+	codeR := ro.codeReader
+	if codeR == nil {
+		codeR = randReader
+	}
+	code, err := generateConfirmationCodeFrom(codeR)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
 			"failed to generate confirmation code")
