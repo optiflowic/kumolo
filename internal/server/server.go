@@ -91,7 +91,8 @@ func NewMux(
 			kmsRouter.ServeHTTP(w, r)
 			return
 		}
-		if strings.HasPrefix(r.Header.Get("X-Amz-Target"), "AWSCognitoIdentityProviderService.") {
+		if strings.HasPrefix(r.Header.Get("X-Amz-Target"), "AWSCognitoIdentityProviderService.") ||
+			strings.HasSuffix(r.URL.Path, "/.well-known/jwks.json") {
 			cognitoRouter.ServeHTTP(w, r)
 			return
 		}

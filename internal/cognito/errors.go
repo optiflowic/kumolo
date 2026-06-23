@@ -14,6 +14,8 @@ const (
 	ErrTypeUserNotConfirmedException = "UserNotConfirmedException"
 	ErrTypeNotAuthorizedException    = "NotAuthorizedException"
 	ErrTypeUsernameExistsException   = "UsernameExistsException"
+	ErrTypeCodeMismatchException     = "CodeMismatchException"
+	ErrTypeInvalidPasswordException  = "InvalidPasswordException"
 	ErrTypeInternalErrorException    = "InternalErrorException"
 	ErrTypeUnknownOperationException = "UnknownOperationException"
 )
