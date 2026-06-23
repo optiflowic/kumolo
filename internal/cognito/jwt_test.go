@@ -178,6 +178,30 @@ func TestIssueTokens_Success(t *testing.T) {
 	assert.Equal(t, "alice@example.com", idClaims["email"])
 }
 
+func TestIssueTokens_ReservedClaimsNotOverridden(t *testing.T) {
+	key, keyID := genTestKey(t)
+	user := &UserMetadata{
+		Username: "alice",
+		Sub:      "real-sub",
+		Attributes: []AttributeType{
+			// Attempt to inject reserved claims via user attributes.
+			{Name: "sub", Value: "injected-sub"},
+			{Name: "exp", Value: "9999999999"},
+			{Name: "token_use", Value: "access"},
+			// A legitimate custom attribute must still appear.
+			{Name: "email", Value: "alice@example.com"},
+		},
+	}
+	_, id, _, err := issueTokens(key, keyID, "us-east-1_Pool1", "client-1", user)
+	require.NoError(t, err)
+
+	idClaims, err := verifyJWT(id, &key.PublicKey)
+	require.NoError(t, err)
+	assert.Equal(t, "real-sub", idClaims["sub"], "sub must not be overridable")
+	assert.Equal(t, "id", idClaims["token_use"], "token_use must not be overridable")
+	assert.Equal(t, "alice@example.com", idClaims["email"], "legitimate attribute must appear")
+}
+
 func TestIssueTokens_AccessTokenBuildFails(t *testing.T) {
 	// Construct a key with a 7-bit modulus directly; rsa.SignPKCS1v15 rejects it,
 	// so buildJWT fails when building the access token.

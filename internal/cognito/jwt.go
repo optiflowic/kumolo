@@ -166,8 +166,15 @@ func issueTokens(
 		"iat":              now,
 		"jti":              idJTI,
 	}
+	reservedClaims := map[string]bool{
+		"sub": true, "iss": true, "aud": true, "token_use": true,
+		"cognito:username": true, "origin_jti": true, "auth_time": true,
+		"exp": true, "iat": true, "jti": true,
+	}
 	for _, attr := range user.Attributes {
-		idClaims[attr.Name] = attr.Value
+		if !reservedClaims[attr.Name] {
+			idClaims[attr.Name] = attr.Value
+		}
 	}
 
 	accessToken, err = buildJWT(privateKey, keyID, accessClaims)
