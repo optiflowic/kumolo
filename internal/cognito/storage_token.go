@@ -31,6 +31,7 @@ type clientIndexEntry struct {
 func generateTokenID() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
+		// untestable: crypto/rand.Read never errors in Go 1.20+
 		return "", fmt.Errorf("read entropy: %w", err)
 	}
 	return hex.EncodeToString(b), nil

@@ -177,6 +177,7 @@ func issueTokens(
 
 	idToken, err = buildJWT(privateKey, keyID, idClaims)
 	if err != nil {
+		// unreachable: same key and algorithm as access token; if access token signing succeeded, this will too
 		return "", "", "", fmt.Errorf("build id token: %w", err)
 	}
 

@@ -6,6 +6,7 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/json"
+	"math/big"
 	"testing"
 	"time"
 
@@ -54,6 +55,19 @@ func TestBuildJWT_UnmarshalableClaimsFails(t *testing.T) {
 	_, err := buildJWT(key, keyID, map[string]any{"ch": make(chan int)})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "marshal claims")
+}
+
+func TestBuildJWT_SigningFails(t *testing.T) {
+	// Construct a key with a 7-bit modulus directly, bypassing rsa.GenerateKey's
+	// minimum-size guard. rsa.SignPKCS1v15 rejects it as too small.
+	key := &rsa.PrivateKey{
+		PublicKey: rsa.PublicKey{N: big.NewInt(127), E: 65537},
+		D:         big.NewInt(1),
+		Primes:    []*big.Int{big.NewInt(127)},
+	}
+	_, err := buildJWT(key, "kid", map[string]any{"sub": "x"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "sign JWT")
 }
 
 func TestVerifyJWT_WrongFormat(t *testing.T) {
@@ -162,6 +176,20 @@ func TestIssueTokens_Success(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "id", idClaims["token_use"])
 	assert.Equal(t, "alice@example.com", idClaims["email"])
+}
+
+func TestIssueTokens_AccessTokenBuildFails(t *testing.T) {
+	// Construct a key with a 7-bit modulus directly; rsa.SignPKCS1v15 rejects it,
+	// so buildJWT fails when building the access token.
+	key := &rsa.PrivateKey{
+		PublicKey: rsa.PublicKey{N: big.NewInt(127), E: 65537},
+		D:         big.NewInt(1),
+		Primes:    []*big.Int{big.NewInt(127)},
+	}
+	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
+	_, _, _, err := issueTokens(key, "kid", "us-east-1_Pool1", "client-1", user)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "build access token")
 }
 
 // ── buildSessionToken / parseSessionToken ─────────────────────────────────────

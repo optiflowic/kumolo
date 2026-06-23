@@ -27,6 +27,8 @@ Success response (FORCE_CHANGE_PASSWORD user): `ChallengeName: "NEW_PASSWORD_REQ
 ### REFRESH_TOKEN_AUTH / REFRESH_TOKEN
 AuthParameters required: `REFRESH_TOKEN`
 
+The refresh token must have been issued by the same `ClientId`; presenting a token issued by a different client returns `NotAuthorizedException`.
+
 Success response: `AuthenticationResult` with new `AccessToken` and `IdToken` (no new `RefreshToken`).
 
 ## Response
