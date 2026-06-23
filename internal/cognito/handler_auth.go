@@ -76,7 +76,7 @@ func (ro *Router) handleSignUp(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
-	if req.Password != "" && len(req.Password) < minPasswordLen {
+	if len(req.Password) < minPasswordLen {
 		writeError(w, http.StatusBadRequest, ErrTypeInvalidPasswordException,
 			fmt.Sprintf("Password must be at least %d characters", minPasswordLen))
 		return
@@ -587,6 +587,9 @@ func (ro *Router) handleNewPasswordRequired(
 	username := responses["USERNAME"]
 	if username == "" {
 		username = claimUsername
+	} else if username != claimUsername {
+		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException, "Invalid session.")
+		return
 	}
 
 	newPassword := responses["NEW_PASSWORD"]

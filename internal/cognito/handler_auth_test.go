@@ -172,6 +172,17 @@ func TestSignUp_ShortPassword(t *testing.T) {
 	assertErrType(t, w, ErrTypeInvalidPasswordException)
 }
 
+func TestSignUp_EmptyPassword(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	body, _ := json.Marshal(map[string]string{
+		"ClientId": clientID, "Username": "alice", "Password": "",
+	})
+	w := doOp(t, ro, "SignUp", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeInvalidPasswordException)
+}
+
 func TestSignUp_InvalidClientId(t *testing.T) {
 	ro := newTestRouter(t)
 	body, _ := json.Marshal(map[string]string{
@@ -678,6 +689,34 @@ func TestRespondToAuthChallenge_UsernameFromSession(t *testing.T) {
 	})
 	w2 := doOp(t, ro, "RespondToAuthChallenge", string(body))
 	require.Equal(t, http.StatusOK, w2.Code)
+}
+
+func TestRespondToAuthChallenge_UsernameMismatch(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID, clientID := setupPool(t, ro)
+	storage := ro.storage.(*Storage)
+
+	insertFCPUser(t, storage, poolID, "dave", "dave-sub", "TempPass123!")
+
+	w := doInitAuth(t, ro, clientID, "dave", "TempPass123!")
+	require.Equal(t, http.StatusOK, w.Code)
+	var initResp map[string]any
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&initResp))
+	session := initResp["Session"].(string)
+
+	// Passing a different USERNAME than the one in the session must be rejected.
+	body, _ := json.Marshal(map[string]any{
+		"ClientId":      clientID,
+		"ChallengeName": "NEW_PASSWORD_REQUIRED",
+		"Session":       session,
+		"ChallengeResponses": map[string]string{
+			"USERNAME":     "other-user",
+			"NEW_PASSWORD": "NewSecurePass123!",
+		},
+	})
+	w2 := doOp(t, ro, "RespondToAuthChallenge", string(body))
+	assert.Equal(t, http.StatusBadRequest, w2.Code)
+	assertErrType(t, w2, ErrTypeNotAuthorizedException)
 }
 
 func TestRespondToAuthChallenge_InvalidSession(t *testing.T) {
