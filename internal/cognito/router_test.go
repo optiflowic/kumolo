@@ -440,6 +440,15 @@ func TestStorage_DeleteUserPoolClient_RemoveError(t *testing.T) {
 	assert.False(t, errors.Is(err, errUserPoolClientNotFound))
 }
 
+func TestStorage_ListUserPoolClients_ZeroMaxResults(t *testing.T) {
+	storage, err := NewStorage(t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = storage.Close() })
+	_, _, err = storage.ListUserPoolClients("us-east-1_Test12345", 0, "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "maxResults must be positive")
+}
+
 func TestStorage_ListUserPoolClients_ListDirError(t *testing.T) {
 	storage, err := NewStorage(t.TempDir())
 	require.NoError(t, err)
