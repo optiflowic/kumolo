@@ -44,13 +44,17 @@ func signUpUser(t *testing.T, ro *Router, clientID, username, password string) s
 	return resp.UserSub
 }
 
-// confirmUser confirms a registered user with the fixed code.
+// confirmUser confirms a registered user by reading the stored confirmation code.
 func confirmUser(t *testing.T, ro *Router, clientID, username string) {
 	t.Helper()
+	poolID, err := ro.storage.GetPoolIDForClient(clientID)
+	require.NoError(t, err)
+	user, err := ro.storage.GetUser(poolID, username)
+	require.NoError(t, err)
 	body, _ := json.Marshal(map[string]string{
 		"ClientId":         clientID,
 		"Username":         username,
-		"ConfirmationCode": confirmationCode,
+		"ConfirmationCode": user.ConfirmationCode,
 	})
 	w := doOp(t, ro, "ConfirmSignUp", string(body))
 	require.Equal(t, http.StatusOK, w.Code)
@@ -258,7 +262,7 @@ func TestConfirmSignUp_AlreadyConfirmed(t *testing.T) {
 	confirmUser(t, ro, clientID, "alice")
 
 	body, _ := json.Marshal(map[string]string{
-		"ClientId": clientID, "Username": "alice", "ConfirmationCode": confirmationCode,
+		"ClientId": clientID, "Username": "alice", "ConfirmationCode": "000000",
 	})
 	w := doOp(t, ro, "ConfirmSignUp", string(body))
 	assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -269,7 +273,7 @@ func TestConfirmSignUp_UserNotFound(t *testing.T) {
 	ro := newTestRouter(t)
 	_, clientID := setupPool(t, ro)
 	body, _ := json.Marshal(map[string]string{
-		"ClientId": clientID, "Username": "nobody", "ConfirmationCode": confirmationCode,
+		"ClientId": clientID, "Username": "nobody", "ConfirmationCode": "000000",
 	})
 	w := doOp(t, ro, "ConfirmSignUp", string(body))
 	assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -278,14 +282,14 @@ func TestConfirmSignUp_UserNotFound(t *testing.T) {
 
 func TestConfirmSignUp_MissingClientId(t *testing.T) {
 	ro := newTestRouter(t)
-	w := doOp(t, ro, "ConfirmSignUp", `{"Username":"alice","ConfirmationCode":"123456"}`)
+	w := doOp(t, ro, "ConfirmSignUp", `{"Username":"alice","ConfirmationCode":"000000"}`)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assertErrType(t, w, ErrTypeInvalidParameterException)
 }
 
 func TestConfirmSignUp_MissingUsername(t *testing.T) {
 	ro := newTestRouter(t)
-	w := doOp(t, ro, "ConfirmSignUp", `{"ClientId":"x","ConfirmationCode":"123456"}`)
+	w := doOp(t, ro, "ConfirmSignUp", `{"ClientId":"x","ConfirmationCode":"000000"}`)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assertErrType(t, w, ErrTypeInvalidParameterException)
 }
@@ -300,7 +304,7 @@ func TestConfirmSignUp_MissingCode(t *testing.T) {
 func TestConfirmSignUp_InvalidClientId(t *testing.T) {
 	ro := newTestRouter(t)
 	body, _ := json.Marshal(map[string]string{
-		"ClientId": "nonexistent", "Username": "alice", "ConfirmationCode": confirmationCode,
+		"ClientId": "nonexistent", "Username": "alice", "ConfirmationCode": "000000",
 	})
 	w := doOp(t, ro, "ConfirmSignUp", string(body))
 	assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -312,7 +316,7 @@ func TestConfirmSignUp_GetPoolError(t *testing.T) {
 		getPoolForClient: func(string) (string, error) { return "", errors.New("db error") },
 	}}
 	body, _ := json.Marshal(map[string]string{
-		"ClientId": "c", "Username": "u", "ConfirmationCode": "123456",
+		"ClientId": "c", "Username": "u", "ConfirmationCode": "000000",
 	})
 	w := doOp(t, ro, "ConfirmSignUp", string(body))
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
@@ -324,7 +328,7 @@ func TestConfirmSignUp_UpdateStorageError(t *testing.T) {
 		updateUserErr:    errors.New("storage error"),
 	}}
 	body, _ := json.Marshal(map[string]string{
-		"ClientId": "c", "Username": "u", "ConfirmationCode": "123456",
+		"ClientId": "c", "Username": "u", "ConfirmationCode": "000000",
 	})
 	w := doOp(t, ro, "ConfirmSignUp", string(body))
 	assert.Equal(t, http.StatusInternalServerError, w.Code)

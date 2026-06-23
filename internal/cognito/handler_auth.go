@@ -1,7 +1,10 @@
 package cognito
 
 import (
+	"crypto/rand"
 	"crypto/rsa"
+	"crypto/subtle"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,13 +15,24 @@ import (
 )
 
 const (
-	confirmationCode = "123456"
-	minPasswordLen   = 8
+	minPasswordLen = 8
 
 	userStatusUnconfirmed       = "UNCONFIRMED"
 	userStatusConfirmed         = "CONFIRMED"
 	userStatusForceChangePasswd = "FORCE_CHANGE_PASSWORD"
 )
+
+// generateConfirmationCode returns a random 6-digit numeric string, matching
+// the format AWS Cognito sends via email/SMS during sign-up verification.
+func generateConfirmationCode() (string, error) {
+	var b [4]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// untestable: crypto/rand.Read never errors in Go 1.20+
+		return "", fmt.Errorf("read entropy: %w", err)
+	}
+	n := binary.BigEndian.Uint32(b[:]) % 1_000_000
+	return fmt.Sprintf("%06d", n), nil
+}
 
 var (
 	errNotUnconfirmed       = errors.New("user is not UNCONFIRMED")
@@ -102,6 +116,14 @@ func (ro *Router) handleSignUp(w http.ResponseWriter, body []byte) {
 		return
 	}
 
+	code, err := generateConfirmationCode()
+	if err != nil {
+		// untestable: crypto/rand.Read only fails on OS-level entropy source errors
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to generate confirmation code")
+		return
+	}
+
 	var passwordHash string
 	if req.Password != "" {
 		hash, herr := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
@@ -121,7 +143,7 @@ func (ro *Router) handleSignUp(w http.ResponseWriter, body []byte) {
 		Status:           userStatusUnconfirmed,
 		PasswordHash:     passwordHash,
 		Attributes:       req.UserAttributes,
-		ConfirmationCode: confirmationCode,
+		ConfirmationCode: code,
 		CreatedAt:        ts,
 		UpdatedAt:        ts,
 	}
@@ -223,7 +245,10 @@ func (ro *Router) handleConfirmSignUp(w http.ResponseWriter, body []byte) {
 		if u.Status != userStatusUnconfirmed {
 			return errNotUnconfirmed
 		}
-		if req.ConfirmationCode != u.ConfirmationCode {
+		if subtle.ConstantTimeCompare(
+			[]byte(req.ConfirmationCode),
+			[]byte(u.ConfirmationCode),
+		) != 1 {
 			return errCodeMismatch
 		}
 		u.Status = userStatusConfirmed
