@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -122,11 +123,11 @@ func (ro *Router) handleSignUp(w http.ResponseWriter, body []byte) {
 
 	code, err := generateConfirmationCode()
 	if err != nil {
-		// untestable: crypto/rand.Read only fails on OS-level entropy source errors
 		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
 			"failed to generate confirmation code")
 		return
 	}
+	slog.Info("SignUp confirmation code", "pool_id", poolID, "username", req.Username, "code", code)
 
 	var passwordHash string
 	if req.Password != "" {

@@ -40,5 +40,7 @@ HTTP 200 with empty body on success.
 ## Behavior
 
 - Transitions user from `UNCONFIRMED` to `CONFIRMED`.
-- kumolo's fixed confirmation code is `"123456"`.
+- kumolo generates a random 6-digit code per SignUp call (matches AWS format).
+  The code is logged at INFO level on the server (`pool_id`, `username`, `code`)
+  so developers can retrieve it from the server log without intercepting email delivery.
 - Once CONFIRMED, a subsequent ConfirmSignUp returns NotAuthorizedException.
