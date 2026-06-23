@@ -1,6 +1,7 @@
 package cognito
 
 import (
+	"crypto/rsa"
 	"encoding/json"
 	"errors"
 	"io"
@@ -163,16 +164,25 @@ func TestStorage_Close(t *testing.T) {
 
 // mockStore is a minimal store implementation for testing handler error paths.
 type mockStore struct {
-	createErr       error
-	getErr          error
-	updateErr       error
-	deleteErr       error
-	listErr         error
-	createClientErr error
-	getClientErr    error
-	updateClientErr error
-	deleteClientErr error
-	listClientErr   error
+	createErr         error
+	getErr            error
+	updateErr         error
+	deleteErr         error
+	listErr           error
+	createClientErr   error
+	getClientErr      error
+	updateClientErr   error
+	deleteClientErr   error
+	listClientErr     error
+	getPoolForClient  func(string) (string, error)
+	createUserErr     error
+	getUserFn         func(string, string) (*UserMetadata, error)
+	getUserBySubFn    func(string, string) (*UserMetadata, error)
+	updateUserErr     error
+	getOrCreateKeysFn func(string) (*poolKeys, *rsa.PrivateKey, error)
+	createRefreshErr  error
+	getRefreshFn      func(string, string) (*refreshTokenData, error)
+	deleteRefreshErr  error
 }
 
 func (m *mockStore) CreateUserPool(*UserPoolMetadata) error { return m.createErr }
@@ -207,6 +217,51 @@ func (m *mockStore) ListUserPoolClients(
 ) ([]*UserPoolClientMetadata, string, error) {
 	return nil, "", m.listClientErr
 }
+
+func (m *mockStore) GetPoolIDForClient(clientID string) (string, error) {
+	if m.getPoolForClient != nil {
+		return m.getPoolForClient(clientID)
+	}
+	return "", errUserPoolClientNotFound
+}
+
+func (m *mockStore) CreateUser(_ string, _ *UserMetadata) error { return m.createUserErr }
+
+func (m *mockStore) GetUser(poolID, username string) (*UserMetadata, error) {
+	if m.getUserFn != nil {
+		return m.getUserFn(poolID, username)
+	}
+	return nil, errUserNotFound
+}
+
+func (m *mockStore) GetUserBySub(poolID, sub string) (*UserMetadata, error) {
+	if m.getUserBySubFn != nil {
+		return m.getUserBySubFn(poolID, sub)
+	}
+	return nil, errUserNotFound
+}
+
+func (m *mockStore) UpdateUser(_ string, _ string, _ func(*UserMetadata) error) error {
+	return m.updateUserErr
+}
+
+func (m *mockStore) GetOrCreatePoolKeys(poolID string) (*poolKeys, *rsa.PrivateKey, error) {
+	if m.getOrCreateKeysFn != nil {
+		return m.getOrCreateKeysFn(poolID)
+	}
+	return nil, nil, errors.New("no keys configured")
+}
+
+func (m *mockStore) CreateRefreshToken(*refreshTokenData) error { return m.createRefreshErr }
+
+func (m *mockStore) GetRefreshToken(poolID, token string) (*refreshTokenData, error) {
+	if m.getRefreshFn != nil {
+		return m.getRefreshFn(poolID, token)
+	}
+	return nil, errRefreshTokenNotFound
+}
+
+func (m *mockStore) DeleteRefreshToken(string, string) error { return m.deleteRefreshErr }
 
 func TestNewStorage_MkdirError(t *testing.T) {
 	dir := t.TempDir()
