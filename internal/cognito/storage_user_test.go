@@ -109,6 +109,29 @@ func TestCreateUser_WriteIndexFileError(t *testing.T) {
 	assert.Contains(t, err.Error(), "write user index")
 }
 
+func TestCreateUser_WriteIndexFileError_RollsBackUserFile(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+
+	realOpenFile := s.openFile
+	calls := 0
+	s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+		calls++
+		if calls == 1 {
+			return realOpenFile(name, flag, perm) // user file: success
+		}
+		return nil, errors.New("disk full on index write")
+	}
+	user := &UserMetadata{Username: "eve", Sub: "sub-eve", Status: userStatusUnconfirmed}
+	err := s.CreateUser(poolID, user)
+	require.Error(t, err)
+
+	// The user file must have been rolled back: a subsequent create must succeed.
+	s.openFile = realOpenFile
+	err = s.CreateUser(poolID, user)
+	require.NoError(t, err)
+}
+
 // ── GetUser / getUserLocked ───────────────────────────────────────────────────
 
 func TestGetUser_NotFound(t *testing.T) {

@@ -72,12 +72,14 @@ func (s *Storage) CreateUser(poolID string, user *UserMetadata) error {
 		return fmt.Errorf("create user_index dir: %w", err)
 	}
 
-	if err := s.writeJSON(userPath(poolID, user.Sub), user); err != nil {
+	uPath := userPath(poolID, user.Sub)
+	if err := s.writeJSON(uPath, user); err != nil {
 		return fmt.Errorf("write user: %w", err)
 	}
 
 	idx := userIndexEntry{Username: user.Username, Sub: user.Sub}
 	if err := s.writeJSON(idxPath, idx); err != nil {
+		_ = s.removeFile(uPath) // best-effort rollback: remove orphaned user file
 		return fmt.Errorf("write user index: %w", err)
 	}
 

@@ -26,3 +26,33 @@ func TestCreateUserPoolClient_WriteClientJSONError(t *testing.T) {
 	})
 	require.Error(t, err)
 }
+
+func TestCreateUserPoolClient_WriteClientIndexError_RollsBackClientFile(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+
+	realOpenFile := s.openFile
+	calls := 0
+	s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+		calls++
+		if calls == 1 {
+			return realOpenFile(name, flag, perm) // client JSON: success
+		}
+		return nil, errors.New("disk full on index write")
+	}
+	err := s.CreateUserPoolClient(&UserPoolClientMetadata{
+		UserPoolID: poolID,
+		ClientID:   "client-rollback",
+		ClientName: "test",
+	})
+	require.Error(t, err)
+
+	// The client file must have been rolled back: a subsequent create must succeed.
+	s.openFile = realOpenFile
+	err = s.CreateUserPoolClient(&UserPoolClientMetadata{
+		UserPoolID: poolID,
+		ClientID:   "client-rollback",
+		ClientName: "test",
+	})
+	require.NoError(t, err)
+}

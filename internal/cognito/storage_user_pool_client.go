@@ -55,10 +55,15 @@ func (s *Storage) CreateUserPoolClient(meta *UserPoolClientMetadata) error {
 	if err := s.mkdirFn(clientsDir, 0o750); err != nil && !errors.Is(err, os.ErrExist) {
 		return fmt.Errorf("create clients dir: %w", err)
 	}
-	if err := s.writeJSON(filepath.Join(clientsDir, meta.ClientID+".json"), meta); err != nil {
+	clientPath := filepath.Join(clientsDir, meta.ClientID+".json")
+	if err := s.writeJSON(clientPath, meta); err != nil {
 		return err
 	}
-	return s.WriteClientIndex(meta.UserPoolID, meta.ClientID)
+	if err := s.writeClientIndexLocked(meta.UserPoolID, meta.ClientID); err != nil {
+		_ = s.removeFile(clientPath) // best-effort rollback: remove orphaned client file
+		return fmt.Errorf("write client index: %w", err)
+	}
+	return nil
 }
 
 func (s *Storage) GetUserPoolClient(poolID, clientID string) (*UserPoolClientMetadata, error) {
@@ -108,7 +113,7 @@ func (s *Storage) DeleteUserPoolClient(poolID, clientID string) error {
 		}
 		return err
 	}
-	return s.DeleteClientIndex(clientID)
+	return s.deleteClientIndexLocked(clientID)
 }
 
 func (s *Storage) ListUserPoolClients(

@@ -89,14 +89,16 @@ func (s *Storage) DeleteRefreshToken(poolID, token string) error {
 	return nil
 }
 
-// WriteClientIndex records that clientID belongs to poolID for cross-pool lookup.
-func (s *Storage) WriteClientIndex(poolID, clientID string) error {
+// writeClientIndexLocked records that clientID belongs to poolID.
+// Callers must hold s.mu.Lock().
+func (s *Storage) writeClientIndexLocked(poolID, clientID string) error {
 	entry := clientIndexEntry{PoolID: poolID, ClientID: clientID}
 	return s.writeJSON(filepath.Join("client_index", clientID+".json"), entry)
 }
 
-// DeleteClientIndex removes the client index entry for a given client ID.
-func (s *Storage) DeleteClientIndex(clientID string) error {
+// deleteClientIndexLocked removes the client index entry for a given client ID.
+// Callers must hold s.mu.Lock().
+func (s *Storage) deleteClientIndexLocked(clientID string) error {
 	path := filepath.Join("client_index", clientID+".json")
 	if err := s.removeFile(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("remove client index: %w", err)
