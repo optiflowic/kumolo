@@ -161,8 +161,7 @@ func (s *Storage) ListUserPoolClients(
 	for _, id := range clientIDs {
 		meta, err := readJSON[UserPoolClientMetadata](s, filepath.Join(clientsDir, id+".json"))
 		if err != nil {
-			// untestable: file was enumerated but cannot be read (external corruption)
-			continue
+			return nil, "", fmt.Errorf("read user pool client %q: %w", id, err)
 		}
 		clients = append(clients, &meta)
 	}

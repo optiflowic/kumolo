@@ -112,13 +112,16 @@ func (s *Storage) DeleteUserPool(poolID string) error {
 	defer s.mu.Unlock()
 
 	metaPath := filepath.Join("pools", poolID, "meta.json")
-	if err := s.removeFile(metaPath); err != nil {
+	if _, err := s.statFn(metaPath); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return errUserPoolNotFound
 		}
 		return err
 	}
 	if err := s.deleteClientsDirLocked(poolID); err != nil {
+		return err
+	}
+	if err := s.removeFile(metaPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	if err := s.removeFile(filepath.Join("pools", poolID)); err != nil &&

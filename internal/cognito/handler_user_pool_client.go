@@ -16,8 +16,12 @@ const (
 	clientSecretChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 )
 
-var reClientName = regexp.MustCompile(`^[\w\s+=,.@-]{1,128}$`)
-var reClientSecret = regexp.MustCompile(`^[\w+]+$`)
+var (
+	reClientName   = regexp.MustCompile(`^[\w\s+=,.@-]{1,128}$`)
+	reClientSecret = regexp.MustCompile(`^[\w+]+$`)
+	reClientID     = regexp.MustCompile(`^[a-z0-9]{26}$`)
+	reUserPoolID   = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+)
 
 func generateClientID() (string, error) {
 	const n = len(clientIDChars)
@@ -135,6 +139,11 @@ func (ro *Router) handleCreateUserPoolClient(w http.ResponseWriter, body []byte)
 			ErrTypeInvalidParameterException,
 			"UserPoolId is required",
 		)
+		return
+	}
+	if !reUserPoolID.MatchString(req.UserPoolId) {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"UserPoolId contains invalid characters")
 		return
 	}
 	if req.ClientName == "" {
@@ -262,6 +271,11 @@ func (ro *Router) handleDescribeUserPoolClient(w http.ResponseWriter, body []byt
 		)
 		return
 	}
+	if !reUserPoolID.MatchString(req.UserPoolId) {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"UserPoolId contains invalid characters")
+		return
+	}
 	if req.ClientId == "" {
 		writeError(
 			w,
@@ -269,6 +283,11 @@ func (ro *Router) handleDescribeUserPoolClient(w http.ResponseWriter, body []byt
 			ErrTypeInvalidParameterException,
 			"ClientId is required",
 		)
+		return
+	}
+	if !reClientID.MatchString(req.ClientId) {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"ClientId contains invalid characters")
 		return
 	}
 
@@ -306,6 +325,11 @@ func (ro *Router) handleUpdateUserPoolClient(w http.ResponseWriter, body []byte)
 		)
 		return
 	}
+	if !reUserPoolID.MatchString(req.UserPoolId) {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"UserPoolId contains invalid characters")
+		return
+	}
 	if req.ClientId == "" {
 		writeError(
 			w,
@@ -313,6 +337,11 @@ func (ro *Router) handleUpdateUserPoolClient(w http.ResponseWriter, body []byte)
 			ErrTypeInvalidParameterException,
 			"ClientId is required",
 		)
+		return
+	}
+	if !reClientID.MatchString(req.ClientId) {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"ClientId contains invalid characters")
 		return
 	}
 
@@ -395,6 +424,11 @@ func (ro *Router) handleDeleteUserPoolClient(w http.ResponseWriter, body []byte)
 		)
 		return
 	}
+	if !reUserPoolID.MatchString(req.UserPoolId) {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"UserPoolId contains invalid characters")
+		return
+	}
 	if req.ClientId == "" {
 		writeError(
 			w,
@@ -402,6 +436,11 @@ func (ro *Router) handleDeleteUserPoolClient(w http.ResponseWriter, body []byte)
 			ErrTypeInvalidParameterException,
 			"ClientId is required",
 		)
+		return
+	}
+	if !reClientID.MatchString(req.ClientId) {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"ClientId contains invalid characters")
 		return
 	}
 
@@ -446,6 +485,11 @@ func (ro *Router) handleListUserPoolClients(w http.ResponseWriter, body []byte) 
 			ErrTypeInvalidParameterException,
 			"UserPoolId is required",
 		)
+		return
+	}
+	if !reUserPoolID.MatchString(req.UserPoolId) {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"UserPoolId contains invalid characters")
 		return
 	}
 

@@ -255,6 +255,38 @@ func TestCreateUserPoolClient_InvalidClientSecretPattern(t *testing.T) {
 	assert.Equal(t, ErrTypeInvalidParameterException, resp.Type)
 }
 
+func TestCreateUserPoolClient_ExplicitDisableTokenRevocation(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "revoke-false-pool")
+
+	w := doOp(t, ro, "CreateUserPoolClient", fmt.Sprintf(`{
+		"UserPoolId": %q,
+		"ClientName": "app",
+		"EnableTokenRevocation": false
+	}`, poolID))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp struct {
+		UserPoolClient struct {
+			EnableTokenRevocation bool `json:"EnableTokenRevocation"`
+		} `json:"UserPoolClient"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.False(t, resp.UserPoolClient.EnableTokenRevocation)
+}
+
+func TestCreateUserPoolClient_InvalidUserPoolID(t *testing.T) {
+	ro := newTestRouter(t)
+	w := doOp(t, ro, "CreateUserPoolClient", `{
+		"UserPoolId": "../../etc/passwd",
+		"ClientName": "app"
+	}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	var resp errResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, ErrTypeInvalidParameterException, resp.Type)
+}
+
 func TestCreateUserPoolClient_InvalidBody(t *testing.T) {
 	ro := newTestRouter(t)
 	w := doOp(t, ro, "CreateUserPoolClient", `not-json`)
@@ -350,6 +382,31 @@ func TestDescribeUserPoolClient_MissingClientId(t *testing.T) {
 	w := doOp(t, ro, "DescribeUserPoolClient", fmt.Sprintf(`{"UserPoolId":%q}`, poolID))
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 
+	var resp errResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, ErrTypeInvalidParameterException, resp.Type)
+}
+
+func TestDescribeUserPoolClient_InvalidUserPoolID(t *testing.T) {
+	ro := newTestRouter(t)
+	w := doOp(t, ro, "DescribeUserPoolClient", `{
+		"UserPoolId": "../../etc/passwd",
+		"ClientId": "testclientid00000000000000"
+	}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	var resp errResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, ErrTypeInvalidParameterException, resp.Type)
+}
+
+func TestDescribeUserPoolClient_InvalidClientID(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "pool")
+	w := doOp(t, ro, "DescribeUserPoolClient", fmt.Sprintf(`{
+		"UserPoolId": %q,
+		"ClientId": "../../etc/passwd"
+	}`, poolID))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 	var resp errResponse
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
 	assert.Equal(t, ErrTypeInvalidParameterException, resp.Type)
@@ -476,6 +533,31 @@ func TestUpdateUserPoolClient_MissingClientId(t *testing.T) {
 	assert.Equal(t, ErrTypeInvalidParameterException, resp.Type)
 }
 
+func TestUpdateUserPoolClient_InvalidUserPoolID(t *testing.T) {
+	ro := newTestRouter(t)
+	w := doOp(t, ro, "UpdateUserPoolClient", `{
+		"UserPoolId": "../../etc/passwd",
+		"ClientId": "testclientid00000000000000"
+	}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	var resp errResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, ErrTypeInvalidParameterException, resp.Type)
+}
+
+func TestUpdateUserPoolClient_InvalidClientID(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "pool")
+	w := doOp(t, ro, "UpdateUserPoolClient", fmt.Sprintf(`{
+		"UserPoolId": %q,
+		"ClientId": "../../etc/passwd"
+	}`, poolID))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	var resp errResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, ErrTypeInvalidParameterException, resp.Type)
+}
+
 func TestUpdateUserPoolClient_InvalidClientName(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -557,6 +639,31 @@ func TestDeleteUserPoolClient_MissingClientId(t *testing.T) {
 	w := doOp(t, ro, "DeleteUserPoolClient", fmt.Sprintf(`{"UserPoolId":%q}`, poolID))
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 
+	var resp errResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, ErrTypeInvalidParameterException, resp.Type)
+}
+
+func TestDeleteUserPoolClient_InvalidUserPoolID(t *testing.T) {
+	ro := newTestRouter(t)
+	w := doOp(t, ro, "DeleteUserPoolClient", `{
+		"UserPoolId": "../../etc/passwd",
+		"ClientId": "testclientid00000000000000"
+	}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	var resp errResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, ErrTypeInvalidParameterException, resp.Type)
+}
+
+func TestDeleteUserPoolClient_InvalidClientID(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "pool")
+	w := doOp(t, ro, "DeleteUserPoolClient", fmt.Sprintf(`{
+		"UserPoolId": %q,
+		"ClientId": "../../etc/passwd"
+	}`, poolID))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 	var resp errResponse
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
 	assert.Equal(t, ErrTypeInvalidParameterException, resp.Type)
@@ -738,6 +845,15 @@ func TestListUserPoolClients_MissingPoolId(t *testing.T) {
 	assert.Equal(t, ErrTypeInvalidParameterException, resp.Type)
 }
 
+func TestListUserPoolClients_InvalidUserPoolID(t *testing.T) {
+	ro := newTestRouter(t)
+	w := doOp(t, ro, "ListUserPoolClients", `{"UserPoolId":"../../etc/passwd"}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	var resp errResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, ErrTypeInvalidParameterException, resp.Type)
+}
+
 func TestListUserPoolClients_InvalidBody(t *testing.T) {
 	ro := newTestRouter(t)
 	w := doOp(t, ro, "ListUserPoolClients", `not-json`)
@@ -777,19 +893,19 @@ func TestUserPoolClientStorageErrors(t *testing.T) {
 			name:  "DescribeUserPoolClient",
 			store: mockStore{getClientErr: storageErr},
 			op:    "DescribeUserPoolClient",
-			body:  `{"UserPoolId":"us-east-1_Test12345","ClientId":"testclientid0000000000000000"}`,
+			body:  `{"UserPoolId":"us-east-1_Test12345","ClientId":"testclientid00000000000000"}`,
 		},
 		{
 			name:  "UpdateUserPoolClient",
 			store: mockStore{updateClientErr: storageErr},
 			op:    "UpdateUserPoolClient",
-			body:  `{"UserPoolId":"us-east-1_Test12345","ClientId":"testclientid0000000000000000"}`,
+			body:  `{"UserPoolId":"us-east-1_Test12345","ClientId":"testclientid00000000000000"}`,
 		},
 		{
 			name:  "DeleteUserPoolClient",
 			store: mockStore{deleteClientErr: storageErr},
 			op:    "DeleteUserPoolClient",
-			body:  `{"UserPoolId":"us-east-1_Test12345","ClientId":"testclientid0000000000000000"}`,
+			body:  `{"UserPoolId":"us-east-1_Test12345","ClientId":"testclientid00000000000000"}`,
 		},
 		{
 			name:  "ListUserPoolClients",
