@@ -79,7 +79,12 @@ func (s *Storage) CreateUser(poolID string, user *UserMetadata) error {
 
 	idx := userIndexEntry{Username: user.Username, Sub: user.Sub}
 	if err := s.writeJSON(idxPath, idx); err != nil {
-		_ = s.removeFile(uPath) // best-effort rollback: remove orphaned user file
+		if rbErr := s.removeFile(uPath); rbErr != nil {
+			return errors.Join(
+				fmt.Errorf("write user index: %w", err),
+				fmt.Errorf("rollback: %w", rbErr),
+			)
+		}
 		return fmt.Errorf("write user index: %w", err)
 	}
 
