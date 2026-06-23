@@ -14,8 +14,9 @@ import (
 )
 
 const (
-	accessTokenExpiry = 3600
-	sessionExpiry     = 180
+	accessTokenExpiry  = 3600
+	sessionExpiry      = 180
+	cognitoClaimPrefix = "cognito:"
 )
 
 // issuerURL returns the AWS-format issuer URL for a user pool.
@@ -172,7 +173,7 @@ func issueTokens(
 		"exp": true, "iat": true, "jti": true,
 	}
 	for _, attr := range user.Attributes {
-		if !reservedClaims[attr.Name] {
+		if !reservedClaims[attr.Name] && !strings.HasPrefix(attr.Name, cognitoClaimPrefix) {
 			idClaims[attr.Name] = attr.Value
 		}
 	}

@@ -6,6 +6,7 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"testing"
 	"time"
@@ -199,7 +200,38 @@ func TestIssueTokens_ReservedClaimsNotOverridden(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "real-sub", idClaims["sub"], "sub must not be overridable")
 	assert.Equal(t, "id", idClaims["token_use"], "token_use must not be overridable")
+	assert.NotEqual(
+		t,
+		"9999999999",
+		fmt.Sprintf("%v", idClaims["exp"]),
+		"exp must not be overridable",
+	)
 	assert.Equal(t, "alice@example.com", idClaims["email"], "legitimate attribute must appear")
+}
+
+func TestIssueTokens_CognitoPrefixAttributesBlocked(t *testing.T) {
+	key, keyID := genTestKey(t)
+	user := &UserMetadata{
+		Username: "alice",
+		Sub:      "real-sub",
+		Attributes: []AttributeType{
+			// Attempt to inject cognito: namespace claims.
+			{Name: "cognito:groups", Value: "admin"},
+			{Name: "cognito:roles", Value: "arn:aws:iam::123:role/Admin"},
+			// A legitimate custom attribute must still appear.
+			{Name: "custom:plan", Value: "pro"},
+		},
+	}
+	_, id, _, err := issueTokens(key, keyID, "us-east-1_Pool1", "client-1", user)
+	require.NoError(t, err)
+
+	idClaims, err := verifyJWT(id, &key.PublicKey)
+	require.NoError(t, err)
+	_, hasGroups := idClaims["cognito:groups"]
+	assert.False(t, hasGroups, "cognito:groups must not be injectable via user attributes")
+	_, hasRoles := idClaims["cognito:roles"]
+	assert.False(t, hasRoles, "cognito:roles must not be injectable via user attributes")
+	assert.Equal(t, "pro", idClaims["custom:plan"], "custom: attribute must appear")
 }
 
 func TestIssueTokens_AccessTokenBuildFails(t *testing.T) {
