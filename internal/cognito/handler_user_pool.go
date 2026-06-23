@@ -428,6 +428,55 @@ func applyPoolUpdate(meta *UserPoolMetadata, req *updateUserPoolRequest) {
 	}
 }
 
+func (ro *Router) handleGetUserPoolMfaConfig(w http.ResponseWriter, body []byte) {
+	var req struct {
+		UserPoolId string `json:"UserPoolId"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"invalid request body",
+		)
+		return
+	}
+	if req.UserPoolId == "" {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"UserPoolId is required",
+		)
+		return
+	}
+
+	meta, err := ro.storage.GetUserPool(req.UserPoolId)
+	if err != nil {
+		if errors.Is(err, errUserPoolNotFound) {
+			writeError(
+				w,
+				http.StatusBadRequest,
+				ErrTypeResourceNotFoundException,
+				"User pool not found.",
+			)
+			return
+		}
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			ErrTypeInternalErrorException,
+			"failed to get user pool",
+		)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"MfaConfiguration":              meta.MfaConfiguration,
+		"SoftwareTokenMfaConfiguration": map[string]any{"Enabled": false},
+	})
+}
+
 func (ro *Router) handleDeleteUserPool(w http.ResponseWriter, body []byte) {
 	var req struct {
 		UserPoolId string `json:"UserPoolId"`

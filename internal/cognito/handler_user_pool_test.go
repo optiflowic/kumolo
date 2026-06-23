@@ -613,3 +613,49 @@ func TestStorageErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestGetUserPoolMfaConfig_Success(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "mfa-pool")
+
+	w := doOp(t, ro, "GetUserPoolMfaConfig", fmt.Sprintf(`{"UserPoolId":%q}`, poolID))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp struct {
+		MfaConfiguration              string `json:"MfaConfiguration"`
+		SoftwareTokenMfaConfiguration struct {
+			Enabled bool `json:"Enabled"`
+		} `json:"SoftwareTokenMfaConfiguration"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, "OFF", resp.MfaConfiguration)
+	assert.False(t, resp.SoftwareTokenMfaConfiguration.Enabled)
+}
+
+func TestGetUserPoolMfaConfig_NotFound(t *testing.T) {
+	ro := newTestRouter(t)
+	w := doOp(t, ro, "GetUserPoolMfaConfig", `{"UserPoolId":"us-east-1_notexist"}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	var resp errResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, ErrTypeResourceNotFoundException, resp.Type)
+}
+
+func TestGetUserPoolMfaConfig_MissingID(t *testing.T) {
+	ro := newTestRouter(t)
+	w := doOp(t, ro, "GetUserPoolMfaConfig", `{}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	var resp errResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, ErrTypeInvalidParameterException, resp.Type)
+}
+
+func TestGetUserPoolMfaConfig_StorageError(t *testing.T) {
+	store := mockStore{getErr: errors.New("storage error")}
+	ro := &Router{storage: &store}
+	w := doOp(t, ro, "GetUserPoolMfaConfig", `{"UserPoolId":"us-east-1_Test12345"}`)
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	var resp errResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, ErrTypeInternalErrorException, resp.Type)
+}
