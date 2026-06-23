@@ -218,6 +218,43 @@ func TestCreateUserPoolClient_InvalidClientName(t *testing.T) {
 	}
 }
 
+func TestCreateUserPoolClient_InvalidClientSecretLength(t *testing.T) {
+	tests := []struct {
+		name   string
+		secret string
+	}{
+		{"too short", strings.Repeat("a", 23)},
+		{"too long", strings.Repeat("a", 65)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ro := newTestRouter(t)
+			poolID := createPool(t, ro, "pool")
+			w := doOp(t, ro, "CreateUserPoolClient", fmt.Sprintf(
+				`{"UserPoolId":%q,"ClientName":"app","ClientSecret":%q}`, poolID, tt.secret,
+			))
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			var resp errResponse
+			require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+			assert.Equal(t, ErrTypeInvalidParameterException, resp.Type)
+		})
+	}
+}
+
+func TestCreateUserPoolClient_InvalidClientSecretPattern(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "pool")
+	// secret with invalid characters (spaces are not in [\w+]+)
+	secret := "invalid secret with spaces!!!"
+	w := doOp(t, ro, "CreateUserPoolClient", fmt.Sprintf(
+		`{"UserPoolId":%q,"ClientName":"app","ClientSecret":%q}`, poolID, secret,
+	))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	var resp errResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, ErrTypeInvalidParameterException, resp.Type)
+}
+
 func TestCreateUserPoolClient_InvalidBody(t *testing.T) {
 	ro := newTestRouter(t)
 	w := doOp(t, ro, "CreateUserPoolClient", `not-json`)
@@ -437,6 +474,30 @@ func TestUpdateUserPoolClient_MissingClientId(t *testing.T) {
 	var resp errResponse
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
 	assert.Equal(t, ErrTypeInvalidParameterException, resp.Type)
+}
+
+func TestUpdateUserPoolClient_InvalidClientName(t *testing.T) {
+	tests := []struct {
+		name       string
+		clientName string
+	}{
+		{"invalid chars", "app!@#"},
+		{"too long", strings.Repeat("a", 129)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ro := newTestRouter(t)
+			poolID := createPool(t, ro, "pool")
+			clientID := createClient(t, ro, poolID, "original-name")
+			w := doOp(t, ro, "UpdateUserPoolClient", fmt.Sprintf(
+				`{"UserPoolId":%q,"ClientId":%q,"ClientName":%q}`, poolID, clientID, tt.clientName,
+			))
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			var resp errResponse
+			require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+			assert.Equal(t, ErrTypeInvalidParameterException, resp.Type)
+		})
+	}
 }
 
 func TestUpdateUserPoolClient_InvalidBody(t *testing.T) {

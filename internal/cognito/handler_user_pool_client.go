@@ -17,6 +17,7 @@ const (
 )
 
 var reClientName = regexp.MustCompile(`^[\w\s+=,.@-]{1,128}$`)
+var reClientSecret = regexp.MustCompile(`^[\w+]+$`)
 
 func generateClientID() (string, error) {
 	const n = len(clientIDChars)
@@ -154,6 +155,18 @@ func (ro *Router) handleCreateUserPoolClient(w http.ResponseWriter, body []byte)
 		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
 			"Cannot specify both GenerateSecret and ClientSecret")
 		return
+	}
+	if !req.GenerateSecret && req.ClientSecret != "" {
+		if len(req.ClientSecret) < 24 || len(req.ClientSecret) > 64 {
+			writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+				"ClientSecret length must be between 24 and 64 characters")
+			return
+		}
+		if !reClientSecret.MatchString(req.ClientSecret) {
+			writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+				`ClientSecret must match pattern [\w+]+`)
+			return
+		}
 	}
 
 	clientID, err := generateClientID()
@@ -303,11 +316,19 @@ func (ro *Router) handleUpdateUserPoolClient(w http.ResponseWriter, body []byte)
 		return
 	}
 
+	if req.ClientName != "" && !reClientName.MatchString(req.ClientName) {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"ClientName must be 1-128 characters and match pattern [\\w\\s+=,.@-]+")
+		return
+	}
+
 	var updated *UserPoolClientMetadata
 	err := ro.storage.UpdateUserPoolClient(req.UserPoolId, req.ClientId,
 		func(meta *UserPoolClientMetadata) error {
 			// Preserve immutable fields; replace all others with request values.
-			meta.ClientName = req.ClientName
+			if req.ClientName != "" {
+				meta.ClientName = req.ClientName
+			}
 			meta.RefreshTokenValidity = req.RefreshTokenValidity
 			meta.AccessTokenValidity = req.AccessTokenValidity
 			meta.IdTokenValidity = req.IdTokenValidity
