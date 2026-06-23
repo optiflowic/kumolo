@@ -476,8 +476,14 @@ func TestStorage_ListUserPoolClients_ReadError(t *testing.T) {
 		ClientID:   "testclientid0000000000000000",
 		ClientName: "app",
 	}))
-	storage.readAll = func(io.Reader) ([]byte, error) {
-		return nil, errors.New("read error")
+	realReadAll := storage.readAll
+	calls := 0
+	storage.readAll = func(r io.Reader) ([]byte, error) {
+		calls++
+		if calls == 1 {
+			return realReadAll(r) // pool metadata read: success
+		}
+		return nil, errors.New("read error") // client file read: fail
 	}
 	_, _, err = storage.ListUserPoolClients("us-east-1_Test12345", 10, "")
 	require.Error(t, err)
