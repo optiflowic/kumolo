@@ -6,6 +6,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -55,4 +56,30 @@ func TestCreateUserPoolClient_WriteClientIndexError_RollsBackClientFile(t *testi
 		ClientName: "test",
 	})
 	require.NoError(t, err)
+}
+
+func TestCreateUserPoolClient_WriteClientIndexError_RollbackDeleteFails(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+
+	realOpenFile := s.openFile
+	calls := 0
+	s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+		calls++
+		if calls == 1 {
+			return realOpenFile(name, flag, perm)
+		}
+		return nil, errors.New("disk full on index write")
+	}
+	s.removeFile = func(string) error {
+		return errors.New("disk full on rollback delete")
+	}
+	err := s.CreateUserPoolClient(&UserPoolClientMetadata{
+		UserPoolID: poolID,
+		ClientID:   "client-rollback-fail",
+		ClientName: "test",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "write client index")
+	assert.Contains(t, err.Error(), "rollback")
 }

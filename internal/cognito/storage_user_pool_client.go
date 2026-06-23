@@ -60,7 +60,12 @@ func (s *Storage) CreateUserPoolClient(meta *UserPoolClientMetadata) error {
 		return err
 	}
 	if err := s.writeClientIndexLocked(meta.UserPoolID, meta.ClientID); err != nil {
-		_ = s.removeFile(clientPath) // best-effort rollback: remove orphaned client file
+		if rbErr := s.removeFile(clientPath); rbErr != nil {
+			return errors.Join(
+				fmt.Errorf("write client index: %w", err),
+				fmt.Errorf("rollback: %w", rbErr),
+			)
+		}
 		return fmt.Errorf("write client index: %w", err)
 	}
 	return nil
