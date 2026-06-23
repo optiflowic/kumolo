@@ -416,6 +416,7 @@ func TestStorage_UpdateUserPoolClient_FnError(t *testing.T) {
 		},
 	)
 	require.Error(t, err)
+	assert.Contains(t, err.Error(), "fn error")
 }
 
 func TestStorage_DeleteUserPoolClient_RemoveError(t *testing.T) {
@@ -461,6 +462,7 @@ func TestStorage_ListUserPoolClients_ListDirError(t *testing.T) {
 	}
 	_, _, err = storage.ListUserPoolClients("us-east-1_Test12345", 10, "")
 	require.Error(t, err)
+	assert.Contains(t, err.Error(), "permission denied")
 }
 
 func TestStorage_ListUserPoolClients_ReadError(t *testing.T) {
@@ -487,6 +489,7 @@ func TestStorage_ListUserPoolClients_ReadError(t *testing.T) {
 	}
 	_, _, err = storage.ListUserPoolClients("us-east-1_Test12345", 10, "")
 	require.Error(t, err)
+	assert.Contains(t, err.Error(), "read user pool client")
 }
 
 func TestStorage_deleteClientsDirLocked_ListDirError(t *testing.T) {
@@ -511,6 +514,7 @@ func TestStorage_deleteClientsDirLocked_ListDirError(t *testing.T) {
 	}
 	err = storage.DeleteUserPool("us-east-1_Test12345")
 	require.Error(t, err)
+	assert.Contains(t, err.Error(), "delete clients dir")
 }
 
 func TestStorage_deleteClientsDirLocked_RemoveClientFileError(t *testing.T) {
@@ -531,6 +535,7 @@ func TestStorage_deleteClientsDirLocked_RemoveClientFileError(t *testing.T) {
 	}
 	err = storage.DeleteUserPool("us-east-1_Test12345")
 	require.Error(t, err)
+	assert.Contains(t, err.Error(), "delete clients dir")
 }
 
 func TestStorage_deleteClientsDirLocked_RemoveDirError(t *testing.T) {
@@ -557,6 +562,7 @@ func TestStorage_deleteClientsDirLocked_RemoveDirError(t *testing.T) {
 	}
 	err = storage.DeleteUserPool("us-east-1_Test12345")
 	require.Error(t, err)
+	assert.Contains(t, err.Error(), "delete clients dir")
 }
 
 func TestStorage_DeleteUserPool_StatError(t *testing.T) {

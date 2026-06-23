@@ -113,6 +113,10 @@ func (s *Storage) ListUserPoolClients(
 	maxResults int,
 	nextToken string,
 ) ([]*UserPoolClientMetadata, string, error) {
+	if maxResults <= 0 {
+		return nil, "", fmt.Errorf("maxResults must be positive, got %d", maxResults)
+	}
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
