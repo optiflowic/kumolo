@@ -121,31 +121,50 @@ func derefBool(p *bool, def bool) bool {
 	return *p
 }
 
-func (ro *Router) handleCreateUserPoolClient(w http.ResponseWriter, body []byte) {
-	var req createUserPoolClientRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"invalid request body",
-		)
-		return
-	}
-	if req.UserPoolId == "" {
+// validatePoolID writes a 400 error and returns false if poolID fails validation.
+func validatePoolID(w http.ResponseWriter, poolID string) bool {
+	if poolID == "" {
 		writeError(
 			w,
 			http.StatusBadRequest,
 			ErrTypeInvalidParameterException,
 			"UserPoolId is required",
 		)
-		return
+		return false
 	}
-	if !reUserPoolID.MatchString(req.UserPoolId) {
+	if !reUserPoolID.MatchString(poolID) {
 		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
 			"UserPoolId contains invalid characters")
-		return
+		return false
 	}
+	return true
+}
+
+// validateClientID writes a 400 error and returns false if clientID fails validation.
+func validateClientID(w http.ResponseWriter, clientID string) bool {
+	if clientID == "" {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"ClientId is required",
+		)
+		return false
+	}
+	if !reClientID.MatchString(clientID) {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"ClientId contains invalid characters")
+		return false
+	}
+	return true
+}
+
+// validateCreateUserPoolClientRequest validates create-specific fields.
+// Returns false after writing a 400 error if any field is invalid.
+func validateCreateUserPoolClientRequest(
+	w http.ResponseWriter,
+	req *createUserPoolClientRequest,
+) bool {
 	if req.ClientName == "" {
 		writeError(
 			w,
@@ -153,54 +172,40 @@ func (ro *Router) handleCreateUserPoolClient(w http.ResponseWriter, body []byte)
 			ErrTypeInvalidParameterException,
 			"ClientName is required",
 		)
-		return
+		return false
 	}
 	if !reClientName.MatchString(req.ClientName) {
 		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
 			"ClientName must be 1-128 characters and match pattern [\\w\\s+=,.@-]+")
-		return
+		return false
 	}
 	if req.GenerateSecret && req.ClientSecret != "" {
 		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
 			"Cannot specify both GenerateSecret and ClientSecret")
-		return
+		return false
 	}
 	if !req.GenerateSecret && req.ClientSecret != "" {
 		if len(req.ClientSecret) < 24 || len(req.ClientSecret) > 64 {
 			writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
 				"ClientSecret length must be between 24 and 64 characters")
-			return
+			return false
 		}
 		if !reClientSecret.MatchString(req.ClientSecret) {
 			writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
 				`ClientSecret must match pattern [\w+]+`)
-			return
+			return false
 		}
 	}
+	return true
+}
 
-	clientID, err := generateClientID()
-	if err != nil {
-		// untestable: crypto/rand.Read only fails on OS-level entropy source errors
-		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
-			"failed to generate client ID")
-		return
-	}
-
-	var secret string
-	if req.GenerateSecret {
-		secret, err = generateClientSecret()
-		if err != nil {
-			// untestable: crypto/rand.Read only fails on OS-level entropy source errors
-			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
-				"failed to generate client secret")
-			return
-		}
-	} else {
-		secret = req.ClientSecret
-	}
-
+// buildUserPoolClientMeta constructs UserPoolClientMetadata from a create request.
+func buildUserPoolClientMeta(
+	req *createUserPoolClientRequest,
+	clientID, secret string,
+) *UserPoolClientMetadata {
 	ts := nowUnix()
-	meta := &UserPoolClientMetadata{
+	return &UserPoolClientMetadata{
 		UserPoolID:           req.UserPoolId,
 		ClientID:             clientID,
 		ClientName:           req.ClientName,
@@ -234,11 +239,56 @@ func (ro *Router) handleCreateUserPoolClient(w http.ResponseWriter, body []byte)
 		AnalyticsConfiguration: req.AnalyticsConfiguration,
 		RefreshTokenRotation:   req.RefreshTokenRotation,
 	}
+}
 
+func (ro *Router) handleCreateUserPoolClient(w http.ResponseWriter, body []byte) {
+	var req createUserPoolClientRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"invalid request body",
+		)
+		return
+	}
+	if !validatePoolID(w, req.UserPoolId) {
+		return
+	}
+	if !validateCreateUserPoolClientRequest(w, &req) {
+		return
+	}
+
+	clientID, err := generateClientID()
+	if err != nil {
+		// untestable: crypto/rand.Read only fails on OS-level entropy source errors
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to generate client ID")
+		return
+	}
+
+	var secret string
+	if req.GenerateSecret {
+		secret, err = generateClientSecret()
+		if err != nil {
+			// untestable: crypto/rand.Read only fails on OS-level entropy source errors
+			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+				"failed to generate client secret")
+			return
+		}
+	} else {
+		secret = req.ClientSecret
+	}
+
+	meta := buildUserPoolClientMeta(&req, clientID, secret)
 	if err := ro.storage.CreateUserPoolClient(meta); err != nil {
 		if errors.Is(err, errUserPoolNotFound) {
-			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException,
-				"User pool not found.")
+			writeError(
+				w,
+				http.StatusBadRequest,
+				ErrTypeResourceNotFoundException,
+				"User pool not found.",
+			)
 			return
 		}
 		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
@@ -262,32 +312,10 @@ func (ro *Router) handleDescribeUserPoolClient(w http.ResponseWriter, body []byt
 		)
 		return
 	}
-	if req.UserPoolId == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"UserPoolId is required",
-		)
+	if !validatePoolID(w, req.UserPoolId) {
 		return
 	}
-	if !reUserPoolID.MatchString(req.UserPoolId) {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-			"UserPoolId contains invalid characters")
-		return
-	}
-	if req.ClientId == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"ClientId is required",
-		)
-		return
-	}
-	if !reClientID.MatchString(req.ClientId) {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-			"ClientId contains invalid characters")
+	if !validateClientID(w, req.ClientId) {
 		return
 	}
 
@@ -316,35 +344,12 @@ func (ro *Router) handleUpdateUserPoolClient(w http.ResponseWriter, body []byte)
 		)
 		return
 	}
-	if req.UserPoolId == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"UserPoolId is required",
-		)
+	if !validatePoolID(w, req.UserPoolId) {
 		return
 	}
-	if !reUserPoolID.MatchString(req.UserPoolId) {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-			"UserPoolId contains invalid characters")
+	if !validateClientID(w, req.ClientId) {
 		return
 	}
-	if req.ClientId == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"ClientId is required",
-		)
-		return
-	}
-	if !reClientID.MatchString(req.ClientId) {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-			"ClientId contains invalid characters")
-		return
-	}
-
 	if req.ClientName != "" && !reClientName.MatchString(req.ClientName) {
 		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
 			"ClientName must be 1-128 characters and match pattern [\\w\\s+=,.@-]+")
@@ -415,32 +420,10 @@ func (ro *Router) handleDeleteUserPoolClient(w http.ResponseWriter, body []byte)
 		)
 		return
 	}
-	if req.UserPoolId == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"UserPoolId is required",
-		)
+	if !validatePoolID(w, req.UserPoolId) {
 		return
 	}
-	if !reUserPoolID.MatchString(req.UserPoolId) {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-			"UserPoolId contains invalid characters")
-		return
-	}
-	if req.ClientId == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"ClientId is required",
-		)
-		return
-	}
-	if !reClientID.MatchString(req.ClientId) {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-			"ClientId contains invalid characters")
+	if !validateClientID(w, req.ClientId) {
 		return
 	}
 
@@ -478,18 +461,7 @@ func (ro *Router) handleListUserPoolClients(w http.ResponseWriter, body []byte) 
 		)
 		return
 	}
-	if req.UserPoolId == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"UserPoolId is required",
-		)
-		return
-	}
-	if !reUserPoolID.MatchString(req.UserPoolId) {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-			"UserPoolId contains invalid characters")
+	if !validatePoolID(w, req.UserPoolId) {
 		return
 	}
 
@@ -510,8 +482,12 @@ func (ro *Router) handleListUserPoolClients(w http.ResponseWriter, body []byte) 
 	)
 	if err != nil {
 		if errors.Is(err, errUserPoolNotFound) {
-			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException,
-				"User pool not found.")
+			writeError(
+				w,
+				http.StatusBadRequest,
+				ErrTypeResourceNotFoundException,
+				"User pool not found.",
+			)
 			return
 		}
 		if errors.Is(err, errInvalidNextToken) {
