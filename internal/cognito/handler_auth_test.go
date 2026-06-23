@@ -5,6 +5,7 @@ import (
 	"crypto/rsa"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -1188,4 +1189,27 @@ func TestRespondToAuthChallenge_UserAlreadyConfirmed(t *testing.T) {
 	w := doOp(t, ro, "RespondToAuthChallenge", string(body))
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assertErrType(t, w, ErrTypeNotAuthorizedException)
+}
+
+// ── generateConfirmationCodeFrom ──────────────────────────────────────────────
+
+type errorReader struct{ err error }
+
+func (r *errorReader) Read([]byte) (int, error) { return 0, r.err }
+
+var _ io.Reader = (*errorReader)(nil)
+
+func TestGenerateConfirmationCodeFrom_EntropyError(t *testing.T) {
+	wantErr := errors.New("entropy source failed")
+	_, err := generateConfirmationCodeFrom(&errorReader{err: wantErr})
+	require.ErrorIs(t, err, wantErr)
+}
+
+func TestGenerateConfirmationCodeFrom_ValidRange(t *testing.T) {
+	code, err := generateConfirmationCodeFrom(rand.Reader)
+	require.NoError(t, err)
+	require.Len(t, code, 6)
+	for _, ch := range code {
+		require.True(t, ch >= '0' && ch <= '9', "expected digit, got %q", ch)
+	}
 }

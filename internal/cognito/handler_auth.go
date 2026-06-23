@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -25,9 +26,12 @@ const (
 // generateConfirmationCode returns a random 6-digit numeric string, matching
 // the format AWS Cognito sends via email/SMS during sign-up verification.
 func generateConfirmationCode() (string, error) {
+	return generateConfirmationCodeFrom(rand.Reader)
+}
+
+func generateConfirmationCodeFrom(r io.Reader) (string, error) {
 	var b [4]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		// untestable: crypto/rand.Read never errors in Go 1.20+
+	if _, err := io.ReadFull(r, b[:]); err != nil {
 		return "", fmt.Errorf("read entropy: %w", err)
 	}
 	n := binary.BigEndian.Uint32(b[:]) % 1_000_000
