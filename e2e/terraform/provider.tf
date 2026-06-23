@@ -22,9 +22,10 @@ provider "aws" {
   s3_use_path_style = true
 
   endpoints {
-    s3       = var.kumolo_endpoint
-    dynamodb = var.kumolo_endpoint
-    sts      = var.kumolo_endpoint
-    kms      = var.kumolo_endpoint
+    s3         = var.kumolo_endpoint
+    dynamodb   = var.kumolo_endpoint
+    sts        = var.kumolo_endpoint
+    kms        = var.kumolo_endpoint
+    cognitoidp = var.kumolo_endpoint
   }
 }

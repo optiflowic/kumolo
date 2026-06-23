@@ -9,6 +9,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
+	awscognito "github.com/aws/aws-sdk-go-v2/service/cognitoidentityprovider"
 	awsdynamodb "github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	awsstreams "github.com/aws/aws-sdk-go-v2/service/dynamodbstreams"
 	awskms "github.com/aws/aws-sdk-go-v2/service/kms"
@@ -25,6 +26,7 @@ type testClients struct {
 	streams *awsstreams.Client
 	sts     *awssts.Client
 	kms     *awskms.Client
+	cognito *awscognito.Client
 }
 
 // apiErrorCode extracts the AWS error code from an SDK error.
@@ -67,5 +69,6 @@ func newTestClients(t *testing.T) testClients {
 		streams: awsstreams.NewFromConfig(cfg),
 		sts:     awssts.NewFromConfig(cfg),
 		kms:     awskms.NewFromConfig(cfg),
+		cognito: awscognito.NewFromConfig(cfg),
 	}
 }
