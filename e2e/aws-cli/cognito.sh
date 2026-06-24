@@ -24,9 +24,6 @@ run() {
   fi
 }
 
-# Extract a JSON field value from command output.
-jget() { python3 -c "import sys,json; print(json.load(sys.stdin)$1)" 2>/dev/null; }
-
 echo "=== Cognito ==="
 
 # ---------------------------------------------------------------------------
