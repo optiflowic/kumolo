@@ -45,14 +45,14 @@ Last verified: 2026-06-23
 ## Behavior
 
 - User is created in `UNCONFIRMED` state and must call ConfirmSignUp to activate.
-- kumolo does not deliver email/SMS. The confirmation code is always `"123456"` (kumolo deviation).
+- kumolo does not deliver email/SMS. A random 6-digit confirmation code is generated per SignUp call and logged at INFO level (`pool_id`, `username`, `code`) so developers can retrieve it from server logs.
 - `CodeDeliveryDetails.Destination` is masked: for email, the full email value is stored but masked as `"***"` in the response.
 - Password is hashed with bcrypt (cost 10).
 - A UUID sub is generated and returned as `UserSub`.
 
 ## kumolo Deviations
 
-- Confirmation code is always `"123456"` — no email/SMS delivery.
+- Confirmation code is a random 6-digit number logged at INFO level on the server — no email/SMS delivery.
 - SecretHash, ValidationData, ClientMetadata, AnalyticsMetadata, UserContextData are accepted but ignored.
 - No password policy enforcement beyond minimum length (8 chars).
 - Usernames are treated as case-insensitive: `"Alice"` and `"alice"` map to the same user. On real AWS the default pool configuration is case-sensitive.
