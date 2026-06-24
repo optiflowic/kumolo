@@ -659,3 +659,12 @@ func TestGetUserPoolMfaConfig_StorageError(t *testing.T) {
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
 	assert.Equal(t, ErrTypeInternalErrorException, resp.Type)
 }
+
+func TestGetUserPoolMfaConfig_InvalidBody(t *testing.T) {
+	ro := newTestRouter(t)
+	w := doOp(t, ro, "GetUserPoolMfaConfig", `not-json`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	var resp errResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, ErrTypeInvalidParameterException, resp.Type)
+}
