@@ -12,61 +12,52 @@ import (
 
 // ── DeleteUserPool error paths ────────────────────────────────────────────────
 
-func TestDeleteUserPool_DeleteUsersError(t *testing.T) {
-	s := newTestStorage(t)
-	poolID := setupStoragePool(t, s)
-
-	storageErr := errors.New("disk error")
-	realListDir := s.listDirFn
-	usersDir := filepath.Join("pools", poolID, "users")
-	s.listDirFn = func(name string) ([]os.DirEntry, error) {
-		if name == usersDir {
-			return nil, storageErr
-		}
-		return realListDir(name)
+func TestDeleteUserPool_DirErrors(t *testing.T) {
+	tests := []struct {
+		subdir string
+		errMsg string
+	}{
+		{"clients", "delete clients dir"},
+		{"users", "delete users dir"},
+		{"user_index", "delete user_index dir"},
+		{"refresh_tokens", "delete refresh_tokens dir"},
 	}
-
-	err := s.DeleteUserPool(poolID)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "delete users dir")
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.subdir, func(t *testing.T) {
+			s := newTestStorage(t)
+			poolID := setupStoragePool(t, s)
+			storageErr := errors.New("disk error")
+			realListDir := s.listDirFn
+			target := filepath.Join("pools", poolID, tc.subdir)
+			s.listDirFn = func(name string) ([]os.DirEntry, error) {
+				if name == target {
+					return nil, storageErr
+				}
+				return realListDir(name)
+			}
+			err := s.DeleteUserPool(poolID)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.errMsg)
+		})
+	}
 }
 
-func TestDeleteUserPool_DeleteUserIndexError(t *testing.T) {
+func TestDeleteUserPool_RemoveKeysJSONError(t *testing.T) {
 	s := newTestStorage(t)
 	poolID := setupStoragePool(t, s)
-
-	storageErr := errors.New("disk error")
-	realListDir := s.listDirFn
-	userIndexDir := filepath.Join("pools", poolID, "user_index")
-	s.listDirFn = func(name string) ([]os.DirEntry, error) {
-		if name == userIndexDir {
-			return nil, storageErr
+	storageErr := errors.New("permission denied")
+	realRemoveFile := s.removeFile
+	keysPath := filepath.Join("pools", poolID, "keys.json")
+	s.removeFile = func(name string) error {
+		if name == keysPath {
+			return storageErr
 		}
-		return realListDir(name)
+		return realRemoveFile(name)
 	}
-
 	err := s.DeleteUserPool(poolID)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "delete user_index dir")
-}
-
-func TestDeleteUserPool_DeleteRefreshTokensError(t *testing.T) {
-	s := newTestStorage(t)
-	poolID := setupStoragePool(t, s)
-
-	storageErr := errors.New("disk error")
-	realListDir := s.listDirFn
-	rtDir := filepath.Join("pools", poolID, "refresh_tokens")
-	s.listDirFn = func(name string) ([]os.DirEntry, error) {
-		if name == rtDir {
-			return nil, storageErr
-		}
-		return realListDir(name)
-	}
-
-	err := s.DeleteUserPool(poolID)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "delete refresh_tokens dir")
+	assert.Contains(t, err.Error(), "remove keys.json")
 }
 
 func TestDeleteUserPool_RemovePoolDirError(t *testing.T) {
