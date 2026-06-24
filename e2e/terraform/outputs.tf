@@ -52,3 +52,15 @@ output "kms_alias" {
 output "kms_disabled_key_id" {
   value = aws_kms_key.disabled.key_id
 }
+
+output "cognito_user_pool_id" {
+  value = aws_cognito_user_pool.main.id
+}
+
+output "cognito_user_pool_arn" {
+  value = aws_cognito_user_pool.main.arn
+}
+
+output "cognito_user_pool_client_id" {
+  value = aws_cognito_user_pool_client.main.id
+}

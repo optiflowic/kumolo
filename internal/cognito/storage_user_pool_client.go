@@ -197,6 +197,10 @@ func (s *Storage) deleteClientsDirLocked(poolID string) error {
 		return err
 	}
 	for _, e := range entries {
+		clientID := strings.TrimSuffix(e.Name(), ".json")
+		if err := s.deleteClientIndexLocked(clientID); err != nil {
+			return err
+		}
 		if err := s.removeFile(filepath.Join(clientsDir, e.Name())); err != nil &&
 			!errors.Is(err, os.ErrNotExist) {
 			return err

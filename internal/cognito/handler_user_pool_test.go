@@ -613,3 +613,73 @@ func TestStorageErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestGetUserPoolMfaConfig_Success(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "mfa-pool")
+
+	w := doOp(t, ro, "GetUserPoolMfaConfig", fmt.Sprintf(`{"UserPoolId":%q}`, poolID))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp struct {
+		MfaConfiguration              string `json:"MfaConfiguration"`
+		SoftwareTokenMfaConfiguration struct {
+			Enabled bool `json:"Enabled"`
+		} `json:"SoftwareTokenMfaConfiguration"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, "OFF", resp.MfaConfiguration)
+	assert.False(t, resp.SoftwareTokenMfaConfiguration.Enabled)
+}
+
+func TestGetUserPoolMfaConfig_Errors(t *testing.T) {
+	tests := []struct {
+		name       string
+		router     func(t *testing.T) *Router
+		body       string
+		wantStatus int
+		wantType   string
+	}{
+		{
+			name:       "not_found",
+			router:     func(t *testing.T) *Router { return newTestRouter(t) },
+			body:       `{"UserPoolId":"us-east-1_notexist"}`,
+			wantStatus: http.StatusBadRequest,
+			wantType:   ErrTypeResourceNotFoundException,
+		},
+		{
+			name:       "missing_id",
+			router:     func(t *testing.T) *Router { return newTestRouter(t) },
+			body:       `{}`,
+			wantStatus: http.StatusBadRequest,
+			wantType:   ErrTypeInvalidParameterException,
+		},
+		{
+			name: "storage_error",
+			router: func(t *testing.T) *Router {
+				return &Router{storage: &mockStore{getErr: errors.New("storage error")}}
+			},
+			body:       `{"UserPoolId":"us-east-1_Test12345"}`,
+			wantStatus: http.StatusInternalServerError,
+			wantType:   ErrTypeInternalErrorException,
+		},
+		{
+			name:       "invalid_body",
+			router:     func(t *testing.T) *Router { return newTestRouter(t) },
+			body:       `not-json`,
+			wantStatus: http.StatusBadRequest,
+			wantType:   ErrTypeInvalidParameterException,
+		},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			ro := tc.router(t)
+			w := doOp(t, ro, "GetUserPoolMfaConfig", tc.body)
+			assert.Equal(t, tc.wantStatus, w.Code)
+			var resp errResponse
+			require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+			assert.Equal(t, tc.wantType, resp.Type)
+		})
+	}
+}

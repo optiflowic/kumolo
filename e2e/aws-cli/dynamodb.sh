@@ -118,7 +118,7 @@ else
 fi
 
 # Tag key > 128 characters → ValidationException.
-LONG_KEY=$(python3 -c "print('k' * 129)" 2>/dev/null || printf 'k%.0s' {1..129})
+LONG_KEY=$(printf 'k%.0s' {1..129})
 LONG_KEY_ERR=$($AWS tag-resource \
   --resource-arn "$TABLE_ARN" \
   --tags "Key=$LONG_KEY,Value=v" 2>&1 || true)
@@ -129,7 +129,7 @@ else
 fi
 
 # Tag value > 256 characters → ValidationException.
-LONG_VAL=$(python3 -c "print('v' * 257)" 2>/dev/null || printf 'v%.0s' {1..257})
+LONG_VAL=$(printf 'v%.0s' {1..257})
 LONG_VAL_ERR=$($AWS tag-resource \
   --resource-arn "$TABLE_ARN" \
   --tags "Key=ok-key,Value=$LONG_VAL" 2>&1 || true)

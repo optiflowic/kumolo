@@ -48,7 +48,7 @@
         devShells = {
           # Local development shell — includes Terraform and AWS CLI for e2e tests.
           default = pkgsWithUnfree.mkShell {
-            packages = commonPackages ++ [ pkgsWithUnfree.terraform pkgs.awscli2 ];
+            packages = commonPackages ++ [ pkgsWithUnfree.terraform pkgs.awscli2 pkgs.jq ];
             shellHook = ''
               unset GOROOT
               echo "kumolo dev env: $(go version)"

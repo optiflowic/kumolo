@@ -128,7 +128,6 @@ func (ro *Router) handleSignUp(w http.ResponseWriter, body []byte) {
 			"failed to generate confirmation code")
 		return
 	}
-	slog.Info("SignUp confirmation code", "pool_id", poolID, "username", req.Username, "code", code)
 
 	var passwordHash string
 	if req.Password != "" {
@@ -164,6 +163,7 @@ func (ro *Router) handleSignUp(w http.ResponseWriter, body []byte) {
 			"failed to create user")
 		return
 	}
+	slog.Info("SignUp confirmation code", "pool_id", poolID, "username", req.Username, "code", code)
 
 	dest := "***"
 	for _, attr := range req.UserAttributes {
