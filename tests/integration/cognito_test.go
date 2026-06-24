@@ -151,6 +151,35 @@ func TestCognitoIntegration_UserPool(t *testing.T) {
 		assert.Equal(t, "ResourceNotFoundException", apiErrorCode(err))
 	})
 
+	t.Run("GetUserPoolMfaConfig", func(t *testing.T) {
+		created, err := c.CreateUserPool(ctx, &awscognito.CreateUserPoolInput{
+			PoolName: aws.String("mfa-config-pool"),
+		})
+		require.NoError(t, err)
+		poolID := aws.ToString(created.UserPool.Id)
+
+		out, err := c.GetUserPoolMfaConfig(ctx, &awscognito.GetUserPoolMfaConfigInput{
+			UserPoolId: aws.String(poolID),
+		})
+		require.NoError(t, err)
+		require.NotNil(t, out)
+		assert.Equal(t, types.UserPoolMfaTypeOff, out.MfaConfiguration)
+		require.NotNil(t, out.SoftwareTokenMfaConfiguration)
+		assert.False(t, out.SoftwareTokenMfaConfiguration.Enabled)
+
+		_, err = c.UpdateUserPool(ctx, &awscognito.UpdateUserPoolInput{
+			UserPoolId:       aws.String(poolID),
+			MfaConfiguration: types.UserPoolMfaTypeOptional,
+		})
+		require.NoError(t, err)
+
+		updated, err := c.GetUserPoolMfaConfig(ctx, &awscognito.GetUserPoolMfaConfigInput{
+			UserPoolId: aws.String(poolID),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, types.UserPoolMfaTypeOptional, updated.MfaConfiguration)
+	})
+
 	t.Run("ListUserPools", func(t *testing.T) {
 		for _, name := range []string{"list-pool-a", "list-pool-b", "list-pool-c"} {
 			_, err := c.CreateUserPool(ctx, &awscognito.CreateUserPoolInput{
