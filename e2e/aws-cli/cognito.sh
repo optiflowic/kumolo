@@ -35,7 +35,7 @@ echo "--- UserPool CRUD ---"
 POOL_JSON=$($AWS create-user-pool --pool-name "e2e-pool" 2>&1)
 if echo "$POOL_JSON" | grep -q '"Id"'; then
   ok "CreateUserPool"
-  POOL_ID=$(echo "$POOL_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['UserPool']['Id'])")
+  POOL_ID=$(echo "$POOL_JSON" | jq -r '.UserPool.Id // empty' 2>/dev/null || true)
 else
   fail "CreateUserPool"
   POOL_ID="us-east-1_UNKNOWN"
@@ -66,7 +66,7 @@ CLIENT_JSON=$($AWS create-user-pool-client \
   --client-name "e2e-client" 2>&1)
 if echo "$CLIENT_JSON" | grep -q '"ClientId"'; then
   ok "CreateUserPoolClient"
-  CLIENT_ID=$(echo "$CLIENT_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['UserPoolClient']['ClientId'])")
+  CLIENT_ID=$(echo "$CLIENT_JSON" | jq -r '.UserPoolClient.ClientId // empty' 2>/dev/null || true)
 else
   fail "CreateUserPoolClient"
   CLIENT_ID="UNKNOWN"
@@ -144,8 +144,7 @@ if [[ -n "$CONFIRM_CODE" ]]; then
   fi
 
   # Refresh token
-  REFRESH_TOKEN=$(echo "$AUTH_JSON" | python3 -c \
-    "import sys,json; d=json.load(sys.stdin); print(d['AuthenticationResult']['RefreshToken'])" 2>/dev/null || true)
+  REFRESH_TOKEN=$(echo "$AUTH_JSON" | jq -r '.AuthenticationResult.RefreshToken // empty' 2>/dev/null || true)
   if [[ -n "$REFRESH_TOKEN" ]]; then
     run "InitiateAuth (REFRESH_TOKEN_AUTH)" \
       $AWS initiate-auth \
