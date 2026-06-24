@@ -121,12 +121,47 @@ func (s *Storage) DeleteUserPool(poolID string) error {
 	if err := s.deleteClientsDirLocked(poolID); err != nil {
 		return fmt.Errorf("delete clients dir: %w", err)
 	}
+	if err := s.deleteFlatDirLocked(filepath.Join("pools", poolID, "users")); err != nil {
+		return fmt.Errorf("delete users dir: %w", err)
+	}
+	if err := s.deleteFlatDirLocked(filepath.Join("pools", poolID, "user_index")); err != nil {
+		return fmt.Errorf("delete user_index dir: %w", err)
+	}
+	if err := s.deleteFlatDirLocked(filepath.Join("pools", poolID, "refresh_tokens")); err != nil {
+		return fmt.Errorf("delete refresh_tokens dir: %w", err)
+	}
+	keysPath := filepath.Join("pools", poolID, "keys.json")
+	if err := s.removeFile(keysPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove keys.json: %w", err)
+	}
 	if err := s.removeFile(metaPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("remove pool meta: %w", err)
 	}
 	if err := s.removeFile(filepath.Join("pools", poolID)); err != nil &&
 		!errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("remove pool dir: %w", err)
+	}
+	return nil
+}
+
+// deleteFlatDirLocked removes all files inside a flat (non-nested) directory, then the directory itself.
+// It is a no-op when the directory does not exist.
+func (s *Storage) deleteFlatDirLocked(dir string) error {
+	entries, err := s.listDirFn(dir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	for _, e := range entries {
+		if err := s.removeFile(filepath.Join(dir, e.Name())); err != nil &&
+			!errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	if err := s.removeFile(dir); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
 	}
 	return nil
 }
