@@ -69,3 +69,4 @@ HTTP 200 + `{"User": UserType}`
 - Password policy check: only minimum length (8 chars); complexity rules not enforced.
 - `MessageAction=RESEND` returns `NotAuthorizedException` (operation not supported).
 - `ForceAliasCreation` and `DesiredDeliveryMediums` are accepted but ignored.
+- `TemporaryPassword` omitted: user status is set to `CONFIRMED` (AWS sets `FORCE_CHANGE_PASSWORD`). Passwordless auth is not implemented; CONFIRMED is used as a pragmatic default.
