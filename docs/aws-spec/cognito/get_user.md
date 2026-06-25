@@ -49,5 +49,6 @@
 ## kumolo Deviations
 
 - MFA fields (`MFAOptions`, `PreferredMfaSetting`, `UserMFASettingList`) are not returned.
+- `PasswordResetRequiredException` is never returned — `RESET_REQUIRED` user status is not implemented.
 - `GetOrCreatePoolKeys` is called even for unknown pool IDs; if the pool has no users the
   signature check will still fail (different key), so no user data leaks.

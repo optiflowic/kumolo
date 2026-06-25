@@ -50,7 +50,7 @@ func TestGetUser_Success(t *testing.T) {
 	_, clientID := setupPool(t, ro)
 	token := doAuth(t, ro, clientID, "alice", "Password123!")
 
-	w := doOp(t, ro, "GetUser", `{"AccessToken":"`+token+`"}`)
+	w := doGetUserDirect(t, ro, token)
 
 	require.Equal(t, http.StatusOK, w.Code)
 	var resp getUserResponse
