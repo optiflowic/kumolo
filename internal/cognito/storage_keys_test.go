@@ -107,3 +107,54 @@ func TestGetOrCreatePoolKeys_WriteError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "write pool keys")
 }
+
+// ── GetPoolKeys ───────────────────────────────────────────────────────────────
+
+func TestGetPoolKeys_NotExist(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+
+	_, _, err := s.GetPoolKeys(poolID)
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestGetPoolKeys_ReturnsExisting(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+
+	created, _, err := s.GetOrCreatePoolKeys(poolID)
+	require.NoError(t, err)
+
+	got, _, err := s.GetPoolKeys(poolID)
+	require.NoError(t, err)
+	assert.Equal(t, created.KeyID, got.KeyID)
+}
+
+func TestGetPoolKeys_ReadError(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+
+	_, _, err := s.GetOrCreatePoolKeys(poolID)
+	require.NoError(t, err)
+
+	s.readAll = func(io.Reader) ([]byte, error) {
+		return nil, errors.New("read error")
+	}
+	_, _, err = s.GetPoolKeys(poolID)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "read pool keys")
+}
+
+func TestGetPoolKeys_BadPEM(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+
+	require.NoError(
+		t,
+		s.writeJSON(keysPath(poolID), &poolKeys{KeyID: "k", PrivateKeyPEM: "bad-pem"}),
+	)
+
+	_, _, err := s.GetPoolKeys(poolID)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "load pool RSA key")
+}
