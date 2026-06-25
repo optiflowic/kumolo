@@ -456,3 +456,122 @@ func TestAdminDeleteUser_StorageError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 	assertErrType(t, w, ErrTypeInternalErrorException)
 }
+
+// ──── Invalid body (json.Unmarshal error paths) ──────────────────────────────
+
+func TestAdminCreateUser_InvalidBody(t *testing.T) {
+	ro := newTestRouter(t)
+	w := doOp(t, ro, "AdminCreateUser", "invalid-json")
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeInvalidParameterException)
+}
+
+func TestAdminGetUser_InvalidBody(t *testing.T) {
+	ro := newTestRouter(t)
+	w := doOp(t, ro, "AdminGetUser", "invalid-json")
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeInvalidParameterException)
+}
+
+func TestAdminSetUserPassword_InvalidBody(t *testing.T) {
+	ro := newTestRouter(t)
+	w := doOp(t, ro, "AdminSetUserPassword", "invalid-json")
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeInvalidParameterException)
+}
+
+func TestAdminConfirmSignUp_InvalidBody(t *testing.T) {
+	ro := newTestRouter(t)
+	w := doOp(t, ro, "AdminConfirmSignUp", "invalid-json")
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeInvalidParameterException)
+}
+
+func TestAdminDeleteUser_InvalidBody(t *testing.T) {
+	ro := newTestRouter(t)
+	w := doOp(t, ro, "AdminDeleteUser", "invalid-json")
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeInvalidParameterException)
+}
+
+// ──── GetUserPool storage error (non-pool-not-found) ────────────────────────
+
+func TestAdminCreateUser_GetPoolStorageError(t *testing.T) {
+	ro := &Router{storage: &mockStore{getErr: errors.New("storage error")}}
+	body, _ := json.Marshal(map[string]any{"UserPoolId": "us-east-1_X", "Username": "u"})
+	w := doOp(t, ro, "AdminCreateUser", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestAdminGetUser_GetPoolStorageError(t *testing.T) {
+	ro := &Router{storage: &mockStore{getErr: errors.New("storage error")}}
+	body, _ := json.Marshal(map[string]any{"UserPoolId": "us-east-1_X", "Username": "u"})
+	w := doOp(t, ro, "AdminGetUser", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestAdminSetUserPassword_GetPoolStorageError(t *testing.T) {
+	ro := &Router{storage: &mockStore{getErr: errors.New("storage error")}}
+	body, _ := json.Marshal(map[string]any{
+		"UserPoolId": "us-east-1_X",
+		"Username":   "u",
+		"Password":   "ValidPass1!",
+	})
+	w := doOp(t, ro, "AdminSetUserPassword", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestAdminConfirmSignUp_GetPoolStorageError(t *testing.T) {
+	ro := &Router{storage: &mockStore{getErr: errors.New("storage error")}}
+	body, _ := json.Marshal(map[string]any{"UserPoolId": "us-east-1_X", "Username": "u"})
+	w := doOp(t, ro, "AdminConfirmSignUp", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestAdminDeleteUser_GetPoolStorageError(t *testing.T) {
+	ro := &Router{storage: &mockStore{getErr: errors.New("storage error")}}
+	body, _ := json.Marshal(map[string]any{"UserPoolId": "us-east-1_X", "Username": "u"})
+	w := doOp(t, ro, "AdminDeleteUser", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+// ──── GetUser / UpdateUser storage errors ────────────────────────────────────
+
+func TestAdminGetUser_GetUserStorageError(t *testing.T) {
+	ro := &Router{
+		storage: &mockStore{
+			getUserFn: func(string, string) (*UserMetadata, error) {
+				return nil, errors.New("storage error")
+			},
+		},
+	}
+	body, _ := json.Marshal(map[string]any{"UserPoolId": "us-east-1_X", "Username": "u"})
+	w := doOp(t, ro, "AdminGetUser", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestAdminSetUserPassword_UpdateUserStorageError(t *testing.T) {
+	ro := &Router{storage: &mockStore{updateUserErr: errors.New("disk full")}}
+	body, _ := json.Marshal(map[string]any{
+		"UserPoolId": "us-east-1_X",
+		"Username":   "u",
+		"Password":   "ValidPass1!",
+	})
+	w := doOp(t, ro, "AdminSetUserPassword", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestAdminConfirmSignUp_UpdateUserStorageError(t *testing.T) {
+	ro := &Router{storage: &mockStore{updateUserErr: errors.New("disk full")}}
+	body, _ := json.Marshal(map[string]any{"UserPoolId": "us-east-1_X", "Username": "u"})
+	w := doOp(t, ro, "AdminConfirmSignUp", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
