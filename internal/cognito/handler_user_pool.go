@@ -130,6 +130,16 @@ func defaultStr(v, fallback string) string {
 	return v
 }
 
+func defaultPolicies() json.RawMessage {
+	return json.RawMessage(
+		`{"PasswordPolicy":{"MinimumLength":8,"RequireUppercase":true,"RequireLowercase":true,"RequireNumbers":true,"RequireSymbols":true,"TemporaryPasswordValidityDays":7}}`,
+	)
+}
+
+func defaultAdminCreateUserConfig() json.RawMessage {
+	return json.RawMessage(`{"AllowAdminCreateUserOnly":false,"UnusedAccountValidityDays":7}`)
+}
+
 type createUserPoolRequest struct {
 	PoolName                    string            `json:"PoolName"`
 	MfaConfiguration            string            `json:"MfaConfiguration"`
@@ -229,6 +239,15 @@ func (ro *Router) handleCreateUserPool(w http.ResponseWriter, body []byte) {
 		return
 	}
 
+	policies := req.Policies
+	if policies == nil {
+		policies = defaultPolicies()
+	}
+	adminCreateUserConfig := req.AdminCreateUserConfig
+	if adminCreateUserConfig == nil {
+		adminCreateUserConfig = defaultAdminCreateUserConfig()
+	}
+
 	ts := nowUnix()
 	meta := &UserPoolMetadata{
 		ID:                          poolID,
@@ -239,7 +258,7 @@ func (ro *Router) handleCreateUserPool(w http.ResponseWriter, body []byte) {
 		LastModifiedDate:            ts,
 		MfaConfiguration:            defaultStr(req.MfaConfiguration, "OFF"),
 		DeletionProtection:          req.DeletionProtection,
-		Policies:                    req.Policies,
+		Policies:                    policies,
 		SchemaAttributes:            schemaAttrs,
 		AliasAttributes:             req.AliasAttributes,
 		AutoVerifiedAttributes:      req.AutoVerifiedAttributes,
@@ -249,7 +268,7 @@ func (ro *Router) handleCreateUserPool(w http.ResponseWriter, body []byte) {
 		EmailConfiguration:          req.EmailConfiguration,
 		SmsConfiguration:            req.SmsConfiguration,
 		DeviceConfiguration:         req.DeviceConfiguration,
-		AdminCreateUserConfig:       req.AdminCreateUserConfig,
+		AdminCreateUserConfig:       adminCreateUserConfig,
 		AccountRecoverySetting:      req.AccountRecoverySetting,
 		UserAttributeUpdateSettings: req.UserAttributeUpdateSettings,
 		UserPoolAddOns:              req.UserPoolAddOns,

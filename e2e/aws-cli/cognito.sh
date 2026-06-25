@@ -26,6 +26,21 @@ run() {
 
 echo "=== Cognito ==="
 
+POOL_ID=""
+CLIENT_ID=""
+
+cleanup() {
+  if [[ -n "$CLIENT_ID" && "$CLIENT_ID" != "UNKNOWN" ]]; then
+    $AWS delete-user-pool-client \
+      --user-pool-id "$POOL_ID" \
+      --client-id "$CLIENT_ID" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "$POOL_ID" && "$POOL_ID" != "us-east-1_UNKNOWN" ]]; then
+    $AWS delete-user-pool --user-pool-id "$POOL_ID" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT
+
 # ---------------------------------------------------------------------------
 # UserPool CRUD
 # ---------------------------------------------------------------------------

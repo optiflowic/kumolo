@@ -307,6 +307,39 @@ func TestParseSessionToken_InvalidSignature(t *testing.T) {
 	require.Error(t, err)
 }
 
+// ── extractPoolID ─────────────────────────────────────────────────────────────
+
+func TestExtractPoolID(t *testing.T) {
+	tests := []struct {
+		iss  string
+		want string
+	}{
+		{"https://cognito-idp.us-east-1.amazonaws.com/us-east-1_Pool1", "us-east-1_Pool1"},
+		{
+			"https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_AbcDe",
+			"ap-northeast-1_AbcDe",
+		},
+		// extra path segment
+		{"https://cognito-idp.us-east-1.amazonaws.com/foo/bar", ""},
+		// no path segment
+		{"https://cognito-idp.us-east-1.amazonaws.com/", ""},
+		{"https://cognito-idp.us-east-1.amazonaws.com", ""},
+		// wrong host
+		{"https://cognito-idp.evil.com/us-east-1_Pool1", ""},
+		// subdomain takeover attempt
+		{"https://cognito-idp.us-east-1.amazonaws.com.evil.com/us-east-1_Pool1", ""},
+		// wrong prefix
+		{"https://not-cognito-idp.us-east-1.amazonaws.com/us-east-1_Pool1", ""},
+		// empty
+		{"", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.iss, func(t *testing.T) {
+			assert.Equal(t, tt.want, extractPoolID(tt.iss))
+		})
+	}
+}
+
 // splitDots splits a JWT into its three dot-separated parts.
 func splitDots(token string) []string {
 	parts := make([]string, 0, 3)

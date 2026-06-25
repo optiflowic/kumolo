@@ -180,6 +180,7 @@ type mockStore struct {
 	getUserBySubFn    func(string, string) (*UserMetadata, error)
 	updateUserErr     error
 	getOrCreateKeysFn func(string) (*poolKeys, *rsa.PrivateKey, error)
+	getPoolKeysFn     func(string) (*poolKeys, *rsa.PrivateKey, error)
 	createRefreshErr  error
 	getRefreshFn      func(string, string) (*refreshTokenData, error)
 	deleteRefreshErr  error
@@ -250,6 +251,13 @@ func (m *mockStore) GetOrCreatePoolKeys(poolID string) (*poolKeys, *rsa.PrivateK
 		return m.getOrCreateKeysFn(poolID)
 	}
 	return nil, nil, errors.New("no keys configured")
+}
+
+func (m *mockStore) GetPoolKeys(poolID string) (*poolKeys, *rsa.PrivateKey, error) {
+	if m.getPoolKeysFn != nil {
+		return m.getPoolKeysFn(poolID)
+	}
+	return nil, nil, os.ErrNotExist
 }
 
 func (m *mockStore) CreateRefreshToken(*refreshTokenData) error { return m.createRefreshErr }
@@ -347,43 +355,153 @@ func TestStorage_UpdateUserPool_FnError(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestStorage_DeleteUserPool_RemoveMetaError(t *testing.T) {
-	storage, err := NewStorage(t.TempDir())
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = storage.Close() })
-	require.NoError(
-		t,
-		storage.CreateUserPool(&UserPoolMetadata{ID: "us-east-1_Test12345", Name: "test"}),
-	)
-	// Pool has no clients, so deleteClientsDirLocked is a no-op.
-	// meta.json removal fails with a non-ErrNotExist error.
-	storage.removeFile = func(string) error {
-		return errors.New("permission denied")
-	}
-	err = storage.DeleteUserPool("us-east-1_Test12345")
-	require.Error(t, err)
-	assert.False(t, errors.Is(err, errUserPoolNotFound))
-}
+func TestStorage_DeleteUserPool_ErrorPaths(t *testing.T) {
+	const poolID = "us-east-1_Test12345"
 
-func TestStorage_DeleteUserPool_RemoveDirError(t *testing.T) {
-	storage, err := NewStorage(t.TempDir())
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = storage.Close() })
-	require.NoError(
-		t,
-		storage.CreateUserPool(&UserPoolMetadata{ID: "us-east-1_Test12345", Name: "test"}),
-	)
-	calls := 0
-	realRemove := storage.removeFile
-	storage.removeFile = func(name string) error {
-		calls++
-		if calls == 1 {
-			return realRemove(name) // remove meta.json: success
-		}
-		return errors.New("cannot remove dir")
+	tests := []struct {
+		name       string
+		withClient bool
+		setup      func(t *testing.T, s *Storage, dataDir string)
+		wantMsg    string
+		notFound   bool
+	}{
+		{
+			name: "stat error",
+			setup: func(_ *testing.T, s *Storage, _ string) {
+				s.statFn = func(string) (os.FileInfo, error) {
+					return nil, errors.New("stat failed")
+				}
+			},
+			notFound: true,
+		},
+		{
+			name:       "clients dir remove error",
+			withClient: true,
+			setup: func(_ *testing.T, s *Storage, _ string) {
+				realRemove := s.removeFile
+				s.removeFile = func(name string) error {
+					if filepath.Base(filepath.Dir(name)) == "clients" {
+						return errors.New("permission denied")
+					}
+					return realRemove(name)
+				}
+			},
+			wantMsg: "delete clients dir",
+		},
+		{
+			name: "flat dir list error",
+			setup: func(_ *testing.T, s *Storage, _ string) {
+				realList := s.listDirFn
+				s.listDirFn = func(name string) ([]os.DirEntry, error) {
+					if filepath.Base(name) == "users" {
+						return nil, errors.New("list error")
+					}
+					return realList(name)
+				}
+			},
+			wantMsg: "delete users dir",
+		},
+		{
+			name: "flat dir file remove error",
+			setup: func(_ *testing.T, s *Storage, _ string) {
+				realList := s.listDirFn
+				s.listDirFn = func(name string) ([]os.DirEntry, error) {
+					if filepath.Base(name) == "users" {
+						return []os.DirEntry{fakeDirEntry("u.json")}, nil
+					}
+					return realList(name)
+				}
+				realRemove := s.removeFile
+				s.removeFile = func(name string) error {
+					if filepath.Base(filepath.Dir(name)) == "users" {
+						return errors.New("permission denied")
+					}
+					return realRemove(name)
+				}
+			},
+			wantMsg: "delete users dir",
+		},
+		{
+			name: "flat dir itself remove error",
+			setup: func(t *testing.T, s *Storage, dataDir string) {
+				usersDir := filepath.Join(dataDir, "cognito", "pools", poolID, "users")
+				require.NoError(t, os.MkdirAll(usersDir, 0o750))
+				realRemove := s.removeFile
+				s.removeFile = func(name string) error {
+					if filepath.Base(name) == "users" {
+						return errors.New("cannot remove users dir")
+					}
+					return realRemove(name)
+				}
+			},
+			wantMsg: "delete users dir",
+		},
+		{
+			name: "keys.json remove error",
+			setup: func(_ *testing.T, s *Storage, _ string) {
+				realRemove := s.removeFile
+				s.removeFile = func(name string) error {
+					if filepath.Base(name) == "keys.json" {
+						return errors.New("permission denied")
+					}
+					return realRemove(name)
+				}
+			},
+			wantMsg: "remove keys.json",
+		},
+		{
+			name: "meta.json remove error",
+			setup: func(_ *testing.T, s *Storage, _ string) {
+				realRemove := s.removeFile
+				s.removeFile = func(name string) error {
+					if filepath.Base(name) == "meta.json" {
+						return errors.New("permission denied")
+					}
+					return realRemove(name)
+				}
+			},
+			wantMsg: "remove pool meta",
+		},
+		{
+			name: "pool dir remove error",
+			setup: func(_ *testing.T, s *Storage, _ string) {
+				realRemove := s.removeFile
+				s.removeFile = func(name string) error {
+					if name == filepath.Join("pools", poolID) {
+						return errors.New("cannot remove dir")
+					}
+					return realRemove(name)
+				}
+			},
+			wantMsg: "remove pool dir",
+		},
 	}
-	err = storage.DeleteUserPool("us-east-1_Test12345")
-	require.Error(t, err)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dataDir := t.TempDir()
+			storage, err := NewStorage(dataDir)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = storage.Close() })
+			require.NoError(t, storage.CreateUserPool(&UserPoolMetadata{ID: poolID, Name: "test"}))
+			if tt.withClient {
+				require.NoError(t, storage.CreateUserPoolClient(&UserPoolClientMetadata{
+					UserPoolID: poolID,
+					ClientID:   "testclientid0000000000000000",
+					ClientName: "app",
+				}))
+			}
+			tt.setup(t, storage, dataDir)
+			err = storage.DeleteUserPool(poolID)
+			require.Error(t, err)
+			if tt.notFound {
+				assert.False(t, errors.Is(err, errUserPoolNotFound))
+			}
+			if tt.wantMsg != "" {
+				assert.Contains(t, err.Error(), tt.wantMsg)
+			}
+		})
+	}
 }
 
 func TestStorage_ListUserPools_PoolsDirDeleted(t *testing.T) {
@@ -556,94 +674,13 @@ func TestStorage_ListUserPoolClients_ReadError(t *testing.T) {
 	assert.Contains(t, err.Error(), "read user pool client")
 }
 
-func TestStorage_deleteClientsDirLocked_ListDirError(t *testing.T) {
-	storage, err := NewStorage(t.TempDir())
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = storage.Close() })
-	require.NoError(
-		t,
-		storage.CreateUserPool(&UserPoolMetadata{ID: "us-east-1_Test12345", Name: "test"}),
-	)
-	require.NoError(t, storage.CreateUserPoolClient(&UserPoolClientMetadata{
-		UserPoolID: "us-east-1_Test12345",
-		ClientID:   "testclientid0000000000000000",
-		ClientName: "app",
-	}))
-	realList := storage.listDirFn
-	storage.listDirFn = func(name string) ([]os.DirEntry, error) {
-		if filepath.Base(name) == "clients" {
-			return nil, errors.New("permission denied")
-		}
-		return realList(name)
-	}
-	err = storage.DeleteUserPool("us-east-1_Test12345")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "delete clients dir")
-}
+// fakeDirEntry is a minimal os.DirEntry implementation for tests.
+type fakeDirEntry string
 
-func TestStorage_deleteClientsDirLocked_RemoveClientFileError(t *testing.T) {
-	storage, err := NewStorage(t.TempDir())
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = storage.Close() })
-	require.NoError(
-		t,
-		storage.CreateUserPool(&UserPoolMetadata{ID: "us-east-1_Test12345", Name: "test"}),
-	)
-	require.NoError(t, storage.CreateUserPoolClient(&UserPoolClientMetadata{
-		UserPoolID: "us-east-1_Test12345",
-		ClientID:   "testclientid0000000000000000",
-		ClientName: "app",
-	}))
-	storage.removeFile = func(string) error {
-		return errors.New("permission denied") // client file removal: fail
-	}
-	err = storage.DeleteUserPool("us-east-1_Test12345")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "delete clients dir")
-}
-
-func TestStorage_deleteClientsDirLocked_RemoveDirError(t *testing.T) {
-	storage, err := NewStorage(t.TempDir())
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = storage.Close() })
-	require.NoError(
-		t,
-		storage.CreateUserPool(&UserPoolMetadata{ID: "us-east-1_Test12345", Name: "test"}),
-	)
-	require.NoError(t, storage.CreateUserPoolClient(&UserPoolClientMetadata{
-		UserPoolID: "us-east-1_Test12345",
-		ClientID:   "testclientid0000000000000000",
-		ClientName: "app",
-	}))
-	realRemove := storage.removeFile
-	calls := 0
-	storage.removeFile = func(name string) error {
-		calls++
-		if calls == 1 {
-			return realRemove(name) // client file: success
-		}
-		return errors.New("cannot remove clients dir") // clients dir removal: fail
-	}
-	err = storage.DeleteUserPool("us-east-1_Test12345")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "delete clients dir")
-}
-
-func TestStorage_DeleteUserPool_StatError(t *testing.T) {
-	storage, err := NewStorage(t.TempDir())
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = storage.Close() })
-	require.NoError(
-		t,
-		storage.CreateUserPool(&UserPoolMetadata{ID: "us-east-1_Test12345", Name: "test"}),
-	)
-	storage.statFn = func(string) (os.FileInfo, error) {
-		return nil, errors.New("stat failed")
-	}
-	err = storage.DeleteUserPool("us-east-1_Test12345")
-	require.Error(t, err)
-	assert.False(t, errors.Is(err, errUserPoolNotFound))
-}
+func (f fakeDirEntry) Name() string               { return string(f) }
+func (f fakeDirEntry) IsDir() bool                { return false }
+func (f fakeDirEntry) Type() os.FileMode          { return 0 }
+func (f fakeDirEntry) Info() (os.FileInfo, error) { return nil, nil }
 
 func TestRouter_ErrorResponseFormat(t *testing.T) {
 	ro := newTestRouter(t)

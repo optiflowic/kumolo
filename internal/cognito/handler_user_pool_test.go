@@ -100,6 +100,28 @@ func TestCreateUserPool_Defaults(t *testing.T) {
 	assert.Equal(t, "ESSENTIALS", resp.UserPool.UserPoolTier)
 }
 
+func TestCreateUserPool_ExplicitPoliciesAndAdminConfig(t *testing.T) {
+	ro := newTestRouter(t)
+	w := doOp(t, ro, "CreateUserPool", `{
+		"PoolName": "custom-pool",
+		"Policies": {"PasswordPolicy": {"MinimumLength": 12, "RequireUppercase": true}},
+		"AdminCreateUserConfig": {"AllowAdminCreateUserOnly": true}
+	}`)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp struct {
+		UserPool struct {
+			Policies              json.RawMessage `json:"Policies"`
+			AdminCreateUserConfig json.RawMessage `json:"AdminCreateUserConfig"`
+		} `json:"UserPool"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.NotEmpty(t, resp.UserPool.Policies)
+	assert.NotEmpty(t, resp.UserPool.AdminCreateUserConfig)
+	assert.Contains(t, string(resp.UserPool.Policies), "MinimumLength")
+	assert.Contains(t, string(resp.UserPool.AdminCreateUserConfig), "AllowAdminCreateUserOnly")
+}
+
 func TestCreateUserPool_WithCustomSchema(t *testing.T) {
 	ro := newTestRouter(t)
 	w := doOp(t, ro, "CreateUserPool", `{

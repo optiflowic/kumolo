@@ -17,6 +17,12 @@ const (
 	accessTokenExpiry  = 3600
 	sessionExpiry      = 180
 	cognitoClaimPrefix = "cognito:"
+
+	jwtClaimIssuer    = "iss"
+	jwtClaimExp       = "exp"
+	jwtClaimTokenUse  = "token_use"
+	jwtClaimSub       = "sub"
+	jwtTokenUseAccess = "access"
 )
 
 // issuerURL returns the AWS-format issuer URL for a user pool.
@@ -211,6 +217,55 @@ func buildSessionToken(
 		return "", fmt.Errorf("build session token: %w", err)
 	}
 	return token, nil
+}
+
+// parseRawClaims decodes the payload of a JWT without verifying the signature.
+// Use only to extract identifiers (e.g. pool ID from iss) before signature verification.
+func parseRawClaims(tokenStr string) (map[string]any, error) {
+	parts := strings.Split(tokenStr, ".")
+	if len(parts) != 3 {
+		return nil, fmt.Errorf("invalid JWT format")
+	}
+	claimsData, err := b64urlDecode(parts[1])
+	if err != nil {
+		return nil, fmt.Errorf("decode JWT claims: %w", err)
+	}
+	var claims map[string]any
+	if err := json.Unmarshal(claimsData, &claims); err != nil {
+		return nil, fmt.Errorf("parse JWT claims: %w", err)
+	}
+	return claims, nil
+}
+
+// extractPoolID returns the pool ID from a Cognito issuer URL.
+// Only accepts the exact shape https://cognito-idp.<region>.amazonaws.com/<poolID>.
+// Returns "" for any other form.
+func extractPoolID(iss string) string {
+	const prefix = "https://cognito-idp."
+	if !strings.HasPrefix(iss, prefix) {
+		return ""
+	}
+	// Strip scheme and split into host + path without importing net/url.
+	rest := iss[len("https://"):]
+	slash := strings.IndexByte(rest, '/')
+	if slash < 0 {
+		return ""
+	}
+	host := rest[:slash]
+	poolID := rest[slash+1:]
+
+	// Host must be exactly cognito-idp.<region>.amazonaws.com (4 dot-separated parts).
+	parts := strings.SplitN(host, ".", 4)
+	if len(parts) != 4 || parts[0] != "cognito-idp" || parts[1] == "" ||
+		parts[2] != "amazonaws" || parts[3] != "com" {
+		return ""
+	}
+
+	// Pool ID must be a single non-empty path segment.
+	if poolID == "" || strings.Contains(poolID, "/") {
+		return ""
+	}
+	return poolID
 }
 
 // parseSessionToken verifies and parses a session JWT. Returns the claims if valid.

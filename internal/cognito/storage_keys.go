@@ -46,6 +46,26 @@ func keysPath(poolID string) string {
 	return filepath.Join("pools", poolID, "keys.json")
 }
 
+// GetPoolKeys returns the RSA key pair for an existing pool.
+// Returns (nil, nil, os.ErrNotExist) if no keys have been persisted yet.
+func (s *Storage) GetPoolKeys(poolID string) (*poolKeys, *rsa.PrivateKey, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	existing, err := readJSON[poolKeys](s, keysPath(poolID))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil, os.ErrNotExist
+		}
+		return nil, nil, fmt.Errorf("read pool keys: %w", err)
+	}
+	key, err := rsaKeyFromPEM(existing.PrivateKeyPEM)
+	if err != nil {
+		return nil, nil, fmt.Errorf("load pool RSA key: %w", err)
+	}
+	return &existing, key, nil
+}
+
 // GetOrCreatePoolKeys returns the RSA key pair for a pool, generating one if not present.
 func (s *Storage) GetOrCreatePoolKeys(poolID string) (*poolKeys, *rsa.PrivateKey, error) {
 	s.mu.Lock()
