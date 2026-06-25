@@ -133,6 +133,27 @@ func (s *Storage) GetUserBySub(poolID, sub string) (*UserMetadata, error) {
 	return &user, nil
 }
 
+// DeleteUser removes a user and its username index entry from storage.
+func (s *Storage) DeleteUser(poolID, username string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	user, err := s.getUserLocked(poolID, username)
+	if err != nil {
+		return err
+	}
+
+	if err := s.removeFile(userPath(poolID, user.Sub)); err != nil &&
+		!errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove user: %w", err)
+	}
+	if err := s.removeFile(userIndexPath(poolID, username)); err != nil &&
+		!errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove user index: %w", err)
+	}
+	return nil
+}
+
 // UpdateUser applies fn to the user and persists the result.
 func (s *Storage) UpdateUser(poolID, username string, fn func(*UserMetadata) error) error {
 	s.mu.Lock()
