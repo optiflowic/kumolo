@@ -173,6 +173,34 @@ func TestGetUser_ExpiredToken(t *testing.T) {
 	assertErrType(t, w, ErrTypeNotAuthorizedException)
 }
 
+func TestGetUser_ExpiredToken_ExactNow(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	signUpUser(t, ro, clientID, "alice", "Password123!")
+	confirmUser(t, ro, clientID, "alice")
+
+	poolID, err := ro.storage.GetPoolIDForClient(clientID)
+	require.NoError(t, err)
+	keys, privateKey, err := ro.storage.GetOrCreatePoolKeys(poolID)
+	require.NoError(t, err)
+	user, err := ro.storage.GetUser(poolID, "alice")
+	require.NoError(t, err)
+
+	now := time.Now().Unix()
+	token, err := buildJWT(privateKey, keys.KeyID, map[string]any{
+		"sub":       user.Sub,
+		"iss":       issuerURL(poolID),
+		"token_use": "access",
+		"exp":       now, // exactly now — must be treated as expired
+		"iat":       now - 3600,
+	})
+	require.NoError(t, err)
+
+	w := doGetUserDirect(t, ro, token)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeNotAuthorizedException)
+}
+
 func TestGetUser_WrongTokenUse(t *testing.T) {
 	ro := newTestRouter(t)
 	_, clientID := setupPool(t, ro)
@@ -266,7 +294,7 @@ func TestGetUser_KeysStorageError(t *testing.T) {
 
 	ro := &Router{
 		storage: &mockStore{
-			getOrCreateKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			getPoolKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
 				return nil, nil, errors.New("storage failure")
 			},
 		},
@@ -295,7 +323,7 @@ func TestGetUser_GetUserBySubStorageError(t *testing.T) {
 
 	ro := &Router{
 		storage: &mockStore{
-			getOrCreateKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			getPoolKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
 				return &poolKeys{KeyID: keyID}, privKey, nil
 			},
 			getUserBySubFn: func(string, string) (*UserMetadata, error) {
@@ -311,14 +339,28 @@ func TestGetUser_GetUserBySubStorageError(t *testing.T) {
 
 // ── prependSub ────────────────────────────────────────────────────────────────
 
-func TestPrependSub_AlreadyPresent(t *testing.T) {
+func TestPrependSub_AlreadyFirst(t *testing.T) {
 	attrs := []AttributeType{
 		{Name: "sub", Value: "uuid-1"},
 		{Name: "email", Value: "a@example.com"},
 	}
 	result := prependSub(attrs, "uuid-1")
-	assert.Equal(t, attrs, result)
+	require.Len(t, result, 2)
 	assert.Equal(t, "sub", result[0].Name)
+	assert.Equal(t, "uuid-1", result[0].Value)
+	assert.Equal(t, "email", result[1].Name)
+}
+
+func TestPrependSub_OutOfOrder(t *testing.T) {
+	attrs := []AttributeType{
+		{Name: "email", Value: "a@example.com"},
+		{Name: "sub", Value: "uuid-1"},
+	}
+	result := prependSub(attrs, "uuid-1")
+	require.Len(t, result, 2)
+	assert.Equal(t, "sub", result[0].Name)
+	assert.Equal(t, "uuid-1", result[0].Value)
+	assert.Equal(t, "email", result[1].Name)
 }
 
 func TestPrependSub_NotPresent(t *testing.T) {

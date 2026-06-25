@@ -34,15 +34,15 @@
 }
 ```
 
-- `sub` is always prepended to `UserAttributes` if not already present.
+- `sub` is always the first element of `UserAttributes`; any existing `sub` in the stored attributes is removed and replaced at index 0.
 - `MFAOptions`, `PreferredMfaSetting`, `UserMFASettingList` are omitted (MFA not implemented).
 
 ## Errors
 
 | Code | HTTP | Condition |
 |---|---|---|
-| `InvalidParameterException` | 400 | `AccessToken` missing or malformed JWT format |
-| `NotAuthorizedException` | 400 | Invalid signature, expired token, wrong `token_use` |
+| `InvalidParameterException` | 400 | `AccessToken` missing or unparseable request body |
+| `NotAuthorizedException` | 400 | Malformed JWT, invalid signature, expired token, wrong `token_use`, or unknown pool |
 | `UserNotFoundException` | 400 | `sub` not found in the pool |
 | `InternalErrorException` | 500 | Storage failure |
 
@@ -50,5 +50,5 @@
 
 - MFA fields (`MFAOptions`, `PreferredMfaSetting`, `UserMFASettingList`) are not returned.
 - `PasswordResetRequiredException` is never returned — `RESET_REQUIRED` user status is not implemented.
-- `GetOrCreatePoolKeys` is called even for unknown pool IDs; if the pool has no users the
-  signature check will still fail (different key), so no user data leaks.
+- Unknown pool IDs (no persisted RSA keys) return `NotAuthorizedException` rather than `ResourceNotFoundException`.
+- `exp` is checked with `<=` (expired at the exact expiry second), matching standard JWT semantics.

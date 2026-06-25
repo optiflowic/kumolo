@@ -232,15 +232,34 @@ func parseRawClaims(tokenStr string) (map[string]any, error) {
 }
 
 // extractPoolID returns the pool ID from a Cognito issuer URL.
-// Format: https://cognito-idp.<region>.amazonaws.com/<poolID>
-// Returns "" if iss does not match the expected prefix.
+// Only accepts the exact shape https://cognito-idp.<region>.amazonaws.com/<poolID>.
+// Returns "" for any other form.
 func extractPoolID(iss string) string {
 	const prefix = "https://cognito-idp."
 	if !strings.HasPrefix(iss, prefix) {
 		return ""
 	}
-	// prefix contains "://" so LastIndexByte always finds a slash
-	return iss[strings.LastIndexByte(iss, '/')+1:]
+	// Strip scheme and split into host + path without importing net/url.
+	rest := iss[len("https://"):]
+	slash := strings.IndexByte(rest, '/')
+	if slash < 0 {
+		return ""
+	}
+	host := rest[:slash]
+	poolID := rest[slash+1:]
+
+	// Host must be exactly cognito-idp.<region>.amazonaws.com (4 dot-separated parts).
+	parts := strings.SplitN(host, ".", 4)
+	if len(parts) != 4 || parts[0] != "cognito-idp" || parts[1] == "" ||
+		parts[2] != "amazonaws" || parts[3] != "com" {
+		return ""
+	}
+
+	// Pool ID must be a single non-empty path segment.
+	if poolID == "" || strings.Contains(poolID, "/") {
+		return ""
+	}
+	return poolID
 }
 
 // parseSessionToken verifies and parses a session JWT. Returns the claims if valid.

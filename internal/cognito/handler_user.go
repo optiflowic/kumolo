@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"time"
 )
 
@@ -53,14 +54,18 @@ func (ro *Router) handleGetUser(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	_, privateKey, err := ro.storage.GetOrCreatePoolKeys(poolID)
+	_, privateKey, err := ro.storage.GetPoolKeys(poolID)
 	if err != nil {
-		writeError(
-			w,
-			http.StatusInternalServerError,
-			ErrTypeInternalErrorException,
-			"failed to get pool keys",
-		)
+		if errors.Is(err, os.ErrNotExist) {
+			writeError(
+				w,
+				http.StatusBadRequest,
+				ErrTypeNotAuthorizedException,
+				"Invalid access token.",
+			)
+		} else {
+			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException, "failed to get pool keys")
+		}
 		return
 	}
 
@@ -71,7 +76,7 @@ func (ro *Router) handleGetUser(w http.ResponseWriter, body []byte) {
 	}
 
 	exp, ok := claims["exp"].(float64)
-	if !ok || int64(exp) < time.Now().Unix() {
+	if !ok || int64(exp) <= time.Now().Unix() {
 		writeError(
 			w,
 			http.StatusBadRequest,
@@ -120,14 +125,15 @@ func (ro *Router) handleGetUser(w http.ResponseWriter, body []byte) {
 	})
 }
 
-// prependSub ensures sub is the first element of attrs.
+// prependSub ensures sub is always the first element of attrs.
+// Any existing sub attribute is removed and replaced with the provided value at index 0.
 func prependSub(attrs []AttributeType, sub string) []AttributeType {
-	for _, a := range attrs {
-		if a.Name == "sub" {
-			return attrs
-		}
-	}
 	result := make([]AttributeType, 0, len(attrs)+1)
 	result = append(result, AttributeType{Name: "sub", Value: sub})
-	return append(result, attrs...)
+	for _, a := range attrs {
+		if a.Name != "sub" {
+			result = append(result, a)
+		}
+	}
+	return result
 }

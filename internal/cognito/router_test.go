@@ -180,6 +180,7 @@ type mockStore struct {
 	getUserBySubFn    func(string, string) (*UserMetadata, error)
 	updateUserErr     error
 	getOrCreateKeysFn func(string) (*poolKeys, *rsa.PrivateKey, error)
+	getPoolKeysFn     func(string) (*poolKeys, *rsa.PrivateKey, error)
 	createRefreshErr  error
 	getRefreshFn      func(string, string) (*refreshTokenData, error)
 	deleteRefreshErr  error
@@ -250,6 +251,13 @@ func (m *mockStore) GetOrCreatePoolKeys(poolID string) (*poolKeys, *rsa.PrivateK
 		return m.getOrCreateKeysFn(poolID)
 	}
 	return nil, nil, errors.New("no keys configured")
+}
+
+func (m *mockStore) GetPoolKeys(poolID string) (*poolKeys, *rsa.PrivateKey, error) {
+	if m.getPoolKeysFn != nil {
+		return m.getPoolKeysFn(poolID)
+	}
+	return nil, nil, os.ErrNotExist
 }
 
 func (m *mockStore) CreateRefreshToken(*refreshTokenData) error { return m.createRefreshErr }
