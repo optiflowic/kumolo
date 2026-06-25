@@ -230,7 +230,7 @@ run "AdminSetUserPassword (permanent)" \
 ADMIN_GET2_JSON=$($AWS admin-get-user \
   --user-pool-id "$POOL_ID" \
   --username "$ADMIN_USER" 2>&1)
-if echo "$ADMIN_GET2_JSON" | grep -q 'CONFIRMED'; then
+if echo "$ADMIN_GET2_JSON" | grep -q '"CONFIRMED"'; then
   ok "AdminSetUserPassword — UserStatus changed to CONFIRMED"
 else
   fail "AdminSetUserPassword — expected CONFIRMED"
@@ -254,7 +254,7 @@ run "AdminConfirmSignUp" \
 ADMIN_GET3_JSON=$($AWS admin-get-user \
   --user-pool-id "$POOL_ID" \
   --username "$ADMIN_USER_UC" 2>&1)
-if echo "$ADMIN_GET3_JSON" | grep -q 'CONFIRMED'; then
+if echo "$ADMIN_GET3_JSON" | grep -q '"CONFIRMED"'; then
   ok "AdminConfirmSignUp — UserStatus is CONFIRMED"
 else
   fail "AdminConfirmSignUp — expected CONFIRMED"
