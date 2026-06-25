@@ -295,7 +295,8 @@ func TestGetUser_UnknownPool(t *testing.T) {
 
 	ro := &Router{
 		storage: &mockStore{
-			getPoolKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			getPoolKeysFn: func(gotPoolID string) (*poolKeys, *rsa.PrivateKey, error) {
+				assert.Equal(t, poolID, gotPoolID)
 				return nil, nil, os.ErrNotExist
 			},
 		},

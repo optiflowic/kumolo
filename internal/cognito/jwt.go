@@ -17,6 +17,12 @@ const (
 	accessTokenExpiry  = 3600
 	sessionExpiry      = 180
 	cognitoClaimPrefix = "cognito:"
+
+	jwtClaimIssuer    = "iss"
+	jwtClaimExp       = "exp"
+	jwtClaimTokenUse  = "token_use"
+	jwtClaimSub       = "sub"
+	jwtTokenUseAccess = "access"
 )
 
 // issuerURL returns the AWS-format issuer URL for a user pool.

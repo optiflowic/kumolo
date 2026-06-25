@@ -76,7 +76,7 @@ func poolIDFromToken(w http.ResponseWriter, token string) (string, bool) {
 		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException, "Invalid access token.")
 		return "", false
 	}
-	iss, _ := rawClaims["iss"].(string)
+	iss, _ := rawClaims[jwtClaimIssuer].(string)
 	poolID := extractPoolID(iss)
 	if poolID == "" {
 		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException, "Invalid access token.")
@@ -113,7 +113,7 @@ func validateAccessJWT(
 		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException, "Invalid access token.")
 		return "", false
 	}
-	exp, ok := claims["exp"].(float64)
+	exp, ok := claims[jwtClaimExp].(float64)
 	if !ok || int64(exp) <= time.Now().Unix() {
 		writeError(
 			w,
@@ -123,11 +123,11 @@ func validateAccessJWT(
 		)
 		return "", false
 	}
-	if tokenUse, _ := claims["token_use"].(string); tokenUse != "access" {
+	if tokenUse, _ := claims[jwtClaimTokenUse].(string); tokenUse != jwtTokenUseAccess {
 		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException, "Invalid access token.")
 		return "", false
 	}
-	sub, _ := claims["sub"].(string)
+	sub, _ := claims[jwtClaimSub].(string)
 	if sub == "" {
 		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException, "Invalid access token.")
 		return "", false
