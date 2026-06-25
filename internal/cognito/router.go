@@ -116,6 +116,8 @@ func (ro *Router) serveHTTP(w http.ResponseWriter, r *http.Request, op string) {
 		ro.handleInitiateAuth(w, body)
 	case "RespondToAuthChallenge":
 		ro.handleRespondToAuthChallenge(w, body)
+	case "GetUser":
+		ro.handleGetUser(w, body)
 	default:
 		writeError(
 			w,

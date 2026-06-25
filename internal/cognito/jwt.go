@@ -213,6 +213,34 @@ func buildSessionToken(
 	return token, nil
 }
 
+// parseRawClaims decodes the payload of a JWT without verifying the signature.
+// Use only to extract identifiers (e.g. pool ID from iss) before signature verification.
+func parseRawClaims(tokenStr string) (map[string]any, error) {
+	parts := strings.Split(tokenStr, ".")
+	if len(parts) != 3 {
+		return nil, fmt.Errorf("invalid JWT format")
+	}
+	claimsData, err := b64urlDecode(parts[1])
+	if err != nil {
+		return nil, fmt.Errorf("decode JWT claims: %w", err)
+	}
+	var claims map[string]any
+	if err := json.Unmarshal(claimsData, &claims); err != nil {
+		return nil, fmt.Errorf("parse JWT claims: %w", err)
+	}
+	return claims, nil
+}
+
+// extractPoolID returns the pool ID from a Cognito issuer URL.
+// Format: https://cognito-idp.<region>.amazonaws.com/<poolID>
+func extractPoolID(iss string) string {
+	slash := strings.LastIndexByte(iss, '/')
+	if slash < 0 {
+		return ""
+	}
+	return iss[slash+1:]
+}
+
 // parseSessionToken verifies and parses a session JWT. Returns the claims if valid.
 func parseSessionToken(tokenStr string, publicKey *rsa.PublicKey) (map[string]any, error) {
 	claims, err := verifyJWT(tokenStr, publicKey)
