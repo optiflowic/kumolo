@@ -182,9 +182,11 @@ run "DeleteUserPoolClient" \
   $AWS delete-user-pool-client \
     --user-pool-id "$POOL_ID" \
     --client-id "$CLIENT_ID"
+CLIENT_ID=""
 
 run "DeleteUserPool" \
   $AWS delete-user-pool --user-pool-id "$POOL_ID"
+POOL_ID=""
 
 # ---------------------------------------------------------------------------
 echo ""
