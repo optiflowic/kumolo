@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -275,6 +276,34 @@ func TestGetUser_UserNotFound(t *testing.T) {
 	w := doGetUserDirect(t, ro, token)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assertErrType(t, w, ErrTypeUserNotFoundException)
+}
+
+func TestGetUser_UnknownPool(t *testing.T) {
+	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	poolID := "us-east-1_Unknown"
+	now := time.Now().Unix()
+	token, err := buildJWT(privKey, "kid", map[string]any{
+		"sub":       "some-sub",
+		"iss":       issuerURL(poolID),
+		"token_use": "access",
+		"exp":       now + 3600,
+		"iat":       now,
+	})
+	require.NoError(t, err)
+
+	ro := &Router{
+		storage: &mockStore{
+			getPoolKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+				return nil, nil, os.ErrNotExist
+			},
+		},
+	}
+
+	w := doGetUserDirect(t, ro, token)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeNotAuthorizedException)
 }
 
 func TestGetUser_KeysStorageError(t *testing.T) {
