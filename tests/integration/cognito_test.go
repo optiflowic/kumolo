@@ -474,3 +474,301 @@ func TestCognitoIntegration_AuthFlows(t *testing.T) {
 		assert.Equal(t, "NotAuthorizedException", apiErrorCode(err))
 	})
 }
+
+// ── Admin operations ──────────────────────────────────────────────────────────
+
+func TestCognitoIntegration_AdminOps(t *testing.T) {
+	clients := newTestClients(t)
+	ctx := context.Background()
+	c := clients.cognito
+
+	pool, err := c.CreateUserPool(ctx, &awscognito.CreateUserPoolInput{
+		PoolName: aws.String("admin-test-pool"),
+	})
+	require.NoError(t, err)
+	poolID := aws.ToString(pool.UserPool.Id)
+
+	client, err := c.CreateUserPoolClient(ctx, &awscognito.CreateUserPoolClientInput{
+		UserPoolId: aws.String(poolID),
+		ClientName: aws.String("admin-test-client"),
+	})
+	require.NoError(t, err)
+	clientID := aws.ToString(client.UserPoolClient.ClientId)
+
+	const (
+		mainUser = "admin-main-user"
+		email    = "admin-main@example.com"
+		tempPass = "TempPass1!"
+		permPass = "PermPass1!"
+	)
+
+	t.Run("AdminCreateUser_WithoutPassword", func(t *testing.T) {
+		out, err := c.AdminCreateUser(ctx, &awscognito.AdminCreateUserInput{
+			UserPoolId: aws.String(poolID),
+			Username:   aws.String("no-pass-user"),
+			UserAttributes: []types.AttributeType{
+				{Name: aws.String("email"), Value: aws.String("nopass@example.com")},
+			},
+		})
+		require.NoError(t, err)
+		require.NotNil(t, out.User)
+		assert.Equal(t, "no-pass-user", aws.ToString(out.User.Username))
+		assert.Equal(t, types.UserStatusTypeConfirmed, out.User.UserStatus)
+	})
+
+	t.Run("AdminCreateUser_WithTemporaryPassword", func(t *testing.T) {
+		out, err := c.AdminCreateUser(ctx, &awscognito.AdminCreateUserInput{
+			UserPoolId:        aws.String(poolID),
+			Username:          aws.String(mainUser),
+			TemporaryPassword: aws.String(tempPass),
+			UserAttributes: []types.AttributeType{
+				{Name: aws.String("email"), Value: aws.String(email)},
+			},
+		})
+		require.NoError(t, err)
+		require.NotNil(t, out.User)
+		assert.Equal(t, mainUser, aws.ToString(out.User.Username))
+		assert.Equal(t, types.UserStatusTypeForceChangePassword, out.User.UserStatus)
+	})
+
+	t.Run("AdminCreateUser_Duplicate", func(t *testing.T) {
+		_, err := c.AdminCreateUser(ctx, &awscognito.AdminCreateUserInput{
+			UserPoolId: aws.String(poolID),
+			Username:   aws.String(mainUser),
+		})
+		require.Error(t, err)
+		assert.Equal(t, "UsernameExistsException", apiErrorCode(err))
+	})
+
+	t.Run("AdminGetUser", func(t *testing.T) {
+		out, err := c.AdminGetUser(ctx, &awscognito.AdminGetUserInput{
+			UserPoolId: aws.String(poolID),
+			Username:   aws.String(mainUser),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, mainUser, aws.ToString(out.Username))
+		assert.Equal(t, types.UserStatusTypeForceChangePassword, out.UserStatus)
+		var hasSub, hasEmail bool
+		for _, a := range out.UserAttributes {
+			switch aws.ToString(a.Name) {
+			case "sub":
+				hasSub = true
+			case "email":
+				hasEmail = true
+				assert.Equal(t, email, aws.ToString(a.Value))
+			}
+		}
+		assert.True(t, hasSub, "sub attribute should be present")
+		assert.True(t, hasEmail, "email attribute should be present")
+	})
+
+	t.Run("AdminGetUser_NotFound", func(t *testing.T) {
+		_, err := c.AdminGetUser(ctx, &awscognito.AdminGetUserInput{
+			UserPoolId: aws.String(poolID),
+			Username:   aws.String("nonexistent"),
+		})
+		require.Error(t, err)
+		assert.Equal(t, "UserNotFoundException", apiErrorCode(err))
+	})
+
+	t.Run("AdminSetUserPassword_Permanent", func(t *testing.T) {
+		_, err := c.AdminSetUserPassword(ctx, &awscognito.AdminSetUserPasswordInput{
+			UserPoolId: aws.String(poolID),
+			Username:   aws.String(mainUser),
+			Password:   aws.String(permPass),
+			Permanent:  true,
+		})
+		require.NoError(t, err)
+
+		out, err := c.AdminGetUser(ctx, &awscognito.AdminGetUserInput{
+			UserPoolId: aws.String(poolID),
+			Username:   aws.String(mainUser),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, types.UserStatusTypeConfirmed, out.UserStatus)
+	})
+
+	t.Run("AdminSetUserPassword_CanLogin", func(t *testing.T) {
+		out, err := c.InitiateAuth(ctx, &awscognito.InitiateAuthInput{
+			ClientId: aws.String(clientID),
+			AuthFlow: types.AuthFlowTypeUserPasswordAuth,
+			AuthParameters: map[string]string{
+				"USERNAME": mainUser,
+				"PASSWORD": permPass,
+			},
+		})
+		require.NoError(t, err)
+		require.NotNil(t, out.AuthenticationResult)
+		assert.NotEmpty(t, aws.ToString(out.AuthenticationResult.AccessToken))
+	})
+
+	t.Run("AdminSetUserPassword_Temporary", func(t *testing.T) {
+		_, err := c.AdminSetUserPassword(ctx, &awscognito.AdminSetUserPasswordInput{
+			UserPoolId: aws.String(poolID),
+			Username:   aws.String(mainUser),
+			Password:   aws.String(tempPass),
+			Permanent:  false,
+		})
+		require.NoError(t, err)
+
+		out, err := c.AdminGetUser(ctx, &awscognito.AdminGetUserInput{
+			UserPoolId: aws.String(poolID),
+			Username:   aws.String(mainUser),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, types.UserStatusTypeForceChangePassword, out.UserStatus)
+	})
+
+	t.Run("AdminSetUserPassword_NotFound", func(t *testing.T) {
+		_, err := c.AdminSetUserPassword(ctx, &awscognito.AdminSetUserPasswordInput{
+			UserPoolId: aws.String(poolID),
+			Username:   aws.String("nonexistent"),
+			Password:   aws.String(permPass),
+			Permanent:  true,
+		})
+		require.Error(t, err)
+		assert.Equal(t, "UserNotFoundException", apiErrorCode(err))
+	})
+
+	t.Run("AdminConfirmSignUp", func(t *testing.T) {
+		// SignUp creates an UNCONFIRMED user; AdminConfirmSignUp confirms without needing a code.
+		_, err := c.SignUp(ctx, &awscognito.SignUpInput{
+			ClientId: aws.String(clientID),
+			Username: aws.String("unconfirmed-user"),
+			Password: aws.String(permPass),
+		})
+		require.NoError(t, err)
+
+		_, err = c.AdminConfirmSignUp(ctx, &awscognito.AdminConfirmSignUpInput{
+			UserPoolId: aws.String(poolID),
+			Username:   aws.String("unconfirmed-user"),
+		})
+		require.NoError(t, err)
+
+		out, err := c.AdminGetUser(ctx, &awscognito.AdminGetUserInput{
+			UserPoolId: aws.String(poolID),
+			Username:   aws.String("unconfirmed-user"),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, types.UserStatusTypeConfirmed, out.UserStatus)
+	})
+
+	t.Run("AdminConfirmSignUp_NotFound", func(t *testing.T) {
+		_, err := c.AdminConfirmSignUp(ctx, &awscognito.AdminConfirmSignUpInput{
+			UserPoolId: aws.String(poolID),
+			Username:   aws.String("nonexistent"),
+		})
+		require.Error(t, err)
+		assert.Equal(t, "UserNotFoundException", apiErrorCode(err))
+	})
+
+	t.Run("AdminDeleteUser", func(t *testing.T) {
+		_, err := c.AdminDeleteUser(ctx, &awscognito.AdminDeleteUserInput{
+			UserPoolId: aws.String(poolID),
+			Username:   aws.String("no-pass-user"),
+		})
+		require.NoError(t, err)
+
+		_, err = c.AdminGetUser(ctx, &awscognito.AdminGetUserInput{
+			UserPoolId: aws.String(poolID),
+			Username:   aws.String("no-pass-user"),
+		})
+		require.Error(t, err)
+		assert.Equal(t, "UserNotFoundException", apiErrorCode(err))
+	})
+
+	t.Run("AdminDeleteUser_NotFound", func(t *testing.T) {
+		_, err := c.AdminDeleteUser(ctx, &awscognito.AdminDeleteUserInput{
+			UserPoolId: aws.String(poolID),
+			Username:   aws.String("nonexistent"),
+		})
+		require.Error(t, err)
+		assert.Equal(t, "UserNotFoundException", apiErrorCode(err))
+	})
+}
+
+// ── GetUser ───────────────────────────────────────────────────────────────────
+
+func TestCognitoIntegration_GetUser(t *testing.T) {
+	cap := withCodeCapture(t)
+	clients := newTestClients(t)
+	ctx := context.Background()
+	c := clients.cognito
+
+	pool, err := c.CreateUserPool(ctx, &awscognito.CreateUserPoolInput{
+		PoolName: aws.String("getuser-test-pool"),
+	})
+	require.NoError(t, err)
+	poolID := aws.ToString(pool.UserPool.Id)
+
+	client, err := c.CreateUserPoolClient(ctx, &awscognito.CreateUserPoolClientInput{
+		UserPoolId: aws.String(poolID),
+		ClientName: aws.String("getuser-test-client"),
+	})
+	require.NoError(t, err)
+	clientID := aws.ToString(client.UserPoolClient.ClientId)
+
+	const (
+		username = "getuser-test"
+		password = "Password1!"
+		email    = "getuser@example.com"
+	)
+
+	_, err = c.SignUp(ctx, &awscognito.SignUpInput{
+		ClientId: aws.String(clientID),
+		Username: aws.String(username),
+		Password: aws.String(password),
+		UserAttributes: []types.AttributeType{
+			{Name: aws.String("email"), Value: aws.String(email)},
+		},
+	})
+	require.NoError(t, err)
+
+	code := cap.get(username)
+	require.NotEmpty(t, code)
+	_, err = c.ConfirmSignUp(ctx, &awscognito.ConfirmSignUpInput{
+		ClientId:         aws.String(clientID),
+		Username:         aws.String(username),
+		ConfirmationCode: aws.String(code),
+	})
+	require.NoError(t, err)
+
+	auth, err := c.InitiateAuth(ctx, &awscognito.InitiateAuthInput{
+		ClientId: aws.String(clientID),
+		AuthFlow: types.AuthFlowTypeUserPasswordAuth,
+		AuthParameters: map[string]string{
+			"USERNAME": username,
+			"PASSWORD": password,
+		},
+	})
+	require.NoError(t, err)
+	accessToken := aws.ToString(auth.AuthenticationResult.AccessToken)
+
+	t.Run("GetUser", func(t *testing.T) {
+		out, err := c.GetUser(ctx, &awscognito.GetUserInput{
+			AccessToken: aws.String(accessToken),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, username, aws.ToString(out.Username))
+		var hasSub, hasEmail bool
+		for _, a := range out.UserAttributes {
+			switch aws.ToString(a.Name) {
+			case "sub":
+				hasSub = true
+			case "email":
+				hasEmail = true
+				assert.Equal(t, email, aws.ToString(a.Value))
+			}
+		}
+		assert.True(t, hasSub, "sub attribute should be present")
+		assert.True(t, hasEmail, "email attribute should be present")
+	})
+
+	t.Run("GetUser_InvalidToken", func(t *testing.T) {
+		_, err := c.GetUser(ctx, &awscognito.GetUserInput{
+			AccessToken: aws.String("invalid-token"),
+		})
+		require.Error(t, err)
+		assert.Equal(t, "NotAuthorizedException", apiErrorCode(err))
+	})
+}
