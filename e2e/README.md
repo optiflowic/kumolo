@@ -32,7 +32,7 @@ catch most regressions. E2E tests add a real-tool smoke test on top of that.
 
 | Directory | Description |
 |-----------|-------------|
-| [`terraform/`](terraform/) | Terraform configurations for S3 and DynamoDB |
+| [`terraform/`](terraform/) | Terraform configurations for S3, DynamoDB, and Cognito |
 | [`aws-cli/`](aws-cli/) | AWS CLI verification scripts |
 
 Run all CLI verifications at once:
