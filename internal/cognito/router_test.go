@@ -619,6 +619,31 @@ func TestStorage_DeleteUserPool_StatError(t *testing.T) {
 	assert.False(t, errors.Is(err, errUserPoolNotFound))
 }
 
+func TestStorage_deleteClientsDirLocked_RemoveClientFileError(t *testing.T) {
+	storage, err := NewStorage(t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = storage.Close() })
+	require.NoError(
+		t,
+		storage.CreateUserPool(&UserPoolMetadata{ID: "us-east-1_Test12345", Name: "test"}),
+	)
+	require.NoError(t, storage.CreateUserPoolClient(&UserPoolClientMetadata{
+		UserPoolID: "us-east-1_Test12345",
+		ClientID:   "testclientid0000000000000000",
+		ClientName: "app",
+	}))
+	realRemove := storage.removeFile
+	storage.removeFile = func(name string) error {
+		if strings.Contains(name, "/clients/") {
+			return errors.New("permission denied")
+		}
+		return realRemove(name)
+	}
+	err = storage.DeleteUserPool("us-east-1_Test12345")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "delete clients dir")
+}
+
 func TestStorage_DeleteUserPool_RemoveFlatDirError(t *testing.T) {
 	storage, err := NewStorage(t.TempDir())
 	require.NoError(t, err)
