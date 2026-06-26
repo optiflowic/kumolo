@@ -58,11 +58,6 @@ func (ro *Router) handleAdminCreateUser(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
-	if req.MessageAction == "RESEND" {
-		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException,
-			"MessageAction RESEND is not supported")
-		return
-	}
 	if req.TemporaryPassword != "" && len(req.TemporaryPassword) < minPasswordLen {
 		writeError(w, http.StatusBadRequest, ErrTypeInvalidPasswordException,
 			fmt.Sprintf("Password must be at least %d characters", minPasswordLen))
@@ -77,6 +72,34 @@ func (ro *Router) handleAdminCreateUser(w http.ResponseWriter, body []byte) {
 		}
 		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
 			"failed to get user pool")
+		return
+	}
+
+	if req.MessageAction == "RESEND" {
+		// RESEND requires the user to already exist; kumolo returns the existing
+		// record without resending any message (no message delivery support).
+		user, err := ro.storage.GetUser(req.UserPoolID, req.Username)
+		if err != nil {
+			if errors.Is(err, errUserNotFound) {
+				writeError(w, http.StatusBadRequest, ErrTypeUserNotFoundException,
+					"User does not exist.")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+				"failed to get user")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"User": userTypeResponse{
+				Username:             user.Username,
+				Attributes:           prependSub(user.Attributes, user.Sub),
+				UserCreateDate:       user.CreatedAt,
+				UserLastModifiedDate: user.UpdatedAt,
+				Enabled:              true,
+				UserStatus:           user.Status,
+				MFAOptions:           []any{},
+			},
+		})
 		return
 	}
 
