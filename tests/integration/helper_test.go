@@ -27,6 +27,7 @@ type testClients struct {
 	sts     *awssts.Client
 	kms     *awskms.Client
 	cognito *awscognito.Client
+	baseURL string
 }
 
 // apiErrorCode extracts the AWS error code from an SDK error.
@@ -70,5 +71,6 @@ func newTestClients(t *testing.T) testClients {
 		sts:     awssts.NewFromConfig(cfg),
 		kms:     awskms.NewFromConfig(cfg),
 		cognito: awscognito.NewFromConfig(cfg),
+		baseURL: srv.URL,
 	}
 }

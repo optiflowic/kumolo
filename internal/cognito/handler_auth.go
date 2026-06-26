@@ -687,8 +687,7 @@ func (ro *Router) handleJWKS(w http.ResponseWriter, r *http.Request) {
 
 	if _, err := ro.storage.GetUserPool(poolID); err != nil {
 		if errors.Is(err, errUserPoolNotFound) {
-			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException,
-				"User pool not found.")
+			http.NotFound(w, r)
 			return
 		}
 		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
@@ -704,5 +703,9 @@ func (ro *Router) handleJWKS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	jwks := buildJWKS(&privateKey.PublicKey, keys.KeyID)
-	writeJSON(w, http.StatusOK, jwks)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(jwks); err != nil {
+		slog.Warn("failed to encode JWKS response", "err", err)
+	}
 }

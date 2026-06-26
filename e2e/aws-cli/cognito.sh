@@ -185,6 +185,36 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# JWKS endpoint
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- JWKS ---"
+
+JWKS_RESP=$(mktemp)
+JWKS_JSON=$(curl -sfD "$JWKS_RESP" "$ENDPOINT/$POOL_ID/.well-known/jwks.json") || true
+JWKS_CT=$(grep -i "^content-type:" "$JWKS_RESP" | tr -d '\r' | sed 's/[^:]*: //')
+JWKS_KID=$(echo "$JWKS_JSON" | jq -r '.keys[0].kid // empty' 2>/dev/null)
+JWKS_N=$(echo "$JWKS_JSON" | jq -r '.keys[0].n // empty' 2>/dev/null)
+JWKS_E=$(echo "$JWKS_JSON" | jq -r '.keys[0].e // empty' 2>/dev/null)
+if [ -n "$JWKS_KID" ] && [ -n "$JWKS_N" ] && [ -n "$JWKS_E" ]; then
+  ok "JWKS endpoint — returns keys array with kid/n/e"
+else
+  fail "JWKS endpoint — unexpected response: $JWKS_JSON"
+fi
+if echo "$JWKS_CT" | grep -q "application/json"; then
+  ok "JWKS endpoint — Content-Type is application/json"
+else
+  fail "JWKS endpoint — expected application/json Content-Type, got: $JWKS_CT"
+fi
+
+JWKS_HTTP=$(curl -s -o /dev/null -w "%{http_code}" "$ENDPOINT/us-east-1_UNKNOWN/.well-known/jwks.json")
+if [[ "$JWKS_HTTP" == "404" ]]; then
+  ok "JWKS unknown pool — 404"
+else
+  fail "JWKS unknown pool — expected 404, got $JWKS_HTTP"
+fi
+
+# ---------------------------------------------------------------------------
 # Admin user operations
 # ---------------------------------------------------------------------------
 echo ""
