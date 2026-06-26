@@ -43,7 +43,7 @@ The `e` value for the standard exponent 65537 encodes as `AQAB`.
 
 | Condition | HTTP Status | Notes |
 |-----------|-------------|-------|
-| Unknown user pool ID | 404 Not Found | Plain text or empty body; not the JSON error envelope |
+| Unknown user pool ID | 404 Not Found | Plain-text body (`404 page not found`); not the JSON error envelope |
 
 ## SDK Struct Names
 

@@ -190,8 +190,9 @@ fi
 echo ""
 echo "--- JWKS ---"
 
-JWKS_JSON=$(curl -sf "$ENDPOINT/$POOL_ID/.well-known/jwks.json") || true
-JWKS_CT=$(curl -sI "$ENDPOINT/$POOL_ID/.well-known/jwks.json" | grep -i "^content-type:" | tr -d '\r' | sed 's/[^:]*: //')
+JWKS_RESP=$(mktemp)
+JWKS_JSON=$(curl -sfD "$JWKS_RESP" "$ENDPOINT/$POOL_ID/.well-known/jwks.json") || true
+JWKS_CT=$(grep -i "^content-type:" "$JWKS_RESP" | tr -d '\r' | sed 's/[^:]*: //')
 JWKS_KID=$(echo "$JWKS_JSON" | jq -r '.keys[0].kid // empty' 2>/dev/null)
 JWKS_N=$(echo "$JWKS_JSON" | jq -r '.keys[0].n // empty' 2>/dev/null)
 JWKS_E=$(echo "$JWKS_JSON" | jq -r '.keys[0].e // empty' 2>/dev/null)

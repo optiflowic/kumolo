@@ -1,11 +1,13 @@
 package cognito
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -898,6 +900,8 @@ func TestJWKS_PoolNotFound(t *testing.T) {
 	w := httptest.NewRecorder()
 	ro.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.Equal(t, "text/plain; charset=utf-8", w.Header().Get("Content-Type"))
+	assert.Contains(t, w.Body.String(), "404 page not found")
 }
 
 func TestJWKS_MissingPoolID(t *testing.T) {
@@ -906,6 +910,8 @@ func TestJWKS_MissingPoolID(t *testing.T) {
 	w := httptest.NewRecorder()
 	ro.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.Equal(t, "text/plain; charset=utf-8", w.Header().Get("Content-Type"))
+	assert.Contains(t, w.Body.String(), "404 page not found")
 }
 
 // ── maskEmail ─────────────────────────────────────────────────────────────────
@@ -1100,9 +1106,16 @@ func TestJWKS_EncodeError(t *testing.T) {
 		},
 	}}
 	req := httptest.NewRequest(http.MethodGet, "/us-east-1_Pool1/.well-known/jwks.json", nil)
+
+	var buf bytes.Buffer
+	orig := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(orig) })
+
 	// failWriter.Write always returns error, so json.Encoder.Encode will fail and
 	// trigger the slog.Warn branch in handleJWKS.
 	ro.ServeHTTP(newFailWriter(), req)
+	assert.Contains(t, buf.String(), "failed to encode JWKS response")
 }
 
 // ── Invalid JSON body tests ───────────────────────────────────────────────────
