@@ -283,15 +283,23 @@ fi
 # ---------------------------------------------------------------------------
 # Cleanup
 # ---------------------------------------------------------------------------
-run "DeleteUserPoolClient" \
-  $AWS delete-user-pool-client \
+# Only clear CLIENT_ID / POOL_ID after a successful delete so the EXIT-trap
+# cleanup() can retry if either command fails here.
+if $AWS delete-user-pool-client \
     --user-pool-id "$POOL_ID" \
-    --client-id "$CLIENT_ID"
-CLIENT_ID=""
+    --client-id "$CLIENT_ID" > /dev/null 2>&1; then
+  ok "DeleteUserPoolClient"
+  CLIENT_ID=""
+else
+  fail "DeleteUserPoolClient"
+fi
 
-run "DeleteUserPool" \
-  $AWS delete-user-pool --user-pool-id "$POOL_ID"
-POOL_ID=""
+if $AWS delete-user-pool --user-pool-id "$POOL_ID" > /dev/null 2>&1; then
+  ok "DeleteUserPool"
+  POOL_ID=""
+else
+  fail "DeleteUserPool"
+fi
 
 # ---------------------------------------------------------------------------
 echo ""
