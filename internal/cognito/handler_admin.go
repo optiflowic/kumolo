@@ -29,6 +29,18 @@ type userTypeResponse struct {
 	MFAOptions           []any           `json:"MFAOptions"`
 }
 
+func newUserTypeResponse(u *UserMetadata) userTypeResponse {
+	return userTypeResponse{
+		Username:             u.Username,
+		Attributes:           prependSub(u.Attributes, u.Sub),
+		UserCreateDate:       u.CreatedAt,
+		UserLastModifiedDate: u.UpdatedAt,
+		Enabled:              true,
+		UserStatus:           u.Status,
+		MFAOptions:           []any{},
+	}
+}
+
 func (ro *Router) handleAdminCreateUser(w http.ResponseWriter, body []byte) {
 	var req adminCreateUserRequest
 	if err := json.Unmarshal(body, &req); err != nil {
@@ -89,17 +101,7 @@ func (ro *Router) handleAdminCreateUser(w http.ResponseWriter, body []byte) {
 				"failed to get user")
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{
-			"User": userTypeResponse{
-				Username:             user.Username,
-				Attributes:           prependSub(user.Attributes, user.Sub),
-				UserCreateDate:       user.CreatedAt,
-				UserLastModifiedDate: user.UpdatedAt,
-				Enabled:              true,
-				UserStatus:           user.Status,
-				MFAOptions:           []any{},
-			},
-		})
+		writeJSON(w, http.StatusOK, map[string]any{"User": newUserTypeResponse(user)})
 		return
 	}
 
@@ -147,17 +149,7 @@ func (ro *Router) handleAdminCreateUser(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"User": userTypeResponse{
-			Username:             user.Username,
-			Attributes:           prependSub(user.Attributes, user.Sub),
-			UserCreateDate:       user.CreatedAt,
-			UserLastModifiedDate: user.UpdatedAt,
-			Enabled:              true,
-			UserStatus:           user.Status,
-			MFAOptions:           []any{},
-		},
-	})
+	writeJSON(w, http.StatusOK, map[string]any{"User": newUserTypeResponse(user)})
 }
 
 // ──── AdminGetUser ───────────────────────────────────────────────────────────
