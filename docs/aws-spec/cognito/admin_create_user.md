@@ -44,7 +44,7 @@ HTTP 200 + `{"User": UserType}`
 - `sub` is auto-generated UUID; included in `Attributes` on response.
 - `Enabled` is always `true` on creation.
 - `MFAOptions` is always empty (MFA not implemented).
-- `MessageAction=RESEND`: resends invitation to existing user — **not implemented**; return `NotAuthorizedException`.
+- `MessageAction=RESEND`: resends the invitation to an existing user and resets the temporary-password duration; kumolo looks up the user and returns the existing record (no message sent, kumolo deviation).
 - `MessageAction=SUPPRESS` or omitted: proceed normally, no message sent.
 - kumolo does not send invitation messages regardless of `MessageAction`.
 
@@ -67,6 +67,6 @@ HTTP 200 + `{"User": UserType}`
 ## kumolo deviations
 
 - Password policy check: only minimum length (8 chars); complexity rules not enforced.
-- `MessageAction=RESEND` returns `NotAuthorizedException` (operation not supported).
+- `MessageAction=RESEND`: user must already exist; kumolo returns the existing user without resending any message.
 - `ForceAliasCreation` and `DesiredDeliveryMediums` are accepted but ignored.
 - `TemporaryPassword` omitted: user status is set to `CONFIRMED` (AWS sets `FORCE_CHANGE_PASSWORD`). Passwordless auth is not implemented; CONFIRMED is used as a pragmatic default.

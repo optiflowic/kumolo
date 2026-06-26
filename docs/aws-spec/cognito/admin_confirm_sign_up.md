@@ -11,7 +11,7 @@
 |----------------|-------------------|----------|-------|
 | UserPoolId     | string            | Yes      |       |
 | Username       | string            | Yes      |       |
-| ClientMetadata | map[string]string | No       | ignored (no Lambda triggers) |
+| ClientMetadata | map[string]string | No       | forwarded to the post-confirmation Lambda trigger when configured; kumolo ignores (no trigger support) |
 
 ## Response
 

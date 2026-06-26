@@ -23,7 +23,7 @@ HTTP 200:
   "UserCreateDate": 1234567890.0,
   "UserLastModifiedDate": 1234567890.0,
   "Enabled": true,
-  "UserStatus": "CONFIRMED",
+  "UserStatus": "UNCONFIRMED | CONFIRMED | FORCE_CHANGE_PASSWORD | RESET_REQUIRED | EXTERNAL_PROVIDER",
   "MFAOptions": [],
   "UserMFASettingList": [],
   "PreferredMfaSetting": ""
