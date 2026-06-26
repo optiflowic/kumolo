@@ -169,6 +169,15 @@ if [[ -n "$CONFIRM_CODE" ]]; then
   else
     skip "InitiateAuth (REFRESH_TOKEN_AUTH) — could not extract refresh token"
   fi
+
+  # GetUser (requires a valid access token)
+  ACCESS_TOKEN=$(echo "$AUTH_JSON" | jq -r '.AuthenticationResult.AccessToken // empty' 2>/dev/null || true)
+  if [[ -n "$ACCESS_TOKEN" ]]; then
+    run "GetUser" \
+      $AWS get-user --access-token "$ACCESS_TOKEN"
+  else
+    skip "GetUser — could not extract access token"
+  fi
 else
   skip "ConfirmSignUp — no confirmation code available"
   skip "InitiateAuth  — skipped (user not confirmed)"
@@ -176,15 +185,121 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Admin user operations
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- Admin user operations ---"
+
+ADMIN_USER="admin-e2e@example.com"
+ADMIN_USER_UC="admin-e2e-unconfirmed@example.com"
+
+# AdminCreateUser with temporary password → FORCE_CHANGE_PASSWORD
+ADMIN_CREATE_JSON=$($AWS admin-create-user \
+  --user-pool-id "$POOL_ID" \
+  --username "$ADMIN_USER" \
+  --temporary-password "TempPass1!" \
+  --user-attributes "Name=email,Value=$ADMIN_USER" 2>&1)
+if echo "$ADMIN_CREATE_JSON" | grep -q '"Username"'; then
+  ok "AdminCreateUser (with temporary password)"
+else
+  fail "AdminCreateUser (with temporary password)"
+fi
+
+# AdminGetUser
+ADMIN_GET_JSON=$($AWS admin-get-user \
+  --user-pool-id "$POOL_ID" \
+  --username "$ADMIN_USER" 2>&1)
+if echo "$ADMIN_GET_JSON" | grep -q '"Username"'; then
+  ok "AdminGetUser"
+else
+  fail "AdminGetUser"
+fi
+if echo "$ADMIN_GET_JSON" | grep -q 'FORCE_CHANGE_PASSWORD'; then
+  ok "AdminGetUser — UserStatus is FORCE_CHANGE_PASSWORD"
+else
+  fail "AdminGetUser — expected FORCE_CHANGE_PASSWORD"
+fi
+
+# AdminSetUserPassword (permanent=true → CONFIRMED)
+run "AdminSetUserPassword (permanent)" \
+  $AWS admin-set-user-password \
+    --user-pool-id "$POOL_ID" \
+    --username "$ADMIN_USER" \
+    --password "PermanentPass1!" \
+    --permanent
+ADMIN_GET2_JSON=$($AWS admin-get-user \
+  --user-pool-id "$POOL_ID" \
+  --username "$ADMIN_USER" 2>&1)
+if echo "$ADMIN_GET2_JSON" | grep -q '"CONFIRMED"'; then
+  ok "AdminSetUserPassword — UserStatus changed to CONFIRMED"
+else
+  fail "AdminSetUserPassword — expected CONFIRMED"
+fi
+
+# AdminConfirmSignUp: sign up a new user then confirm via admin API (no code needed)
+SIGNUP_UC_JSON=$($AWS sign-up \
+  --client-id "$CLIENT_ID" \
+  --username "$ADMIN_USER_UC" \
+  --password "Password1!" \
+  --user-attributes "Name=email,Value=$ADMIN_USER_UC" 2>&1)
+if echo "$SIGNUP_UC_JSON" | grep -q '"UserSub"'; then
+  ok "SignUp (for AdminConfirmSignUp)"
+else
+  fail "SignUp (for AdminConfirmSignUp)"
+fi
+run "AdminConfirmSignUp" \
+  $AWS admin-confirm-sign-up \
+    --user-pool-id "$POOL_ID" \
+    --username "$ADMIN_USER_UC"
+ADMIN_GET3_JSON=$($AWS admin-get-user \
+  --user-pool-id "$POOL_ID" \
+  --username "$ADMIN_USER_UC" 2>&1)
+if echo "$ADMIN_GET3_JSON" | grep -q '"CONFIRMED"'; then
+  ok "AdminConfirmSignUp — UserStatus is CONFIRMED"
+else
+  fail "AdminConfirmSignUp — expected CONFIRMED"
+fi
+
+# AdminDeleteUser
+run "AdminDeleteUser" \
+  $AWS admin-delete-user \
+    --user-pool-id "$POOL_ID" \
+    --username "$ADMIN_USER"
+run "AdminDeleteUser (confirmed user)" \
+  $AWS admin-delete-user \
+    --user-pool-id "$POOL_ID" \
+    --username "$ADMIN_USER_UC"
+
+# Verify AdminGetUser returns UserNotFoundException after delete
+DELETED_JSON=$($AWS admin-get-user \
+  --user-pool-id "$POOL_ID" \
+  --username "$ADMIN_USER" 2>&1) || true
+if echo "$DELETED_JSON" | grep -qi 'UserNotFoundException\|does not exist'; then
+  ok "AdminGetUser — UserNotFoundException after AdminDeleteUser"
+else
+  fail "AdminGetUser — expected UserNotFoundException after AdminDeleteUser"
+fi
+
+# ---------------------------------------------------------------------------
 # Cleanup
 # ---------------------------------------------------------------------------
-run "DeleteUserPoolClient" \
-  $AWS delete-user-pool-client \
+# Only clear CLIENT_ID / POOL_ID after a successful delete so the EXIT-trap
+# cleanup() can retry if either command fails here.
+if $AWS delete-user-pool-client \
     --user-pool-id "$POOL_ID" \
-    --client-id "$CLIENT_ID"
+    --client-id "$CLIENT_ID" > /dev/null 2>&1; then
+  ok "DeleteUserPoolClient"
+  CLIENT_ID=""
+else
+  fail "DeleteUserPoolClient"
+fi
 
-run "DeleteUserPool" \
-  $AWS delete-user-pool --user-pool-id "$POOL_ID"
+if $AWS delete-user-pool --user-pool-id "$POOL_ID" > /dev/null 2>&1; then
+  ok "DeleteUserPool"
+  POOL_ID=""
+else
+  fail "DeleteUserPool"
+fi
 
 # ---------------------------------------------------------------------------
 echo ""

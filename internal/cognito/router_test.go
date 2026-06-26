@@ -179,6 +179,7 @@ type mockStore struct {
 	getUserFn         func(string, string) (*UserMetadata, error)
 	getUserBySubFn    func(string, string) (*UserMetadata, error)
 	updateUserErr     error
+	deleteUserErr     error
 	getOrCreateKeysFn func(string) (*poolKeys, *rsa.PrivateKey, error)
 	getPoolKeysFn     func(string) (*poolKeys, *rsa.PrivateKey, error)
 	createRefreshErr  error
@@ -245,6 +246,8 @@ func (m *mockStore) GetUserBySub(poolID, sub string) (*UserMetadata, error) {
 func (m *mockStore) UpdateUser(_ string, _ string, _ func(*UserMetadata) error) error {
 	return m.updateUserErr
 }
+
+func (m *mockStore) DeleteUser(string, string) error { return m.deleteUserErr }
 
 func (m *mockStore) GetOrCreatePoolKeys(poolID string) (*poolKeys, *rsa.PrivateKey, error) {
 	if m.getOrCreateKeysFn != nil {

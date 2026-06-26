@@ -64,3 +64,11 @@ output "cognito_user_pool_arn" {
 output "cognito_user_pool_client_id" {
   value = aws_cognito_user_pool_client.main.id
 }
+
+output "cognito_admin_user" {
+  value = aws_cognito_user.admin.username
+}
+
+output "cognito_admin_user_status" {
+  value = aws_cognito_user.admin.status
+}

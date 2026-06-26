@@ -133,6 +133,33 @@ func (s *Storage) GetUserBySub(poolID, sub string) (*UserMetadata, error) {
 	return &user, nil
 }
 
+// DeleteUser removes a user and its username index entry from storage.
+// Reading the index directly (not via getUserLocked) makes DeleteUser retryable
+// after a partial failure: if the user file was removed but index removal failed,
+// a retry can find the index, skip the already-gone user file, and finish the cleanup.
+func (s *Storage) DeleteUser(poolID, username string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	idx, err := readJSON[userIndexEntry](s, userIndexPath(poolID, username))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return errUserNotFound
+		}
+		return fmt.Errorf("read user index: %w", err)
+	}
+
+	if err := s.removeFile(userPath(poolID, idx.Sub)); err != nil &&
+		!errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove user: %w", err)
+	}
+	if err := s.removeFile(userIndexPath(poolID, username)); err != nil &&
+		!errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove user index: %w", err)
+	}
+	return nil
+}
+
 // UpdateUser applies fn to the user and persists the result.
 func (s *Storage) UpdateUser(poolID, username string, fn func(*UserMetadata) error) error {
 	s.mu.Lock()

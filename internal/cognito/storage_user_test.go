@@ -253,3 +253,69 @@ func TestUpdateUser_NotFound(t *testing.T) {
 	err := s.UpdateUser(poolID, "nobody", func(*UserMetadata) error { return nil })
 	require.ErrorIs(t, err, errUserNotFound)
 }
+
+// ── DeleteUser ────────────────────────────────────────────────────────────────
+
+func TestDeleteUser_RemoveUserFileError(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	require.NoError(t, s.CreateUser(poolID,
+		&UserMetadata{Username: "alice", Sub: "sub-alice", Status: userStatusUnconfirmed},
+	))
+
+	calls := 0
+	realRemove := s.removeFile
+	s.removeFile = func(name string) error {
+		calls++
+		if calls == 1 {
+			return errors.New("disk full")
+		}
+		return realRemove(name)
+	}
+	err := s.DeleteUser(poolID, "alice")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "remove user")
+}
+
+func TestDeleteUser_RemoveIndexFileError(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	require.NoError(t, s.CreateUser(poolID,
+		&UserMetadata{Username: "alice", Sub: "sub-alice", Status: userStatusUnconfirmed},
+	))
+
+	calls := 0
+	realRemove := s.removeFile
+	s.removeFile = func(name string) error {
+		calls++
+		if calls == 1 {
+			return realRemove(name) // user file: success
+		}
+		return errors.New("disk full")
+	}
+	err := s.DeleteUser(poolID, "alice")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "remove user index")
+
+	// After partial failure: user file is gone but stale index remains.
+	// Restore removeFile and verify retry converges (stale index is cleaned up).
+	s.removeFile = realRemove
+	require.NoError(t, s.DeleteUser(poolID, "alice"))
+	_, err = s.GetUser(poolID, "alice")
+	require.ErrorIs(t, err, errUserNotFound)
+}
+
+func TestDeleteUser_IndexReadError(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	require.NoError(t, s.CreateUser(poolID,
+		&UserMetadata{Username: "alice", Sub: "sub-alice", Status: userStatusUnconfirmed},
+	))
+
+	s.readAll = func(io.Reader) ([]byte, error) {
+		return nil, errors.New("read error")
+	}
+	err := s.DeleteUser(poolID, "alice")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "read user index")
+}

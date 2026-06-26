@@ -37,6 +37,7 @@ type store interface {
 	GetUser(poolID, username string) (*UserMetadata, error)
 	GetUserBySub(poolID, sub string) (*UserMetadata, error)
 	UpdateUser(poolID, username string, fn func(*UserMetadata) error) error
+	DeleteUser(poolID, username string) error
 
 	// RSA key operations
 	GetOrCreatePoolKeys(poolID string) (*poolKeys, *rsa.PrivateKey, error)
@@ -119,6 +120,16 @@ func (ro *Router) serveHTTP(w http.ResponseWriter, r *http.Request, op string) {
 		ro.handleRespondToAuthChallenge(w, body)
 	case "GetUser":
 		ro.handleGetUser(w, body)
+	case "AdminCreateUser":
+		ro.handleAdminCreateUser(w, body)
+	case "AdminGetUser":
+		ro.handleAdminGetUser(w, body)
+	case "AdminSetUserPassword":
+		ro.handleAdminSetUserPassword(w, body)
+	case "AdminConfirmSignUp":
+		ro.handleAdminConfirmSignUp(w, body)
+	case "AdminDeleteUser":
+		ro.handleAdminDeleteUser(w, body)
 	default:
 		writeError(
 			w,

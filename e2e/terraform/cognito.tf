@@ -17,6 +17,18 @@ resource "aws_cognito_user_pool" "main" {
   }
 }
 
+resource "aws_cognito_user" "admin" {
+  user_pool_id = aws_cognito_user_pool.main.id
+  username     = "tf-admin@example.com"
+
+  temporary_password = "TempPass1!"
+  message_action     = "SUPPRESS"
+
+  attributes = {
+    email = "tf-admin@example.com"
+  }
+}
+
 resource "aws_cognito_user_pool_client" "main" {
   name         = "kumolo-tf-client"
   user_pool_id = aws_cognito_user_pool.main.id
