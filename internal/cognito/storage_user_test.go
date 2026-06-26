@@ -296,4 +296,26 @@ func TestDeleteUser_RemoveIndexFileError(t *testing.T) {
 	err := s.DeleteUser(poolID, "alice")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "remove user index")
+
+	// After partial failure: user file is gone but stale index remains.
+	// Restore removeFile and verify retry converges (stale index is cleaned up).
+	s.removeFile = realRemove
+	require.NoError(t, s.DeleteUser(poolID, "alice"))
+	_, err = s.GetUser(poolID, "alice")
+	require.ErrorIs(t, err, errUserNotFound)
+}
+
+func TestDeleteUser_IndexReadError(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	require.NoError(t, s.CreateUser(poolID,
+		&UserMetadata{Username: "alice", Sub: "sub-alice", Status: userStatusUnconfirmed},
+	))
+
+	s.readAll = func(io.Reader) ([]byte, error) {
+		return nil, errors.New("read error")
+	}
+	err := s.DeleteUser(poolID, "alice")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "read user index")
 }
