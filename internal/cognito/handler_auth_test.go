@@ -1115,6 +1115,7 @@ func TestJWKS_EncodeError(t *testing.T) {
 	// failWriter.Write always returns error, so json.Encoder.Encode will fail and
 	// trigger the slog.Warn branch in handleJWKS.
 	ro.ServeHTTP(newFailWriter(), req)
+	assert.Contains(t, buf.String(), "level=WARN")
 	assert.Contains(t, buf.String(), "failed to encode JWKS response")
 }
 
