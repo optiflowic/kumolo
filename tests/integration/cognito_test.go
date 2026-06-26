@@ -666,6 +666,14 @@ func TestCognitoIntegration_AdminUserNotFound(t *testing.T) {
 
 	const permPass = "PermPass1!"
 
+	// Pre-create "dup-user" in the outer test scope so the duplicate subtest
+	// can call require.NoError on the correct goroutine's t.
+	_, err := c.AdminCreateUser(ctx, &awscognito.AdminCreateUserInput{
+		UserPoolId: aws.String(env.poolID),
+		Username:   aws.String("dup-user"),
+	})
+	require.NoError(t, err)
+
 	tests := []struct {
 		name string
 		run  func() error
@@ -673,13 +681,7 @@ func TestCognitoIntegration_AdminUserNotFound(t *testing.T) {
 		{
 			name: "AdminCreateUser_Duplicate",
 			run: func() error {
-				// First create must succeed.
 				_, err := c.AdminCreateUser(ctx, &awscognito.AdminCreateUserInput{
-					UserPoolId: aws.String(env.poolID),
-					Username:   aws.String("dup-user"),
-				})
-				require.NoError(t, err)
-				_, err = c.AdminCreateUser(ctx, &awscognito.AdminCreateUserInput{
 					UserPoolId: aws.String(env.poolID),
 					Username:   aws.String("dup-user"),
 				})
