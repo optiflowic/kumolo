@@ -1091,6 +1091,20 @@ func TestJWKS_GetOrCreateKeysError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }
 
+func TestJWKS_EncodeError(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	ro := &Router{storage: &mockStore{
+		getOrCreateKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: "test-kid"}, key, nil
+		},
+	}}
+	req := httptest.NewRequest(http.MethodGet, "/us-east-1_Pool1/.well-known/jwks.json", nil)
+	// failWriter.Write always returns error, so json.Encoder.Encode will fail and
+	// trigger the slog.Warn branch in handleJWKS.
+	ro.ServeHTTP(newFailWriter(), req)
+}
+
 // ── Invalid JSON body tests ───────────────────────────────────────────────────
 
 func TestSignUp_InvalidBody(t *testing.T) {

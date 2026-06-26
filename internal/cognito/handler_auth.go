@@ -705,7 +705,7 @@ func (ro *Router) handleJWKS(w http.ResponseWriter, r *http.Request) {
 	jwks := buildJWKS(&privateKey.PublicKey, keys.KeyID)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(jwks); err != nil { // untestable: json.Encoder.Encode only fails on underlying I/O errors that httptest.ResponseRecorder cannot simulate
+	if err := json.NewEncoder(w).Encode(jwks); err != nil {
 		slog.Warn("failed to encode JWKS response", "err", err)
 	}
 }

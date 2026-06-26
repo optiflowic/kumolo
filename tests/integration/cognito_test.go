@@ -892,6 +892,7 @@ func TestCognitoIntegration_JWKS(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = resp.Body.Close() })
 		require.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Equal(t, "application/json", resp.Header.Get("Content-Type"))
 
 		var jwks struct {
 			Keys []struct {
@@ -922,8 +923,9 @@ func TestCognitoIntegration_JWKS(t *testing.T) {
 
 		var jwks struct {
 			Keys []struct {
-				N string `json:"n"`
-				E string `json:"e"`
+				Kid string `json:"kid"`
+				N   string `json:"n"`
+				E   string `json:"e"`
 			} `json:"keys"`
 		}
 		require.NoError(t, json.NewDecoder(resp.Body).Decode(&jwks))
@@ -942,6 +944,17 @@ func TestCognitoIntegration_JWKS(t *testing.T) {
 
 		parts := strings.Split(accessToken, ".")
 		require.Len(t, parts, 3)
+
+		headerBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
+		require.NoError(t, err)
+		var jwtHeader struct {
+			Kid string `json:"kid"`
+			Alg string `json:"alg"`
+		}
+		require.NoError(t, json.Unmarshal(headerBytes, &jwtHeader))
+		assert.Equal(t, "RS256", jwtHeader.Alg)
+		assert.Equal(t, k.Kid, jwtHeader.Kid)
+
 		digest := sha256.Sum256([]byte(parts[0] + "." + parts[1]))
 		sigBytes, err := base64.RawURLEncoding.DecodeString(parts[2])
 		require.NoError(t, err)

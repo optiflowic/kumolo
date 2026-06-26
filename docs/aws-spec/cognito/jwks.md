@@ -10,7 +10,7 @@ Not an AWS API target — path-based routing with no `X-Amz-Target` header.
 
 ## Request
 
-```
+```http
 GET /{userPoolId}/.well-known/jwks.json
 ```
 
