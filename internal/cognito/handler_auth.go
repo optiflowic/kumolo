@@ -687,8 +687,7 @@ func (ro *Router) handleJWKS(w http.ResponseWriter, r *http.Request) {
 
 	if _, err := ro.storage.GetUserPool(poolID); err != nil {
 		if errors.Is(err, errUserPoolNotFound) {
-			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException,
-				"User pool not found.")
+			http.NotFound(w, r)
 			return
 		}
 		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,

@@ -2,7 +2,15 @@ package integration_test
 
 import (
 	"context"
+	"crypto"
+	"crypto/rsa"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
 	"log/slog"
+	"math/big"
+	"net/http"
+	"strings"
 	"sync"
 	"testing"
 
@@ -817,5 +825,129 @@ func TestCognitoIntegration_GetUser(t *testing.T) {
 		})
 		require.Error(t, err)
 		assert.Equal(t, "NotAuthorizedException", apiErrorCode(err))
+	})
+}
+
+// ── JWKS ──────────────────────────────────────────────────────────────────────
+
+func TestCognitoIntegration_JWKS(t *testing.T) {
+	clients := newTestClients(t)
+	ctx := context.Background()
+	c := clients.cognito
+	cap := withCodeCapture(t)
+
+	pool, err := c.CreateUserPool(ctx, &awscognito.CreateUserPoolInput{
+		PoolName: aws.String("jwks-test-pool"),
+	})
+	require.NoError(t, err)
+	poolID := aws.ToString(pool.UserPool.Id)
+
+	client, err := c.CreateUserPoolClient(ctx, &awscognito.CreateUserPoolClientInput{
+		UserPoolId: aws.String(poolID),
+		ClientName: aws.String("jwks-test-client"),
+	})
+	require.NoError(t, err)
+	clientID := aws.ToString(client.UserPoolClient.ClientId)
+
+	const (
+		jwksUsername = "jwks-user"
+		jwksPassword = "Password1!"
+	)
+	_, err = c.SignUp(ctx, &awscognito.SignUpInput{
+		ClientId: aws.String(clientID),
+		Username: aws.String(jwksUsername),
+		Password: aws.String(jwksPassword),
+	})
+	require.NoError(t, err)
+
+	code := cap.get(jwksUsername)
+	require.NotEmpty(t, code)
+	_, err = c.ConfirmSignUp(ctx, &awscognito.ConfirmSignUpInput{
+		ClientId:         aws.String(clientID),
+		Username:         aws.String(jwksUsername),
+		ConfirmationCode: aws.String(code),
+	})
+	require.NoError(t, err)
+
+	auth, err := c.InitiateAuth(ctx, &awscognito.InitiateAuthInput{
+		ClientId: aws.String(clientID),
+		AuthFlow: types.AuthFlowTypeUserPasswordAuth,
+		AuthParameters: map[string]string{
+			"USERNAME": jwksUsername,
+			"PASSWORD": jwksPassword,
+		},
+	})
+	require.NoError(t, err)
+	accessToken := aws.ToString(auth.AuthenticationResult.AccessToken)
+
+	t.Run("UnknownPool_404", func(t *testing.T) {
+		resp, err := http.Get(clients.baseURL + "/us-east-1_UNKNOWN/.well-known/jwks.json")
+		require.NoError(t, err)
+		resp.Body.Close()
+		assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	})
+
+	t.Run("FetchJWKS", func(t *testing.T) {
+		resp, err := http.Get(clients.baseURL + "/" + poolID + "/.well-known/jwks.json")
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+
+		var jwks struct {
+			Keys []struct {
+				Kid string `json:"kid"`
+				Alg string `json:"alg"`
+				Kty string `json:"kty"`
+				Use string `json:"use"`
+				N   string `json:"n"`
+				E   string `json:"e"`
+			} `json:"keys"`
+		}
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&jwks))
+		require.Len(t, jwks.Keys, 1)
+		key := jwks.Keys[0]
+		assert.Equal(t, "RS256", key.Alg)
+		assert.Equal(t, "RSA", key.Kty)
+		assert.Equal(t, "sig", key.Use)
+		assert.NotEmpty(t, key.Kid)
+		assert.NotEmpty(t, key.N)
+		assert.Equal(t, "AQAB", key.E, "standard RSA exponent 65537 must encode as AQAB")
+	})
+
+	t.Run("VerifyTokenSignature", func(t *testing.T) {
+		resp, err := http.Get(clients.baseURL + "/" + poolID + "/.well-known/jwks.json")
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+
+		var jwks struct {
+			Keys []struct {
+				N string `json:"n"`
+				E string `json:"e"`
+			} `json:"keys"`
+		}
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&jwks))
+		require.Len(t, jwks.Keys, 1)
+		k := jwks.Keys[0]
+
+		nBytes, err := base64.RawURLEncoding.DecodeString(k.N)
+		require.NoError(t, err)
+		eBytes, err := base64.RawURLEncoding.DecodeString(k.E)
+		require.NoError(t, err)
+
+		pubKey := &rsa.PublicKey{
+			N: new(big.Int).SetBytes(nBytes),
+			E: int(new(big.Int).SetBytes(eBytes).Int64()),
+		}
+
+		parts := strings.Split(accessToken, ".")
+		require.Len(t, parts, 3)
+		digest := sha256.Sum256([]byte(parts[0] + "." + parts[1]))
+		sigBytes, err := base64.RawURLEncoding.DecodeString(parts[2])
+		require.NoError(t, err)
+		require.NoError(t,
+			rsa.VerifyPKCS1v15(pubKey, crypto.SHA256, digest[:], sigBytes),
+			"access token signature must verify against JWKS public key",
+		)
 	})
 }

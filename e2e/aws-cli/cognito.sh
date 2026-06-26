@@ -185,6 +185,26 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# JWKS endpoint
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- JWKS ---"
+
+JWKS_JSON=$(curl -sf "$ENDPOINT/$POOL_ID/.well-known/jwks.json" 2>&1) || true
+if echo "$JWKS_JSON" | grep -q '"keys"'; then
+  ok "JWKS endpoint — returns keys array"
+else
+  fail "JWKS endpoint — unexpected response: $JWKS_JSON"
+fi
+
+JWKS_HTTP=$(curl -s -o /dev/null -w "%{http_code}" "$ENDPOINT/us-east-1_UNKNOWN/.well-known/jwks.json")
+if [[ "$JWKS_HTTP" == "404" ]]; then
+  ok "JWKS unknown pool — 404"
+else
+  fail "JWKS unknown pool — expected 404, got $JWKS_HTTP"
+fi
+
+# ---------------------------------------------------------------------------
 # Admin user operations
 # ---------------------------------------------------------------------------
 echo ""

@@ -897,8 +897,7 @@ func TestJWKS_PoolNotFound(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/us-east-1_UNKNOWN/.well-known/jwks.json", nil)
 	w := httptest.NewRecorder()
 	ro.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrType(t, w, ErrTypeResourceNotFoundException)
+	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
 func TestJWKS_MissingPoolID(t *testing.T) {
@@ -906,7 +905,7 @@ func TestJWKS_MissingPoolID(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/.well-known/jwks.json", nil)
 	w := httptest.NewRecorder()
 	ro.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
 // ── maskEmail ─────────────────────────────────────────────────────────────────
