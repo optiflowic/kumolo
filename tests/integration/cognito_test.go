@@ -883,14 +883,14 @@ func TestCognitoIntegration_JWKS(t *testing.T) {
 	t.Run("UnknownPool_404", func(t *testing.T) {
 		resp, err := http.Get(clients.baseURL + "/us-east-1_UNKNOWN/.well-known/jwks.json")
 		require.NoError(t, err)
-		resp.Body.Close()
+		t.Cleanup(func() { _ = resp.Body.Close() })
 		assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 	})
 
 	t.Run("FetchJWKS", func(t *testing.T) {
 		resp, err := http.Get(clients.baseURL + "/" + poolID + "/.well-known/jwks.json")
 		require.NoError(t, err)
-		defer resp.Body.Close()
+		t.Cleanup(func() { _ = resp.Body.Close() })
 		require.Equal(t, http.StatusOK, resp.StatusCode)
 
 		var jwks struct {
@@ -917,7 +917,7 @@ func TestCognitoIntegration_JWKS(t *testing.T) {
 	t.Run("VerifyTokenSignature", func(t *testing.T) {
 		resp, err := http.Get(clients.baseURL + "/" + poolID + "/.well-known/jwks.json")
 		require.NoError(t, err)
-		defer resp.Body.Close()
+		t.Cleanup(func() { _ = resp.Body.Close() })
 		require.Equal(t, http.StatusOK, resp.StatusCode)
 
 		var jwks struct {
