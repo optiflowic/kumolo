@@ -672,6 +672,101 @@ func (ro *Router) handleNewPasswordRequired(
 	ro.writeAuthResult(w, poolID, clientID, updatedUser, privateKey, keys.KeyID, true)
 }
 
+// ──── ResendConfirmationCode ─────────────────────────────────────────────────
+
+type resendConfirmationCodeRequest struct {
+	ClientID string `json:"ClientId"`
+	Username string `json:"Username"`
+}
+
+type resendConfirmationCodeResponse struct {
+	CodeDeliveryDetails codeDeliveryDetails `json:"CodeDeliveryDetails"`
+}
+
+func (ro *Router) handleResendConfirmationCode(w http.ResponseWriter, body []byte) {
+	var req resendConfirmationCodeRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"invalid request body")
+		return
+	}
+	if req.ClientID == "" {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"ClientId is required")
+		return
+	}
+	if req.Username == "" {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"Username is required")
+		return
+	}
+
+	poolID, err := ro.storage.GetPoolIDForClient(req.ClientID)
+	if err != nil {
+		if errors.Is(err, errUserPoolClientNotFound) {
+			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException,
+				"User pool client not found.")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to resolve client")
+		return
+	}
+
+	codeR := ro.codeReader
+	if codeR == nil {
+		codeR = randReader
+	}
+	code, err := generateConfirmationCodeFrom(codeR)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to generate confirmation code")
+		return
+	}
+
+	var dest string
+	err = ro.storage.UpdateUser(poolID, req.Username, func(u *UserMetadata) error {
+		if u.Status != userStatusUnconfirmed {
+			return errNotUnconfirmed
+		}
+		u.ConfirmationCode = code
+		for _, attr := range u.Attributes {
+			if attr.Name == "email" {
+				dest = maskEmail(attr.Value)
+				break
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, errUserNotFound):
+			writeError(w, http.StatusBadRequest, ErrTypeUserNotFoundException,
+				"User does not exist.")
+		case errors.Is(err, errNotUnconfirmed):
+			writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException,
+				"User cannot be confirmed. Current status is CONFIRMED.")
+		default:
+			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+				"failed to update user")
+		}
+		return
+	}
+
+	slog.Info("ResendConfirmationCode", "pool_id", poolID, "username", req.Username, "code", code)
+
+	if dest == "" {
+		dest = "***"
+	}
+	writeJSON(w, http.StatusOK, resendConfirmationCodeResponse{
+		CodeDeliveryDetails: codeDeliveryDetails{
+			AttributeName:  "email",
+			DeliveryMedium: "EMAIL",
+			Destination:    dest,
+		},
+	})
+}
+
 // ──── JWKS ──────────────────────────────────────────────────────────────────
 
 func (ro *Router) handleJWKS(w http.ResponseWriter, r *http.Request) {

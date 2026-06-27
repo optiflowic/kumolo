@@ -1255,3 +1255,158 @@ func TestGenerateConfirmationCodeFrom_ValidRange(t *testing.T) {
 		require.True(t, ch >= '0' && ch <= '9', "expected digit, got %q", ch)
 	}
 }
+
+// ── ResendConfirmationCode ────────────────────────────────────────────────────
+
+func TestResendConfirmationCode_Success(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	signUpUser(t, ro, clientID, "alice", "Password123!")
+
+	poolID, err := ro.storage.GetPoolIDForClient(clientID)
+	require.NoError(t, err)
+	oldUser, err := ro.storage.GetUser(poolID, "alice")
+	require.NoError(t, err)
+	oldCode := oldUser.ConfirmationCode
+
+	body, _ := json.Marshal(map[string]string{
+		"ClientId": clientID,
+		"Username": "alice",
+	})
+	w := doOp(t, ro, "ResendConfirmationCode", string(body))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp resendConfirmationCodeResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, "EMAIL", resp.CodeDeliveryDetails.DeliveryMedium)
+	assert.Equal(t, "email", resp.CodeDeliveryDetails.AttributeName)
+	assert.Contains(t, resp.CodeDeliveryDetails.Destination, "@example.com")
+
+	newUser, err := ro.storage.GetUser(poolID, "alice")
+	require.NoError(t, err)
+	assert.NotEmpty(t, newUser.ConfirmationCode)
+	assert.Len(t, newUser.ConfirmationCode, 6)
+	// new code must be stored (may coincidentally equal old code, but must exist)
+	_ = oldCode
+}
+
+func TestResendConfirmationCode_NewCodeConfirmsUser(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	signUpUser(t, ro, clientID, "alice", "Password123!")
+
+	body, _ := json.Marshal(map[string]string{
+		"ClientId": clientID,
+		"Username": "alice",
+	})
+	w := doOp(t, ro, "ResendConfirmationCode", string(body))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	poolID, err := ro.storage.GetPoolIDForClient(clientID)
+	require.NoError(t, err)
+	user, err := ro.storage.GetUser(poolID, "alice")
+	require.NoError(t, err)
+
+	confirmBody, _ := json.Marshal(map[string]string{
+		"ClientId":         clientID,
+		"Username":         "alice",
+		"ConfirmationCode": user.ConfirmationCode,
+	})
+	wc := doOp(t, ro, "ConfirmSignUp", string(confirmBody))
+	assert.Equal(t, http.StatusOK, wc.Code)
+}
+
+func TestResendConfirmationCode_NoEmail_MasksDestination(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "test-pool")
+	clientID := createClient(t, ro, poolID, "test-client")
+
+	// Sign up without email attribute.
+	body, _ := json.Marshal(map[string]string{
+		"ClientId": clientID,
+		"Username": "bob",
+		"Password": "Password123!",
+	})
+	w := doOp(t, ro, "SignUp", string(body))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	resendBody, _ := json.Marshal(map[string]string{
+		"ClientId": clientID,
+		"Username": "bob",
+	})
+	wr := doOp(t, ro, "ResendConfirmationCode", string(resendBody))
+	require.Equal(t, http.StatusOK, wr.Code)
+	var resp resendConfirmationCodeResponse
+	require.NoError(t, json.NewDecoder(wr.Body).Decode(&resp))
+	assert.Equal(t, "***", resp.CodeDeliveryDetails.Destination)
+}
+
+func TestResendConfirmationCode_MissingClientId(t *testing.T) {
+	ro := newTestRouter(t)
+	w := doOp(t, ro, "ResendConfirmationCode", `{"Username":"alice"}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeInvalidParameterException)
+}
+
+func TestResendConfirmationCode_MissingUsername(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	body, _ := json.Marshal(map[string]string{"ClientId": clientID})
+	w := doOp(t, ro, "ResendConfirmationCode", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeInvalidParameterException)
+}
+
+func TestResendConfirmationCode_InvalidClientId(t *testing.T) {
+	ro := newTestRouter(t)
+	body, _ := json.Marshal(map[string]string{
+		"ClientId": "nonexistent",
+		"Username": "alice",
+	})
+	w := doOp(t, ro, "ResendConfirmationCode", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeResourceNotFoundException)
+}
+
+func TestResendConfirmationCode_UserNotFound(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	body, _ := json.Marshal(map[string]string{
+		"ClientId": clientID,
+		"Username": "nobody",
+	})
+	w := doOp(t, ro, "ResendConfirmationCode", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeUserNotFoundException)
+}
+
+func TestResendConfirmationCode_AlreadyConfirmed(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	signUpUser(t, ro, clientID, "alice", "Password123!")
+	confirmUser(t, ro, clientID, "alice")
+
+	body, _ := json.Marshal(map[string]string{
+		"ClientId": clientID,
+		"Username": "alice",
+	})
+	w := doOp(t, ro, "ResendConfirmationCode", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeNotAuthorizedException)
+}
+
+func TestResendConfirmationCode_EntropyError(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	signUpUser(t, ro, clientID, "alice", "Password123!")
+
+	ro.codeReader = &errorReader{err: errors.New("entropy failed")}
+
+	body, _ := json.Marshal(map[string]string{
+		"ClientId": clientID,
+		"Username": "alice",
+	})
+	w := doOp(t, ro, "ResendConfirmationCode", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
