@@ -22,6 +22,13 @@ const (
 	userStatusUnconfirmed       = "UNCONFIRMED"
 	userStatusConfirmed         = "CONFIRMED"
 	userStatusForceChangePasswd = "FORCE_CHANGE_PASSWORD"
+
+	attrEmail       = "email"
+	attrPhoneNumber = "phone_number"
+	deliveryEmail   = "EMAIL"
+	deliverySMS     = "SMS"
+	maskFallback    = "***"
+	maskPhoneMinLen = 5
 )
 
 // randReader is the default entropy source; overridden in tests via Router.codeReader.
@@ -165,9 +172,9 @@ func (ro *Router) handleSignUp(w http.ResponseWriter, body []byte) {
 	}
 	slog.Info("SignUp confirmation code", "pool_id", poolID, "username", req.Username, "code", code)
 
-	dest := "***"
+	dest := maskFallback
 	for _, attr := range req.UserAttributes {
-		if attr.Name == "email" {
+		if attr.Name == attrEmail {
 			dest = maskEmail(attr.Value)
 			break
 		}
@@ -177,8 +184,8 @@ func (ro *Router) handleSignUp(w http.ResponseWriter, body []byte) {
 		UserSub:       sub,
 		UserConfirmed: false,
 		CodeDeliveryDetails: codeDeliveryDetails{
-			AttributeName:  "email",
-			DeliveryMedium: "EMAIL",
+			AttributeName:  attrEmail,
+			DeliveryMedium: deliveryEmail,
 			Destination:    dest,
 		},
 	})
@@ -187,16 +194,16 @@ func (ro *Router) handleSignUp(w http.ResponseWriter, body []byte) {
 func maskEmail(email string) string {
 	at := strings.IndexByte(email, '@')
 	if at <= 0 {
-		return "***"
+		return maskFallback
 	}
-	return email[:1] + "***" + email[at:]
+	return email[:1] + maskFallback + email[at:]
 }
 
 func maskPhone(phone string) string {
-	if len(phone) <= 5 {
-		return "***"
+	if len(phone) <= maskPhoneMinLen {
+		return maskFallback
 	}
-	return phone[:1] + "***" + phone[len(phone)-4:]
+	return phone[:1] + maskFallback + phone[len(phone)-4:]
 }
 
 // resendDeliveryDetails returns CodeDeliveryDetails for the user's registered
@@ -206,17 +213,17 @@ func resendDeliveryDetails(attrs []AttributeType) codeDeliveryDetails {
 	var phone *codeDeliveryDetails
 	for _, attr := range attrs {
 		switch attr.Name {
-		case "email":
+		case attrEmail:
 			return codeDeliveryDetails{
-				AttributeName:  "email",
-				DeliveryMedium: "EMAIL",
+				AttributeName:  attrEmail,
+				DeliveryMedium: deliveryEmail,
 				Destination:    maskEmail(attr.Value),
 			}
-		case "phone_number":
+		case attrPhoneNumber:
 			if phone == nil {
 				d := codeDeliveryDetails{
-					AttributeName:  "phone_number",
-					DeliveryMedium: "SMS",
+					AttributeName:  attrPhoneNumber,
+					DeliveryMedium: deliverySMS,
 					Destination:    maskPhone(attr.Value),
 				}
 				phone = &d
@@ -226,7 +233,11 @@ func resendDeliveryDetails(attrs []AttributeType) codeDeliveryDetails {
 	if phone != nil {
 		return *phone
 	}
-	return codeDeliveryDetails{AttributeName: "email", DeliveryMedium: "EMAIL", Destination: "***"}
+	return codeDeliveryDetails{
+		AttributeName:  attrEmail,
+		DeliveryMedium: deliveryEmail,
+		Destination:    maskFallback,
+	}
 }
 
 // ──── ConfirmSignUp ─────────────────────────────────────────────────────────

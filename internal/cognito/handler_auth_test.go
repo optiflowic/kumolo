@@ -928,15 +928,18 @@ func TestMaskEmail_NoAt(t *testing.T) {
 
 func TestMaskPhone(t *testing.T) {
 	tests := []struct {
+		name  string
 		input string
 		want  string
 	}{
-		{"+123", "***"},
-		{"+1234", "***"}, // exactly 5 chars must also be masked (boundary)
-		{"+14155551234", "+***1234"},
+		{"short input masked", "+123", maskFallback},
+		{"exactly 5 chars masked (boundary)", "+1234", maskFallback},
+		{"long input shows first char and last 4 digits", "+14155551234", "+***1234"},
 	}
 	for _, tc := range tests {
-		assert.Equal(t, tc.want, maskPhone(tc.input), "input=%q", tc.input)
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, maskPhone(tc.input))
+		})
 	}
 }
 
