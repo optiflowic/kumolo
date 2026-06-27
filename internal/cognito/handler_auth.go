@@ -724,9 +724,10 @@ func (ro *Router) handleResendConfirmationCode(w http.ResponseWriter, body []byt
 		return
 	}
 
-	var dest string
+	var dest, actualStatus string
 	err = ro.storage.UpdateUser(poolID, req.Username, func(u *UserMetadata) error {
 		if u.Status != userStatusUnconfirmed {
+			actualStatus = u.Status
 			return errNotUnconfirmed
 		}
 		u.ConfirmationCode = code
@@ -745,7 +746,7 @@ func (ro *Router) handleResendConfirmationCode(w http.ResponseWriter, body []byt
 				"User does not exist.")
 		case errors.Is(err, errNotUnconfirmed):
 			writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException,
-				"User cannot be confirmed. Current status is CONFIRMED.")
+				fmt.Sprintf("User cannot be confirmed. Current status is %s.", actualStatus))
 		default:
 			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
 				"failed to update user")

@@ -34,13 +34,13 @@ Last verified: 2026-06-28
 | InvalidParameterException | 400 | Missing ClientId or Username |
 | ResourceNotFoundException | 400 | ClientId not found in any pool |
 | UserNotFoundException | 400 | Username not found in the pool |
-| NotAuthorizedException | 400 | User is already CONFIRMED |
+| NotAuthorizedException | 400 | User is not in UNCONFIRMED status (e.g. already CONFIRMED, or FORCE_CHANGE_PASSWORD for admin-created users); message includes the actual current status string |
 | InternalErrorException | 500 | Storage failure |
 
 ## Behavior
 
 - Generates a new 6-digit confirmation code and overwrites the previous one stored on the user.
-- Only allowed when the user is in `UNCONFIRMED` status; returns `NotAuthorizedException` otherwise.
+- Only allowed when the user is in `UNCONFIRMED` status; returns `NotAuthorizedException` otherwise. The error message includes the actual current status (e.g. `"Current status is CONFIRMED."` or `"Current status is FORCE_CHANGE_PASSWORD."`). Admin-created users start in `FORCE_CHANGE_PASSWORD` and cannot use this operation.
 - kumolo does not deliver email/SMS. The new code is logged at INFO level (`pool_id`, `username`, `code`).
 - `CodeDeliveryDetails.Destination` is masked like SignUp: first char + `***` + `@domain`.
 - The new code replaces the old one so a subsequent `ConfirmSignUp` must use this latest code.
