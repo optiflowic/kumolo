@@ -926,12 +926,30 @@ func TestMaskEmail_NoAt(t *testing.T) {
 
 // ── maskPhone ─────────────────────────────────────────────────────────────────
 
-func TestMaskPhone_ShortNumber(t *testing.T) {
-	assert.Equal(t, "***", maskPhone("+123"))
+func TestMaskPhone(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"+123", "***"},
+		{"+1234", "***"}, // exactly 5 chars must also be masked (boundary)
+		{"+14155551234", "+***1234"},
+	}
+	for _, tc := range tests {
+		assert.Equal(t, tc.want, maskPhone(tc.input), "input=%q", tc.input)
+	}
 }
 
-func TestMaskPhone_Normal(t *testing.T) {
-	assert.Equal(t, "+***1234", maskPhone("+14155551234"))
+func TestResendDeliveryDetails_EmailWinsOverPhone(t *testing.T) {
+	// phone_number listed before email — email must still win
+	attrs := []AttributeType{
+		{Name: "phone_number", Value: "+14155551234"},
+		{Name: "email", Value: "alice@example.com"},
+	}
+	got := resendDeliveryDetails(attrs)
+	assert.Equal(t, "email", got.AttributeName)
+	assert.Equal(t, "EMAIL", got.DeliveryMedium)
+	assert.Equal(t, "a***@example.com", got.Destination)
 }
 
 // ── writeAuthResult error paths ───────────────────────────────────────────────

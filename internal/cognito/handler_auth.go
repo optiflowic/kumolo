@@ -193,15 +193,17 @@ func maskEmail(email string) string {
 }
 
 func maskPhone(phone string) string {
-	if len(phone) < 5 {
+	if len(phone) <= 5 {
 		return "***"
 	}
 	return phone[:1] + "***" + phone[len(phone)-4:]
 }
 
 // resendDeliveryDetails returns CodeDeliveryDetails for the user's registered
-// contact attribute. Email takes precedence over phone_number.
+// contact attribute. Email takes precedence over phone_number regardless of
+// attribute order.
 func resendDeliveryDetails(attrs []AttributeType) codeDeliveryDetails {
+	var phone *codeDeliveryDetails
 	for _, attr := range attrs {
 		switch attr.Name {
 		case "email":
@@ -211,12 +213,18 @@ func resendDeliveryDetails(attrs []AttributeType) codeDeliveryDetails {
 				Destination:    maskEmail(attr.Value),
 			}
 		case "phone_number":
-			return codeDeliveryDetails{
-				AttributeName:  "phone_number",
-				DeliveryMedium: "SMS",
-				Destination:    maskPhone(attr.Value),
+			if phone == nil {
+				d := codeDeliveryDetails{
+					AttributeName:  "phone_number",
+					DeliveryMedium: "SMS",
+					Destination:    maskPhone(attr.Value),
+				}
+				phone = &d
 			}
 		}
+	}
+	if phone != nil {
+		return *phone
 	}
 	return codeDeliveryDetails{AttributeName: "email", DeliveryMedium: "EMAIL", Destination: "***"}
 }
