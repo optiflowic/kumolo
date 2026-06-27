@@ -185,6 +185,79 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# ResendConfirmationCode
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- ResendConfirmationCode ---"
+
+RESEND_USER="resend-e2e@example.com"
+RESEND_PASS="Password1!"
+
+RESEND_SIGNUP_JSON=$($AWS sign-up \
+  --client-id "$CLIENT_ID" \
+  --username "$RESEND_USER" \
+  --password "$RESEND_PASS" \
+  --user-attributes "Name=email,Value=$RESEND_USER" 2>&1)
+if echo "$RESEND_SIGNUP_JSON" | grep -q '"UserSub"'; then
+  ok "SignUp (for ResendConfirmationCode)"
+else
+  fail "SignUp (for ResendConfirmationCode)"
+fi
+
+RESEND_JSON=$($AWS resend-confirmation-code \
+  --client-id "$CLIENT_ID" \
+  --username "$RESEND_USER" 2>&1)
+if echo "$RESEND_JSON" | grep -q '"CodeDeliveryDetails"'; then
+  ok "ResendConfirmationCode"
+else
+  fail "ResendConfirmationCode"
+fi
+
+# Error: user not found
+RESEND_NF_JSON=$($AWS resend-confirmation-code \
+  --client-id "$CLIENT_ID" \
+  --username "no-such-user-resend@example.com" 2>&1) || true
+if echo "$RESEND_NF_JSON" | grep -qi 'UserNotFoundException\|does not exist'; then
+  ok "ResendConfirmationCode — UserNotFoundException for unknown user"
+else
+  fail "ResendConfirmationCode — expected UserNotFoundException"
+fi
+
+# Confirm the user via resent code and verify already-confirmed error
+RESEND_CODE="${E2E_COGNITO_RESEND_CODE:-}"
+if [[ -z "$RESEND_CODE" ]]; then
+  if command -v docker &>/dev/null && docker compose ps --services 2>/dev/null | grep -q .; then
+    RESEND_CODE=$(docker compose logs 2>/dev/null \
+      | grep 'ResendConfirmationCode' \
+      | grep "$RESEND_USER" \
+      | tail -1 \
+      | grep -oE 'code=[0-9]+' \
+      | cut -d= -f2 || true)
+  fi
+fi
+
+if [[ -n "$RESEND_CODE" ]]; then
+  run "ConfirmSignUp (with resent code)" \
+    $AWS confirm-sign-up \
+      --client-id "$CLIENT_ID" \
+      --username "$RESEND_USER" \
+      --confirmation-code "$RESEND_CODE"
+
+  RESEND_CONFIRMED_JSON=$($AWS resend-confirmation-code \
+    --client-id "$CLIENT_ID" \
+    --username "$RESEND_USER" 2>&1) || true
+  if echo "$RESEND_CONFIRMED_JSON" | grep -qi 'NotAuthorizedException'; then
+    ok "ResendConfirmationCode — NotAuthorizedException for already confirmed user"
+  else
+    fail "ResendConfirmationCode — expected NotAuthorizedException for already confirmed user"
+  fi
+else
+  skip "ConfirmSignUp (with resent code) — no code available"
+  skip "ResendConfirmationCode already-confirmed check — skipped (user not confirmed)"
+  echo "  Hint: set E2E_COGNITO_RESEND_CODE=<code> from kumolo logs, or use Docker Compose"
+fi
+
+# ---------------------------------------------------------------------------
 # JWKS endpoint
 # ---------------------------------------------------------------------------
 echo ""

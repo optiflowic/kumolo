@@ -22,6 +22,13 @@ const (
 	userStatusUnconfirmed       = "UNCONFIRMED"
 	userStatusConfirmed         = "CONFIRMED"
 	userStatusForceChangePasswd = "FORCE_CHANGE_PASSWORD"
+
+	attrEmail       = "email"
+	attrPhoneNumber = "phone_number"
+	deliveryEmail   = "EMAIL"
+	deliverySMS     = "SMS"
+	maskFallback    = "***"
+	maskPhoneMinLen = 5
 )
 
 // randReader is the default entropy source; overridden in tests via Router.codeReader.
@@ -165,9 +172,9 @@ func (ro *Router) handleSignUp(w http.ResponseWriter, body []byte) {
 	}
 	slog.Info("SignUp confirmation code", "pool_id", poolID, "username", req.Username, "code", code)
 
-	dest := "***"
+	dest := maskFallback
 	for _, attr := range req.UserAttributes {
-		if attr.Name == "email" {
+		if attr.Name == attrEmail {
 			dest = maskEmail(attr.Value)
 			break
 		}
@@ -177,8 +184,8 @@ func (ro *Router) handleSignUp(w http.ResponseWriter, body []byte) {
 		UserSub:       sub,
 		UserConfirmed: false,
 		CodeDeliveryDetails: codeDeliveryDetails{
-			AttributeName:  "email",
-			DeliveryMedium: "EMAIL",
+			AttributeName:  attrEmail,
+			DeliveryMedium: deliveryEmail,
 			Destination:    dest,
 		},
 	})
@@ -187,9 +194,50 @@ func (ro *Router) handleSignUp(w http.ResponseWriter, body []byte) {
 func maskEmail(email string) string {
 	at := strings.IndexByte(email, '@')
 	if at <= 0 {
-		return "***"
+		return maskFallback
 	}
-	return email[:1] + "***" + email[at:]
+	return email[:1] + maskFallback + email[at:]
+}
+
+func maskPhone(phone string) string {
+	if len(phone) <= maskPhoneMinLen {
+		return maskFallback
+	}
+	return phone[:1] + maskFallback + phone[len(phone)-4:]
+}
+
+// resendDeliveryDetails returns CodeDeliveryDetails for the user's registered
+// contact attribute. Email takes precedence over phone_number regardless of
+// attribute order.
+func resendDeliveryDetails(attrs []AttributeType) codeDeliveryDetails {
+	var phone *codeDeliveryDetails
+	for _, attr := range attrs {
+		switch attr.Name {
+		case attrEmail:
+			return codeDeliveryDetails{
+				AttributeName:  attrEmail,
+				DeliveryMedium: deliveryEmail,
+				Destination:    maskEmail(attr.Value),
+			}
+		case attrPhoneNumber:
+			if phone == nil {
+				d := codeDeliveryDetails{
+					AttributeName:  attrPhoneNumber,
+					DeliveryMedium: deliverySMS,
+					Destination:    maskPhone(attr.Value),
+				}
+				phone = &d
+			}
+		}
+	}
+	if phone != nil {
+		return *phone
+	}
+	return codeDeliveryDetails{
+		AttributeName:  attrEmail,
+		DeliveryMedium: deliveryEmail,
+		Destination:    maskFallback,
+	}
 }
 
 // ──── ConfirmSignUp ─────────────────────────────────────────────────────────
@@ -670,6 +718,92 @@ func (ro *Router) handleNewPasswordRequired(
 	}
 
 	ro.writeAuthResult(w, poolID, clientID, updatedUser, privateKey, keys.KeyID, true)
+}
+
+// ──── ResendConfirmationCode ─────────────────────────────────────────────────
+
+type resendConfirmationCodeRequest struct {
+	ClientID string `json:"ClientId"`
+	Username string `json:"Username"`
+}
+
+type resendConfirmationCodeResponse struct {
+	CodeDeliveryDetails codeDeliveryDetails `json:"CodeDeliveryDetails"`
+}
+
+func (ro *Router) handleResendConfirmationCode(w http.ResponseWriter, body []byte) {
+	var req resendConfirmationCodeRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"invalid request body")
+		return
+	}
+	if req.ClientID == "" {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"ClientId is required")
+		return
+	}
+	if req.Username == "" {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"Username is required")
+		return
+	}
+
+	poolID, err := ro.storage.GetPoolIDForClient(req.ClientID)
+	if err != nil {
+		if errors.Is(err, errUserPoolClientNotFound) {
+			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException,
+				"User pool client not found.")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to resolve client")
+		return
+	}
+
+	codeR := ro.codeReader
+	if codeR == nil {
+		codeR = randReader
+	}
+	code, err := generateConfirmationCodeFrom(codeR)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to generate confirmation code")
+		return
+	}
+
+	var delivery codeDeliveryDetails
+	var actualStatus string
+	err = ro.storage.UpdateUser(poolID, req.Username, func(u *UserMetadata) error {
+		if u.Status != userStatusUnconfirmed {
+			actualStatus = u.Status
+			return errNotUnconfirmed
+		}
+		u.ConfirmationCode = code
+		delivery = resendDeliveryDetails(u.Attributes)
+		return nil
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, errUserNotFound):
+			writeError(w, http.StatusBadRequest, ErrTypeUserNotFoundException,
+				"User does not exist.")
+		case errors.Is(err, errNotUnconfirmed):
+			writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException,
+				fmt.Sprintf("User cannot be confirmed. Current status is %s.", actualStatus))
+		default:
+			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+				"failed to update user")
+		}
+		return
+	}
+
+	slog.Info("ResendConfirmationCode", "pool_id", poolID)
+	slog.Debug("ResendConfirmationCode", "pool_id", poolID, "username", req.Username, "code", code)
+
+	writeJSON(w, http.StatusOK, resendConfirmationCodeResponse{
+		CodeDeliveryDetails: delivery,
+	})
 }
 
 // ──── JWKS ──────────────────────────────────────────────────────────────────

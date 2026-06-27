@@ -114,6 +114,8 @@ func (ro *Router) serveHTTP(w http.ResponseWriter, r *http.Request, op string) {
 		ro.handleSignUp(w, body)
 	case "ConfirmSignUp":
 		ro.handleConfirmSignUp(w, body)
+	case "ResendConfirmationCode":
+		ro.handleResendConfirmationCode(w, body)
 	case "InitiateAuth":
 		ro.handleInitiateAuth(w, body)
 	case "RespondToAuthChallenge":
