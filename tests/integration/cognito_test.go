@@ -36,7 +36,7 @@ func newCodeCapture() *codeCapture {
 func (c *codeCapture) Enabled(_ context.Context, _ slog.Level) bool { return true }
 
 func (c *codeCapture) Handle(_ context.Context, r slog.Record) error {
-	if r.Message == "SignUp confirmation code" {
+	if r.Message == "SignUp confirmation code" || r.Message == "ResendConfirmationCode" {
 		var username, code string
 		r.Attrs(func(a slog.Attr) bool {
 			switch a.Key {
@@ -974,5 +974,91 @@ func TestCognitoIntegration_JWKS(t *testing.T) {
 	t.Run("VerifyTokenSignature", func(t *testing.T) {
 		key := fetchJWKS(t, clients.baseURL, poolID)
 		verifyAccessTokenSignature(t, accessToken, key)
+	})
+}
+
+// ── ResendConfirmationCode ────────────────────────────────────────────────────
+
+func TestCognitoIntegration_ResendConfirmationCode(t *testing.T) {
+	cap := withCodeCapture(t)
+	clients := newTestClients(t)
+	ctx := context.Background()
+	c := clients.cognito
+
+	pool, err := c.CreateUserPool(ctx, &awscognito.CreateUserPoolInput{
+		PoolName: aws.String("resend-test-pool"),
+	})
+	require.NoError(t, err)
+	poolID := aws.ToString(pool.UserPool.Id)
+
+	client, err := c.CreateUserPoolClient(ctx, &awscognito.CreateUserPoolClientInput{
+		UserPoolId: aws.String(poolID),
+		ClientName: aws.String("resend-test-client"),
+	})
+	require.NoError(t, err)
+	clientID := aws.ToString(client.UserPoolClient.ClientId)
+
+	const (
+		username = "resend-user"
+		password = "Password1!"
+		email    = "resend-user@example.com"
+	)
+
+	_, err = c.SignUp(ctx, &awscognito.SignUpInput{
+		ClientId: aws.String(clientID),
+		Username: aws.String(username),
+		Password: aws.String(password),
+		UserAttributes: []types.AttributeType{
+			{Name: aws.String("email"), Value: aws.String(email)},
+		},
+	})
+	require.NoError(t, err)
+
+	t.Run("ResendConfirmationCode_Success", func(t *testing.T) {
+		out, err := c.ResendConfirmationCode(ctx, &awscognito.ResendConfirmationCodeInput{
+			ClientId: aws.String(clientID),
+			Username: aws.String(username),
+		})
+		require.NoError(t, err)
+		require.NotNil(t, out.CodeDeliveryDetails)
+		assert.Equal(t, "EMAIL", string(out.CodeDeliveryDetails.DeliveryMedium))
+		assert.Equal(t, "email", aws.ToString(out.CodeDeliveryDetails.AttributeName))
+		assert.NotEmpty(t, aws.ToString(out.CodeDeliveryDetails.Destination))
+	})
+
+	t.Run("ResendConfirmationCode_NewCodeConfirmsUser", func(t *testing.T) {
+		_, err := c.ResendConfirmationCode(ctx, &awscognito.ResendConfirmationCodeInput{
+			ClientId: aws.String(clientID),
+			Username: aws.String(username),
+		})
+		require.NoError(t, err)
+
+		code := cap.get(username)
+		require.NotEmpty(t, code, "resend code should be captured from slog output")
+
+		_, err = c.ConfirmSignUp(ctx, &awscognito.ConfirmSignUpInput{
+			ClientId:         aws.String(clientID),
+			Username:         aws.String(username),
+			ConfirmationCode: aws.String(code),
+		})
+		require.NoError(t, err)
+	})
+
+	t.Run("ResendConfirmationCode_AlreadyConfirmed", func(t *testing.T) {
+		_, err := c.ResendConfirmationCode(ctx, &awscognito.ResendConfirmationCodeInput{
+			ClientId: aws.String(clientID),
+			Username: aws.String(username),
+		})
+		require.Error(t, err)
+		assert.Equal(t, "NotAuthorizedException", apiErrorCode(err))
+	})
+
+	t.Run("ResendConfirmationCode_UserNotFound", func(t *testing.T) {
+		_, err := c.ResendConfirmationCode(ctx, &awscognito.ResendConfirmationCodeInput{
+			ClientId: aws.String(clientID),
+			Username: aws.String("nobody"),
+		})
+		require.Error(t, err)
+		assert.Equal(t, "UserNotFoundException", apiErrorCode(err))
 	})
 }
