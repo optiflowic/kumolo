@@ -41,11 +41,13 @@ Last verified: 2026-06-28
 
 - Generates a new 6-digit confirmation code and overwrites the previous one stored on the user.
 - Only allowed when the user is in `UNCONFIRMED` status; returns `NotAuthorizedException` otherwise. The error message includes the actual current status (e.g. `"Current status is CONFIRMED."` or `"Current status is FORCE_CHANGE_PASSWORD."`). Admin-created users start in `FORCE_CHANGE_PASSWORD` and cannot use this operation.
-- kumolo does not deliver email/SMS. The new code is logged at INFO level (`pool_id`, `username`, `code`).
-- `CodeDeliveryDetails.Destination` is masked like SignUp: first char + `***` + `@domain`.
+- kumolo does not deliver email/SMS. The operation is logged at INFO level (`pool_id` only); the code and username are logged at DEBUG level.
+- `CodeDeliveryDetails` is derived from the user's first contact attribute: `email` → EMAIL medium, `phone_number` → SMS medium. If neither is present, returns `AttributeName: "email"`, `DeliveryMedium: "EMAIL"`, `Destination: "***"`.
+- Email destination is masked: first char + `***` + `@domain` (e.g., `a***@example.com`). Phone destination: first char + `***` + last 4 digits (e.g., `+***1234`).
 - The new code replaces the old one so a subsequent `ConfirmSignUp` must use this latest code.
 
 ## kumolo Deviations
 
-- No real email/SMS delivery; code is logged at INFO level.
+- No real email/SMS delivery; code is logged at DEBUG level only (`username` + `code`).
+- Delivery medium is inferred from user attributes (email → EMAIL, phone_number → SMS); no pool-level auto-verified attribute config is consulted.
 - SecretHash, AnalyticsMetadata, ClientMetadata, UserContextData accepted but ignored.

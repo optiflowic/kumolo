@@ -1280,7 +1280,7 @@ func TestResendConfirmationCode_Success(t *testing.T) {
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
 	assert.Equal(t, "EMAIL", resp.CodeDeliveryDetails.DeliveryMedium)
 	assert.Equal(t, "email", resp.CodeDeliveryDetails.AttributeName)
-	assert.Contains(t, resp.CodeDeliveryDetails.Destination, "@example.com")
+	assert.Equal(t, "a***@example.com", resp.CodeDeliveryDetails.Destination)
 
 	newUser, err := ro.storage.GetUser(poolID, "alice")
 	require.NoError(t, err)
@@ -1341,43 +1341,81 @@ func TestResendConfirmationCode_NoEmail_MasksDestination(t *testing.T) {
 	assert.Equal(t, "***", resp.CodeDeliveryDetails.Destination)
 }
 
-func TestResendConfirmationCode_MissingClientId(t *testing.T) {
+func TestResendConfirmationCode_PhoneNumber(t *testing.T) {
 	ro := newTestRouter(t)
-	w := doOp(t, ro, "ResendConfirmationCode", `{"Username":"alice"}`)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrType(t, w, ErrTypeInvalidParameterException)
-}
+	poolID := createPool(t, ro, "test-pool")
+	clientID := createClient(t, ro, poolID, "test-client")
 
-func TestResendConfirmationCode_MissingUsername(t *testing.T) {
-	ro := newTestRouter(t)
-	_, clientID := setupPool(t, ro)
-	body, _ := json.Marshal(map[string]string{"ClientId": clientID})
-	w := doOp(t, ro, "ResendConfirmationCode", string(body))
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrType(t, w, ErrTypeInvalidParameterException)
-}
-
-func TestResendConfirmationCode_InvalidClientId(t *testing.T) {
-	ro := newTestRouter(t)
-	body, _ := json.Marshal(map[string]string{
-		"ClientId": "nonexistent",
-		"Username": "alice",
-	})
-	w := doOp(t, ro, "ResendConfirmationCode", string(body))
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrType(t, w, ErrTypeResourceNotFoundException)
-}
-
-func TestResendConfirmationCode_UserNotFound(t *testing.T) {
-	ro := newTestRouter(t)
-	_, clientID := setupPool(t, ro)
-	body, _ := json.Marshal(map[string]string{
+	body, _ := json.Marshal(map[string]any{
 		"ClientId": clientID,
-		"Username": "nobody",
+		"Username": "carol",
+		"Password": "Password123!",
+		"UserAttributes": []map[string]string{
+			{"Name": "phone_number", "Value": "+14155551234"},
+		},
 	})
-	w := doOp(t, ro, "ResendConfirmationCode", string(body))
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrType(t, w, ErrTypeUserNotFoundException)
+	w := doOp(t, ro, "SignUp", string(body))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	resendBody, _ := json.Marshal(map[string]string{
+		"ClientId": clientID,
+		"Username": "carol",
+	})
+	wr := doOp(t, ro, "ResendConfirmationCode", string(resendBody))
+	require.Equal(t, http.StatusOK, wr.Code)
+	var resp resendConfirmationCodeResponse
+	require.NoError(t, json.NewDecoder(wr.Body).Decode(&resp))
+	assert.Equal(t, "SMS", resp.CodeDeliveryDetails.DeliveryMedium)
+	assert.Equal(t, "phone_number", resp.CodeDeliveryDetails.AttributeName)
+	assert.Equal(t, "+***1234", resp.CodeDeliveryDetails.Destination)
+}
+
+func TestResendConfirmationCode_ErrorCases(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+
+	missingUsername, _ := json.Marshal(map[string]string{"ClientId": clientID})
+	userNotFound, _ := json.Marshal(map[string]string{"ClientId": clientID, "Username": "nobody"})
+
+	tests := []struct {
+		name    string
+		body    string
+		status  int
+		errType string
+	}{
+		{
+			"missing ClientId",
+			`{"Username":"alice"}`,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+		},
+		{
+			"missing Username",
+			string(missingUsername),
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+		},
+		{
+			"invalid ClientId",
+			`{"ClientId":"nonexistent","Username":"alice"}`,
+			http.StatusBadRequest,
+			ErrTypeResourceNotFoundException,
+		},
+		{
+			"user not found",
+			string(userNotFound),
+			http.StatusBadRequest,
+			ErrTypeUserNotFoundException,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			w := doOp(t, ro, "ResendConfirmationCode", tc.body)
+			assert.Equal(t, tc.status, w.Code)
+			assertErrType(t, w, tc.errType)
+		})
+	}
 }
 
 func TestResendConfirmationCode_AlreadyConfirmed(t *testing.T) {

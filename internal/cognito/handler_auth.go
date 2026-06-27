@@ -192,6 +192,35 @@ func maskEmail(email string) string {
 	return email[:1] + "***" + email[at:]
 }
 
+func maskPhone(phone string) string {
+	if len(phone) < 5 {
+		return "***"
+	}
+	return phone[:1] + "***" + phone[len(phone)-4:]
+}
+
+// resendDeliveryDetails returns CodeDeliveryDetails for the user's registered
+// contact attribute. Email takes precedence over phone_number.
+func resendDeliveryDetails(attrs []AttributeType) codeDeliveryDetails {
+	for _, attr := range attrs {
+		switch attr.Name {
+		case "email":
+			return codeDeliveryDetails{
+				AttributeName:  "email",
+				DeliveryMedium: "EMAIL",
+				Destination:    maskEmail(attr.Value),
+			}
+		case "phone_number":
+			return codeDeliveryDetails{
+				AttributeName:  "phone_number",
+				DeliveryMedium: "SMS",
+				Destination:    maskPhone(attr.Value),
+			}
+		}
+	}
+	return codeDeliveryDetails{AttributeName: "email", DeliveryMedium: "EMAIL", Destination: "***"}
+}
+
 // ──── ConfirmSignUp ─────────────────────────────────────────────────────────
 
 type confirmSignUpRequest struct {
@@ -724,19 +753,15 @@ func (ro *Router) handleResendConfirmationCode(w http.ResponseWriter, body []byt
 		return
 	}
 
-	var dest, actualStatus string
+	var delivery codeDeliveryDetails
+	var actualStatus string
 	err = ro.storage.UpdateUser(poolID, req.Username, func(u *UserMetadata) error {
 		if u.Status != userStatusUnconfirmed {
 			actualStatus = u.Status
 			return errNotUnconfirmed
 		}
 		u.ConfirmationCode = code
-		for _, attr := range u.Attributes {
-			if attr.Name == "email" {
-				dest = maskEmail(attr.Value)
-				break
-			}
-		}
+		delivery = resendDeliveryDetails(u.Attributes)
 		return nil
 	})
 	if err != nil {
@@ -754,17 +779,11 @@ func (ro *Router) handleResendConfirmationCode(w http.ResponseWriter, body []byt
 		return
 	}
 
-	slog.Info("ResendConfirmationCode", "pool_id", poolID, "username", req.Username, "code", code)
+	slog.Info("ResendConfirmationCode", "pool_id", poolID)
+	slog.Debug("ResendConfirmationCode", "pool_id", poolID, "username", req.Username, "code", code)
 
-	if dest == "" {
-		dest = "***"
-	}
 	writeJSON(w, http.StatusOK, resendConfirmationCodeResponse{
-		CodeDeliveryDetails: codeDeliveryDetails{
-			AttributeName:  "email",
-			DeliveryMedium: "EMAIL",
-			Destination:    dest,
-		},
+		CodeDeliveryDetails: delivery,
 	})
 }
 

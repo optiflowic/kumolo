@@ -1023,7 +1023,7 @@ func TestCognitoIntegration_ResendConfirmationCode(t *testing.T) {
 		require.NotNil(t, out.CodeDeliveryDetails)
 		assert.Equal(t, "EMAIL", string(out.CodeDeliveryDetails.DeliveryMedium))
 		assert.Equal(t, "email", aws.ToString(out.CodeDeliveryDetails.AttributeName))
-		assert.NotEmpty(t, aws.ToString(out.CodeDeliveryDetails.Destination))
+		assert.Equal(t, "r***@example.com", aws.ToString(out.CodeDeliveryDetails.Destination))
 	})
 
 	t.Run("ResendConfirmationCode_NewCodeConfirmsUser", func(t *testing.T) {
