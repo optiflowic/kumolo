@@ -1410,3 +1410,52 @@ func TestResendConfirmationCode_EntropyError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 	assertErrType(t, w, ErrTypeInternalErrorException)
 }
+
+func TestResendConfirmationCode_InvalidJSON(t *testing.T) {
+	ro := newTestRouter(t)
+	w := doOp(t, ro, "ResendConfirmationCode", `{invalid`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeInvalidParameterException)
+}
+
+func TestResendConfirmationCode_GetPoolStorageError(t *testing.T) {
+	ro := &Router{storage: &mockStore{
+		getPoolForClient: func(string) (string, error) { return "", errors.New("db error") },
+	}}
+	body, _ := json.Marshal(map[string]string{
+		"ClientId": "c",
+		"Username": "u",
+	})
+	w := doOp(t, ro, "ResendConfirmationCode", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestResendConfirmationCode_NilCodeReader(t *testing.T) {
+	ro := &Router{
+		storage: &mockStore{
+			getPoolForClient: func(string) (string, error) { return "pool-1", nil },
+		},
+		// codeReader intentionally nil: should fall back to randReader
+	}
+	body, _ := json.Marshal(map[string]string{
+		"ClientId": "c",
+		"Username": "u",
+	})
+	w := doOp(t, ro, "ResendConfirmationCode", string(body))
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestResendConfirmationCode_UpdateUserStorageError(t *testing.T) {
+	ro := &Router{storage: &mockStore{
+		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
+		updateUserErr:    errors.New("disk full"),
+	}}
+	body, _ := json.Marshal(map[string]string{
+		"ClientId": "c",
+		"Username": "u",
+	})
+	w := doOp(t, ro, "ResendConfirmationCode", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
