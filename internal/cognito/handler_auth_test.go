@@ -924,6 +924,16 @@ func TestMaskEmail_NoAt(t *testing.T) {
 	assert.Equal(t, "***", maskEmail("noatsign"))
 }
 
+// ── maskPhone ─────────────────────────────────────────────────────────────────
+
+func TestMaskPhone_ShortNumber(t *testing.T) {
+	assert.Equal(t, "***", maskPhone("+123"))
+}
+
+func TestMaskPhone_Normal(t *testing.T) {
+	assert.Equal(t, "+***1234", maskPhone("+14155551234"))
+}
+
 // ── writeAuthResult error paths ───────────────────────────────────────────────
 
 func TestWriteAuthResult_CreateRefreshTokenError(t *testing.T) {
