@@ -452,7 +452,10 @@ func (s *Storage) applyTransactActionLocked(action TransactWriteAction) error {
 					return fmt.Errorf("%w: %v", ErrValidationException, err)
 				}
 			case nestedRemoveOp:
-				if err := applyNestedRemove(item, op.segs); err != nil { // unreachable: applyNestedRemove always returns nil
+				if err := applyNestedRemove(
+					item,
+					op.segs,
+				); err != nil { // unreachable: applyNestedRemove always returns nil
 					return fmt.Errorf("%w: %v", ErrValidationException, err)
 				}
 			default:
@@ -533,7 +536,10 @@ func (s *Storage) emitTransactStreamEvents(records []transactWriteRecord) {
 		}
 		var old map[string]any
 		if r.snap.content != nil {
-			if err := json.Unmarshal(r.snap.content, &old); err != nil { // untestable: snap.content is written by this process; JSON corruption is not reachable in tests
+			if err := json.Unmarshal(
+				r.snap.content,
+				&old,
+			); err != nil { // untestable: snap.content is written by this process; JSON corruption is not reachable in tests
 				slog.Error("emitTransactStreamEvents: corrupt pre-image snapshot", "err", err)
 			}
 		}
@@ -601,7 +607,13 @@ func (s *Storage) rollbackLocked(snaps []itemSnapshot) {
 		} else {
 			// double-failure (tx error + rollback error): best-effort, log and continue
 			if err := s.writeJSON(snap.path, json.RawMessage(snap.content)); err != nil {
-				slog.Error("transaction rollback: failed to restore item", "path", snap.path, "err", err)
+				slog.Error(
+					"transaction rollback: failed to restore item",
+					"path",
+					snap.path,
+					"err",
+					err,
+				)
 			}
 		}
 	}

@@ -2508,7 +2508,9 @@ func (s *Storage) removeAllDir(dir string) {
 		if e.IsDir() {
 			s.removeAllDir(child)
 		} else {
-			_ = s.root.Remove(child) // untestable: verDirIsEmpty guarantees only empty dirs reach here
+			_ = s.root.Remove(
+				child,
+			) // untestable: verDirIsEmpty guarantees only empty dirs reach here
 		}
 	}
 	_ = s.root.Remove(dir)

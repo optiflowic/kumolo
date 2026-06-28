@@ -428,7 +428,11 @@ func (ro *Router) handlePutBucketLifecycle(w http.ResponseWriter, r *http.Reques
 			"The XML you provided was not well-formed.")
 		return
 	}
-	if err := ro.storage.PutBucketLifecycleConfig(bucket, stripXMLDecl(string(body)), transitionMinSize); err != nil {
+	if err := ro.storage.PutBucketLifecycleConfig(
+		bucket,
+		stripXMLDecl(string(body)),
+		transitionMinSize,
+	); err != nil {
 		if errors.Is(err, ErrBucketNotFound) {
 			writeError(w, r, http.StatusNotFound, "NoSuchBucket",
 				"The specified bucket does not exist.")

@@ -300,7 +300,12 @@ func (e *LifecycleEnforcer) enforceNoncurrentTransition(
 			v.StorageClass == storageClass {
 			continue
 		}
-		if err := e.storage.SetObjectVersionStorageClass(bucket, v.Key, v.VersionID, storageClass); err != nil {
+		if err := e.storage.SetObjectVersionStorageClass(
+			bucket,
+			v.Key,
+			v.VersionID,
+			storageClass,
+		); err != nil {
 			slog.Error(
 				"lifecycle: transition noncurrent version",
 				"bucket", bucket,

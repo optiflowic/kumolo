@@ -208,12 +208,20 @@ func (ro *Router) handleSelectObjectContent(
 	w.WriteHeader(http.StatusOK)
 
 	if len(payload) > 0 {
-		if err := writeRecordsEvent(w, payload); err != nil { // untestable: http.ResponseWriter never fails in tests
+		if err := writeRecordsEvent(
+			w,
+			payload,
+		); err != nil { // untestable: http.ResponseWriter never fails in tests
 			slog.Error("failed to write SelectObjectContent Records event", "err", err)
 			return
 		}
 	}
-	if err := writeStatsEvent(w, rawSize, bytesProcessed, bytesReturned); err != nil { // untestable: same as above
+	if err := writeStatsEvent(
+		w,
+		rawSize,
+		bytesProcessed,
+		bytesReturned,
+	); err != nil { // untestable: same as above
 		slog.Error("failed to write SelectObjectContent Stats event", "err", err)
 		return
 	}

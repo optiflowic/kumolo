@@ -1135,7 +1135,10 @@ func (s *Storage) RotateKeyOnDemand(keyID string) (KeyMetadata, error) {
 	if mkErr := s.mkdirFn(materialsDir, 0o750); mkErr != nil && !errors.Is(mkErr, os.ErrExist) {
 		return KeyMetadata{}, fmt.Errorf("create materials dir: %w", mkErr)
 	}
-	if err := s.writeJSON(filepath.Join(materialsDir, curMat.KeyMaterialID+".json"), curMat); err != nil {
+	if err := s.writeJSON(
+		filepath.Join(materialsDir, curMat.KeyMaterialID+".json"),
+		curMat,
+	); err != nil {
 		// untestable: writeJSON failure requires OS-level I/O error simulation
 		return KeyMetadata{}, fmt.Errorf("save previous material: %w", err)
 	}
@@ -1163,7 +1166,10 @@ func (s *Storage) RotateKeyOnDemand(keyID string) (KeyMetadata, error) {
 		RotationType: "ON_DEMAND",
 	}
 	history = append(history, record)
-	if err := s.writeJSON(filepath.Join("keys", keyID, "rotation_history.json"), history); err != nil {
+	if err := s.writeJSON(
+		filepath.Join("keys", keyID, "rotation_history.json"),
+		history,
+	); err != nil {
 		// untestable: writeJSON failure requires OS-level I/O error simulation
 		return KeyMetadata{}, fmt.Errorf("write rotation history: %w", err)
 	}
