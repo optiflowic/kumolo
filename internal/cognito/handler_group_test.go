@@ -310,10 +310,14 @@ func TestAdminRemoveUserFromGroup_Success(t *testing.T) {
 	createGroup(t, ro, poolID, "admins")
 	createAdminUser(t, ro, poolID, "alice")
 
-	addBody, _ := json.Marshal(map[string]any{"UserPoolId": poolID, "GroupName": "admins", "Username": "alice"})
+	addBody, _ := json.Marshal(
+		map[string]any{"UserPoolId": poolID, "GroupName": "admins", "Username": "alice"},
+	)
 	require.Equal(t, http.StatusOK, doOp(t, ro, "AdminAddUserToGroup", string(addBody)).Code)
 
-	removeBody, _ := json.Marshal(map[string]any{"UserPoolId": poolID, "GroupName": "admins", "Username": "alice"})
+	removeBody, _ := json.Marshal(
+		map[string]any{"UserPoolId": poolID, "GroupName": "admins", "Username": "alice"},
+	)
 	w := doOp(t, ro, "AdminRemoveUserFromGroup", string(removeBody))
 	require.Equal(t, http.StatusOK, w.Code)
 }
@@ -344,7 +348,9 @@ func TestAdminListGroupsForUser_Success(t *testing.T) {
 	createAdminUser(t, ro, poolID, "alice")
 
 	for _, name := range []string{"beta", "alpha"} {
-		addBody, _ := json.Marshal(map[string]any{"UserPoolId": poolID, "GroupName": name, "Username": "alice"})
+		addBody, _ := json.Marshal(
+			map[string]any{"UserPoolId": poolID, "GroupName": name, "Username": "alice"},
+		)
 		require.Equal(t, http.StatusOK, doOp(t, ro, "AdminAddUserToGroup", string(addBody)).Code)
 	}
 
@@ -379,7 +385,9 @@ func TestListUsersInGroup_Success(t *testing.T) {
 	createGroup(t, ro, poolID, "admins")
 	for _, u := range []string{"charlie", "alice", "bob"} {
 		createAdminUser(t, ro, poolID, u)
-		addBody, _ := json.Marshal(map[string]any{"UserPoolId": poolID, "GroupName": "admins", "Username": u})
+		addBody, _ := json.Marshal(
+			map[string]any{"UserPoolId": poolID, "GroupName": "admins", "Username": u},
+		)
 		require.Equal(t, http.StatusOK, doOp(t, ro, "AdminAddUserToGroup", string(addBody)).Code)
 	}
 
@@ -419,7 +427,9 @@ func TestJWT_CognitoGroupsClaim(t *testing.T) {
 	}
 	signUpAndConfirmUser(t, ro, poolID, "alice", "Pass1234!")
 	for _, name := range []string{"beta", "alpha"} {
-		addBody, _ := json.Marshal(map[string]any{"UserPoolId": poolID, "GroupName": name, "Username": "alice"})
+		addBody, _ := json.Marshal(
+			map[string]any{"UserPoolId": poolID, "GroupName": name, "Username": "alice"},
+		)
 		require.Equal(t, http.StatusOK, doOp(t, ro, "AdminAddUserToGroup", string(addBody)).Code)
 	}
 

@@ -211,12 +211,18 @@ func (s *Storage) AddUserToGroup(poolID, groupName, username string) error {
 	}
 
 	mPath := memberPath(poolID, groupName, username)
-	if err := s.writeJSON(mPath, memberMarker{Username: username, GroupName: groupName}); err != nil {
+	if err := s.writeJSON(
+		mPath,
+		memberMarker{Username: username, GroupName: groupName},
+	); err != nil {
 		return fmt.Errorf("write member: %w", err)
 	}
 
 	ugPath := userGroupPath(poolID, username, groupName)
-	if err := s.writeJSON(ugPath, userGroupMarker{Username: username, GroupName: groupName}); err != nil {
+	if err := s.writeJSON(
+		ugPath,
+		userGroupMarker{Username: username, GroupName: groupName},
+	); err != nil {
 		// best-effort rollback of the member record
 		_ = s.removeFile(mPath)
 		return fmt.Errorf("write user_groups index: %w", err)

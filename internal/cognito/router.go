@@ -58,8 +58,16 @@ type store interface {
 	// Group membership operations
 	AddUserToGroup(poolID, groupName, username string) error
 	RemoveUserFromGroup(poolID, groupName, username string) error
-	ListGroupsForUser(poolID, username string, maxResults int, nextToken string) ([]*GroupMetadata, string, error)
-	ListUsersInGroup(poolID, groupName string, maxResults int, nextToken string) ([]*UserMetadata, string, error)
+	ListGroupsForUser(
+		poolID, username string,
+		maxResults int,
+		nextToken string,
+	) ([]*GroupMetadata, string, error)
+	ListUsersInGroup(
+		poolID, groupName string,
+		maxResults int,
+		nextToken string,
+	) ([]*UserMetadata, string, error)
 	GetGroupsForUser(poolID, username string) ([]string, error)
 }
 

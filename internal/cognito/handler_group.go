@@ -42,24 +42,49 @@ type createGroupRequest struct {
 func (ro *Router) handleCreateGroup(w http.ResponseWriter, body []byte) {
 	var req createGroupRequest
 	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException, "invalid request body")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"invalid request body",
+		)
 		return
 	}
 	if req.UserPoolID == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException, "UserPoolId is required")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"UserPoolId is required",
+		)
 		return
 	}
 	if req.GroupName == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException, "GroupName is required")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"GroupName is required",
+		)
 		return
 	}
 
 	if _, err := ro.storage.GetUserPool(req.UserPoolID); err != nil {
 		if errors.Is(err, errUserPoolNotFound) {
-			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException, "User pool not found.")
+			writeError(
+				w,
+				http.StatusBadRequest,
+				ErrTypeResourceNotFoundException,
+				"User pool not found.",
+			)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException, "failed to get user pool")
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			ErrTypeInternalErrorException,
+			"failed to get user pool",
+		)
 		return
 	}
 
@@ -80,7 +105,12 @@ func (ro *Router) handleCreateGroup(w http.ResponseWriter, body []byte) {
 				"A group with the name already exists.")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException, "failed to create group")
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			ErrTypeInternalErrorException,
+			"failed to create group",
+		)
 		return
 	}
 
@@ -97,33 +127,68 @@ type deleteGroupRequest struct {
 func (ro *Router) handleDeleteGroup(w http.ResponseWriter, body []byte) {
 	var req deleteGroupRequest
 	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException, "invalid request body")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"invalid request body",
+		)
 		return
 	}
 	if req.UserPoolID == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException, "UserPoolId is required")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"UserPoolId is required",
+		)
 		return
 	}
 	if req.GroupName == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException, "GroupName is required")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"GroupName is required",
+		)
 		return
 	}
 
 	if _, err := ro.storage.GetUserPool(req.UserPoolID); err != nil {
 		if errors.Is(err, errUserPoolNotFound) {
-			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException, "User pool not found.")
+			writeError(
+				w,
+				http.StatusBadRequest,
+				ErrTypeResourceNotFoundException,
+				"User pool not found.",
+			)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException, "failed to get user pool")
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			ErrTypeInternalErrorException,
+			"failed to get user pool",
+		)
 		return
 	}
 
 	if err := ro.storage.DeleteGroup(req.UserPoolID, req.GroupName); err != nil {
 		if errors.Is(err, errGroupNotFound) {
-			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException, "Group not found.")
+			writeError(
+				w,
+				http.StatusBadRequest,
+				ErrTypeResourceNotFoundException,
+				"Group not found.",
+			)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException, "failed to delete group")
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			ErrTypeInternalErrorException,
+			"failed to delete group",
+		)
 		return
 	}
 
@@ -140,34 +205,69 @@ type getGroupRequest struct {
 func (ro *Router) handleGetGroup(w http.ResponseWriter, body []byte) {
 	var req getGroupRequest
 	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException, "invalid request body")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"invalid request body",
+		)
 		return
 	}
 	if req.UserPoolID == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException, "UserPoolId is required")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"UserPoolId is required",
+		)
 		return
 	}
 	if req.GroupName == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException, "GroupName is required")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"GroupName is required",
+		)
 		return
 	}
 
 	if _, err := ro.storage.GetUserPool(req.UserPoolID); err != nil {
 		if errors.Is(err, errUserPoolNotFound) {
-			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException, "User pool not found.")
+			writeError(
+				w,
+				http.StatusBadRequest,
+				ErrTypeResourceNotFoundException,
+				"User pool not found.",
+			)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException, "failed to get user pool")
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			ErrTypeInternalErrorException,
+			"failed to get user pool",
+		)
 		return
 	}
 
 	group, err := ro.storage.GetGroup(req.UserPoolID, req.GroupName)
 	if err != nil {
 		if errors.Is(err, errGroupNotFound) {
-			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException, "Group not found.")
+			writeError(
+				w,
+				http.StatusBadRequest,
+				ErrTypeResourceNotFoundException,
+				"Group not found.",
+			)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException, "failed to get group")
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			ErrTypeInternalErrorException,
+			"failed to get group",
+		)
 		return
 	}
 
@@ -187,24 +287,49 @@ type updateGroupRequest struct {
 func (ro *Router) handleUpdateGroup(w http.ResponseWriter, body []byte) {
 	var req updateGroupRequest
 	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException, "invalid request body")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"invalid request body",
+		)
 		return
 	}
 	if req.UserPoolID == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException, "UserPoolId is required")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"UserPoolId is required",
+		)
 		return
 	}
 	if req.GroupName == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException, "GroupName is required")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"GroupName is required",
+		)
 		return
 	}
 
 	if _, err := ro.storage.GetUserPool(req.UserPoolID); err != nil {
 		if errors.Is(err, errUserPoolNotFound) {
-			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException, "User pool not found.")
+			writeError(
+				w,
+				http.StatusBadRequest,
+				ErrTypeResourceNotFoundException,
+				"User pool not found.",
+			)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException, "failed to get user pool")
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			ErrTypeInternalErrorException,
+			"failed to get user pool",
+		)
 		return
 	}
 
@@ -224,10 +349,20 @@ func (ro *Router) handleUpdateGroup(w http.ResponseWriter, body []byte) {
 	})
 	if err != nil {
 		if errors.Is(err, errGroupNotFound) {
-			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException, "Group not found.")
+			writeError(
+				w,
+				http.StatusBadRequest,
+				ErrTypeResourceNotFoundException,
+				"Group not found.",
+			)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException, "failed to update group")
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			ErrTypeInternalErrorException,
+			"failed to update group",
+		)
 		return
 	}
 
@@ -247,20 +382,40 @@ const defaultGroupLimit = 60
 func (ro *Router) handleListGroups(w http.ResponseWriter, body []byte) {
 	var req listGroupsRequest
 	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException, "invalid request body")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"invalid request body",
+		)
 		return
 	}
 	if req.UserPoolID == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException, "UserPoolId is required")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"UserPoolId is required",
+		)
 		return
 	}
 
 	if _, err := ro.storage.GetUserPool(req.UserPoolID); err != nil {
 		if errors.Is(err, errUserPoolNotFound) {
-			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException, "User pool not found.")
+			writeError(
+				w,
+				http.StatusBadRequest,
+				ErrTypeResourceNotFoundException,
+				"User pool not found.",
+			)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException, "failed to get user pool")
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			ErrTypeInternalErrorException,
+			"failed to get user pool",
+		)
 		return
 	}
 
@@ -272,10 +427,20 @@ func (ro *Router) handleListGroups(w http.ResponseWriter, body []byte) {
 	groups, nextToken, err := ro.storage.ListGroups(req.UserPoolID, limit, req.NextToken)
 	if err != nil {
 		if errors.Is(err, errInvalidNextToken) {
-			writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException, "invalid pagination token")
+			writeError(
+				w,
+				http.StatusBadRequest,
+				ErrTypeInvalidParameterException,
+				"invalid pagination token",
+			)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException, "failed to list groups")
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			ErrTypeInternalErrorException,
+			"failed to list groups",
+		)
 		return
 	}
 
@@ -305,51 +470,106 @@ type adminAddUserToGroupRequest struct {
 func (ro *Router) handleAdminAddUserToGroup(w http.ResponseWriter, body []byte) {
 	var req adminAddUserToGroupRequest
 	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException, "invalid request body")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"invalid request body",
+		)
 		return
 	}
 	if req.UserPoolID == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException, "UserPoolId is required")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"UserPoolId is required",
+		)
 		return
 	}
 	if req.GroupName == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException, "GroupName is required")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"GroupName is required",
+		)
 		return
 	}
 	if req.Username == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException, "Username is required")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"Username is required",
+		)
 		return
 	}
 
 	if _, err := ro.storage.GetUserPool(req.UserPoolID); err != nil {
 		if errors.Is(err, errUserPoolNotFound) {
-			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException, "User pool not found.")
+			writeError(
+				w,
+				http.StatusBadRequest,
+				ErrTypeResourceNotFoundException,
+				"User pool not found.",
+			)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException, "failed to get user pool")
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			ErrTypeInternalErrorException,
+			"failed to get user pool",
+		)
 		return
 	}
 
 	if _, err := ro.storage.GetGroup(req.UserPoolID, req.GroupName); err != nil {
 		if errors.Is(err, errGroupNotFound) {
-			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException, "Group not found.")
+			writeError(
+				w,
+				http.StatusBadRequest,
+				ErrTypeResourceNotFoundException,
+				"Group not found.",
+			)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException, "failed to get group")
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			ErrTypeInternalErrorException,
+			"failed to get group",
+		)
 		return
 	}
 
 	if _, err := ro.storage.GetUser(req.UserPoolID, req.Username); err != nil {
 		if errors.Is(err, errUserNotFound) {
-			writeError(w, http.StatusBadRequest, ErrTypeUserNotFoundException, "User does not exist.")
+			writeError(
+				w,
+				http.StatusBadRequest,
+				ErrTypeUserNotFoundException,
+				"User does not exist.",
+			)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException, "failed to get user")
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			ErrTypeInternalErrorException,
+			"failed to get user",
+		)
 		return
 	}
 
 	if err := ro.storage.AddUserToGroup(req.UserPoolID, req.GroupName, req.Username); err != nil {
-		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException, "failed to add user to group")
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			ErrTypeInternalErrorException,
+			"failed to add user to group",
+		)
 		return
 	}
 
@@ -367,51 +587,110 @@ type adminRemoveUserFromGroupRequest struct {
 func (ro *Router) handleAdminRemoveUserFromGroup(w http.ResponseWriter, body []byte) {
 	var req adminRemoveUserFromGroupRequest
 	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException, "invalid request body")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"invalid request body",
+		)
 		return
 	}
 	if req.UserPoolID == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException, "UserPoolId is required")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"UserPoolId is required",
+		)
 		return
 	}
 	if req.GroupName == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException, "GroupName is required")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"GroupName is required",
+		)
 		return
 	}
 	if req.Username == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException, "Username is required")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"Username is required",
+		)
 		return
 	}
 
 	if _, err := ro.storage.GetUserPool(req.UserPoolID); err != nil {
 		if errors.Is(err, errUserPoolNotFound) {
-			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException, "User pool not found.")
+			writeError(
+				w,
+				http.StatusBadRequest,
+				ErrTypeResourceNotFoundException,
+				"User pool not found.",
+			)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException, "failed to get user pool")
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			ErrTypeInternalErrorException,
+			"failed to get user pool",
+		)
 		return
 	}
 
 	if _, err := ro.storage.GetGroup(req.UserPoolID, req.GroupName); err != nil {
 		if errors.Is(err, errGroupNotFound) {
-			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException, "Group not found.")
+			writeError(
+				w,
+				http.StatusBadRequest,
+				ErrTypeResourceNotFoundException,
+				"Group not found.",
+			)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException, "failed to get group")
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			ErrTypeInternalErrorException,
+			"failed to get group",
+		)
 		return
 	}
 
 	if _, err := ro.storage.GetUser(req.UserPoolID, req.Username); err != nil {
 		if errors.Is(err, errUserNotFound) {
-			writeError(w, http.StatusBadRequest, ErrTypeUserNotFoundException, "User does not exist.")
+			writeError(
+				w,
+				http.StatusBadRequest,
+				ErrTypeUserNotFoundException,
+				"User does not exist.",
+			)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException, "failed to get user")
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			ErrTypeInternalErrorException,
+			"failed to get user",
+		)
 		return
 	}
 
-	if err := ro.storage.RemoveUserFromGroup(req.UserPoolID, req.GroupName, req.Username); err != nil {
-		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException, "failed to remove user from group")
+	if err := ro.storage.RemoveUserFromGroup(
+		req.UserPoolID,
+		req.GroupName,
+		req.Username,
+	); err != nil {
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			ErrTypeInternalErrorException,
+			"failed to remove user from group",
+		)
 		return
 	}
 
@@ -430,33 +709,68 @@ type adminListGroupsForUserRequest struct {
 func (ro *Router) handleAdminListGroupsForUser(w http.ResponseWriter, body []byte) {
 	var req adminListGroupsForUserRequest
 	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException, "invalid request body")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"invalid request body",
+		)
 		return
 	}
 	if req.UserPoolID == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException, "UserPoolId is required")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"UserPoolId is required",
+		)
 		return
 	}
 	if req.Username == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException, "Username is required")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"Username is required",
+		)
 		return
 	}
 
 	if _, err := ro.storage.GetUserPool(req.UserPoolID); err != nil {
 		if errors.Is(err, errUserPoolNotFound) {
-			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException, "User pool not found.")
+			writeError(
+				w,
+				http.StatusBadRequest,
+				ErrTypeResourceNotFoundException,
+				"User pool not found.",
+			)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException, "failed to get user pool")
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			ErrTypeInternalErrorException,
+			"failed to get user pool",
+		)
 		return
 	}
 
 	if _, err := ro.storage.GetUser(req.UserPoolID, req.Username); err != nil {
 		if errors.Is(err, errUserNotFound) {
-			writeError(w, http.StatusBadRequest, ErrTypeUserNotFoundException, "User does not exist.")
+			writeError(
+				w,
+				http.StatusBadRequest,
+				ErrTypeUserNotFoundException,
+				"User does not exist.",
+			)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException, "failed to get user")
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			ErrTypeInternalErrorException,
+			"failed to get user",
+		)
 		return
 	}
 
@@ -465,13 +779,28 @@ func (ro *Router) handleAdminListGroupsForUser(w http.ResponseWriter, body []byt
 		limit = defaultGroupLimit
 	}
 
-	groups, nextToken, err := ro.storage.ListGroupsForUser(req.UserPoolID, req.Username, limit, req.NextToken)
+	groups, nextToken, err := ro.storage.ListGroupsForUser(
+		req.UserPoolID,
+		req.Username,
+		limit,
+		req.NextToken,
+	)
 	if err != nil {
 		if errors.Is(err, errInvalidNextToken) {
-			writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException, "invalid pagination token")
+			writeError(
+				w,
+				http.StatusBadRequest,
+				ErrTypeInvalidParameterException,
+				"invalid pagination token",
+			)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException, "failed to list groups for user")
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			ErrTypeInternalErrorException,
+			"failed to list groups for user",
+		)
 		return
 	}
 
@@ -494,33 +823,68 @@ type listUsersInGroupRequest struct {
 func (ro *Router) handleListUsersInGroup(w http.ResponseWriter, body []byte) {
 	var req listUsersInGroupRequest
 	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException, "invalid request body")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"invalid request body",
+		)
 		return
 	}
 	if req.UserPoolID == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException, "UserPoolId is required")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"UserPoolId is required",
+		)
 		return
 	}
 	if req.GroupName == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException, "GroupName is required")
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"GroupName is required",
+		)
 		return
 	}
 
 	if _, err := ro.storage.GetUserPool(req.UserPoolID); err != nil {
 		if errors.Is(err, errUserPoolNotFound) {
-			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException, "User pool not found.")
+			writeError(
+				w,
+				http.StatusBadRequest,
+				ErrTypeResourceNotFoundException,
+				"User pool not found.",
+			)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException, "failed to get user pool")
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			ErrTypeInternalErrorException,
+			"failed to get user pool",
+		)
 		return
 	}
 
 	if _, err := ro.storage.GetGroup(req.UserPoolID, req.GroupName); err != nil {
 		if errors.Is(err, errGroupNotFound) {
-			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException, "Group not found.")
+			writeError(
+				w,
+				http.StatusBadRequest,
+				ErrTypeResourceNotFoundException,
+				"Group not found.",
+			)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException, "failed to get group")
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			ErrTypeInternalErrorException,
+			"failed to get group",
+		)
 		return
 	}
 
@@ -529,13 +893,28 @@ func (ro *Router) handleListUsersInGroup(w http.ResponseWriter, body []byte) {
 		limit = defaultGroupLimit
 	}
 
-	users, nextToken, err := ro.storage.ListUsersInGroup(req.UserPoolID, req.GroupName, limit, req.NextToken)
+	users, nextToken, err := ro.storage.ListUsersInGroup(
+		req.UserPoolID,
+		req.GroupName,
+		limit,
+		req.NextToken,
+	)
 	if err != nil {
 		if errors.Is(err, errInvalidNextToken) {
-			writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException, "invalid pagination token")
+			writeError(
+				w,
+				http.StatusBadRequest,
+				ErrTypeInvalidParameterException,
+				"invalid pagination token",
+			)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException, "failed to list users in group")
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			ErrTypeInternalErrorException,
+			"failed to list users in group",
+		)
 		return
 	}
 
