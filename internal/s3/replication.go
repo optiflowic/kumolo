@@ -131,7 +131,11 @@ func (ro *Router) replicateObject(bucket, key string, srcMeta ObjectMetadata) {
 			continue
 		}
 
-		if err := ro.storage.SetObjectReplicationStatus(destBucket, key, ReplicationStatusReplica); err != nil {
+		if err := ro.storage.SetObjectReplicationStatus(
+			destBucket,
+			key,
+			ReplicationStatusReplica,
+		); err != nil {
 			// untestable: storage write failure after a successful copy cannot be injected via current test helpers
 			slog.Warn( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
 				"replication: failed to set REPLICA status",
@@ -143,7 +147,11 @@ func (ro *Router) replicateObject(bucket, key string, srcMeta ObjectMetadata) {
 				err,
 			)
 		}
-		if err := ro.storage.SetObjectReplicationStatus(bucket, key, ReplicationStatusCompleted); err != nil {
+		if err := ro.storage.SetObjectReplicationStatus(
+			bucket,
+			key,
+			ReplicationStatusCompleted,
+		); err != nil {
 			// untestable: storage write failure after a successful copy cannot be injected via current test helpers
 			slog.Warn( // #nosec G706 -- bucket/key come from URL path; log injection risk accepted for a local dev emulator
 				"replication: failed to set COMPLETED status",

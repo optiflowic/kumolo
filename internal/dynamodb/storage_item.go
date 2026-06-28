@@ -383,7 +383,10 @@ func (s *Storage) UpdateItem(
 				return nil, nil, fmt.Errorf("%w: %v", ErrValidationException, err)
 			}
 		case nestedRemoveOp:
-			if err := applyNestedRemove(item, op.segs); err != nil { // unreachable: applyNestedRemove always returns nil
+			if err := applyNestedRemove(
+				item,
+				op.segs,
+			); err != nil { // unreachable: applyNestedRemove always returns nil
 				return nil, nil, fmt.Errorf("%w: %v", ErrValidationException, err)
 			}
 		default:

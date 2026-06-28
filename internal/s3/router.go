@@ -1400,7 +1400,11 @@ func (ro *Router) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 			}
 		} else {
 			// Versioning-aware delete: creates a delete marker when versioning is enabled.
-			vid, isMarker, err := ro.storage.DeleteObjectVersioned(bucket, obj.Key, bypassGovernance)
+			vid, isMarker, err := ro.storage.DeleteObjectVersioned(
+				bucket,
+				obj.Key,
+				bypassGovernance,
+			)
 			deleteErr = err
 			if err == nil && isMarker {
 				deleteMarker = true

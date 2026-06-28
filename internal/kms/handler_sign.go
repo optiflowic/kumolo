@@ -174,7 +174,13 @@ func verifyData(privKeyDER []byte, algo string, h crypto.Hash, data, sig []byte)
 	case *rsa.PrivateKey:
 		pub := &k.PublicKey
 		if isPSSAlgorithm(algo) {
-			if err := rsa.VerifyPSS(pub, h, data, sig, &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthAuto}); err != nil {
+			if err := rsa.VerifyPSS(
+				pub,
+				h,
+				data,
+				sig,
+				&rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthAuto},
+			); err != nil {
 				return fmt.Errorf("%w: %s", ErrInvalidSignature, err)
 			}
 			return nil
@@ -419,7 +425,13 @@ func (ro *Router) handleVerify(w http.ResponseWriter, body []byte) {
 		dataToVerify = digestMessage(h, req.Message)
 	}
 
-	if err := verifyData(mat.PrivateKeyDER, req.SigningAlgorithm, h, dataToVerify, req.Signature); err != nil {
+	if err := verifyData(
+		mat.PrivateKeyDER,
+		req.SigningAlgorithm,
+		h,
+		dataToVerify,
+		req.Signature,
+	); err != nil {
 		if errors.Is(err, ErrInvalidSignature) {
 			writeError(w, http.StatusBadRequest, "KMSInvalidSignatureException",
 				"The signature verification failed")

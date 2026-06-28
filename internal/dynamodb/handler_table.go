@@ -97,7 +97,12 @@ func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 			Projection: l.Projection,
 		})
 	}
-	if err := validateTableIndexes(meta.KeySchema, meta.AttributeDefinitions, meta.GlobalSecondaryIndexes, meta.LocalSecondaryIndexes); err != nil {
+	if err := validateTableIndexes(
+		meta.KeySchema,
+		meta.AttributeDefinitions,
+		meta.GlobalSecondaryIndexes,
+		meta.LocalSecondaryIndexes,
+	); err != nil {
 		writeError(
 			w,
 			http.StatusBadRequest,

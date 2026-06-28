@@ -20,17 +20,17 @@ run:
 
 fmt:
 	go fmt ./...
-	go tool golines --base-formatter=gofmt -w .
+	golangci-lint fmt ./...
 
 fmt-check:
 	@test -z "$$(gofmt -l .)" || (echo "Run 'make fmt' to fix formatting"; exit 1)
-	@test -z "$$(go tool golines --base-formatter=gofmt -l .)" || (echo "Run 'make fmt' to fix formatting"; exit 1)
+	@golangci-lint fmt --diff ./... || (echo "Run 'make fmt' to fix formatting"; exit 1)
 
 vet:
 	go vet ./...
 
 lint:
-	go tool golangci-lint run ./...
+	golangci-lint run ./...
 
 test:
 	go test -race ./...

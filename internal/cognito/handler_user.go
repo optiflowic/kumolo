@@ -96,7 +96,8 @@ func (ro *Router) poolKey(w http.ResponseWriter, poolID string) (*rsa.PrivateKey
 				"Invalid access token.",
 			)
 		} else {
-			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException, "failed to get pool keys")
+			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+				"failed to get pool keys")
 		}
 		return nil, false
 	}
@@ -146,7 +147,12 @@ func (ro *Router) lookupUser(w http.ResponseWriter, poolID, sub string) (*UserMe
 				"User does not exist.",
 			)
 		} else {
-			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException, "failed to get user")
+			writeError(
+				w,
+				http.StatusInternalServerError,
+				ErrTypeInternalErrorException,
+				"failed to get user",
+			)
 		}
 		return nil, false
 	}
