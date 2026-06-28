@@ -425,7 +425,7 @@ func TestJWT_CognitoGroupsClaim(t *testing.T) {
 	for _, name := range []string{"beta", "alpha"} {
 		createGroup(t, ro, poolID, name)
 	}
-	signUpAndConfirmUser(t, ro, poolID, "alice", "Pass1234!")
+	signUpAndConfirmUser(t, ro, poolID, clientID, "alice", "Pass1234!")
 	for _, name := range []string{"beta", "alpha"} {
 		addBody, _ := json.Marshal(
 			map[string]any{"UserPoolId": poolID, "GroupName": name, "Username": "alice"},
@@ -490,10 +490,8 @@ func createGroupTestClient(t *testing.T, ro *Router, poolID string) string {
 	return resp.UserPoolClient.ClientId
 }
 
-func signUpAndConfirmUser(t *testing.T, ro *Router, poolID, username, password string) {
+func signUpAndConfirmUser(t *testing.T, ro *Router, poolID, clientID, username, password string) {
 	t.Helper()
-	clientID := createGroupTestClient(t, ro, poolID)
-
 	body, _ := json.Marshal(map[string]any{
 		"ClientId": clientID,
 		"Username": username,
