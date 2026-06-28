@@ -107,7 +107,11 @@ func aclAllowsAnonymous(aclXML, permission string) bool {
 		return true // no ACL configured: unrestricted access
 	}
 	var p aclPolicyXML
-	if err := xml.Unmarshal([]byte(aclXML), &p); err != nil { // #nosec G709 -- aclXML is kumolo-internal data validated by parseACLBody before storage; not raw user input
+	// aclXML is kumolo-internal data validated by parseACLBody before storage; not raw user input.
+	if err := xml.Unmarshal( // #nosec G709
+		[]byte(aclXML),
+		&p,
+	); err != nil {
 		return false
 	}
 	for _, g := range p.Grants {
