@@ -1006,6 +1006,31 @@ func TestStorageDeleteGroup_DeleteMembersDirError(t *testing.T) {
 	assert.Contains(t, err.Error(), "remove group_members dir")
 }
 
+// ── DeleteGroup with corrupted member marker ──────────────────────────────────
+
+func TestStorageDeleteGroup_CorruptedMemberMarker(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	setupStorageGroup(t, s, poolID, "admins")
+	setupStorageUser(t, s, poolID, "alice", "sub-alice")
+	require.NoError(t, s.AddUserToGroup(poolID, "admins", "alice"))
+
+	// Overwrite the member marker with invalid JSON to simulate corruption.
+	f, err := s.root.OpenFile(memberPath(poolID, "admins", "alice"), os.O_WRONLY|os.O_TRUNC, 0o640)
+	require.NoError(t, err)
+	_, err = f.Write([]byte("not-valid-json"))
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	// DeleteGroup must still clean up the user_groups reverse-index entry.
+	require.NoError(t, s.DeleteGroup(poolID, "admins"))
+
+	// alice's group list must be empty — no stale entries from the corrupted marker.
+	names, err := s.GetGroupsForUser(poolID, "alice")
+	require.NoError(t, err)
+	assert.Empty(t, names)
+}
+
 // ── ListGroupsForUser stale group-not-found ───────────────────────────────────
 
 func TestStorageListGroupsForUser_SkipsStaleGroupNotFound(t *testing.T) {

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 var (
@@ -140,12 +141,11 @@ func (s *Storage) DeleteGroup(poolID, groupName string) error {
 		if e.IsDir() {
 			continue
 		}
-		marker, err := readJSON[memberMarker](s, filepath.Join(memberDir, e.Name()))
-		if err != nil {
-			// untestable: corrupted member file; skip — stale index entry acceptable
-			continue
-		}
-		ugPath := userGroupPath(poolID, marker.Username, groupName)
+		// The member filename is groupKey(username)+".json", so we can derive the
+		// reverse-index path without reading the marker JSON — this handles corrupted
+		// marker files without leaking stale user_groups entries.
+		userKey := strings.TrimSuffix(e.Name(), ".json")
+		ugPath := filepath.Join("pools", poolID, "user_groups", userKey, groupKey(groupName)+".json")
 		if err := s.removeFile(ugPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("remove user_groups index: %w", err)
 		}
