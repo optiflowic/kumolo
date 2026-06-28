@@ -96,7 +96,8 @@ func (ro *Router) poolKey(w http.ResponseWriter, poolID string) (*rsa.PrivateKey
 				"Invalid access token.",
 			)
 		} else {
-			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException, "failed to get pool keys")
+			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+				"failed to get pool keys")
 		}
 		return nil, false
 	}

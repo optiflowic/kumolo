@@ -443,7 +443,9 @@ func (ro *Router) handleUserPasswordAuth(
 		return
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
+	if err := bcrypt.CompareHashAndPassword(
+		[]byte(user.PasswordHash), []byte(password),
+	); err != nil {
 		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException,
 			"Incorrect username or password.")
 		return
