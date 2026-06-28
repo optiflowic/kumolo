@@ -42,6 +42,7 @@
           gnumake
           govulncheck
           goreleaser
+          golangci-lint
         ];
       in
       {

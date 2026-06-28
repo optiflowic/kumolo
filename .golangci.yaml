@@ -3,6 +3,7 @@ version: "2"
 linters:
   enable:
     - gosec
+    - golines
   exclusions:
     rules:
       # Test files intentionally set restrictive permissions to trigger error paths.
