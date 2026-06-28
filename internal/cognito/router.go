@@ -47,6 +47,20 @@ type store interface {
 	CreateRefreshToken(data *refreshTokenData) error
 	GetRefreshToken(poolID, token string) (*refreshTokenData, error)
 	DeleteRefreshToken(poolID, token string) error
+
+	// Group operations
+	CreateGroup(poolID string, group *GroupMetadata) error
+	GetGroup(poolID, groupName string) (*GroupMetadata, error)
+	UpdateGroup(poolID, groupName string, fn func(*GroupMetadata) error) error
+	DeleteGroup(poolID, groupName string) error
+	ListGroups(poolID string, maxResults int, nextToken string) ([]*GroupMetadata, string, error)
+
+	// Group membership operations
+	AddUserToGroup(poolID, groupName, username string) error
+	RemoveUserFromGroup(poolID, groupName, username string) error
+	ListGroupsForUser(poolID, username string, maxResults int, nextToken string) ([]*GroupMetadata, string, error)
+	ListUsersInGroup(poolID, groupName string, maxResults int, nextToken string) ([]*UserMetadata, string, error)
+	GetGroupsForUser(poolID, username string) ([]string, error)
 }
 
 // Router handles Cognito User Pools API requests dispatched via the X-Amz-Target header.
@@ -132,6 +146,24 @@ func (ro *Router) serveHTTP(w http.ResponseWriter, r *http.Request, op string) {
 		ro.handleAdminConfirmSignUp(w, body)
 	case "AdminDeleteUser":
 		ro.handleAdminDeleteUser(w, body)
+	case "CreateGroup":
+		ro.handleCreateGroup(w, body)
+	case "DeleteGroup":
+		ro.handleDeleteGroup(w, body)
+	case "GetGroup":
+		ro.handleGetGroup(w, body)
+	case "UpdateGroup":
+		ro.handleUpdateGroup(w, body)
+	case "ListGroups":
+		ro.handleListGroups(w, body)
+	case "AdminAddUserToGroup":
+		ro.handleAdminAddUserToGroup(w, body)
+	case "AdminRemoveUserFromGroup":
+		ro.handleAdminRemoveUserFromGroup(w, body)
+	case "AdminListGroupsForUser":
+		ro.handleAdminListGroupsForUser(w, body)
+	case "ListUsersInGroup":
+		ro.handleListUsersInGroup(w, body)
 	default:
 		writeError(
 			w,

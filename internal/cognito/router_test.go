@@ -274,6 +274,25 @@ func (m *mockStore) GetRefreshToken(poolID, token string) (*refreshTokenData, er
 
 func (m *mockStore) DeleteRefreshToken(string, string) error { return m.deleteRefreshErr }
 
+func (m *mockStore) CreateGroup(_ string, _ *GroupMetadata) error    { return nil }
+func (m *mockStore) GetGroup(string, string) (*GroupMetadata, error) { return nil, errGroupNotFound }
+func (m *mockStore) UpdateGroup(_ string, _ string, _ func(*GroupMetadata) error) error {
+	return nil
+}
+func (m *mockStore) DeleteGroup(string, string) error { return nil }
+func (m *mockStore) ListGroups(string, int, string) ([]*GroupMetadata, string, error) {
+	return nil, "", nil
+}
+func (m *mockStore) AddUserToGroup(string, string, string) error      { return nil }
+func (m *mockStore) RemoveUserFromGroup(string, string, string) error { return nil }
+func (m *mockStore) ListGroupsForUser(string, string, int, string) ([]*GroupMetadata, string, error) {
+	return nil, "", nil
+}
+func (m *mockStore) ListUsersInGroup(string, string, int, string) ([]*UserMetadata, string, error) {
+	return nil, "", nil
+}
+func (m *mockStore) GetGroupsForUser(string, string) ([]string, error) { return nil, nil }
+
 func TestNewStorage_MkdirError(t *testing.T) {
 	dir := t.TempDir()
 	// Place a file where the "cognito" directory must be created, forcing MkdirAll to fail.

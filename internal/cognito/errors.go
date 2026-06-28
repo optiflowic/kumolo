@@ -18,6 +18,7 @@ const (
 	ErrTypeInvalidPasswordException  = "InvalidPasswordException"
 	ErrTypeInternalErrorException    = "InternalErrorException"
 	ErrTypeUnknownOperationException = "UnknownOperationException"
+	ErrTypeGroupExistsException      = "GroupExistsException"
 )
 
 type responseRecorder struct {

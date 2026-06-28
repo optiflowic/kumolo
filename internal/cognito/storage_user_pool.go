@@ -130,6 +130,15 @@ func (s *Storage) DeleteUserPool(poolID string) error {
 	if err := s.deleteFlatDirLocked(filepath.Join("pools", poolID, "refresh_tokens")); err != nil {
 		return fmt.Errorf("delete refresh_tokens dir: %w", err)
 	}
+	if err := s.deleteFlatDirLocked(filepath.Join("pools", poolID, "groups")); err != nil {
+		return fmt.Errorf("delete groups dir: %w", err)
+	}
+	if err := s.deleteNestedDirLocked(filepath.Join("pools", poolID, "group_members")); err != nil {
+		return fmt.Errorf("delete group_members dir: %w", err)
+	}
+	if err := s.deleteNestedDirLocked(filepath.Join("pools", poolID, "user_groups")); err != nil {
+		return fmt.Errorf("delete user_groups dir: %w", err)
+	}
 	keysPath := filepath.Join("pools", poolID, "keys.json")
 	if err := s.removeFile(keysPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("remove keys.json: %w", err)
@@ -140,6 +149,30 @@ func (s *Storage) DeleteUserPool(poolID string) error {
 	if err := s.removeFile(filepath.Join("pools", poolID)); err != nil &&
 		!errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("remove pool dir: %w", err)
+	}
+	return nil
+}
+
+// deleteNestedDirLocked removes a two-level directory (dir/{subdir}/files) and then the top dir.
+// It is a no-op when the directory does not exist.
+func (s *Storage) deleteNestedDirLocked(dir string) error {
+	entries, err := s.listDirFn(dir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if err := s.deleteFlatDirLocked(filepath.Join(dir, e.Name())); err != nil {
+			return err
+		}
+	}
+	if err := s.removeFile(dir); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
 	}
 	return nil
 }

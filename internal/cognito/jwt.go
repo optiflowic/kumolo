@@ -113,10 +113,13 @@ func buildJWKS(publicKey *rsa.PublicKey, keyID string) map[string]any {
 }
 
 // issueTokens generates a new access token, ID token, and refresh token for the given user.
+// groups is the list of group names to include in the cognito:groups claim; pass nil if the user
+// has no group membership.
 func issueTokens(
 	privateKey *rsa.PrivateKey,
 	keyID, poolID, clientID string,
 	user *UserMetadata,
+	groups []string,
 ) (accessToken, idToken, refreshToken string, err error) {
 	now := time.Now().Unix()
 	exp := now + accessTokenExpiry
@@ -160,6 +163,9 @@ func issueTokens(
 		"jti":        accessJTI,
 		"username":   user.Username,
 	}
+	if len(groups) > 0 {
+		accessClaims["cognito:groups"] = groups
+	}
 
 	idClaims := map[string]any{
 		"sub":              user.Sub,
@@ -182,6 +188,9 @@ func issueTokens(
 		if !reservedClaims[attr.Name] && !strings.HasPrefix(attr.Name, cognitoClaimPrefix) {
 			idClaims[attr.Name] = attr.Value
 		}
+	}
+	if len(groups) > 0 {
+		idClaims["cognito:groups"] = groups
 	}
 
 	accessToken, err = buildJWT(privateKey, keyID, accessClaims)

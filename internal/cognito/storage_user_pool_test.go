@@ -129,3 +129,26 @@ func TestDeleteFlatDirLocked_RemoveDirError(t *testing.T) {
 	err := s.deleteFlatDirLocked(usersDir)
 	require.ErrorIs(t, err, storageErr)
 }
+
+// ── deleteNestedDirLocked ─────────────────────────────────────────────────────
+
+func TestDeleteUserPool_WithGroups(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+
+	ts := nowUnix()
+	require.NoError(t, s.CreateGroup(poolID, &GroupMetadata{
+		GroupName: "admins", UserPoolId: poolID,
+		CreationDate: ts, LastModifiedDate: ts,
+	}))
+	require.NoError(t, s.CreateUser(poolID, &UserMetadata{
+		Username: "alice", Sub: "sub-alice", Status: userStatusConfirmed,
+		CreatedAt: ts, UpdatedAt: ts,
+	}))
+	require.NoError(t, s.AddUserToGroup(poolID, "admins", "alice"))
+
+	require.NoError(t, s.DeleteUserPool(poolID))
+
+	_, err := s.GetUserPool(poolID)
+	require.ErrorIs(t, err, errUserPoolNotFound)
+}
