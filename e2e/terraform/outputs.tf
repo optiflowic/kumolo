@@ -74,9 +74,9 @@ output "cognito_admin_user_status" {
 }
 
 output "cognito_group_admins" {
-  value = aws_cognito_user_pool_group.admins.name
+  value = aws_cognito_user_group.admins.name
 }
 
 output "cognito_group_editors" {
-  value = aws_cognito_user_pool_group.editors.name
+  value = aws_cognito_user_group.editors.name
 }

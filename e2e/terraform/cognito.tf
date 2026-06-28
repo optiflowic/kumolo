@@ -42,14 +42,14 @@ resource "aws_cognito_user_pool_client" "main" {
   access_token_validity  = 1
 }
 
-resource "aws_cognito_user_pool_group" "admins" {
+resource "aws_cognito_user_group" "admins" {
   name         = "admins"
   user_pool_id = aws_cognito_user_pool.main.id
   description  = "Administrator group"
   precedence   = 1
 }
 
-resource "aws_cognito_user_pool_group" "editors" {
+resource "aws_cognito_user_group" "editors" {
   name         = "editors"
   user_pool_id = aws_cognito_user_pool.main.id
   description  = "Editor group"
@@ -58,6 +58,6 @@ resource "aws_cognito_user_pool_group" "editors" {
 
 resource "aws_cognito_user_in_group" "admin_in_admins" {
   user_pool_id = aws_cognito_user_pool.main.id
-  group_name   = aws_cognito_user_pool_group.admins.name
+  group_name   = aws_cognito_user_group.admins.name
   username     = aws_cognito_user.admin.username
 }
