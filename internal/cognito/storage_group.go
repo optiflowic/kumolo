@@ -116,8 +116,8 @@ func (s *Storage) UpdateGroup(poolID, groupName string, fn func(*GroupMetadata) 
 	return s.writeJSON(groupPath(poolID, groupName), group)
 }
 
-// DeleteGroup removes a group. It does not remove membership records; those are inert once the
-// group file is gone.
+// DeleteGroup removes a group and cleans up its membership indexes so that
+// recreating a group with the same name does not inherit the old members.
 func (s *Storage) DeleteGroup(poolID, groupName string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -129,6 +129,31 @@ func (s *Storage) DeleteGroup(poolID, groupName string) error {
 		}
 		return fmt.Errorf("stat group: %w", err)
 	}
+
+	// Remove per-user reverse-index entries before deleting the group.
+	memberDir := filepath.Join("pools", poolID, "group_members", groupKey(groupName))
+	memberEntries, err := s.listDirFn(memberDir)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("list group members: %w", err)
+	}
+	for _, e := range memberEntries {
+		if e.IsDir() {
+			continue
+		}
+		marker, err := readJSON[memberMarker](s, filepath.Join(memberDir, e.Name()))
+		if err != nil {
+			// untestable: corrupted member file; skip — stale index entry acceptable
+			continue
+		}
+		ugPath := userGroupPath(poolID, marker.Username, groupName)
+		if err := s.removeFile(ugPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove user_groups index: %w", err)
+		}
+	}
+	if err := s.deleteFlatDirLocked(memberDir); err != nil {
+		return fmt.Errorf("remove group_members dir: %w", err)
+	}
+
 	return s.removeFile(gPath)
 }
 
@@ -145,7 +170,7 @@ func (s *Storage) ListGroups(poolID string, maxResults int, nextToken string) (
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, "", nil
 		}
-		return nil, "", err
+		return nil, "", fmt.Errorf("list groups dir: %w", err)
 	}
 
 	var groups []*GroupMetadata
@@ -179,7 +204,7 @@ func (s *Storage) ListGroups(poolID string, maxResults int, nextToken string) (
 	}
 
 	var retNextToken string
-	if len(groups) > maxResults {
+	if maxResults > 0 && len(groups) > maxResults {
 		retNextToken = groups[maxResults-1].GroupName
 		groups = groups[:maxResults]
 	}
@@ -223,8 +248,9 @@ func (s *Storage) AddUserToGroup(poolID, groupName, username string) error {
 		ugPath,
 		userGroupMarker{Username: username, GroupName: groupName},
 	); err != nil {
-		// best-effort rollback of the member record
-		_ = s.removeFile(mPath)
+		if rbErr := s.removeFile(mPath); rbErr != nil {
+			return fmt.Errorf("write user_groups index: %w (rollback: %v)", err, rbErr)
+		}
 		return fmt.Errorf("write user_groups index: %w", err)
 	}
 	return nil
@@ -259,7 +285,7 @@ func (s *Storage) ListGroupsForUser(poolID, username string, maxResults int, nex
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, "", nil
 		}
-		return nil, "", err
+		return nil, "", fmt.Errorf("list user_groups dir: %w", err)
 	}
 
 	var groups []*GroupMetadata
@@ -274,8 +300,10 @@ func (s *Storage) ListGroupsForUser(poolID, username string, maxResults int, nex
 		}
 		g, err := s.getGroupLocked(poolID, marker.GroupName)
 		if err != nil {
-			// group was deleted after the membership record was written; skip
-			continue
+			if errors.Is(err, errGroupNotFound) {
+				continue // stale membership record; group was deleted
+			}
+			return nil, "", fmt.Errorf("read group %q: %w", marker.GroupName, err)
 		}
 		groups = append(groups, g)
 	}
@@ -298,7 +326,7 @@ func (s *Storage) ListGroupsForUser(poolID, username string, maxResults int, nex
 	}
 
 	var retNextToken string
-	if len(groups) > maxResults {
+	if maxResults > 0 && len(groups) > maxResults {
 		retNextToken = groups[maxResults-1].GroupName
 		groups = groups[:maxResults]
 	}
@@ -330,8 +358,11 @@ func (s *Storage) GetGroupsForUser(poolID, username string) ([]string, error) {
 			continue
 		}
 		// Only include groups that still exist.
-		if _, err := s.getGroupLocked(poolID, marker.GroupName); err == nil {
+		_, gErr := s.getGroupLocked(poolID, marker.GroupName)
+		if gErr == nil {
 			names = append(names, marker.GroupName)
+		} else if !errors.Is(gErr, errGroupNotFound) {
+			return nil, fmt.Errorf("read group %q: %w", marker.GroupName, gErr)
 		}
 	}
 	sort.Strings(names)
@@ -351,7 +382,7 @@ func (s *Storage) ListUsersInGroup(poolID, groupName string, maxResults int, nex
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, "", nil
 		}
-		return nil, "", err
+		return nil, "", fmt.Errorf("list group_members dir: %w", err)
 	}
 
 	var users []*UserMetadata
@@ -366,8 +397,10 @@ func (s *Storage) ListUsersInGroup(poolID, groupName string, maxResults int, nex
 		}
 		user, err := s.getUserLocked(poolID, marker.Username)
 		if err != nil {
-			// user was deleted after membership was written; skip
-			continue
+			if errors.Is(err, errUserNotFound) {
+				continue // stale membership record; user was deleted
+			}
+			return nil, "", fmt.Errorf("read user %q: %w", marker.Username, err)
 		}
 		users = append(users, user)
 	}
@@ -390,7 +423,7 @@ func (s *Storage) ListUsersInGroup(poolID, groupName string, maxResults int, nex
 	}
 
 	var retNextToken string
-	if len(users) > maxResults {
+	if maxResults > 0 && len(users) > maxResults {
 		retNextToken = users[maxResults-1].Username
 		users = users[:maxResults]
 	}

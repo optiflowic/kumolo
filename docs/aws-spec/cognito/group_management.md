@@ -97,7 +97,7 @@ When the user has no groups, the claim is omitted.
 
 ## kumolo storage layout
 
-```
+```text
 pools/{poolID}/groups/{sha256(groupName)}.json          — GroupMetadata
 pools/{poolID}/group_members/{sha256(groupName)}/{sha256(username)}.json  — membership marker
 pools/{poolID}/user_groups/{sha256(username)}/{sha256(groupName)}.json    — reverse index for AdminListGroupsForUser

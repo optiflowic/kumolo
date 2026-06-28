@@ -1157,7 +1157,15 @@ func TestCognitoIntegration_Groups(t *testing.T) {
 			UserPoolId: aws.String(poolID),
 		})
 		require.NoError(t, err)
-		assert.GreaterOrEqual(t, len(out.Groups), 3)
+		require.GreaterOrEqual(t, len(out.Groups), 3)
+
+		names := make([]string, len(out.Groups))
+		for i, g := range out.Groups {
+			names[i] = aws.ToString(g.GroupName)
+		}
+		assert.Contains(t, names, "admins")
+		assert.Contains(t, names, "beta-group")
+		assert.Contains(t, names, "gamma-group")
 	})
 
 	t.Run("DeleteGroup", func(t *testing.T) {
@@ -1246,12 +1254,21 @@ func TestCognitoIntegration_GroupMembership(t *testing.T) {
 		})
 		require.NoError(t, err)
 
+		// Forward index: user no longer belongs to the group.
 		out, err := c.AdminListGroupsForUser(ctx, &awscognito.AdminListGroupsForUserInput{
 			UserPoolId: aws.String(env.poolID),
 			Username:   aws.String("member-user"),
 		})
 		require.NoError(t, err)
 		assert.Empty(t, out.Groups)
+
+		// Reverse index: group no longer contains the user.
+		usersOut, err := c.ListUsersInGroup(ctx, &awscognito.ListUsersInGroupInput{
+			UserPoolId: aws.String(env.poolID),
+			GroupName:  aws.String("members"),
+		})
+		require.NoError(t, err)
+		assert.Empty(t, usersOut.Users)
 	})
 
 	t.Run("AdminAddUserToGroup_UserNotFound", func(t *testing.T) {

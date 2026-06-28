@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -864,7 +865,7 @@ func TestIssueTokensAndWrite_GetGroupsForUserError(t *testing.T) {
 
 	storage := ro.storage.(*Storage)
 	realListDir := storage.listDirFn
-	aliceUserGroupDir := "pools/" + poolID + "/user_groups/" + groupKey("alice")
+	aliceUserGroupDir := filepath.Join("pools", poolID, "user_groups", groupKey("alice"))
 	storage.listDirFn = func(name string) ([]os.DirEntry, error) {
 		if name == aliceUserGroupDir {
 			return nil, errors.New("disk error")

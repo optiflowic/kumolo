@@ -161,18 +161,22 @@ func (s *Storage) deleteNestedDirLocked(dir string) error {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
 		}
-		return err
+		return fmt.Errorf("list %s: %w", dir, err)
 	}
 	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		if err := s.deleteFlatDirLocked(filepath.Join(dir, e.Name())); err != nil {
-			return err
+		child := filepath.Join(dir, e.Name())
+		if e.IsDir() {
+			if err := s.deleteFlatDirLocked(child); err != nil {
+				return err
+			}
+		} else {
+			if err := s.removeFile(child); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("remove %s: %w", child, err)
+			}
 		}
 	}
 	if err := s.removeFile(dir); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
+		return fmt.Errorf("remove %s: %w", dir, err)
 	}
 	return nil
 }

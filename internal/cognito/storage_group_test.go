@@ -380,6 +380,69 @@ func TestStorageDeleteGroup_StatError(t *testing.T) {
 	assert.Contains(t, err.Error(), "stat group")
 }
 
+func TestStorageDeleteGroup_MembershipCleanupOnRecreate(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	setupStorageGroup(t, s, poolID, "admins")
+	setupStorageUser(t, s, poolID, "alice", "sub-alice")
+	require.NoError(t, s.AddUserToGroup(poolID, "admins", "alice"))
+
+	require.NoError(t, s.DeleteGroup(poolID, "admins"))
+
+	// Recreate with the same name — alice must NOT appear as a member.
+	setupStorageGroup(t, s, poolID, "admins")
+	users, _, err := s.ListUsersInGroup(poolID, "admins", 60, "")
+	require.NoError(t, err)
+	assert.Empty(t, users)
+
+	// alice's group list must also be empty.
+	names, err := s.GetGroupsForUser(poolID, "alice")
+	require.NoError(t, err)
+	assert.Empty(t, names)
+}
+
+func TestStorageDeleteGroup_ListMembersError(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	setupStorageGroup(t, s, poolID, "admins")
+	setupStorageUser(t, s, poolID, "alice", "sub-alice")
+	require.NoError(t, s.AddUserToGroup(poolID, "admins", "alice"))
+
+	listErr := errors.New("listdir failed")
+	realListDir := s.listDirFn
+	memberDir := filepath.Join("pools", poolID, "group_members", groupKey("admins"))
+	s.listDirFn = func(name string) ([]os.DirEntry, error) {
+		if name == memberDir {
+			return nil, listErr
+		}
+		return realListDir(name)
+	}
+	err := s.DeleteGroup(poolID, "admins")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "list group members")
+}
+
+func TestStorageDeleteGroup_RemoveUserGroupIndexError(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	setupStorageGroup(t, s, poolID, "admins")
+	setupStorageUser(t, s, poolID, "alice", "sub-alice")
+	require.NoError(t, s.AddUserToGroup(poolID, "admins", "alice"))
+
+	removeErr := errors.New("remove failed")
+	realRemove := s.removeFile
+	ugPath := userGroupPath(poolID, "alice", "admins")
+	s.removeFile = func(name string) error {
+		if name == ugPath {
+			return removeErr
+		}
+		return realRemove(name)
+	}
+	err := s.DeleteGroup(poolID, "admins")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "remove user_groups index")
+}
+
 // ── ListGroups listDirFn error ─────────────────────────────────────────────────
 
 func TestStorageListGroups_ListDirError(t *testing.T) {
@@ -391,6 +454,18 @@ func TestStorageListGroups_ListDirError(t *testing.T) {
 	s.listDirFn = func(string) ([]os.DirEntry, error) { return nil, listErr }
 	_, _, err := s.ListGroups(poolID, 60, "")
 	require.ErrorIs(t, err, listErr)
+}
+
+func TestStorageListGroups_ZeroLimit(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	for _, name := range []string{"alpha", "beta", "gamma"} {
+		setupStorageGroup(t, s, poolID, name)
+	}
+	groups, nextToken, err := s.ListGroups(poolID, 0, "")
+	require.NoError(t, err)
+	assert.Len(t, groups, 3)
+	assert.Empty(t, nextToken)
 }
 
 // ── AddUserToGroup error paths ─────────────────────────────────────────────────
@@ -487,6 +562,36 @@ func TestStorageAddUserToGroup_WriteUserGroupIndexError(t *testing.T) {
 	err := s.AddUserToGroup(poolID, "admins", "alice")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "write user_groups index")
+}
+
+func TestStorageAddUserToGroup_WriteUserGroupIndexError_RollbackError(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	setupStorageGroup(t, s, poolID, "admins")
+	setupStorageUser(t, s, poolID, "alice", "sub-alice")
+
+	writeErr := errors.New("write failed")
+	removeErr := errors.New("remove failed")
+	realOpen := s.openFile
+	realRemove := s.removeFile
+	ugPath := userGroupPath(poolID, "alice", "admins")
+	mPath := memberPath(poolID, "admins", "alice")
+	s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+		if name == ugPath {
+			return nil, writeErr
+		}
+		return realOpen(name, flag, perm)
+	}
+	s.removeFile = func(name string) error {
+		if name == mPath {
+			return removeErr
+		}
+		return realRemove(name)
+	}
+	err := s.AddUserToGroup(poolID, "admins", "alice")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "write user_groups index")
+	assert.Contains(t, err.Error(), "rollback")
 }
 
 // ── RemoveUserFromGroup error paths ────────────────────────────────────────────
@@ -587,6 +692,45 @@ func TestStorageListGroupsForUser_InvalidNextToken(t *testing.T) {
 	require.ErrorIs(t, err, errInvalidNextToken)
 }
 
+func TestStorageListGroupsForUser_ZeroLimit(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	for _, name := range []string{"alpha", "beta", "gamma"} {
+		setupStorageGroup(t, s, poolID, name)
+	}
+	setupStorageUser(t, s, poolID, "alice", "sub-alice")
+	for _, name := range []string{"alpha", "beta", "gamma"} {
+		require.NoError(t, s.AddUserToGroup(poolID, name, "alice"))
+	}
+	groups, nextToken, err := s.ListGroupsForUser(poolID, "alice", 0, "")
+	require.NoError(t, err)
+	assert.Len(t, groups, 3)
+	assert.Empty(t, nextToken)
+}
+
+func TestStorageListGroupsForUser_GetGroupReadError(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	setupStorageGroup(t, s, poolID, "admins")
+	setupStorageUser(t, s, poolID, "alice", "sub-alice")
+	require.NoError(t, s.AddUserToGroup(poolID, "admins", "alice"))
+
+	// Make readAll fail for the second call (first = marker file, second = group file).
+	readErr := errors.New("disk error")
+	callCount := 0
+	realReadAll := s.readAll
+	s.readAll = func(r io.Reader) ([]byte, error) {
+		callCount++
+		if callCount == 2 {
+			return nil, readErr
+		}
+		return realReadAll(r)
+	}
+	_, _, err := s.ListGroupsForUser(poolID, "alice", 60, "")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, readErr)
+}
+
 // ── ListUsersInGroup edge cases ────────────────────────────────────────────────
 
 func TestStorageListUsersInGroup_EmptyGroup(t *testing.T) {
@@ -642,6 +786,45 @@ func TestStorageListUsersInGroup_InvalidNextToken(t *testing.T) {
 
 	_, _, err := s.ListUsersInGroup(poolID, "admins", 60, "bad-token")
 	require.ErrorIs(t, err, errInvalidNextToken)
+}
+
+func TestStorageListUsersInGroup_ZeroLimit(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	setupStorageGroup(t, s, poolID, "admins")
+	setupStorageUser(t, s, poolID, "alice", "sub-alice")
+	setupStorageUser(t, s, poolID, "bob", "sub-bob")
+	setupStorageUser(t, s, poolID, "charlie", "sub-charlie")
+	for _, u := range []string{"alice", "bob", "charlie"} {
+		require.NoError(t, s.AddUserToGroup(poolID, "admins", u))
+	}
+	users, nextToken, err := s.ListUsersInGroup(poolID, "admins", 0, "")
+	require.NoError(t, err)
+	assert.Len(t, users, 3)
+	assert.Empty(t, nextToken)
+}
+
+func TestStorageListUsersInGroup_GetUserReadError(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	setupStorageGroup(t, s, poolID, "admins")
+	setupStorageUser(t, s, poolID, "alice", "sub-alice")
+	require.NoError(t, s.AddUserToGroup(poolID, "admins", "alice"))
+
+	// Make readAll fail for the second call (first = member marker, second = user file).
+	readErr := errors.New("disk error")
+	callCount := 0
+	realReadAll := s.readAll
+	s.readAll = func(r io.Reader) ([]byte, error) {
+		callCount++
+		if callCount == 2 {
+			return nil, readErr
+		}
+		return realReadAll(r)
+	}
+	_, _, err := s.ListUsersInGroup(poolID, "admins", 60, "")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, readErr)
 }
 
 // ── IsDir skip in ListGroups ──────────────────────────────────────────────────
@@ -772,4 +955,27 @@ func TestStorageGetGroupsForUser_ListDirError(t *testing.T) {
 	}
 	_, err := s.GetGroupsForUser(poolID, "alice")
 	require.ErrorIs(t, err, listErr)
+}
+
+func TestStorageGetGroupsForUser_GetGroupReadError(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	setupStorageGroup(t, s, poolID, "admins")
+	setupStorageUser(t, s, poolID, "alice", "sub-alice")
+	require.NoError(t, s.AddUserToGroup(poolID, "admins", "alice"))
+
+	// Make readAll fail for the second call (first = marker file, second = group file).
+	readErr := errors.New("disk error")
+	callCount := 0
+	realReadAll := s.readAll
+	s.readAll = func(r io.Reader) ([]byte, error) {
+		callCount++
+		if callCount == 2 {
+			return nil, readErr
+		}
+		return realReadAll(r)
+	}
+	_, err := s.GetGroupsForUser(poolID, "alice")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, readErr)
 }

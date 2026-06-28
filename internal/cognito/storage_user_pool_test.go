@@ -283,21 +283,54 @@ func TestDeleteNestedDirLocked_RemoveDirError(t *testing.T) {
 	require.ErrorIs(t, err, removeErr)
 }
 
-func TestDeleteNestedDirLocked_SkipsNonDirEntry(t *testing.T) {
+func TestDeleteNestedDirLocked_RemovesNonDirEntry(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	ts := nowUnix()
+	require.NoError(t, s.CreateGroup(poolID, &GroupMetadata{
+		GroupName: "admins", UserPoolId: poolID, CreationDate: ts, LastModifiedDate: ts,
+	}))
+	require.NoError(t, s.CreateUser(poolID, &UserMetadata{
+		Username: "alice", Sub: "sub-alice", Status: userStatusConfirmed,
+		CreatedAt: ts, UpdatedAt: ts,
+	}))
+	require.NoError(t, s.AddUserToGroup(poolID, "admins", "alice"))
+
+	// Write a stray file directly inside the top-level nested dir.
+	strayPath := filepath.Join("pools", poolID, "group_members", "stray.json")
+	require.NoError(t, s.writeJSON(strayPath, struct{}{}))
+
+	dir := filepath.Join("pools", poolID, "group_members")
+	require.NoError(t, s.deleteNestedDirLocked(dir))
+
+	// The stray file must be gone.
+	_, err := s.statFn(strayPath)
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestDeleteNestedDirLocked_NonDirRemoveError(t *testing.T) {
 	s := newTestStorage(t)
 	poolID := setupStoragePool(t, s)
 
 	dir := filepath.Join("pools", poolID, "group_members")
+	strayPath := filepath.Join(dir, "stray.json")
+	removeErr := errors.New("remove failed")
 	realListDir := s.listDirFn
+	realRemove := s.removeFile
 	s.listDirFn = func(name string) ([]os.DirEntry, error) {
 		if name == dir {
-			return []os.DirEntry{fakeDirEntry("stray-file.json")}, nil
+			return []os.DirEntry{fakeDirEntry("stray.json")}, nil
 		}
 		return realListDir(name)
 	}
-
+	s.removeFile = func(name string) error {
+		if name == strayPath {
+			return removeErr
+		}
+		return realRemove(name)
+	}
 	err := s.deleteNestedDirLocked(dir)
-	require.NoError(t, err)
+	require.ErrorIs(t, err, removeErr)
 }
 
 func TestDeleteUserPool_WithGroups(t *testing.T) {

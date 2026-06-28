@@ -544,12 +544,15 @@ run "AdminRemoveUserFromGroup" \
 GROUPS_AFTER_REMOVE_JSON=$($AWS admin-list-groups-for-user \
   --user-pool-id "$POOL_ID" \
   --username "$GROUP_USER" 2>&1)
-GROUPS_COUNT=$(echo "$GROUPS_AFTER_REMOVE_JSON" | \
-  jq -r '.Groups | length' 2>/dev/null || echo "0")
-if [[ "$GROUPS_COUNT" == "0" ]]; then
-  ok "AdminRemoveUserFromGroup — user no longer in group"
+if echo "$GROUPS_AFTER_REMOVE_JSON" | grep -q '"Groups"'; then
+  GROUPS_COUNT=$(echo "$GROUPS_AFTER_REMOVE_JSON" | jq -r '.Groups | length')
+  if [[ "$GROUPS_COUNT" == "0" ]]; then
+    ok "AdminRemoveUserFromGroup — user no longer in group"
+  else
+    fail "AdminRemoveUserFromGroup — expected empty groups after removal"
+  fi
 else
-  fail "AdminRemoveUserFromGroup — expected empty groups after removal"
+  fail "AdminRemoveUserFromGroup — admin-list-groups-for-user failed after removal"
 fi
 
 # Delete the group (before pool/client cleanup)
