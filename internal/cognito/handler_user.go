@@ -147,7 +147,12 @@ func (ro *Router) lookupUser(w http.ResponseWriter, poolID, sub string) (*UserMe
 				"User does not exist.",
 			)
 		} else {
-			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException, "failed to get user")
+			writeError(
+				w,
+				http.StatusInternalServerError,
+				ErrTypeInternalErrorException,
+				"failed to get user",
+			)
 		}
 		return nil, false
 	}

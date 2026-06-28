@@ -328,7 +328,8 @@ func (ro *Router) handleTransactWriteItems(w http.ResponseWriter, body []byte) {
 				return
 			}
 			if err := validateUnusedExprRefs(
-				ti.ConditionCheck.ExpressionAttributeNames, ti.ConditionCheck.ExpressionAttributeValues,
+				ti.ConditionCheck.ExpressionAttributeNames,
+				ti.ConditionCheck.ExpressionAttributeValues,
 				ti.ConditionCheck.ConditionExpression,
 			); err != nil {
 				writeError(w, http.StatusBadRequest,

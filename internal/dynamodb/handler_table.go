@@ -98,7 +98,10 @@ func (ro *Router) handleCreateTable(w http.ResponseWriter, body []byte) {
 		})
 	}
 	if err := validateTableIndexes(
-		meta.KeySchema, meta.AttributeDefinitions, meta.GlobalSecondaryIndexes, meta.LocalSecondaryIndexes,
+		meta.KeySchema,
+		meta.AttributeDefinitions,
+		meta.GlobalSecondaryIndexes,
+		meta.LocalSecondaryIndexes,
 	); err != nil {
 		writeError(
 			w,
