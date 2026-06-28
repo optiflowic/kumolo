@@ -185,6 +185,18 @@ type mockStore struct {
 	createRefreshErr  error
 	getRefreshFn      func(string, string) (*refreshTokenData, error)
 	deleteRefreshErr  error
+
+	// Group operations
+	createGroupErr         error
+	getGroupFn             func(string, string) (*GroupMetadata, error)
+	updateGroupErr         error
+	deleteGroupErr         error
+	listGroupsErr          error
+	addUserToGroupErr      error
+	removeUserFromGroupErr error
+	listGroupsForUserErr   error
+	listUsersInGroupErr    error
+	getGroupsForUserFn     func(string, string) ([]string, error)
 }
 
 func (m *mockStore) CreateUserPool(*UserPoolMetadata) error { return m.createErr }
@@ -274,23 +286,26 @@ func (m *mockStore) GetRefreshToken(poolID, token string) (*refreshTokenData, er
 
 func (m *mockStore) DeleteRefreshToken(string, string) error { return m.deleteRefreshErr }
 
-func (m *mockStore) CreateGroup(_ string, _ *GroupMetadata) error { return nil }
+func (m *mockStore) CreateGroup(_ string, _ *GroupMetadata) error { return m.createGroupErr }
 
-func (m *mockStore) GetGroup(
-	string,
-	string,
-) (*GroupMetadata, error) {
+func (m *mockStore) GetGroup(poolID, name string) (*GroupMetadata, error) {
+	if m.getGroupFn != nil {
+		return m.getGroupFn(poolID, name)
+	}
 	return nil, errGroupNotFound
 }
+
 func (m *mockStore) UpdateGroup(_ string, _ string, _ func(*GroupMetadata) error) error {
-	return nil
+	return m.updateGroupErr
 }
-func (m *mockStore) DeleteGroup(string, string) error { return nil }
+func (m *mockStore) DeleteGroup(string, string) error { return m.deleteGroupErr }
 func (m *mockStore) ListGroups(string, int, string) ([]*GroupMetadata, string, error) {
-	return nil, "", nil
+	return nil, "", m.listGroupsErr
 }
-func (m *mockStore) AddUserToGroup(string, string, string) error      { return nil }
-func (m *mockStore) RemoveUserFromGroup(string, string, string) error { return nil }
+func (m *mockStore) AddUserToGroup(string, string, string) error { return m.addUserToGroupErr }
+func (m *mockStore) RemoveUserFromGroup(string, string, string) error {
+	return m.removeUserFromGroupErr
+}
 
 func (m *mockStore) ListGroupsForUser(
 	string,
@@ -298,12 +313,18 @@ func (m *mockStore) ListGroupsForUser(
 	int,
 	string,
 ) ([]*GroupMetadata, string, error) {
-	return nil, "", nil
+	return nil, "", m.listGroupsForUserErr
 }
 func (m *mockStore) ListUsersInGroup(string, string, int, string) ([]*UserMetadata, string, error) {
-	return nil, "", nil
+	return nil, "", m.listUsersInGroupErr
 }
-func (m *mockStore) GetGroupsForUser(string, string) ([]string, error) { return nil, nil }
+
+func (m *mockStore) GetGroupsForUser(poolID, username string) ([]string, error) {
+	if m.getGroupsForUserFn != nil {
+		return m.getGroupsForUserFn(poolID, username)
+	}
+	return nil, nil
+}
 
 func TestNewStorage_MkdirError(t *testing.T) {
 	dir := t.TempDir()
@@ -708,13 +729,21 @@ func TestStorage_ListUserPoolClients_ReadError(t *testing.T) {
 	assert.Contains(t, err.Error(), "read user pool client")
 }
 
-// fakeDirEntry is a minimal os.DirEntry implementation for tests.
+// fakeDirEntry is a minimal os.DirEntry implementation for tests (non-directory).
 type fakeDirEntry string
 
 func (f fakeDirEntry) Name() string               { return string(f) }
 func (f fakeDirEntry) IsDir() bool                { return false }
 func (f fakeDirEntry) Type() os.FileMode          { return 0 }
 func (f fakeDirEntry) Info() (os.FileInfo, error) { return nil, nil }
+
+// fakeDirEntryDir is a minimal os.DirEntry implementation for tests (directory).
+type fakeDirEntryDir string
+
+func (f fakeDirEntryDir) Name() string               { return string(f) }
+func (f fakeDirEntryDir) IsDir() bool                { return true }
+func (f fakeDirEntryDir) Type() os.FileMode          { return os.ModeDir }
+func (f fakeDirEntryDir) Info() (os.FileInfo, error) { return nil, nil }
 
 func TestRouter_ErrorResponseFormat(t *testing.T) {
 	ro := newTestRouter(t)

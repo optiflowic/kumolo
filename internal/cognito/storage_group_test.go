@@ -2,7 +2,9 @@ package cognito
 
 import (
 	"errors"
+	"io"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -348,4 +350,426 @@ func TestStorageGetGroupsForUser_NoGroups(t *testing.T) {
 	names, err := s.GetGroupsForUser(poolID, "alice")
 	require.NoError(t, err)
 	assert.Nil(t, names)
+}
+
+// ── getGroupLocked read error ──────────────────────────────────────────────────
+
+func TestStorageGetGroup_ReadError(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	setupStorageGroup(t, s, poolID, "admins")
+
+	readErr := errors.New("read failed")
+	s.readAll = func(io.Reader) ([]byte, error) { return nil, readErr }
+	_, err := s.GetGroup(poolID, "admins")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "read group")
+}
+
+// ── DeleteGroup stat error ─────────────────────────────────────────────────────
+
+func TestStorageDeleteGroup_StatError(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	setupStorageGroup(t, s, poolID, "admins")
+
+	statErr := errors.New("stat failed")
+	s.statFn = func(string) (os.FileInfo, error) { return nil, statErr }
+	err := s.DeleteGroup(poolID, "admins")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "stat group")
+}
+
+// ── ListGroups listDirFn error ─────────────────────────────────────────────────
+
+func TestStorageListGroups_ListDirError(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	setupStorageGroup(t, s, poolID, "admins")
+
+	listErr := errors.New("listdir failed")
+	s.listDirFn = func(string) ([]os.DirEntry, error) { return nil, listErr }
+	_, _, err := s.ListGroups(poolID, 60, "")
+	require.ErrorIs(t, err, listErr)
+}
+
+// ── AddUserToGroup error paths ─────────────────────────────────────────────────
+
+func TestStorageAddUserToGroup_MkdirErrors(t *testing.T) {
+	tests := []struct {
+		name        string
+		getTarget   func(poolID string) string
+		errContains string
+	}{
+		{
+			"group_members root",
+			func(poolID string) string { return filepath.Join("pools", poolID, "group_members") },
+			"create group_members root",
+		},
+		{
+			"member dir",
+			func(poolID string) string {
+				return filepath.Join("pools", poolID, "group_members", groupKey("admins"))
+			},
+			"create group_members dir",
+		},
+		{
+			"user_groups root",
+			func(poolID string) string { return filepath.Join("pools", poolID, "user_groups") },
+			"create user_groups root",
+		},
+		{
+			"user_groups dir",
+			func(poolID string) string {
+				return filepath.Join("pools", poolID, "user_groups", groupKey("alice"))
+			},
+			"create user_groups dir",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newTestStorage(t)
+			poolID := setupStoragePool(t, s)
+			setupStorageGroup(t, s, poolID, "admins")
+			setupStorageUser(t, s, poolID, "alice", "sub-alice")
+
+			mkdirErr := errors.New("mkdir failed")
+			realMkdir := s.mkdirFn
+			target := tc.getTarget(poolID)
+			s.mkdirFn = func(name string, perm os.FileMode) error {
+				if name == target {
+					return mkdirErr
+				}
+				return realMkdir(name, perm)
+			}
+			err := s.AddUserToGroup(poolID, "admins", "alice")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.errContains)
+		})
+	}
+}
+
+func TestStorageAddUserToGroup_WriteMemberError(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	setupStorageGroup(t, s, poolID, "admins")
+	setupStorageUser(t, s, poolID, "alice", "sub-alice")
+
+	writeErr := errors.New("write failed")
+	realOpen := s.openFile
+	mPath := memberPath(poolID, "admins", "alice")
+	s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+		if name == mPath {
+			return nil, writeErr
+		}
+		return realOpen(name, flag, perm)
+	}
+	err := s.AddUserToGroup(poolID, "admins", "alice")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "write member")
+}
+
+func TestStorageAddUserToGroup_WriteUserGroupIndexError(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	setupStorageGroup(t, s, poolID, "admins")
+	setupStorageUser(t, s, poolID, "alice", "sub-alice")
+
+	writeErr := errors.New("write failed")
+	realOpen := s.openFile
+	ugPath := userGroupPath(poolID, "alice", "admins")
+	s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+		if name == ugPath {
+			return nil, writeErr
+		}
+		return realOpen(name, flag, perm)
+	}
+	err := s.AddUserToGroup(poolID, "admins", "alice")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "write user_groups index")
+}
+
+// ── RemoveUserFromGroup error paths ────────────────────────────────────────────
+
+func TestStorageRemoveUserFromGroup_RemoveMemberError(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	setupStorageGroup(t, s, poolID, "admins")
+	setupStorageUser(t, s, poolID, "alice", "sub-alice")
+	require.NoError(t, s.AddUserToGroup(poolID, "admins", "alice"))
+
+	removeErr := errors.New("remove failed")
+	mPath := memberPath(poolID, "admins", "alice")
+	s.removeFile = func(name string) error {
+		if name == mPath {
+			return removeErr
+		}
+		return nil
+	}
+	err := s.RemoveUserFromGroup(poolID, "admins", "alice")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "remove member")
+}
+
+func TestStorageRemoveUserFromGroup_RemoveUserGroupIndexError(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	setupStorageGroup(t, s, poolID, "admins")
+	setupStorageUser(t, s, poolID, "alice", "sub-alice")
+	require.NoError(t, s.AddUserToGroup(poolID, "admins", "alice"))
+
+	removeErr := errors.New("remove failed")
+	ugPath := userGroupPath(poolID, "alice", "admins")
+	s.removeFile = func(name string) error {
+		if name == ugPath {
+			return removeErr
+		}
+		return nil
+	}
+	err := s.RemoveUserFromGroup(poolID, "admins", "alice")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "remove user_groups index")
+}
+
+// ── ListGroupsForUser edge cases ───────────────────────────────────────────────
+
+func TestStorageListGroupsForUser_NoGroupsForUser(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+
+	groups, nextToken, err := s.ListGroupsForUser(poolID, "alice", 60, "")
+	require.NoError(t, err)
+	assert.Empty(t, groups)
+	assert.Empty(t, nextToken)
+}
+
+func TestStorageListGroupsForUser_ListDirError(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	setupStorageGroup(t, s, poolID, "admins")
+	setupStorageUser(t, s, poolID, "alice", "sub-alice")
+	require.NoError(t, s.AddUserToGroup(poolID, "admins", "alice"))
+
+	listErr := errors.New("listdir failed")
+	realListDir := s.listDirFn
+	userGroupDir := filepath.Join("pools", poolID, "user_groups", groupKey("alice"))
+	s.listDirFn = func(name string) ([]os.DirEntry, error) {
+		if name == userGroupDir {
+			return nil, listErr
+		}
+		return realListDir(name)
+	}
+	_, _, err := s.ListGroupsForUser(poolID, "alice", 60, "")
+	require.ErrorIs(t, err, listErr)
+}
+
+func TestStorageListGroupsForUser_DeletedGroup(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	setupStorageGroup(t, s, poolID, "admins")
+	setupStorageUser(t, s, poolID, "alice", "sub-alice")
+	require.NoError(t, s.AddUserToGroup(poolID, "admins", "alice"))
+	require.NoError(t, s.DeleteGroup(poolID, "admins"))
+
+	groups, _, err := s.ListGroupsForUser(poolID, "alice", 60, "")
+	require.NoError(t, err)
+	assert.Empty(t, groups)
+}
+
+func TestStorageListGroupsForUser_InvalidNextToken(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	setupStorageGroup(t, s, poolID, "admins")
+	setupStorageUser(t, s, poolID, "alice", "sub-alice")
+	require.NoError(t, s.AddUserToGroup(poolID, "admins", "alice"))
+
+	_, _, err := s.ListGroupsForUser(poolID, "alice", 60, "bad-token")
+	require.ErrorIs(t, err, errInvalidNextToken)
+}
+
+// ── ListUsersInGroup edge cases ────────────────────────────────────────────────
+
+func TestStorageListUsersInGroup_EmptyGroup(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	setupStorageGroup(t, s, poolID, "admins")
+
+	users, nextToken, err := s.ListUsersInGroup(poolID, "admins", 60, "")
+	require.NoError(t, err)
+	assert.Empty(t, users)
+	assert.Empty(t, nextToken)
+}
+
+func TestStorageListUsersInGroup_ListDirError(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	setupStorageGroup(t, s, poolID, "admins")
+	setupStorageUser(t, s, poolID, "alice", "sub-alice")
+	require.NoError(t, s.AddUserToGroup(poolID, "admins", "alice"))
+
+	listErr := errors.New("listdir failed")
+	realListDir := s.listDirFn
+	memberDir := filepath.Join("pools", poolID, "group_members", groupKey("admins"))
+	s.listDirFn = func(name string) ([]os.DirEntry, error) {
+		if name == memberDir {
+			return nil, listErr
+		}
+		return realListDir(name)
+	}
+	_, _, err := s.ListUsersInGroup(poolID, "admins", 60, "")
+	require.ErrorIs(t, err, listErr)
+}
+
+func TestStorageListUsersInGroup_DeletedUser(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	setupStorageGroup(t, s, poolID, "admins")
+	setupStorageUser(t, s, poolID, "alice", "sub-alice")
+	require.NoError(t, s.AddUserToGroup(poolID, "admins", "alice"))
+	require.NoError(t, s.DeleteUser(poolID, "alice"))
+
+	users, _, err := s.ListUsersInGroup(poolID, "admins", 60, "")
+	require.NoError(t, err)
+	assert.Empty(t, users)
+}
+
+func TestStorageListUsersInGroup_InvalidNextToken(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	setupStorageGroup(t, s, poolID, "admins")
+	setupStorageUser(t, s, poolID, "alice", "sub-alice")
+	require.NoError(t, s.AddUserToGroup(poolID, "admins", "alice"))
+
+	_, _, err := s.ListUsersInGroup(poolID, "admins", 60, "bad-token")
+	require.ErrorIs(t, err, errInvalidNextToken)
+}
+
+// ── IsDir skip in ListGroups ──────────────────────────────────────────────────
+
+func TestStorageListGroups_SkipsDirEntry(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	setupStorageGroup(t, s, poolID, "admins")
+
+	realListDir := s.listDirFn
+	s.listDirFn = func(name string) ([]os.DirEntry, error) {
+		entries, err := realListDir(name)
+		if err != nil {
+			return nil, err
+		}
+		if filepath.Base(name) == "groups" {
+			return append([]os.DirEntry{fakeDirEntryDir("subdir")}, entries...), nil
+		}
+		return entries, nil
+	}
+
+	groups, _, err := s.ListGroups(poolID, 60, "")
+	require.NoError(t, err)
+	assert.Len(t, groups, 1)
+	assert.Equal(t, "admins", groups[0].GroupName)
+}
+
+// ── IsDir skip in ListGroupsForUser ──────────────────────────────────────────
+
+func TestStorageListGroupsForUser_SkipsDirEntry(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	setupStorageGroup(t, s, poolID, "admins")
+	setupStorageUser(t, s, poolID, "alice", "sub-alice")
+	require.NoError(t, s.AddUserToGroup(poolID, "admins", "alice"))
+
+	realListDir := s.listDirFn
+	userGroupDir := filepath.Join("pools", poolID, "user_groups", groupKey("alice"))
+	s.listDirFn = func(name string) ([]os.DirEntry, error) {
+		entries, err := realListDir(name)
+		if err != nil {
+			return nil, err
+		}
+		if name == userGroupDir {
+			return append([]os.DirEntry{fakeDirEntryDir("subdir")}, entries...), nil
+		}
+		return entries, nil
+	}
+
+	groups, _, err := s.ListGroupsForUser(poolID, "alice", 60, "")
+	require.NoError(t, err)
+	assert.Len(t, groups, 1)
+	assert.Equal(t, "admins", groups[0].GroupName)
+}
+
+// ── IsDir skip in GetGroupsForUser ───────────────────────────────────────────
+
+func TestStorageGetGroupsForUser_SkipsDirEntry(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	setupStorageGroup(t, s, poolID, "admins")
+	setupStorageUser(t, s, poolID, "alice", "sub-alice")
+	require.NoError(t, s.AddUserToGroup(poolID, "admins", "alice"))
+
+	realListDir := s.listDirFn
+	userGroupDir := filepath.Join("pools", poolID, "user_groups", groupKey("alice"))
+	s.listDirFn = func(name string) ([]os.DirEntry, error) {
+		entries, err := realListDir(name)
+		if err != nil {
+			return nil, err
+		}
+		if name == userGroupDir {
+			return append([]os.DirEntry{fakeDirEntryDir("subdir")}, entries...), nil
+		}
+		return entries, nil
+	}
+
+	names, err := s.GetGroupsForUser(poolID, "alice")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"admins"}, names)
+}
+
+// ── IsDir skip in ListUsersInGroup ────────────────────────────────────────────
+
+func TestStorageListUsersInGroup_SkipsDirEntry(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	setupStorageGroup(t, s, poolID, "admins")
+	setupStorageUser(t, s, poolID, "alice", "sub-alice")
+	require.NoError(t, s.AddUserToGroup(poolID, "admins", "alice"))
+
+	realListDir := s.listDirFn
+	memberDir := filepath.Join("pools", poolID, "group_members", groupKey("admins"))
+	s.listDirFn = func(name string) ([]os.DirEntry, error) {
+		entries, err := realListDir(name)
+		if err != nil {
+			return nil, err
+		}
+		if name == memberDir {
+			return append([]os.DirEntry{fakeDirEntryDir("subdir")}, entries...), nil
+		}
+		return entries, nil
+	}
+
+	users, _, err := s.ListUsersInGroup(poolID, "admins", 60, "")
+	require.NoError(t, err)
+	assert.Len(t, users, 1)
+	assert.Equal(t, "alice", users[0].Username)
+}
+
+// ── GetGroupsForUser listDirFn error ──────────────────────────────────────────
+
+func TestStorageGetGroupsForUser_ListDirError(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	setupStorageGroup(t, s, poolID, "admins")
+	setupStorageUser(t, s, poolID, "alice", "sub-alice")
+	require.NoError(t, s.AddUserToGroup(poolID, "admins", "alice"))
+
+	listErr := errors.New("listdir failed")
+	realListDir := s.listDirFn
+	userGroupDir := filepath.Join("pools", poolID, "user_groups", groupKey("alice"))
+	s.listDirFn = func(name string) ([]os.DirEntry, error) {
+		if name == userGroupDir {
+			return nil, listErr
+		}
+		return realListDir(name)
+	}
+	_, err := s.GetGroupsForUser(poolID, "alice")
+	require.ErrorIs(t, err, listErr)
 }

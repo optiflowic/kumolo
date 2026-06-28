@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -851,6 +852,41 @@ func TestRespondToAuthChallenge_GetPoolError(t *testing.T) {
 	})
 	w := doOp(t, ro, "RespondToAuthChallenge", string(body))
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+// ── issueTokensAndWrite: GetGroupsForUser error ───────────────────────────────
+
+func TestIssueTokensAndWrite_GetGroupsForUserError(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID, clientID := setupPool(t, ro)
+	signUpUser(t, ro, clientID, "alice", "Pass1234!")
+	confirmUser(t, ro, clientID, "alice")
+
+	storage := ro.storage.(*Storage)
+	realListDir := storage.listDirFn
+	aliceUserGroupDir := "pools/" + poolID + "/user_groups/" + groupKey("alice")
+	storage.listDirFn = func(name string) ([]os.DirEntry, error) {
+		if name == aliceUserGroupDir {
+			return nil, errors.New("disk error")
+		}
+		return realListDir(name)
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"AuthFlow": "USER_PASSWORD_AUTH",
+		"ClientId": clientID,
+		"AuthParameters": map[string]string{
+			"USERNAME": "alice",
+			"PASSWORD": "Pass1234!",
+		},
+	})
+	w := doOp(t, ro, "InitiateAuth", string(body))
+	require.Equal(t, http.StatusInternalServerError, w.Code)
+	var resp struct {
+		Type string `json:"__type"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, ErrTypeInternalErrorException, resp.Type)
 }
 
 // ── JWKS ──────────────────────────────────────────────────────────────────────
