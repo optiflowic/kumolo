@@ -24,6 +24,7 @@ fmt:
 
 fmt-check:
 	@test -z "$$(gofmt -l .)" || (echo "Run 'make fmt' to fix formatting"; exit 1)
+	@golangci-lint fmt --diff ./... || (echo "Run 'make fmt' to fix formatting"; exit 1)
 
 vet:
 	go vet ./...
