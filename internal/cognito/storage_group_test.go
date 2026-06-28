@@ -957,6 +957,83 @@ func TestStorageGetGroupsForUser_ListDirError(t *testing.T) {
 	require.ErrorIs(t, err, listErr)
 }
 
+// ── DeleteGroup IsDir skip in group_members ───────────────────────────────────
+
+func TestStorageDeleteGroup_SkipsDirEntryInMembers(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	setupStorageGroup(t, s, poolID, "admins")
+	setupStorageUser(t, s, poolID, "alice", "sub-alice")
+	require.NoError(t, s.AddUserToGroup(poolID, "admins", "alice"))
+
+	realListDir := s.listDirFn
+	memberDir := filepath.Join("pools", poolID, "group_members", groupKey("admins"))
+	s.listDirFn = func(name string) ([]os.DirEntry, error) {
+		entries, err := realListDir(name)
+		if err != nil {
+			return nil, err
+		}
+		if name == memberDir {
+			return append([]os.DirEntry{fakeDirEntryDir("subdir")}, entries...), nil
+		}
+		return entries, nil
+	}
+	require.NoError(t, s.DeleteGroup(poolID, "admins"))
+	_, err := s.GetGroup(poolID, "admins")
+	require.ErrorIs(t, err, errGroupNotFound)
+}
+
+// ── DeleteGroup deleteFlatDirLocked error ─────────────────────────────────────
+
+func TestStorageDeleteGroup_DeleteMembersDirError(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	setupStorageGroup(t, s, poolID, "admins")
+	setupStorageUser(t, s, poolID, "alice", "sub-alice")
+	require.NoError(t, s.AddUserToGroup(poolID, "admins", "alice"))
+
+	deleteErr := errors.New("remove dir failed")
+	realRemove := s.removeFile
+	memberDir := filepath.Join("pools", poolID, "group_members", groupKey("admins"))
+	s.removeFile = func(name string) error {
+		if name == memberDir {
+			return deleteErr
+		}
+		return realRemove(name)
+	}
+	err := s.DeleteGroup(poolID, "admins")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "remove group_members dir")
+}
+
+// ── ListGroupsForUser stale group-not-found ───────────────────────────────────
+
+func TestStorageListGroupsForUser_SkipsStaleGroupNotFound(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	setupStorageGroup(t, s, poolID, "admins")
+	setupStorageUser(t, s, poolID, "alice", "sub-alice")
+	require.NoError(t, s.AddUserToGroup(poolID, "admins", "alice"))
+
+	// Delete the group but keep alice's user_groups reverse-index entry stale
+	// by skipping the removeFile call for the user_groups path.
+	ugPath := userGroupPath(poolID, "alice", "admins")
+	realRemove := s.removeFile
+	s.removeFile = func(name string) error {
+		if name == ugPath {
+			return nil // silently skip — leaves stale entry
+		}
+		return realRemove(name)
+	}
+	require.NoError(t, s.DeleteGroup(poolID, "admins"))
+	s.removeFile = realRemove // restore
+
+	// ListGroupsForUser should skip the stale entry and return nothing.
+	groups, _, err := s.ListGroupsForUser(poolID, "alice", 60, "")
+	require.NoError(t, err)
+	assert.Empty(t, groups)
+}
+
 func TestStorageGetGroupsForUser_GetGroupReadError(t *testing.T) {
 	s := newTestStorage(t)
 	poolID := setupStoragePool(t, s)
