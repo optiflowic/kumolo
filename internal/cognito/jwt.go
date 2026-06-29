@@ -14,9 +14,10 @@ import (
 )
 
 const (
-	accessTokenExpiry  = 3600
-	sessionExpiry      = 180
-	cognitoClaimPrefix = "cognito:"
+	accessTokenExpiry       = 3600
+	sessionExpiry           = 180
+	defaultRefreshTokenDays = 30
+	cognitoClaimPrefix      = "cognito:"
 
 	jwtClaimIssuer    = "iss"
 	jwtClaimExp       = "exp"

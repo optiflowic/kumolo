@@ -1022,6 +1022,80 @@ func TestWriteAuthResult_CreateRefreshTokenError(t *testing.T) {
 
 // ── handleRefreshTokenAuth error paths ────────────────────────────────────────
 
+func TestInitiateAuth_RefreshToken_Expired(t *testing.T) {
+	rt := &refreshTokenData{
+		Token:     "tok",
+		PoolID:    "pool-1",
+		ClientID:  "c",
+		Username:  "u",
+		Sub:       "sub-u",
+		IssuedAt:  nowUnix() - float64(31*86400),
+		ExpiresAt: nowUnix() - 1,
+	}
+	ro := &Router{storage: &mockStore{
+		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
+		getRefreshFn:     func(string, string) (*refreshTokenData, error) { return rt, nil },
+	}}
+	body, _ := json.Marshal(map[string]any{
+		"ClientId": "c", "AuthFlow": "REFRESH_TOKEN",
+		"AuthParameters": map[string]string{"REFRESH_TOKEN": "tok"},
+	})
+	w := doOp(t, ro, "InitiateAuth", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeNotAuthorizedException)
+}
+
+func TestInitiateAuth_RefreshToken_NoExpiresAt_NotRejected(t *testing.T) {
+	rt := &refreshTokenData{
+		Token:    "tok",
+		PoolID:   "pool-1",
+		ClientID: "c",
+		Username: "u",
+		Sub:      "sub-u",
+		IssuedAt: nowUnix() - float64(31*86400),
+		// ExpiresAt == 0: legacy token without expiry must not be rejected
+	}
+	user := &UserMetadata{Username: "u", Sub: "sub-u", Status: userStatusConfirmed}
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	keyID, _ := generateTokenID()
+	ro := &Router{storage: &mockStore{
+		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
+		getRefreshFn:     func(string, string) (*refreshTokenData, error) { return rt, nil },
+		getUserBySubFn:   func(string, string) (*UserMetadata, error) { return user, nil },
+		getOrCreateKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: keyID}, key, nil
+		},
+	}}
+	body, _ := json.Marshal(map[string]any{
+		"ClientId": "c", "AuthFlow": "REFRESH_TOKEN",
+		"AuthParameters": map[string]string{"REFRESH_TOKEN": "tok"},
+	})
+	w := doOp(t, ro, "InitiateAuth", string(body))
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestInitiateAuth_RefreshToken_ExpiresAtSet(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	signUpUser(t, ro, clientID, "alice", "Password123!")
+	confirmUser(t, ro, clientID, "alice")
+
+	w := doInitAuth(t, ro, clientID, "alice", "Password123!")
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp map[string]any
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	rt := resp["AuthenticationResult"].(map[string]any)["RefreshToken"].(string)
+
+	poolID, err := ro.storage.GetPoolIDForClient(clientID)
+	require.NoError(t, err)
+	storage := ro.storage.(*Storage)
+	rtData, err := storage.GetRefreshToken(poolID, rt)
+	require.NoError(t, err)
+	assert.Greater(t, rtData.ExpiresAt, rtData.IssuedAt)
+	assert.InDelta(t, rtData.IssuedAt+float64(defaultRefreshTokenDays*86400), rtData.ExpiresAt, 1.0)
+}
+
 func TestInitiateAuth_RefreshToken_GetOrCreateKeysError(t *testing.T) {
 	rt := &refreshTokenData{
 		Token: "tok", PoolID: "pool-1", ClientID: "c", Username: "u", Sub: "sub-u",
