@@ -491,136 +491,195 @@ func createGroupTestClient(t *testing.T, ro *Router, poolID string) string {
 	return resp.UserPoolClient.ClientId
 }
 
-// ──── CreateGroup additional validation ──────────────────────────────────────
+// ──── Validation error table (invalid input / not-found across all operations) ─
 
-func TestCreateGroup_InvalidBody(t *testing.T) {
-	ro := newTestRouter(t)
-	w := doOp(t, ro, "CreateGroup", "not-json")
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrorType(t, w, ErrTypeInvalidParameterException)
-}
+// TestGroupHandlers_Validation exercises the common error paths for all group
+// handler operations using a single table-driven subtest, keeping each case to
+// the minimum setup it actually needs.
+func TestGroupHandlers_Validation(t *testing.T) {
+	// body helpers; all ignore the router when no pool creation is required.
+	poolID := func(t *testing.T, ro *Router) string {
+		t.Helper()
+		return createPool(t, ro, "p")
+	}
+	withPool := func(extra map[string]any) func(*testing.T, *Router) string {
+		return func(t *testing.T, ro *Router) string {
+			t.Helper()
+			m := map[string]any{"UserPoolId": poolID(t, ro)}
+			for k, v := range extra {
+				m[k] = v
+			}
+			b, _ := json.Marshal(m)
+			return string(b)
+		}
+	}
+	withPoolAndGroup := func(extra map[string]any) func(*testing.T, *Router) string {
+		return func(t *testing.T, ro *Router) string {
+			t.Helper()
+			pid := poolID(t, ro)
+			createGroup(t, ro, pid, "admins")
+			m := map[string]any{"UserPoolId": pid, "GroupName": "admins"}
+			for k, v := range extra {
+				m[k] = v
+			}
+			b, _ := json.Marshal(m)
+			return string(b)
+		}
+	}
+	static := func(fields map[string]any) func(*testing.T, *Router) string {
+		b, _ := json.Marshal(fields)
+		s := string(b)
+		return func(*testing.T, *Router) string { return s }
+	}
 
-// ──── DeleteGroup validation ──────────────────────────────────────────────────
+	tests := []struct {
+		name     string
+		op       string
+		body     func(*testing.T, *Router) string
+		wantCode int
+		wantType string
+	}{
+		// ── CreateGroup ────────────────────────────────────────────────────────
+		{"CreateGroup/invalid body", "CreateGroup",
+			func(*testing.T, *Router) string { return "not-json" },
+			http.StatusBadRequest, ErrTypeInvalidParameterException},
+		{"CreateGroup/missing pool ID", "CreateGroup",
+			static(map[string]any{"GroupName": "admins"}),
+			http.StatusBadRequest, ErrTypeInvalidParameterException},
+		{"CreateGroup/missing group name", "CreateGroup",
+			withPool(nil),
+			http.StatusBadRequest, ErrTypeInvalidParameterException},
+		{"CreateGroup/pool not found", "CreateGroup",
+			static(map[string]any{"UserPoolId": "us-east-1_NoPool", "GroupName": "admins"}),
+			http.StatusBadRequest, ErrTypeResourceNotFoundException},
 
-func TestDeleteGroup_InvalidBody(t *testing.T) {
-	ro := newTestRouter(t)
-	w := doOp(t, ro, "DeleteGroup", "not-json")
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrorType(t, w, ErrTypeInvalidParameterException)
-}
+		// ── DeleteGroup ────────────────────────────────────────────────────────
+		{"DeleteGroup/invalid body", "DeleteGroup",
+			func(*testing.T, *Router) string { return "not-json" },
+			http.StatusBadRequest, ErrTypeInvalidParameterException},
+		{"DeleteGroup/missing pool ID", "DeleteGroup",
+			static(map[string]any{"GroupName": "admins"}),
+			http.StatusBadRequest, ErrTypeInvalidParameterException},
+		{"DeleteGroup/missing group name", "DeleteGroup",
+			withPool(nil),
+			http.StatusBadRequest, ErrTypeInvalidParameterException},
+		{"DeleteGroup/pool not found", "DeleteGroup",
+			static(map[string]any{"UserPoolId": "us-east-1_NoPool", "GroupName": "admins"}),
+			http.StatusBadRequest, ErrTypeResourceNotFoundException},
 
-func TestDeleteGroup_MissingPoolID(t *testing.T) {
-	ro := newTestRouter(t)
-	w := doOp(t, ro, "DeleteGroup", `{"GroupName":"admins"}`)
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrorType(t, w, ErrTypeInvalidParameterException)
-}
+		// ── GetGroup ───────────────────────────────────────────────────────────
+		{"GetGroup/invalid body", "GetGroup",
+			func(*testing.T, *Router) string { return "not-json" },
+			http.StatusBadRequest, ErrTypeInvalidParameterException},
+		{"GetGroup/missing pool ID", "GetGroup",
+			static(map[string]any{"GroupName": "admins"}),
+			http.StatusBadRequest, ErrTypeInvalidParameterException},
+		{"GetGroup/missing group name", "GetGroup",
+			withPool(nil),
+			http.StatusBadRequest, ErrTypeInvalidParameterException},
+		{"GetGroup/pool not found", "GetGroup",
+			static(map[string]any{"UserPoolId": "us-east-1_NoPool", "GroupName": "admins"}),
+			http.StatusBadRequest, ErrTypeResourceNotFoundException},
 
-func TestDeleteGroup_MissingGroupName(t *testing.T) {
-	ro := newTestRouter(t)
-	poolID := createPool(t, ro, "test-pool")
-	body, _ := json.Marshal(map[string]any{"UserPoolId": poolID})
-	w := doOp(t, ro, "DeleteGroup", string(body))
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrorType(t, w, ErrTypeInvalidParameterException)
-}
+		// ── UpdateGroup ────────────────────────────────────────────────────────
+		{"UpdateGroup/invalid body", "UpdateGroup",
+			func(*testing.T, *Router) string { return "not-json" },
+			http.StatusBadRequest, ErrTypeInvalidParameterException},
+		{"UpdateGroup/missing pool ID", "UpdateGroup",
+			static(map[string]any{"GroupName": "admins"}),
+			http.StatusBadRequest, ErrTypeInvalidParameterException},
+		{"UpdateGroup/missing group name", "UpdateGroup",
+			withPool(nil),
+			http.StatusBadRequest, ErrTypeInvalidParameterException},
+		{"UpdateGroup/pool not found", "UpdateGroup",
+			static(map[string]any{"UserPoolId": "us-east-1_NoPool", "GroupName": "admins"}),
+			http.StatusBadRequest, ErrTypeResourceNotFoundException},
 
-func TestDeleteGroup_PoolNotFound(t *testing.T) {
-	ro := newTestRouter(t)
-	body, _ := json.Marshal(map[string]any{"UserPoolId": "us-east-1_NoPool", "GroupName": "admins"})
-	w := doOp(t, ro, "DeleteGroup", string(body))
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrorType(t, w, ErrTypeResourceNotFoundException)
-}
+		// ── ListGroups ─────────────────────────────────────────────────────────
+		{"ListGroups/invalid body", "ListGroups",
+			func(*testing.T, *Router) string { return "not-json" },
+			http.StatusBadRequest, ErrTypeInvalidParameterException},
+		{"ListGroups/missing pool ID", "ListGroups",
+			func(*testing.T, *Router) string { return `{}` },
+			http.StatusBadRequest, ErrTypeInvalidParameterException},
+		{"ListGroups/pool not found", "ListGroups",
+			static(map[string]any{"UserPoolId": "us-east-1_NoPool"}),
+			http.StatusBadRequest, ErrTypeResourceNotFoundException},
 
-// ──── GetGroup validation ─────────────────────────────────────────────────────
+		// ── AdminAddUserToGroup ────────────────────────────────────────────────
+		{"AdminAddUserToGroup/invalid body", "AdminAddUserToGroup",
+			func(*testing.T, *Router) string { return "not-json" },
+			http.StatusBadRequest, ErrTypeInvalidParameterException},
+		{"AdminAddUserToGroup/missing pool ID", "AdminAddUserToGroup",
+			static(map[string]any{"GroupName": "admins", "Username": "alice"}),
+			http.StatusBadRequest, ErrTypeInvalidParameterException},
+		{"AdminAddUserToGroup/missing group name", "AdminAddUserToGroup",
+			withPool(map[string]any{"Username": "alice"}),
+			http.StatusBadRequest, ErrTypeInvalidParameterException},
+		{"AdminAddUserToGroup/missing username", "AdminAddUserToGroup",
+			withPool(map[string]any{"GroupName": "admins"}),
+			http.StatusBadRequest, ErrTypeInvalidParameterException},
+		{"AdminAddUserToGroup/pool not found", "AdminAddUserToGroup",
+			static(map[string]any{"UserPoolId": "us-east-1_NoPool", "GroupName": "admins", "Username": "alice"}),
+			http.StatusBadRequest, ErrTypeResourceNotFoundException},
 
-func TestGetGroup_InvalidBody(t *testing.T) {
-	ro := newTestRouter(t)
-	w := doOp(t, ro, "GetGroup", "not-json")
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrorType(t, w, ErrTypeInvalidParameterException)
-}
+		// ── AdminRemoveUserFromGroup ───────────────────────────────────────────
+		{"AdminRemoveUserFromGroup/invalid body", "AdminRemoveUserFromGroup",
+			func(*testing.T, *Router) string { return "not-json" },
+			http.StatusBadRequest, ErrTypeInvalidParameterException},
+		{"AdminRemoveUserFromGroup/missing pool ID", "AdminRemoveUserFromGroup",
+			static(map[string]any{"GroupName": "admins", "Username": "alice"}),
+			http.StatusBadRequest, ErrTypeInvalidParameterException},
+		{"AdminRemoveUserFromGroup/missing group name", "AdminRemoveUserFromGroup",
+			withPool(map[string]any{"Username": "alice"}),
+			http.StatusBadRequest, ErrTypeInvalidParameterException},
+		{"AdminRemoveUserFromGroup/missing username", "AdminRemoveUserFromGroup",
+			withPool(map[string]any{"GroupName": "admins"}),
+			http.StatusBadRequest, ErrTypeInvalidParameterException},
+		{"AdminRemoveUserFromGroup/pool not found", "AdminRemoveUserFromGroup",
+			static(map[string]any{"UserPoolId": "us-east-1_NoPool", "GroupName": "admins", "Username": "alice"}),
+			http.StatusBadRequest, ErrTypeResourceNotFoundException},
+		{"AdminRemoveUserFromGroup/user not found", "AdminRemoveUserFromGroup",
+			withPoolAndGroup(map[string]any{"Username": "nonexistent"}),
+			http.StatusBadRequest, ErrTypeUserNotFoundException},
 
-func TestGetGroup_MissingPoolID(t *testing.T) {
-	ro := newTestRouter(t)
-	w := doOp(t, ro, "GetGroup", `{"GroupName":"admins"}`)
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrorType(t, w, ErrTypeInvalidParameterException)
-}
+		// ── AdminListGroupsForUser ─────────────────────────────────────────────
+		{"AdminListGroupsForUser/invalid body", "AdminListGroupsForUser",
+			func(*testing.T, *Router) string { return "not-json" },
+			http.StatusBadRequest, ErrTypeInvalidParameterException},
+		{"AdminListGroupsForUser/missing pool ID", "AdminListGroupsForUser",
+			static(map[string]any{"Username": "alice"}),
+			http.StatusBadRequest, ErrTypeInvalidParameterException},
+		{"AdminListGroupsForUser/missing username", "AdminListGroupsForUser",
+			withPool(nil),
+			http.StatusBadRequest, ErrTypeInvalidParameterException},
+		{"AdminListGroupsForUser/pool not found", "AdminListGroupsForUser",
+			static(map[string]any{"UserPoolId": "us-east-1_NoPool", "Username": "alice"}),
+			http.StatusBadRequest, ErrTypeResourceNotFoundException},
 
-func TestGetGroup_MissingGroupName(t *testing.T) {
-	ro := newTestRouter(t)
-	poolID := createPool(t, ro, "test-pool")
-	body, _ := json.Marshal(map[string]any{"UserPoolId": poolID})
-	w := doOp(t, ro, "GetGroup", string(body))
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrorType(t, w, ErrTypeInvalidParameterException)
-}
+		// ── ListUsersInGroup ───────────────────────────────────────────────────
+		{"ListUsersInGroup/invalid body", "ListUsersInGroup",
+			func(*testing.T, *Router) string { return "not-json" },
+			http.StatusBadRequest, ErrTypeInvalidParameterException},
+		{"ListUsersInGroup/missing pool ID", "ListUsersInGroup",
+			static(map[string]any{"GroupName": "admins"}),
+			http.StatusBadRequest, ErrTypeInvalidParameterException},
+		{"ListUsersInGroup/missing group name", "ListUsersInGroup",
+			withPool(nil),
+			http.StatusBadRequest, ErrTypeInvalidParameterException},
+		{"ListUsersInGroup/pool not found", "ListUsersInGroup",
+			static(map[string]any{"UserPoolId": "us-east-1_NoPool", "GroupName": "admins"}),
+			http.StatusBadRequest, ErrTypeResourceNotFoundException},
+	}
 
-func TestGetGroup_PoolNotFound(t *testing.T) {
-	ro := newTestRouter(t)
-	body, _ := json.Marshal(map[string]any{"UserPoolId": "us-east-1_NoPool", "GroupName": "admins"})
-	w := doOp(t, ro, "GetGroup", string(body))
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrorType(t, w, ErrTypeResourceNotFoundException)
-}
-
-// ──── UpdateGroup validation ──────────────────────────────────────────────────
-
-func TestUpdateGroup_InvalidBody(t *testing.T) {
-	ro := newTestRouter(t)
-	w := doOp(t, ro, "UpdateGroup", "not-json")
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrorType(t, w, ErrTypeInvalidParameterException)
-}
-
-func TestUpdateGroup_MissingPoolID(t *testing.T) {
-	ro := newTestRouter(t)
-	w := doOp(t, ro, "UpdateGroup", `{"GroupName":"admins"}`)
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrorType(t, w, ErrTypeInvalidParameterException)
-}
-
-func TestUpdateGroup_MissingGroupName(t *testing.T) {
-	ro := newTestRouter(t)
-	poolID := createPool(t, ro, "test-pool")
-	body, _ := json.Marshal(map[string]any{"UserPoolId": poolID})
-	w := doOp(t, ro, "UpdateGroup", string(body))
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrorType(t, w, ErrTypeInvalidParameterException)
-}
-
-func TestUpdateGroup_PoolNotFound(t *testing.T) {
-	ro := newTestRouter(t)
-	body, _ := json.Marshal(map[string]any{"UserPoolId": "us-east-1_NoPool", "GroupName": "admins"})
-	w := doOp(t, ro, "UpdateGroup", string(body))
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrorType(t, w, ErrTypeResourceNotFoundException)
-}
-
-// ──── ListGroups validation ───────────────────────────────────────────────────
-
-func TestListGroups_InvalidBody(t *testing.T) {
-	ro := newTestRouter(t)
-	w := doOp(t, ro, "ListGroups", "not-json")
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrorType(t, w, ErrTypeInvalidParameterException)
-}
-
-func TestListGroups_MissingPoolID(t *testing.T) {
-	ro := newTestRouter(t)
-	w := doOp(t, ro, "ListGroups", `{}`)
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrorType(t, w, ErrTypeInvalidParameterException)
-}
-
-func TestListGroups_PoolNotFound(t *testing.T) {
-	ro := newTestRouter(t)
-	body, _ := json.Marshal(map[string]any{"UserPoolId": "us-east-1_NoPool"})
-	w := doOp(t, ro, "ListGroups", string(body))
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrorType(t, w, ErrTypeResourceNotFoundException)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ro := newTestRouter(t)
+			w := doOp(t, ro, tc.op, tc.body(t, ro))
+			require.Equal(t, tc.wantCode, w.Code)
+			assertErrorType(t, w, tc.wantType)
+		})
+	}
 }
 
 func TestListGroups_InvalidNextToken(t *testing.T) {
@@ -632,146 +691,6 @@ func TestListGroups_InvalidNextToken(t *testing.T) {
 	w := doOp(t, ro, "ListGroups", string(body))
 	require.Equal(t, http.StatusBadRequest, w.Code)
 	assertErrorType(t, w, ErrTypeInvalidParameterException)
-}
-
-// ──── AdminAddUserToGroup validation ──────────────────────────────────────────
-
-func TestAdminAddUserToGroup_InvalidBody(t *testing.T) {
-	ro := newTestRouter(t)
-	w := doOp(t, ro, "AdminAddUserToGroup", "not-json")
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrorType(t, w, ErrTypeInvalidParameterException)
-}
-
-func TestAdminAddUserToGroup_MissingPoolID(t *testing.T) {
-	ro := newTestRouter(t)
-	w := doOp(t, ro, "AdminAddUserToGroup", `{"GroupName":"admins","Username":"alice"}`)
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrorType(t, w, ErrTypeInvalidParameterException)
-}
-
-func TestAdminAddUserToGroup_MissingGroupName(t *testing.T) {
-	ro := newTestRouter(t)
-	poolID := createPool(t, ro, "test-pool")
-	body, _ := json.Marshal(map[string]any{"UserPoolId": poolID, "Username": "alice"})
-	w := doOp(t, ro, "AdminAddUserToGroup", string(body))
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrorType(t, w, ErrTypeInvalidParameterException)
-}
-
-func TestAdminAddUserToGroup_MissingUsername(t *testing.T) {
-	ro := newTestRouter(t)
-	poolID := createPool(t, ro, "test-pool")
-	body, _ := json.Marshal(map[string]any{"UserPoolId": poolID, "GroupName": "admins"})
-	w := doOp(t, ro, "AdminAddUserToGroup", string(body))
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrorType(t, w, ErrTypeInvalidParameterException)
-}
-
-func TestAdminAddUserToGroup_PoolNotFound(t *testing.T) {
-	ro := newTestRouter(t)
-	body, _ := json.Marshal(map[string]any{
-		"UserPoolId": "us-east-1_NoPool",
-		"GroupName":  "admins",
-		"Username":   "alice",
-	})
-	w := doOp(t, ro, "AdminAddUserToGroup", string(body))
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrorType(t, w, ErrTypeResourceNotFoundException)
-}
-
-// ──── AdminRemoveUserFromGroup validation ─────────────────────────────────────
-
-func TestAdminRemoveUserFromGroup_InvalidBody(t *testing.T) {
-	ro := newTestRouter(t)
-	w := doOp(t, ro, "AdminRemoveUserFromGroup", "not-json")
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrorType(t, w, ErrTypeInvalidParameterException)
-}
-
-func TestAdminRemoveUserFromGroup_MissingPoolID(t *testing.T) {
-	ro := newTestRouter(t)
-	w := doOp(t, ro, "AdminRemoveUserFromGroup", `{"GroupName":"admins","Username":"alice"}`)
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrorType(t, w, ErrTypeInvalidParameterException)
-}
-
-func TestAdminRemoveUserFromGroup_MissingGroupName(t *testing.T) {
-	ro := newTestRouter(t)
-	poolID := createPool(t, ro, "test-pool")
-	body, _ := json.Marshal(map[string]any{"UserPoolId": poolID, "Username": "alice"})
-	w := doOp(t, ro, "AdminRemoveUserFromGroup", string(body))
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrorType(t, w, ErrTypeInvalidParameterException)
-}
-
-func TestAdminRemoveUserFromGroup_MissingUsername(t *testing.T) {
-	ro := newTestRouter(t)
-	poolID := createPool(t, ro, "test-pool")
-	body, _ := json.Marshal(map[string]any{"UserPoolId": poolID, "GroupName": "admins"})
-	w := doOp(t, ro, "AdminRemoveUserFromGroup", string(body))
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrorType(t, w, ErrTypeInvalidParameterException)
-}
-
-func TestAdminRemoveUserFromGroup_PoolNotFound(t *testing.T) {
-	ro := newTestRouter(t)
-	body, _ := json.Marshal(map[string]any{
-		"UserPoolId": "us-east-1_NoPool",
-		"GroupName":  "admins",
-		"Username":   "alice",
-	})
-	w := doOp(t, ro, "AdminRemoveUserFromGroup", string(body))
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrorType(t, w, ErrTypeResourceNotFoundException)
-}
-
-func TestAdminRemoveUserFromGroup_UserNotFound(t *testing.T) {
-	ro := newTestRouter(t)
-	poolID := createPool(t, ro, "test-pool")
-	createGroup(t, ro, poolID, "admins")
-
-	body, _ := json.Marshal(map[string]any{
-		"UserPoolId": poolID,
-		"GroupName":  "admins",
-		"Username":   "nonexistent",
-	})
-	w := doOp(t, ro, "AdminRemoveUserFromGroup", string(body))
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrorType(t, w, ErrTypeUserNotFoundException)
-}
-
-// ──── AdminListGroupsForUser validation ───────────────────────────────────────
-
-func TestAdminListGroupsForUser_InvalidBody(t *testing.T) {
-	ro := newTestRouter(t)
-	w := doOp(t, ro, "AdminListGroupsForUser", "not-json")
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrorType(t, w, ErrTypeInvalidParameterException)
-}
-
-func TestAdminListGroupsForUser_MissingPoolID(t *testing.T) {
-	ro := newTestRouter(t)
-	w := doOp(t, ro, "AdminListGroupsForUser", `{"Username":"alice"}`)
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrorType(t, w, ErrTypeInvalidParameterException)
-}
-
-func TestAdminListGroupsForUser_MissingUsername(t *testing.T) {
-	ro := newTestRouter(t)
-	poolID := createPool(t, ro, "test-pool")
-	body, _ := json.Marshal(map[string]any{"UserPoolId": poolID})
-	w := doOp(t, ro, "AdminListGroupsForUser", string(body))
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrorType(t, w, ErrTypeInvalidParameterException)
-}
-
-func TestAdminListGroupsForUser_PoolNotFound(t *testing.T) {
-	ro := newTestRouter(t)
-	body, _ := json.Marshal(map[string]any{"UserPoolId": "us-east-1_NoPool", "Username": "alice"})
-	w := doOp(t, ro, "AdminListGroupsForUser", string(body))
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrorType(t, w, ErrTypeResourceNotFoundException)
 }
 
 func TestAdminListGroupsForUser_InvalidNextToken(t *testing.T) {
@@ -833,39 +752,6 @@ func TestAdminListGroupsForUser_Pagination(t *testing.T) {
 	require.Len(t, resp2.Groups, 1)
 	assert.Equal(t, "c", resp2.Groups[0].GroupName)
 	assert.Empty(t, resp2.NextToken)
-}
-
-// ──── ListUsersInGroup validation ────────────────────────────────────────────
-
-func TestListUsersInGroup_InvalidBody(t *testing.T) {
-	ro := newTestRouter(t)
-	w := doOp(t, ro, "ListUsersInGroup", "not-json")
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrorType(t, w, ErrTypeInvalidParameterException)
-}
-
-func TestListUsersInGroup_MissingPoolID(t *testing.T) {
-	ro := newTestRouter(t)
-	w := doOp(t, ro, "ListUsersInGroup", `{"GroupName":"admins"}`)
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrorType(t, w, ErrTypeInvalidParameterException)
-}
-
-func TestListUsersInGroup_MissingGroupName(t *testing.T) {
-	ro := newTestRouter(t)
-	poolID := createPool(t, ro, "test-pool")
-	body, _ := json.Marshal(map[string]any{"UserPoolId": poolID})
-	w := doOp(t, ro, "ListUsersInGroup", string(body))
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrorType(t, w, ErrTypeInvalidParameterException)
-}
-
-func TestListUsersInGroup_PoolNotFound(t *testing.T) {
-	ro := newTestRouter(t)
-	body, _ := json.Marshal(map[string]any{"UserPoolId": "us-east-1_NoPool", "GroupName": "admins"})
-	w := doOp(t, ro, "ListUsersInGroup", string(body))
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrorType(t, w, ErrTypeResourceNotFoundException)
 }
 
 func TestListUsersInGroup_InvalidNextToken(t *testing.T) {
