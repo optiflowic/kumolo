@@ -10,9 +10,12 @@ import (
 	"log/slog"
 	"math/big"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awscognito "github.com/aws/aws-sdk-go-v2/service/cognitoidentityprovider"
@@ -1289,5 +1292,90 @@ func TestCognitoIntegration_GroupMembership(t *testing.T) {
 		})
 		require.Error(t, err)
 		assert.Equal(t, "ResourceNotFoundException", apiErrorCode(err))
+	})
+}
+
+func TestCognitoIntegration_RefreshTokenExpiry(t *testing.T) {
+	cap := withCodeCapture(t)
+	clients := newTestClients(t)
+	ctx := context.Background()
+	c := clients.cognito
+
+	pool, err := c.CreateUserPool(ctx, &awscognito.CreateUserPoolInput{
+		PoolName: aws.String("expiry-test-pool"),
+	})
+	require.NoError(t, err)
+	poolID := aws.ToString(pool.UserPool.Id)
+
+	client, err := c.CreateUserPoolClient(ctx, &awscognito.CreateUserPoolClientInput{
+		UserPoolId: aws.String(poolID),
+		ClientName: aws.String("expiry-test-client"),
+	})
+	require.NoError(t, err)
+	clientID := aws.ToString(client.UserPoolClient.ClientId)
+
+	const (
+		username = "expiry-user"
+		password = "Password1!"
+		email    = "expiry@example.com"
+	)
+
+	_, err = c.SignUp(ctx, &awscognito.SignUpInput{
+		ClientId: aws.String(clientID),
+		Username: aws.String(username),
+		Password: aws.String(password),
+		UserAttributes: []types.AttributeType{
+			{Name: aws.String("email"), Value: aws.String(email)},
+		},
+	})
+	require.NoError(t, err)
+
+	code := cap.get(username)
+	require.NotEmpty(t, code)
+	_, err = c.ConfirmSignUp(ctx, &awscognito.ConfirmSignUpInput{
+		ClientId:         aws.String(clientID),
+		Username:         aws.String(username),
+		ConfirmationCode: aws.String(code),
+	})
+	require.NoError(t, err)
+
+	auth, err := c.InitiateAuth(ctx, &awscognito.InitiateAuthInput{
+		ClientId: aws.String(clientID),
+		AuthFlow: types.AuthFlowTypeUserPasswordAuth,
+		AuthParameters: map[string]string{
+			"USERNAME": username,
+			"PASSWORD": password,
+		},
+	})
+	require.NoError(t, err)
+	refreshToken := aws.ToString(auth.AuthenticationResult.RefreshToken)
+	require.NotEmpty(t, refreshToken)
+
+	// Patch the on-disk token file to place ExpiresAt one second in the past.
+	// This simulates a token that was valid when issued but has since expired,
+	// without requiring a real time.Sleep.
+	tokenPath := filepath.Join(
+		clients.dataDir, "cognito", "pools", poolID,
+		"refresh_tokens", refreshToken+".json",
+	)
+	raw, err := os.ReadFile(filepath.Clean(tokenPath))
+	require.NoError(t, err)
+	var tokenJSON map[string]any
+	require.NoError(t, json.Unmarshal(raw, &tokenJSON))
+	tokenJSON["ExpiresAt"] = float64(time.Now().Unix() - 1)
+	patched, err := json.Marshal(tokenJSON)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(tokenPath, patched, 0o600))
+
+	t.Run("ExpiredToken_Rejected", func(t *testing.T) {
+		_, err := c.InitiateAuth(ctx, &awscognito.InitiateAuthInput{
+			ClientId: aws.String(clientID),
+			AuthFlow: types.AuthFlowTypeRefreshTokenAuth,
+			AuthParameters: map[string]string{
+				"REFRESH_TOKEN": refreshToken,
+			},
+		})
+		require.Error(t, err)
+		assert.Equal(t, "NotAuthorizedException", apiErrorCode(err))
 	})
 }

@@ -13,12 +13,13 @@ var errRefreshTokenNotFound = errors.New("refresh token not found")
 
 // refreshTokenData stores the context for an issued refresh token.
 type refreshTokenData struct {
-	Token    string  `json:"Token"`
-	PoolID   string  `json:"PoolID"`
-	ClientID string  `json:"ClientID"`
-	Username string  `json:"Username"`
-	Sub      string  `json:"Sub"`
-	IssuedAt float64 `json:"IssuedAt"`
+	Token     string  `json:"Token"`
+	PoolID    string  `json:"PoolID"`
+	ClientID  string  `json:"ClientID"`
+	Username  string  `json:"Username"`
+	Sub       string  `json:"Sub"`
+	IssuedAt  float64 `json:"IssuedAt"`
+	ExpiresAt float64 `json:"ExpiresAt"`
 }
 
 // clientIndexEntry maps a client ID to its pool ID for efficient cross-pool lookup.

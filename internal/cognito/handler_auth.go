@@ -506,6 +506,16 @@ func (ro *Router) handleRefreshTokenAuth(
 		return
 	}
 
+	if rt.ExpiresAt > 0 && nowUnix() > rt.ExpiresAt {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeNotAuthorizedException,
+			"Refresh Token has expired",
+		)
+		return
+	}
+
 	user, err := ro.storage.GetUserBySub(poolID, rt.Sub)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, ErrTypeUserNotFoundException, "User does not exist.")
@@ -548,13 +558,25 @@ func (ro *Router) writeAuthResult(
 	}
 
 	if includeRefreshToken {
+		validity := defaultRefreshTokenDays
+		client, cerr := ro.storage.GetUserPoolClient(poolID, clientID)
+		if cerr != nil {
+			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+				"failed to read pool client")
+			return
+		}
+		if client.RefreshTokenValidity > 0 {
+			validity = client.RefreshTokenValidity
+		}
+		issuedAt := nowUnix()
 		rtData := &refreshTokenData{
-			Token:    rt,
-			PoolID:   poolID,
-			ClientID: clientID,
-			Username: user.Username,
-			Sub:      user.Sub,
-			IssuedAt: nowUnix(),
+			Token:     rt,
+			PoolID:    poolID,
+			ClientID:  clientID,
+			Username:  user.Username,
+			Sub:       user.Sub,
+			IssuedAt:  issuedAt,
+			ExpiresAt: issuedAt + float64(validity)*secondsPerDay,
 		}
 		if err := ro.storage.CreateRefreshToken(rtData); err != nil {
 			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,

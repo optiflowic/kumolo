@@ -201,7 +201,10 @@ func (m *mockStore) ListUserPools(int, string) ([]*UserPoolMetadata, string, err
 }
 func (m *mockStore) CreateUserPoolClient(*UserPoolClientMetadata) error { return m.createClientErr }
 func (m *mockStore) GetUserPoolClient(string, string) (*UserPoolClientMetadata, error) {
-	return nil, m.getClientErr
+	if m.getClientErr != nil {
+		return nil, m.getClientErr
+	}
+	return &UserPoolClientMetadata{}, nil
 }
 
 func (m *mockStore) UpdateUserPoolClient(

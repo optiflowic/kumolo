@@ -1020,7 +1020,145 @@ func TestWriteAuthResult_CreateRefreshTokenError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }
 
+func TestWriteAuthResult_GetUserPoolClientError_ReturnsInternalError(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	keyID, err := generateTokenID()
+	require.NoError(t, err)
+
+	hash, err := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.DefaultCost)
+	require.NoError(t, err)
+	confirmedUser := &UserMetadata{
+		Username: "u", Sub: "sub-u", Status: userStatusConfirmed,
+		PasswordHash: string(hash),
+	}
+	ro := &Router{storage: &mockStore{
+		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
+		getUserFn:        func(string, string) (*UserMetadata, error) { return confirmedUser, nil },
+		getOrCreateKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: keyID}, key, nil
+		},
+		getClientErr: errors.New("storage unavailable"),
+	}}
+	body, _ := json.Marshal(map[string]any{
+		"ClientId": "c", "AuthFlow": "USER_PASSWORD_AUTH",
+		"AuthParameters": map[string]string{"USERNAME": "u", "PASSWORD": "Password123!"},
+	})
+	w := doOp(t, ro, "InitiateAuth", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestWriteAuthResult_CustomRefreshTokenValidity(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "test-pool")
+	body, _ := json.Marshal(map[string]any{
+		"UserPoolId": poolID, "ClientName": "c", "RefreshTokenValidity": 7,
+	})
+	w := doOp(t, ro, "CreateUserPoolClient", string(body))
+	require.Equal(t, http.StatusOK, w.Code)
+	var clientResp struct {
+		UserPoolClient struct{ ClientId string } `json:"UserPoolClient"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&clientResp))
+	clientID := clientResp.UserPoolClient.ClientId
+
+	signUpUser(t, ro, clientID, "alice", "Password123!")
+	confirmUser(t, ro, clientID, "alice")
+
+	w = doInitAuth(t, ro, clientID, "alice", "Password123!")
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp map[string]any
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	rt := resp["AuthenticationResult"].(map[string]any)["RefreshToken"].(string)
+
+	storage := ro.storage.(*Storage)
+	rtData, err := storage.GetRefreshToken(poolID, rt)
+	require.NoError(t, err)
+	assert.InDelta(t, rtData.IssuedAt+float64(7)*secondsPerDay, rtData.ExpiresAt, 1.0)
+}
+
 // ── handleRefreshTokenAuth error paths ────────────────────────────────────────
+
+func TestInitiateAuth_RefreshToken_Expired(t *testing.T) {
+	rt := &refreshTokenData{
+		Token:     "tok",
+		PoolID:    "pool-1",
+		ClientID:  "c",
+		Username:  "u",
+		Sub:       "sub-u",
+		IssuedAt:  nowUnix() - float64(31)*secondsPerDay,
+		ExpiresAt: nowUnix() - 1,
+	}
+	ro := &Router{storage: &mockStore{
+		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
+		getRefreshFn:     func(string, string) (*refreshTokenData, error) { return rt, nil },
+	}}
+	body, _ := json.Marshal(map[string]any{
+		"ClientId": "c", "AuthFlow": "REFRESH_TOKEN",
+		"AuthParameters": map[string]string{"REFRESH_TOKEN": "tok"},
+	})
+	w := doOp(t, ro, "InitiateAuth", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeNotAuthorizedException)
+}
+
+func TestInitiateAuth_RefreshToken_NoExpiresAt_NotRejected(t *testing.T) {
+	rt := &refreshTokenData{
+		Token:    "tok",
+		PoolID:   "pool-1",
+		ClientID: "c",
+		Username: "u",
+		Sub:      "sub-u",
+		IssuedAt: nowUnix() - float64(31)*secondsPerDay,
+		// ExpiresAt == 0: legacy token without expiry must not be rejected
+	}
+	user := &UserMetadata{Username: "u", Sub: "sub-u", Status: userStatusConfirmed}
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	keyID, err := generateTokenID()
+	require.NoError(t, err)
+	ro := &Router{storage: &mockStore{
+		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
+		getRefreshFn:     func(string, string) (*refreshTokenData, error) { return rt, nil },
+		getUserBySubFn:   func(string, string) (*UserMetadata, error) { return user, nil },
+		getOrCreateKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: keyID}, key, nil
+		},
+	}}
+	body, _ := json.Marshal(map[string]any{
+		"ClientId": "c", "AuthFlow": "REFRESH_TOKEN",
+		"AuthParameters": map[string]string{"REFRESH_TOKEN": "tok"},
+	})
+	w := doOp(t, ro, "InitiateAuth", string(body))
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestInitiateAuth_RefreshToken_ExpiresAtSet(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	signUpUser(t, ro, clientID, "alice", "Password123!")
+	confirmUser(t, ro, clientID, "alice")
+
+	w := doInitAuth(t, ro, clientID, "alice", "Password123!")
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp map[string]any
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	rt := resp["AuthenticationResult"].(map[string]any)["RefreshToken"].(string)
+
+	poolID, err := ro.storage.GetPoolIDForClient(clientID)
+	require.NoError(t, err)
+	storage := ro.storage.(*Storage)
+	rtData, err := storage.GetRefreshToken(poolID, rt)
+	require.NoError(t, err)
+	assert.Greater(t, rtData.ExpiresAt, rtData.IssuedAt)
+	assert.InDelta(
+		t,
+		rtData.IssuedAt+float64(defaultRefreshTokenDays)*secondsPerDay,
+		rtData.ExpiresAt,
+		1.0,
+	)
+}
 
 func TestInitiateAuth_RefreshToken_GetOrCreateKeysError(t *testing.T) {
 	rt := &refreshTokenData{
