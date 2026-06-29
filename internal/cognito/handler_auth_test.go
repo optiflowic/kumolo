@@ -1020,12 +1020,14 @@ func TestWriteAuthResult_CreateRefreshTokenError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }
 
-func TestWriteAuthResult_GetUserPoolClientError_FallsBackToDefault(t *testing.T) {
+func TestWriteAuthResult_GetUserPoolClientError_ReturnsInternalError(t *testing.T) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
-	keyID, _ := generateTokenID()
+	keyID, err := generateTokenID()
+	require.NoError(t, err)
 
-	hash, _ := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.DefaultCost)
+	require.NoError(t, err)
 	confirmedUser := &UserMetadata{
 		Username: "u", Sub: "sub-u", Status: userStatusConfirmed,
 		PasswordHash: string(hash),
@@ -1043,7 +1045,8 @@ func TestWriteAuthResult_GetUserPoolClientError_FallsBackToDefault(t *testing.T)
 		"AuthParameters": map[string]string{"USERNAME": "u", "PASSWORD": "Password123!"},
 	})
 	w := doOp(t, ro, "InitiateAuth", string(body))
-	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
 }
 
 func TestWriteAuthResult_CustomRefreshTokenValidity(t *testing.T) {
@@ -1113,7 +1116,8 @@ func TestInitiateAuth_RefreshToken_NoExpiresAt_NotRejected(t *testing.T) {
 	user := &UserMetadata{Username: "u", Sub: "sub-u", Status: userStatusConfirmed}
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
-	keyID, _ := generateTokenID()
+	keyID, err := generateTokenID()
+	require.NoError(t, err)
 	ro := &Router{storage: &mockStore{
 		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
 		getRefreshFn:     func(string, string) (*refreshTokenData, error) { return rt, nil },

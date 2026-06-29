@@ -17,6 +17,7 @@ const (
 	accessTokenExpiry       = 3600
 	sessionExpiry           = 180
 	defaultRefreshTokenDays = 30
+	secondsPerDay           = 24 * 60 * 60
 	cognitoClaimPrefix      = "cognito:"
 
 	jwtClaimIssuer    = "iss"

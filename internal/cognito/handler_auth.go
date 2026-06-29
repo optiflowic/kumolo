@@ -559,13 +559,13 @@ func (ro *Router) writeAuthResult(
 
 	if includeRefreshToken {
 		validity := defaultRefreshTokenDays
-		if client, cerr := ro.storage.GetUserPoolClient(
-			poolID,
-			clientID,
-		); cerr != nil {
-			slog.Warn("failed to read pool client for refresh token validity; using default",
-				"pool_id", poolID, "client_id", clientID, "err", cerr)
-		} else if client != nil && client.RefreshTokenValidity > 0 {
+		client, cerr := ro.storage.GetUserPoolClient(poolID, clientID)
+		if cerr != nil {
+			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+				"failed to read pool client")
+			return
+		}
+		if client != nil && client.RefreshTokenValidity > 0 {
 			validity = client.RefreshTokenValidity
 		}
 		issuedAt := nowUnix()
@@ -576,7 +576,7 @@ func (ro *Router) writeAuthResult(
 			Username:  user.Username,
 			Sub:       user.Sub,
 			IssuedAt:  issuedAt,
-			ExpiresAt: issuedAt + float64(validity*86400),
+			ExpiresAt: issuedAt + float64(validity)*secondsPerDay,
 		}
 		if err := ro.storage.CreateRefreshToken(rtData); err != nil {
 			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
