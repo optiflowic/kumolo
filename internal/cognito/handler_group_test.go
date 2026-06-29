@@ -619,9 +619,19 @@ func TestGroupHandlers_Validation(t *testing.T) {
 		{"AdminAddUserToGroup/missing username", "AdminAddUserToGroup",
 			withPool(map[string]any{"GroupName": "admins"}),
 			http.StatusBadRequest, ErrTypeInvalidParameterException},
-		{"AdminAddUserToGroup/pool not found", "AdminAddUserToGroup",
-			static(map[string]any{"UserPoolId": "us-east-1_NoPool", "GroupName": "admins", "Username": "alice"}),
-			http.StatusBadRequest, ErrTypeResourceNotFoundException},
+		{
+			"AdminAddUserToGroup/pool not found",
+			"AdminAddUserToGroup",
+			static(
+				map[string]any{
+					"UserPoolId": "us-east-1_NoPool",
+					"GroupName":  "admins",
+					"Username":   "alice",
+				},
+			),
+			http.StatusBadRequest,
+			ErrTypeResourceNotFoundException,
+		},
 
 		// ── AdminRemoveUserFromGroup ───────────────────────────────────────────
 		{"AdminRemoveUserFromGroup/invalid body", "AdminRemoveUserFromGroup",
@@ -636,9 +646,19 @@ func TestGroupHandlers_Validation(t *testing.T) {
 		{"AdminRemoveUserFromGroup/missing username", "AdminRemoveUserFromGroup",
 			withPool(map[string]any{"GroupName": "admins"}),
 			http.StatusBadRequest, ErrTypeInvalidParameterException},
-		{"AdminRemoveUserFromGroup/pool not found", "AdminRemoveUserFromGroup",
-			static(map[string]any{"UserPoolId": "us-east-1_NoPool", "GroupName": "admins", "Username": "alice"}),
-			http.StatusBadRequest, ErrTypeResourceNotFoundException},
+		{
+			"AdminRemoveUserFromGroup/pool not found",
+			"AdminRemoveUserFromGroup",
+			static(
+				map[string]any{
+					"UserPoolId": "us-east-1_NoPool",
+					"GroupName":  "admins",
+					"Username":   "alice",
+				},
+			),
+			http.StatusBadRequest,
+			ErrTypeResourceNotFoundException,
+		},
 		{"AdminRemoveUserFromGroup/user not found", "AdminRemoveUserFromGroup",
 			withPoolAndGroup(map[string]any{"Username": "nonexistent"}),
 			http.StatusBadRequest, ErrTypeUserNotFoundException},
