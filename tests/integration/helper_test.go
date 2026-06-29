@@ -28,6 +28,7 @@ type testClients struct {
 	kms     *awskms.Client
 	cognito *awscognito.Client
 	baseURL string
+	dataDir string
 }
 
 // apiErrorCode extracts the AWS error code from an SDK error.
@@ -45,7 +46,8 @@ func newTestClients(t *testing.T) testClients {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	mux, cleanup, err := server.NewMux(ctx, t.TempDir(), time.Minute)
+	dataDir := t.TempDir()
+	mux, cleanup, err := server.NewMux(ctx, dataDir, time.Minute)
 	require.NoError(t, err)
 	t.Cleanup(cleanup)
 
@@ -72,5 +74,6 @@ func newTestClients(t *testing.T) testClients {
 		kms:     awskms.NewFromConfig(cfg),
 		cognito: awscognito.NewFromConfig(cfg),
 		baseURL: srv.URL,
+		dataDir: dataDir,
 	}
 }
