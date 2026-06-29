@@ -1075,7 +1075,7 @@ func TestWriteAuthResult_CustomRefreshTokenValidity(t *testing.T) {
 	storage := ro.storage.(*Storage)
 	rtData, err := storage.GetRefreshToken(poolID, rt)
 	require.NoError(t, err)
-	assert.InDelta(t, rtData.IssuedAt+float64(7*86400), rtData.ExpiresAt, 1.0)
+	assert.InDelta(t, rtData.IssuedAt+float64(7)*secondsPerDay, rtData.ExpiresAt, 1.0)
 }
 
 // ── handleRefreshTokenAuth error paths ────────────────────────────────────────
@@ -1087,7 +1087,7 @@ func TestInitiateAuth_RefreshToken_Expired(t *testing.T) {
 		ClientID:  "c",
 		Username:  "u",
 		Sub:       "sub-u",
-		IssuedAt:  nowUnix() - float64(31*86400),
+		IssuedAt:  nowUnix() - float64(31)*secondsPerDay,
 		ExpiresAt: nowUnix() - 1,
 	}
 	ro := &Router{storage: &mockStore{
@@ -1110,7 +1110,7 @@ func TestInitiateAuth_RefreshToken_NoExpiresAt_NotRejected(t *testing.T) {
 		ClientID: "c",
 		Username: "u",
 		Sub:      "sub-u",
-		IssuedAt: nowUnix() - float64(31*86400),
+		IssuedAt: nowUnix() - float64(31)*secondsPerDay,
 		// ExpiresAt == 0: legacy token without expiry must not be rejected
 	}
 	user := &UserMetadata{Username: "u", Sub: "sub-u", Status: userStatusConfirmed}
@@ -1152,7 +1152,12 @@ func TestInitiateAuth_RefreshToken_ExpiresAtSet(t *testing.T) {
 	rtData, err := storage.GetRefreshToken(poolID, rt)
 	require.NoError(t, err)
 	assert.Greater(t, rtData.ExpiresAt, rtData.IssuedAt)
-	assert.InDelta(t, rtData.IssuedAt+float64(defaultRefreshTokenDays*86400), rtData.ExpiresAt, 1.0)
+	assert.InDelta(
+		t,
+		rtData.IssuedAt+float64(defaultRefreshTokenDays)*secondsPerDay,
+		rtData.ExpiresAt,
+		1.0,
+	)
 }
 
 func TestInitiateAuth_RefreshToken_GetOrCreateKeysError(t *testing.T) {

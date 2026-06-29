@@ -565,7 +565,7 @@ func (ro *Router) writeAuthResult(
 				"failed to read pool client")
 			return
 		}
-		if client != nil && client.RefreshTokenValidity > 0 {
+		if client.RefreshTokenValidity > 0 {
 			validity = client.RefreshTokenValidity
 		}
 		issuedAt := nowUnix()
