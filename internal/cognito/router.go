@@ -8,8 +8,7 @@ import (
 	"time"
 )
 
-// store is the storage interface used by Router.
-// Methods are added incrementally as operations are implemented.
+// store is the storage interface for non-group operations used by Router.
 type store interface {
 	// User pool operations
 	CreateUserPool(meta *UserPoolMetadata) error
@@ -48,14 +47,21 @@ type store interface {
 	GetRefreshToken(poolID, token string) (*refreshTokenData, error)
 	DeleteRefreshToken(poolID, token string) error
 
-	// Group operations
+	// GetGroupsForUser is used by auth handlers to embed group claims in JWTs.
+	GetGroupsForUser(poolID, username string) ([]string, error)
+}
+
+// groupStore is the focused interface for group CRUD and membership operations.
+type groupStore interface {
+	GetUserPool(poolID string) (*UserPoolMetadata, error)
+	GetUser(poolID, username string) (*UserMetadata, error)
+
 	CreateGroup(poolID string, group *GroupMetadata) error
 	GetGroup(poolID, groupName string) (*GroupMetadata, error)
 	UpdateGroup(poolID, groupName string, fn func(*GroupMetadata) error) error
 	DeleteGroup(poolID, groupName string) error
 	ListGroups(poolID string, maxResults int, nextToken string) ([]*GroupMetadata, string, error)
 
-	// Group membership operations
 	AddUserToGroup(poolID, groupName, username string) error
 	RemoveUserFromGroup(poolID, groupName, username string) error
 	ListGroupsForUser(
@@ -68,17 +74,17 @@ type store interface {
 		maxResults int,
 		nextToken string,
 	) ([]*UserMetadata, string, error)
-	GetGroupsForUser(poolID, username string) ([]string, error)
 }
 
 // Router handles Cognito User Pools API requests dispatched via the X-Amz-Target header.
 type Router struct {
 	storage    store
+	groups     groupStore
 	codeReader io.Reader // injectable for testing; defaults to crypto/rand.Reader
 }
 
 func NewRouter(storage *Storage) *Router {
-	return &Router{storage: storage, codeReader: randReader}
+	return &Router{storage: storage, groups: storage, codeReader: randReader}
 }
 
 func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {

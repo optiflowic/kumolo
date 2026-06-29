@@ -162,41 +162,30 @@ func TestStorage_Close(t *testing.T) {
 	assert.NoError(t, storage.Close())
 }
 
-// mockStore is a minimal store implementation for testing handler error paths.
+// mockStore is a minimal store implementation for testing non-group handler error paths.
 type mockStore struct {
-	createErr         error
-	getErr            error
-	updateErr         error
-	deleteErr         error
-	listErr           error
-	createClientErr   error
-	getClientErr      error
-	updateClientErr   error
-	deleteClientErr   error
-	listClientErr     error
-	getPoolForClient  func(string) (string, error)
-	createUserErr     error
-	getUserFn         func(string, string) (*UserMetadata, error)
-	getUserBySubFn    func(string, string) (*UserMetadata, error)
-	updateUserErr     error
-	deleteUserErr     error
-	getOrCreateKeysFn func(string) (*poolKeys, *rsa.PrivateKey, error)
-	getPoolKeysFn     func(string) (*poolKeys, *rsa.PrivateKey, error)
-	createRefreshErr  error
-	getRefreshFn      func(string, string) (*refreshTokenData, error)
-	deleteRefreshErr  error
-
-	// Group operations
-	createGroupErr         error
-	getGroupFn             func(string, string) (*GroupMetadata, error)
-	updateGroupErr         error
-	deleteGroupErr         error
-	listGroupsErr          error
-	addUserToGroupErr      error
-	removeUserFromGroupErr error
-	listGroupsForUserErr   error
-	listUsersInGroupErr    error
-	getGroupsForUserFn     func(string, string) ([]string, error)
+	createErr          error
+	getErr             error
+	updateErr          error
+	deleteErr          error
+	listErr            error
+	createClientErr    error
+	getClientErr       error
+	updateClientErr    error
+	deleteClientErr    error
+	listClientErr      error
+	getPoolForClient   func(string) (string, error)
+	createUserErr      error
+	getUserFn          func(string, string) (*UserMetadata, error)
+	getUserBySubFn     func(string, string) (*UserMetadata, error)
+	updateUserErr      error
+	deleteUserErr      error
+	getOrCreateKeysFn  func(string) (*poolKeys, *rsa.PrivateKey, error)
+	getPoolKeysFn      func(string) (*poolKeys, *rsa.PrivateKey, error)
+	createRefreshErr   error
+	getRefreshFn       func(string, string) (*refreshTokenData, error)
+	deleteRefreshErr   error
+	getGroupsForUserFn func(string, string) ([]string, error)
 }
 
 func (m *mockStore) CreateUserPool(*UserPoolMetadata) error { return m.createErr }
@@ -286,44 +275,67 @@ func (m *mockStore) GetRefreshToken(poolID, token string) (*refreshTokenData, er
 
 func (m *mockStore) DeleteRefreshToken(string, string) error { return m.deleteRefreshErr }
 
-func (m *mockStore) CreateGroup(_ string, _ *GroupMetadata) error { return m.createGroupErr }
+func (m *mockStore) GetGroupsForUser(poolID, username string) ([]string, error) {
+	if m.getGroupsForUserFn != nil {
+		return m.getGroupsForUserFn(poolID, username)
+	}
+	return nil, nil
+}
 
-func (m *mockStore) GetGroup(poolID, name string) (*GroupMetadata, error) {
+// mockGroupStore is a minimal groupStore implementation for testing group handler error paths.
+type mockGroupStore struct {
+	getErr                 error
+	getUserFn              func(string, string) (*UserMetadata, error)
+	getGroupFn             func(string, string) (*GroupMetadata, error)
+	createGroupErr         error
+	updateGroupErr         error
+	deleteGroupErr         error
+	listGroupsErr          error
+	addUserToGroupErr      error
+	removeUserFromGroupErr error
+	listGroupsForUserErr   error
+	listUsersInGroupErr    error
+}
+
+func (m *mockGroupStore) GetUserPool(string) (*UserPoolMetadata, error) {
+	return nil, m.getErr
+}
+
+func (m *mockGroupStore) GetUser(poolID, username string) (*UserMetadata, error) {
+	if m.getUserFn != nil {
+		return m.getUserFn(poolID, username)
+	}
+	return nil, errUserNotFound
+}
+
+func (m *mockGroupStore) GetGroup(poolID, name string) (*GroupMetadata, error) {
 	if m.getGroupFn != nil {
 		return m.getGroupFn(poolID, name)
 	}
 	return nil, errGroupNotFound
 }
 
-func (m *mockStore) UpdateGroup(_ string, _ string, _ func(*GroupMetadata) error) error {
+func (m *mockGroupStore) CreateGroup(_ string, _ *GroupMetadata) error { return m.createGroupErr }
+func (m *mockGroupStore) UpdateGroup(_ string, _ string, _ func(*GroupMetadata) error) error {
 	return m.updateGroupErr
 }
-func (m *mockStore) DeleteGroup(string, string) error { return m.deleteGroupErr }
-func (m *mockStore) ListGroups(string, int, string) ([]*GroupMetadata, string, error) {
+func (m *mockGroupStore) DeleteGroup(string, string) error { return m.deleteGroupErr }
+func (m *mockGroupStore) ListGroups(string, int, string) ([]*GroupMetadata, string, error) {
 	return nil, "", m.listGroupsErr
 }
-func (m *mockStore) AddUserToGroup(string, string, string) error { return m.addUserToGroupErr }
-func (m *mockStore) RemoveUserFromGroup(string, string, string) error {
+func (m *mockGroupStore) AddUserToGroup(string, string, string) error { return m.addUserToGroupErr }
+func (m *mockGroupStore) RemoveUserFromGroup(string, string, string) error {
 	return m.removeUserFromGroupErr
 }
-
-func (m *mockStore) ListGroupsForUser(
-	string,
-	string,
-	int,
-	string,
+func (m *mockGroupStore) ListGroupsForUser(
+	string, string, int, string,
 ) ([]*GroupMetadata, string, error) {
 	return nil, "", m.listGroupsForUserErr
 }
-func (m *mockStore) ListUsersInGroup(string, string, int, string) ([]*UserMetadata, string, error) {
+func (m *mockGroupStore) ListUsersInGroup(
+	string, string, int, string,
+) ([]*UserMetadata, string, error) {
 	return nil, "", m.listUsersInGroupErr
-}
-
-func (m *mockStore) GetGroupsForUser(poolID, username string) ([]string, error) {
-	if m.getGroupsForUserFn != nil {
-		return m.getGroupsForUserFn(poolID, username)
-	}
-	return nil, nil
 }
 
 func TestNewStorage_MkdirError(t *testing.T) {

@@ -69,7 +69,7 @@ func (ro *Router) handleCreateGroup(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	if _, err := ro.storage.GetUserPool(req.UserPoolID); err != nil {
+	if _, err := ro.groups.GetUserPool(req.UserPoolID); err != nil {
 		if errors.Is(err, errUserPoolNotFound) {
 			writeError(
 				w,
@@ -99,7 +99,7 @@ func (ro *Router) handleCreateGroup(w http.ResponseWriter, body []byte) {
 		LastModifiedDate: ts,
 	}
 
-	if err := ro.storage.CreateGroup(req.UserPoolID, group); err != nil {
+	if err := ro.groups.CreateGroup(req.UserPoolID, group); err != nil {
 		if errors.Is(err, errGroupExists) {
 			writeError(w, http.StatusBadRequest, ErrTypeGroupExistsException,
 				"A group with the name already exists.")
@@ -154,7 +154,7 @@ func (ro *Router) handleDeleteGroup(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	if _, err := ro.storage.GetUserPool(req.UserPoolID); err != nil {
+	if _, err := ro.groups.GetUserPool(req.UserPoolID); err != nil {
 		if errors.Is(err, errUserPoolNotFound) {
 			writeError(
 				w,
@@ -173,7 +173,7 @@ func (ro *Router) handleDeleteGroup(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	if err := ro.storage.DeleteGroup(req.UserPoolID, req.GroupName); err != nil {
+	if err := ro.groups.DeleteGroup(req.UserPoolID, req.GroupName); err != nil {
 		if errors.Is(err, errGroupNotFound) {
 			writeError(
 				w,
@@ -232,7 +232,7 @@ func (ro *Router) handleGetGroup(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	if _, err := ro.storage.GetUserPool(req.UserPoolID); err != nil {
+	if _, err := ro.groups.GetUserPool(req.UserPoolID); err != nil {
 		if errors.Is(err, errUserPoolNotFound) {
 			writeError(
 				w,
@@ -251,7 +251,7 @@ func (ro *Router) handleGetGroup(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	group, err := ro.storage.GetGroup(req.UserPoolID, req.GroupName)
+	group, err := ro.groups.GetGroup(req.UserPoolID, req.GroupName)
 	if err != nil {
 		if errors.Is(err, errGroupNotFound) {
 			writeError(
@@ -314,7 +314,7 @@ func (ro *Router) handleUpdateGroup(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	if _, err := ro.storage.GetUserPool(req.UserPoolID); err != nil {
+	if _, err := ro.groups.GetUserPool(req.UserPoolID); err != nil {
 		if errors.Is(err, errUserPoolNotFound) {
 			writeError(
 				w,
@@ -334,7 +334,7 @@ func (ro *Router) handleUpdateGroup(w http.ResponseWriter, body []byte) {
 	}
 
 	var updated *GroupMetadata
-	err := ro.storage.UpdateGroup(req.UserPoolID, req.GroupName, func(g *GroupMetadata) error {
+	err := ro.groups.UpdateGroup(req.UserPoolID, req.GroupName, func(g *GroupMetadata) error {
 		if req.Description != nil {
 			g.Description = *req.Description
 		}
@@ -400,7 +400,7 @@ func (ro *Router) handleListGroups(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	if _, err := ro.storage.GetUserPool(req.UserPoolID); err != nil {
+	if _, err := ro.groups.GetUserPool(req.UserPoolID); err != nil {
 		if errors.Is(err, errUserPoolNotFound) {
 			writeError(
 				w,
@@ -424,7 +424,7 @@ func (ro *Router) handleListGroups(w http.ResponseWriter, body []byte) {
 		limit = defaultGroupLimit
 	}
 
-	groups, nextToken, err := ro.storage.ListGroups(req.UserPoolID, limit, req.NextToken)
+	groups, nextToken, err := ro.groups.ListGroups(req.UserPoolID, limit, req.NextToken)
 	if err != nil {
 		if errors.Is(err, errInvalidNextToken) {
 			writeError(
@@ -514,7 +514,7 @@ func (ro *Router) parseGroupMembershipRequest(
 		)
 		return req, false
 	}
-	if _, err := ro.storage.GetUserPool(req.UserPoolID); err != nil {
+	if _, err := ro.groups.GetUserPool(req.UserPoolID); err != nil {
 		if errors.Is(err, errUserPoolNotFound) {
 			writeError(
 				w,
@@ -532,7 +532,7 @@ func (ro *Router) parseGroupMembershipRequest(
 		)
 		return req, false
 	}
-	if _, err := ro.storage.GetGroup(req.UserPoolID, req.GroupName); err != nil {
+	if _, err := ro.groups.GetGroup(req.UserPoolID, req.GroupName); err != nil {
 		if errors.Is(err, errGroupNotFound) {
 			writeError(
 				w,
@@ -550,7 +550,7 @@ func (ro *Router) parseGroupMembershipRequest(
 		)
 		return req, false
 	}
-	if _, err := ro.storage.GetUser(req.UserPoolID, req.Username); err != nil {
+	if _, err := ro.groups.GetUser(req.UserPoolID, req.Username); err != nil {
 		if errors.Is(err, errUserNotFound) {
 			writeError(
 				w,
@@ -576,7 +576,7 @@ func (ro *Router) handleAdminAddUserToGroup(w http.ResponseWriter, body []byte) 
 	if !ok {
 		return
 	}
-	if err := ro.storage.AddUserToGroup(req.UserPoolID, req.GroupName, req.Username); err != nil {
+	if err := ro.groups.AddUserToGroup(req.UserPoolID, req.GroupName, req.Username); err != nil {
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -595,7 +595,7 @@ func (ro *Router) handleAdminRemoveUserFromGroup(w http.ResponseWriter, body []b
 	if !ok {
 		return
 	}
-	if err := ro.storage.RemoveUserFromGroup(
+	if err := ro.groups.RemoveUserFromGroup(
 		req.UserPoolID,
 		req.GroupName,
 		req.Username,
@@ -650,7 +650,7 @@ func (ro *Router) handleAdminListGroupsForUser(w http.ResponseWriter, body []byt
 		return
 	}
 
-	if _, err := ro.storage.GetUserPool(req.UserPoolID); err != nil {
+	if _, err := ro.groups.GetUserPool(req.UserPoolID); err != nil {
 		if errors.Is(err, errUserPoolNotFound) {
 			writeError(
 				w,
@@ -669,7 +669,7 @@ func (ro *Router) handleAdminListGroupsForUser(w http.ResponseWriter, body []byt
 		return
 	}
 
-	if _, err := ro.storage.GetUser(req.UserPoolID, req.Username); err != nil {
+	if _, err := ro.groups.GetUser(req.UserPoolID, req.Username); err != nil {
 		if errors.Is(err, errUserNotFound) {
 			writeError(
 				w,
@@ -693,7 +693,7 @@ func (ro *Router) handleAdminListGroupsForUser(w http.ResponseWriter, body []byt
 		limit = defaultGroupLimit
 	}
 
-	groups, nextToken, err := ro.storage.ListGroupsForUser(
+	groups, nextToken, err := ro.groups.ListGroupsForUser(
 		req.UserPoolID,
 		req.Username,
 		limit,
@@ -764,7 +764,7 @@ func (ro *Router) handleListUsersInGroup(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	if _, err := ro.storage.GetUserPool(req.UserPoolID); err != nil {
+	if _, err := ro.groups.GetUserPool(req.UserPoolID); err != nil {
 		if errors.Is(err, errUserPoolNotFound) {
 			writeError(
 				w,
@@ -783,7 +783,7 @@ func (ro *Router) handleListUsersInGroup(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	if _, err := ro.storage.GetGroup(req.UserPoolID, req.GroupName); err != nil {
+	if _, err := ro.groups.GetGroup(req.UserPoolID, req.GroupName); err != nil {
 		if errors.Is(err, errGroupNotFound) {
 			writeError(
 				w,
@@ -807,7 +807,7 @@ func (ro *Router) handleListUsersInGroup(w http.ResponseWriter, body []byte) {
 		limit = defaultGroupLimit
 	}
 
-	users, nextToken, err := ro.storage.ListUsersInGroup(
+	users, nextToken, err := ro.groups.ListUsersInGroup(
 		req.UserPoolID,
 		req.GroupName,
 		limit,

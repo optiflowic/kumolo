@@ -871,7 +871,7 @@ func userOK() func(string, string) (*UserMetadata, error) {
 }
 
 func TestCreateGroup_GetUserPoolInternalError(t *testing.T) {
-	ro := &Router{storage: &mockStore{getErr: diskErr()}}
+	ro := &Router{groups: &mockGroupStore{getErr: diskErr()}}
 	body, _ := json.Marshal(map[string]any{"UserPoolId": "pool1", "GroupName": "admins"})
 	w := doOp(t, ro, "CreateGroup", string(body))
 	require.Equal(t, http.StatusInternalServerError, w.Code)
@@ -879,7 +879,7 @@ func TestCreateGroup_GetUserPoolInternalError(t *testing.T) {
 }
 
 func TestCreateGroup_CreateGroupInternalError(t *testing.T) {
-	ro := &Router{storage: &mockStore{createGroupErr: diskErr()}}
+	ro := &Router{groups: &mockGroupStore{createGroupErr: diskErr()}}
 	body, _ := json.Marshal(map[string]any{"UserPoolId": "pool1", "GroupName": "admins"})
 	w := doOp(t, ro, "CreateGroup", string(body))
 	require.Equal(t, http.StatusInternalServerError, w.Code)
@@ -887,7 +887,7 @@ func TestCreateGroup_CreateGroupInternalError(t *testing.T) {
 }
 
 func TestDeleteGroup_GetUserPoolInternalError(t *testing.T) {
-	ro := &Router{storage: &mockStore{getErr: diskErr()}}
+	ro := &Router{groups: &mockGroupStore{getErr: diskErr()}}
 	body, _ := json.Marshal(map[string]any{"UserPoolId": "pool1", "GroupName": "admins"})
 	w := doOp(t, ro, "DeleteGroup", string(body))
 	require.Equal(t, http.StatusInternalServerError, w.Code)
@@ -895,7 +895,7 @@ func TestDeleteGroup_GetUserPoolInternalError(t *testing.T) {
 }
 
 func TestDeleteGroup_DeleteGroupInternalError(t *testing.T) {
-	ro := &Router{storage: &mockStore{deleteGroupErr: diskErr()}}
+	ro := &Router{groups: &mockGroupStore{deleteGroupErr: diskErr()}}
 	body, _ := json.Marshal(map[string]any{"UserPoolId": "pool1", "GroupName": "admins"})
 	w := doOp(t, ro, "DeleteGroup", string(body))
 	require.Equal(t, http.StatusInternalServerError, w.Code)
@@ -903,7 +903,7 @@ func TestDeleteGroup_DeleteGroupInternalError(t *testing.T) {
 }
 
 func TestGetGroup_GetUserPoolInternalError(t *testing.T) {
-	ro := &Router{storage: &mockStore{getErr: diskErr()}}
+	ro := &Router{groups: &mockGroupStore{getErr: diskErr()}}
 	body, _ := json.Marshal(map[string]any{"UserPoolId": "pool1", "GroupName": "admins"})
 	w := doOp(t, ro, "GetGroup", string(body))
 	require.Equal(t, http.StatusInternalServerError, w.Code)
@@ -911,7 +911,7 @@ func TestGetGroup_GetUserPoolInternalError(t *testing.T) {
 }
 
 func TestGetGroup_GetGroupInternalError(t *testing.T) {
-	ro := &Router{storage: &mockStore{
+	ro := &Router{groups: &mockGroupStore{
 		getGroupFn: func(_, _ string) (*GroupMetadata, error) { return nil, diskErr() },
 	}}
 	body, _ := json.Marshal(map[string]any{"UserPoolId": "pool1", "GroupName": "admins"})
@@ -921,7 +921,7 @@ func TestGetGroup_GetGroupInternalError(t *testing.T) {
 }
 
 func TestUpdateGroup_GetUserPoolInternalError(t *testing.T) {
-	ro := &Router{storage: &mockStore{getErr: diskErr()}}
+	ro := &Router{groups: &mockGroupStore{getErr: diskErr()}}
 	body, _ := json.Marshal(map[string]any{"UserPoolId": "pool1", "GroupName": "admins"})
 	w := doOp(t, ro, "UpdateGroup", string(body))
 	require.Equal(t, http.StatusInternalServerError, w.Code)
@@ -929,7 +929,7 @@ func TestUpdateGroup_GetUserPoolInternalError(t *testing.T) {
 }
 
 func TestUpdateGroup_UpdateGroupInternalError(t *testing.T) {
-	ro := &Router{storage: &mockStore{updateGroupErr: diskErr()}}
+	ro := &Router{groups: &mockGroupStore{updateGroupErr: diskErr()}}
 	body, _ := json.Marshal(map[string]any{"UserPoolId": "pool1", "GroupName": "admins"})
 	w := doOp(t, ro, "UpdateGroup", string(body))
 	require.Equal(t, http.StatusInternalServerError, w.Code)
@@ -937,7 +937,7 @@ func TestUpdateGroup_UpdateGroupInternalError(t *testing.T) {
 }
 
 func TestListGroups_GetUserPoolInternalError(t *testing.T) {
-	ro := &Router{storage: &mockStore{getErr: diskErr()}}
+	ro := &Router{groups: &mockGroupStore{getErr: diskErr()}}
 	body, _ := json.Marshal(map[string]any{"UserPoolId": "pool1"})
 	w := doOp(t, ro, "ListGroups", string(body))
 	require.Equal(t, http.StatusInternalServerError, w.Code)
@@ -945,7 +945,7 @@ func TestListGroups_GetUserPoolInternalError(t *testing.T) {
 }
 
 func TestListGroups_ListGroupsInternalError(t *testing.T) {
-	ro := &Router{storage: &mockStore{listGroupsErr: diskErr()}}
+	ro := &Router{groups: &mockGroupStore{listGroupsErr: diskErr()}}
 	body, _ := json.Marshal(map[string]any{"UserPoolId": "pool1"})
 	w := doOp(t, ro, "ListGroups", string(body))
 	require.Equal(t, http.StatusInternalServerError, w.Code)
@@ -953,7 +953,7 @@ func TestListGroups_ListGroupsInternalError(t *testing.T) {
 }
 
 func TestAdminAddUserToGroup_GetUserPoolInternalError(t *testing.T) {
-	ro := &Router{storage: &mockStore{getErr: diskErr()}}
+	ro := &Router{groups: &mockGroupStore{getErr: diskErr()}}
 	body, _ := json.Marshal(
 		map[string]any{"UserPoolId": "pool1", "GroupName": "admins", "Username": "alice"},
 	)
@@ -963,7 +963,7 @@ func TestAdminAddUserToGroup_GetUserPoolInternalError(t *testing.T) {
 }
 
 func TestAdminAddUserToGroup_GetGroupInternalError(t *testing.T) {
-	ro := &Router{storage: &mockStore{
+	ro := &Router{groups: &mockGroupStore{
 		getGroupFn: func(_, _ string) (*GroupMetadata, error) { return nil, diskErr() },
 	}}
 	body, _ := json.Marshal(
@@ -975,7 +975,7 @@ func TestAdminAddUserToGroup_GetGroupInternalError(t *testing.T) {
 }
 
 func TestAdminAddUserToGroup_GetUserInternalError(t *testing.T) {
-	ro := &Router{storage: &mockStore{
+	ro := &Router{groups: &mockGroupStore{
 		getGroupFn: groupOK(),
 		getUserFn:  func(_, _ string) (*UserMetadata, error) { return nil, diskErr() },
 	}}
@@ -988,7 +988,7 @@ func TestAdminAddUserToGroup_GetUserInternalError(t *testing.T) {
 }
 
 func TestAdminAddUserToGroup_AddUserToGroupInternalError(t *testing.T) {
-	ro := &Router{storage: &mockStore{
+	ro := &Router{groups: &mockGroupStore{
 		getGroupFn:        groupOK(),
 		getUserFn:         userOK(),
 		addUserToGroupErr: diskErr(),
@@ -1002,7 +1002,7 @@ func TestAdminAddUserToGroup_AddUserToGroupInternalError(t *testing.T) {
 }
 
 func TestAdminRemoveUserFromGroup_GetUserPoolInternalError(t *testing.T) {
-	ro := &Router{storage: &mockStore{getErr: diskErr()}}
+	ro := &Router{groups: &mockGroupStore{getErr: diskErr()}}
 	body, _ := json.Marshal(
 		map[string]any{"UserPoolId": "pool1", "GroupName": "admins", "Username": "alice"},
 	)
@@ -1012,7 +1012,7 @@ func TestAdminRemoveUserFromGroup_GetUserPoolInternalError(t *testing.T) {
 }
 
 func TestAdminRemoveUserFromGroup_GetGroupInternalError(t *testing.T) {
-	ro := &Router{storage: &mockStore{
+	ro := &Router{groups: &mockGroupStore{
 		getGroupFn: func(_, _ string) (*GroupMetadata, error) { return nil, diskErr() },
 	}}
 	body, _ := json.Marshal(
@@ -1024,7 +1024,7 @@ func TestAdminRemoveUserFromGroup_GetGroupInternalError(t *testing.T) {
 }
 
 func TestAdminRemoveUserFromGroup_GetUserInternalError(t *testing.T) {
-	ro := &Router{storage: &mockStore{
+	ro := &Router{groups: &mockGroupStore{
 		getGroupFn: groupOK(),
 		getUserFn:  func(_, _ string) (*UserMetadata, error) { return nil, diskErr() },
 	}}
@@ -1037,7 +1037,7 @@ func TestAdminRemoveUserFromGroup_GetUserInternalError(t *testing.T) {
 }
 
 func TestAdminRemoveUserFromGroup_RemoveUserFromGroupInternalError(t *testing.T) {
-	ro := &Router{storage: &mockStore{
+	ro := &Router{groups: &mockGroupStore{
 		getGroupFn:             groupOK(),
 		getUserFn:              userOK(),
 		removeUserFromGroupErr: diskErr(),
@@ -1051,7 +1051,7 @@ func TestAdminRemoveUserFromGroup_RemoveUserFromGroupInternalError(t *testing.T)
 }
 
 func TestAdminListGroupsForUser_GetUserPoolInternalError(t *testing.T) {
-	ro := &Router{storage: &mockStore{getErr: diskErr()}}
+	ro := &Router{groups: &mockGroupStore{getErr: diskErr()}}
 	body, _ := json.Marshal(map[string]any{"UserPoolId": "pool1", "Username": "alice"})
 	w := doOp(t, ro, "AdminListGroupsForUser", string(body))
 	require.Equal(t, http.StatusInternalServerError, w.Code)
@@ -1059,7 +1059,7 @@ func TestAdminListGroupsForUser_GetUserPoolInternalError(t *testing.T) {
 }
 
 func TestAdminListGroupsForUser_GetUserInternalError(t *testing.T) {
-	ro := &Router{storage: &mockStore{
+	ro := &Router{groups: &mockGroupStore{
 		getUserFn: func(_, _ string) (*UserMetadata, error) { return nil, diskErr() },
 	}}
 	body, _ := json.Marshal(map[string]any{"UserPoolId": "pool1", "Username": "alice"})
@@ -1069,7 +1069,7 @@ func TestAdminListGroupsForUser_GetUserInternalError(t *testing.T) {
 }
 
 func TestAdminListGroupsForUser_ListGroupsForUserInternalError(t *testing.T) {
-	ro := &Router{storage: &mockStore{
+	ro := &Router{groups: &mockGroupStore{
 		getUserFn:            userOK(),
 		listGroupsForUserErr: diskErr(),
 	}}
@@ -1080,7 +1080,7 @@ func TestAdminListGroupsForUser_ListGroupsForUserInternalError(t *testing.T) {
 }
 
 func TestListUsersInGroup_GetUserPoolInternalError(t *testing.T) {
-	ro := &Router{storage: &mockStore{getErr: diskErr()}}
+	ro := &Router{groups: &mockGroupStore{getErr: diskErr()}}
 	body, _ := json.Marshal(map[string]any{"UserPoolId": "pool1", "GroupName": "admins"})
 	w := doOp(t, ro, "ListUsersInGroup", string(body))
 	require.Equal(t, http.StatusInternalServerError, w.Code)
@@ -1088,7 +1088,7 @@ func TestListUsersInGroup_GetUserPoolInternalError(t *testing.T) {
 }
 
 func TestListUsersInGroup_GetGroupInternalError(t *testing.T) {
-	ro := &Router{storage: &mockStore{
+	ro := &Router{groups: &mockGroupStore{
 		getGroupFn: func(_, _ string) (*GroupMetadata, error) { return nil, diskErr() },
 	}}
 	body, _ := json.Marshal(map[string]any{"UserPoolId": "pool1", "GroupName": "admins"})
@@ -1098,7 +1098,7 @@ func TestListUsersInGroup_GetGroupInternalError(t *testing.T) {
 }
 
 func TestListUsersInGroup_ListUsersInGroupInternalError(t *testing.T) {
-	ro := &Router{storage: &mockStore{
+	ro := &Router{groups: &mockGroupStore{
 		getGroupFn:          groupOK(),
 		listUsersInGroupErr: diskErr(),
 	}}
