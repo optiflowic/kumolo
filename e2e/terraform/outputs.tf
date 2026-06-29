@@ -80,3 +80,7 @@ output "cognito_group_admins" {
 output "cognito_group_editors" {
   value = aws_cognito_user_group.editors.name
 }
+
+output "cognito_client_refresh_token_validity" {
+  value = aws_cognito_user_pool_client.main.refresh_token_validity
+}

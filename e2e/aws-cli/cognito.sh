@@ -185,6 +185,73 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Refresh token expiry
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- Refresh token expiry ---"
+
+# Create a client with explicit refresh_token_validity to verify the value is persisted
+RT_CLIENT_JSON=$($AWS create-user-pool-client \
+  --user-pool-id "$POOL_ID" \
+  --client-name "e2e-rt-validity-client" \
+  --refresh-token-validity 7 2>&1)
+if echo "$RT_CLIENT_JSON" | grep -q '"ClientId"'; then
+  ok "CreateUserPoolClient (refresh_token_validity=7)"
+  RT_CLIENT_ID=$(echo "$RT_CLIENT_JSON" | jq -r '.UserPoolClient.ClientId // empty' 2>/dev/null || true)
+else
+  fail "CreateUserPoolClient (refresh_token_validity=7)"
+  RT_CLIENT_ID="UNKNOWN"
+fi
+
+# Invalid refresh token must be rejected with NotAuthorizedException
+INVALID_RT_JSON=$($AWS initiate-auth \
+  --client-id "$RT_CLIENT_ID" \
+  --auth-flow "REFRESH_TOKEN_AUTH" \
+  --auth-parameters "REFRESH_TOKEN=not-a-real-token" 2>&1) || true
+if echo "$INVALID_RT_JSON" | grep -qi 'NotAuthorizedException'; then
+  ok "InitiateAuth (REFRESH_TOKEN_AUTH) — NotAuthorizedException for invalid token"
+else
+  fail "InitiateAuth (REFRESH_TOKEN_AUTH) — expected NotAuthorizedException for invalid token"
+fi
+
+# Happy path: re-auth with the client that has explicit refresh_token_validity
+# REFRESH_TOKEN is set earlier in the "Auth flows" section when CONFIRM_CODE is available
+if [[ -n "${REFRESH_TOKEN:-}" ]]; then
+  RT_AUTH_JSON=$($AWS initiate-auth \
+    --client-id "$RT_CLIENT_ID" \
+    --auth-flow "USER_PASSWORD_AUTH" \
+    --auth-parameters "USERNAME=$USERNAME,PASSWORD=$PASSWORD" 2>&1)
+  RT_REFRESH_TOKEN=$(echo "$RT_AUTH_JSON" | jq -r '.AuthenticationResult.RefreshToken // empty' 2>/dev/null || true)
+  if [[ -n "$RT_REFRESH_TOKEN" ]]; then
+    RT_REFRESH_RESP=$($AWS initiate-auth \
+      --client-id "$RT_CLIENT_ID" \
+      --auth-flow "REFRESH_TOKEN_AUTH" \
+      --auth-parameters "REFRESH_TOKEN=$RT_REFRESH_TOKEN" 2>&1)
+    if echo "$RT_REFRESH_RESP" | grep -q '"AccessToken"'; then
+      ok "InitiateAuth (REFRESH_TOKEN_AUTH) — new AccessToken issued for client with refresh_token_validity=7"
+    else
+      fail "InitiateAuth (REFRESH_TOKEN_AUTH) — expected AccessToken for client with explicit validity"
+    fi
+    # AWS does not return a new refresh token on REFRESH_TOKEN_AUTH
+    NEW_RT=$(echo "$RT_REFRESH_RESP" | jq -r '.AuthenticationResult.RefreshToken // empty' 2>/dev/null || true)
+    if [[ -z "$NEW_RT" ]]; then
+      ok "InitiateAuth (REFRESH_TOKEN_AUTH) — no new refresh token in response (matches AWS behavior)"
+    else
+      fail "InitiateAuth (REFRESH_TOKEN_AUTH) — unexpected new refresh token returned"
+    fi
+  else
+    skip "InitiateAuth (REFRESH_TOKEN_AUTH) explicit validity — could not obtain refresh token"
+  fi
+else
+  skip "InitiateAuth (REFRESH_TOKEN_AUTH) explicit validity — no confirmed user"
+  echo "  Hint: set E2E_COGNITO_CODE=<code> from kumolo logs, or use Docker Compose"
+fi
+
+$AWS delete-user-pool-client \
+  --user-pool-id "$POOL_ID" \
+  --client-id "$RT_CLIENT_ID" >/dev/null 2>&1 || true
+
+# ---------------------------------------------------------------------------
 # ResendConfirmationCode
 # ---------------------------------------------------------------------------
 echo ""
