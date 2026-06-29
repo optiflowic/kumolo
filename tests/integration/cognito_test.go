@@ -1062,3 +1062,232 @@ func TestCognitoIntegration_ResendConfirmationCode(t *testing.T) {
 		assert.Equal(t, "UserNotFoundException", apiErrorCode(err))
 	})
 }
+
+// ── Group management ──────────────────────────────────────────────────────────
+
+func TestCognitoIntegration_Groups(t *testing.T) {
+	clients := newTestClients(t)
+	ctx := context.Background()
+	c := clients.cognito
+
+	pool, err := c.CreateUserPool(ctx, &awscognito.CreateUserPoolInput{
+		PoolName: aws.String("group-test-pool"),
+	})
+	require.NoError(t, err)
+	poolID := aws.ToString(pool.UserPool.Id)
+
+	t.Run("CreateGroup", func(t *testing.T) {
+		prec := int32(10)
+		out, err := c.CreateGroup(ctx, &awscognito.CreateGroupInput{
+			UserPoolId:  aws.String(poolID),
+			GroupName:   aws.String("admins"),
+			Description: aws.String("Admin users"),
+			Precedence:  &prec,
+		})
+		require.NoError(t, err)
+		require.NotNil(t, out.Group)
+		assert.Equal(t, "admins", aws.ToString(out.Group.GroupName))
+		assert.Equal(t, poolID, aws.ToString(out.Group.UserPoolId))
+		assert.Equal(t, "Admin users", aws.ToString(out.Group.Description))
+		require.NotNil(t, out.Group.Precedence)
+		assert.Equal(t, int32(10), *out.Group.Precedence)
+		assert.NotNil(t, out.Group.CreationDate)
+		assert.NotNil(t, out.Group.LastModifiedDate)
+	})
+
+	t.Run("CreateGroup_Duplicate", func(t *testing.T) {
+		_, err := c.CreateGroup(ctx, &awscognito.CreateGroupInput{
+			UserPoolId: aws.String(poolID),
+			GroupName:  aws.String("admins"),
+		})
+		require.Error(t, err)
+		assert.Equal(t, "GroupExistsException", apiErrorCode(err))
+	})
+
+	t.Run("GetGroup", func(t *testing.T) {
+		out, err := c.GetGroup(ctx, &awscognito.GetGroupInput{
+			UserPoolId: aws.String(poolID),
+			GroupName:  aws.String("admins"),
+		})
+		require.NoError(t, err)
+		require.NotNil(t, out.Group)
+		assert.Equal(t, "admins", aws.ToString(out.Group.GroupName))
+		assert.Equal(t, poolID, aws.ToString(out.Group.UserPoolId))
+	})
+
+	t.Run("GetGroup_NotFound", func(t *testing.T) {
+		_, err := c.GetGroup(ctx, &awscognito.GetGroupInput{
+			UserPoolId: aws.String(poolID),
+			GroupName:  aws.String("nonexistent"),
+		})
+		require.Error(t, err)
+		assert.Equal(t, "ResourceNotFoundException", apiErrorCode(err))
+	})
+
+	t.Run("UpdateGroup", func(t *testing.T) {
+		newPrec := int32(5)
+		_, err := c.UpdateGroup(ctx, &awscognito.UpdateGroupInput{
+			UserPoolId:  aws.String(poolID),
+			GroupName:   aws.String("admins"),
+			Description: aws.String("Updated description"),
+			Precedence:  &newPrec,
+		})
+		require.NoError(t, err)
+
+		out, err := c.GetGroup(ctx, &awscognito.GetGroupInput{
+			UserPoolId: aws.String(poolID),
+			GroupName:  aws.String("admins"),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, "Updated description", aws.ToString(out.Group.Description))
+		require.NotNil(t, out.Group.Precedence)
+		assert.Equal(t, int32(5), *out.Group.Precedence)
+	})
+
+	t.Run("ListGroups", func(t *testing.T) {
+		for _, name := range []string{"beta-group", "gamma-group"} {
+			_, err := c.CreateGroup(ctx, &awscognito.CreateGroupInput{
+				UserPoolId: aws.String(poolID),
+				GroupName:  aws.String(name),
+			})
+			require.NoError(t, err)
+		}
+
+		out, err := c.ListGroups(ctx, &awscognito.ListGroupsInput{
+			UserPoolId: aws.String(poolID),
+		})
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, len(out.Groups), 3)
+
+		names := make([]string, len(out.Groups))
+		for i, g := range out.Groups {
+			names[i] = aws.ToString(g.GroupName)
+		}
+		assert.Contains(t, names, "admins")
+		assert.Contains(t, names, "beta-group")
+		assert.Contains(t, names, "gamma-group")
+	})
+
+	t.Run("DeleteGroup", func(t *testing.T) {
+		_, err := c.CreateGroup(ctx, &awscognito.CreateGroupInput{
+			UserPoolId: aws.String(poolID),
+			GroupName:  aws.String("to-delete"),
+		})
+		require.NoError(t, err)
+
+		_, err = c.DeleteGroup(ctx, &awscognito.DeleteGroupInput{
+			UserPoolId: aws.String(poolID),
+			GroupName:  aws.String("to-delete"),
+		})
+		require.NoError(t, err)
+
+		_, err = c.GetGroup(ctx, &awscognito.GetGroupInput{
+			UserPoolId: aws.String(poolID),
+			GroupName:  aws.String("to-delete"),
+		})
+		require.Error(t, err)
+		assert.Equal(t, "ResourceNotFoundException", apiErrorCode(err))
+	})
+
+	t.Run("DeleteGroup_NotFound", func(t *testing.T) {
+		_, err := c.DeleteGroup(ctx, &awscognito.DeleteGroupInput{
+			UserPoolId: aws.String(poolID),
+			GroupName:  aws.String("ghost-group"),
+		})
+		require.Error(t, err)
+		assert.Equal(t, "ResourceNotFoundException", apiErrorCode(err))
+	})
+}
+
+func TestCognitoIntegration_GroupMembership(t *testing.T) {
+	clients := newTestClients(t)
+	ctx := context.Background()
+	c := clients.cognito
+	env := newAdminTestEnv(t, c, "group-membership-pool")
+
+	_, err := c.CreateGroup(ctx, &awscognito.CreateGroupInput{
+		UserPoolId: aws.String(env.poolID),
+		GroupName:  aws.String("members"),
+	})
+	require.NoError(t, err)
+
+	_, err = c.AdminCreateUser(ctx, &awscognito.AdminCreateUserInput{
+		UserPoolId: aws.String(env.poolID),
+		Username:   aws.String("member-user"),
+	})
+	require.NoError(t, err)
+
+	t.Run("AdminAddUserToGroup", func(t *testing.T) {
+		_, err := c.AdminAddUserToGroup(ctx, &awscognito.AdminAddUserToGroupInput{
+			UserPoolId: aws.String(env.poolID),
+			GroupName:  aws.String("members"),
+			Username:   aws.String("member-user"),
+		})
+		require.NoError(t, err)
+	})
+
+	t.Run("AdminListGroupsForUser", func(t *testing.T) {
+		out, err := c.AdminListGroupsForUser(ctx, &awscognito.AdminListGroupsForUserInput{
+			UserPoolId: aws.String(env.poolID),
+			Username:   aws.String("member-user"),
+		})
+		require.NoError(t, err)
+		require.Len(t, out.Groups, 1)
+		assert.Equal(t, "members", aws.ToString(out.Groups[0].GroupName))
+	})
+
+	t.Run("ListUsersInGroup", func(t *testing.T) {
+		out, err := c.ListUsersInGroup(ctx, &awscognito.ListUsersInGroupInput{
+			UserPoolId: aws.String(env.poolID),
+			GroupName:  aws.String("members"),
+		})
+		require.NoError(t, err)
+		require.Len(t, out.Users, 1)
+		assert.Equal(t, "member-user", aws.ToString(out.Users[0].Username))
+	})
+
+	t.Run("AdminRemoveUserFromGroup", func(t *testing.T) {
+		_, err := c.AdminRemoveUserFromGroup(ctx, &awscognito.AdminRemoveUserFromGroupInput{
+			UserPoolId: aws.String(env.poolID),
+			GroupName:  aws.String("members"),
+			Username:   aws.String("member-user"),
+		})
+		require.NoError(t, err)
+
+		// Forward index: user no longer belongs to the group.
+		out, err := c.AdminListGroupsForUser(ctx, &awscognito.AdminListGroupsForUserInput{
+			UserPoolId: aws.String(env.poolID),
+			Username:   aws.String("member-user"),
+		})
+		require.NoError(t, err)
+		assert.Empty(t, out.Groups)
+
+		// Reverse index: group no longer contains the user.
+		usersOut, err := c.ListUsersInGroup(ctx, &awscognito.ListUsersInGroupInput{
+			UserPoolId: aws.String(env.poolID),
+			GroupName:  aws.String("members"),
+		})
+		require.NoError(t, err)
+		assert.Empty(t, usersOut.Users)
+	})
+
+	t.Run("AdminAddUserToGroup_UserNotFound", func(t *testing.T) {
+		_, err := c.AdminAddUserToGroup(ctx, &awscognito.AdminAddUserToGroupInput{
+			UserPoolId: aws.String(env.poolID),
+			GroupName:  aws.String("members"),
+			Username:   aws.String("nonexistent-user"),
+		})
+		require.Error(t, err)
+		assert.Equal(t, "UserNotFoundException", apiErrorCode(err))
+	})
+
+	t.Run("AdminAddUserToGroup_GroupNotFound", func(t *testing.T) {
+		_, err := c.AdminAddUserToGroup(ctx, &awscognito.AdminAddUserToGroupInput{
+			UserPoolId: aws.String(env.poolID),
+			GroupName:  aws.String("nonexistent-group"),
+			Username:   aws.String("member-user"),
+		})
+		require.Error(t, err)
+		assert.Equal(t, "ResourceNotFoundException", apiErrorCode(err))
+	})
+}

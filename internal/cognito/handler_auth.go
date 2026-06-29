@@ -532,7 +532,14 @@ func (ro *Router) writeAuthResult(
 	keyID string,
 	includeRefreshToken bool,
 ) {
-	accessToken, idToken, rt, err := issueTokens(privateKey, keyID, poolID, clientID, user)
+	groups, err := ro.storage.GetGroupsForUser(poolID, user.Username)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to get user groups")
+		return
+	}
+
+	accessToken, idToken, rt, err := issueTokens(privateKey, keyID, poolID, clientID, user, groups)
 	if err != nil {
 		// untestable: issueTokens only fails on crypto/rand.Read OS-level failures
 		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,

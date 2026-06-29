@@ -8,8 +8,7 @@ import (
 	"time"
 )
 
-// store is the storage interface used by Router.
-// Methods are added incrementally as operations are implemented.
+// store is the storage interface for non-group operations used by Router.
 type store interface {
 	// User pool operations
 	CreateUserPool(meta *UserPoolMetadata) error
@@ -47,16 +46,45 @@ type store interface {
 	CreateRefreshToken(data *refreshTokenData) error
 	GetRefreshToken(poolID, token string) (*refreshTokenData, error)
 	DeleteRefreshToken(poolID, token string) error
+
+	// GetGroupsForUser is used by auth handlers to embed group claims in JWTs.
+	GetGroupsForUser(poolID, username string) ([]string, error)
+}
+
+// groupStore is the focused interface for group CRUD and membership operations.
+type groupStore interface {
+	GetUserPool(poolID string) (*UserPoolMetadata, error)
+	GetUser(poolID, username string) (*UserMetadata, error)
+
+	CreateGroup(poolID string, group *GroupMetadata) error
+	GetGroup(poolID, groupName string) (*GroupMetadata, error)
+	UpdateGroup(poolID, groupName string, fn func(*GroupMetadata) error) error
+	DeleteGroup(poolID, groupName string) error
+	ListGroups(poolID string, maxResults int, nextToken string) ([]*GroupMetadata, string, error)
+
+	AddUserToGroup(poolID, groupName, username string) error
+	RemoveUserFromGroup(poolID, groupName, username string) error
+	ListGroupsForUser(
+		poolID, username string,
+		maxResults int,
+		nextToken string,
+	) ([]*GroupMetadata, string, error)
+	ListUsersInGroup(
+		poolID, groupName string,
+		maxResults int,
+		nextToken string,
+	) ([]*UserMetadata, string, error)
 }
 
 // Router handles Cognito User Pools API requests dispatched via the X-Amz-Target header.
 type Router struct {
 	storage    store
+	groups     groupStore
 	codeReader io.Reader // injectable for testing; defaults to crypto/rand.Reader
 }
 
 func NewRouter(storage *Storage) *Router {
-	return &Router{storage: storage, codeReader: randReader}
+	return &Router{storage: storage, groups: storage, codeReader: randReader}
 }
 
 func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -132,6 +160,24 @@ func (ro *Router) serveHTTP(w http.ResponseWriter, r *http.Request, op string) {
 		ro.handleAdminConfirmSignUp(w, body)
 	case "AdminDeleteUser":
 		ro.handleAdminDeleteUser(w, body)
+	case "CreateGroup":
+		ro.handleCreateGroup(w, body)
+	case "DeleteGroup":
+		ro.handleDeleteGroup(w, body)
+	case "GetGroup":
+		ro.handleGetGroup(w, body)
+	case "UpdateGroup":
+		ro.handleUpdateGroup(w, body)
+	case "ListGroups":
+		ro.handleListGroups(w, body)
+	case "AdminAddUserToGroup":
+		ro.handleAdminAddUserToGroup(w, body)
+	case "AdminRemoveUserFromGroup":
+		ro.handleAdminRemoveUserFromGroup(w, body)
+	case "AdminListGroupsForUser":
+		ro.handleAdminListGroupsForUser(w, body)
+	case "ListUsersInGroup":
+		ro.handleListUsersInGroup(w, body)
 	default:
 		writeError(
 			w,

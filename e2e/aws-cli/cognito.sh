@@ -384,6 +384,194 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Group management
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- Group management ---"
+
+GROUP_NAME="e2e-admins"
+GROUP_USER="group-member@example.com"
+
+GROUP_JSON=$($AWS create-group \
+  --user-pool-id "$POOL_ID" \
+  --group-name "$GROUP_NAME" \
+  --description "E2E admin group" \
+  --precedence 10 2>&1)
+if echo "$GROUP_JSON" | grep -q '"GroupName"'; then
+  ok "CreateGroup"
+else
+  fail "CreateGroup"
+fi
+
+# CreateGroup duplicate → GroupExistsException
+DUP_GROUP_JSON=$($AWS create-group \
+  --user-pool-id "$POOL_ID" \
+  --group-name "$GROUP_NAME" 2>&1) || true
+if echo "$DUP_GROUP_JSON" | grep -qi 'GroupExistsException'; then
+  ok "CreateGroup — GroupExistsException for duplicate name"
+else
+  fail "CreateGroup — expected GroupExistsException for duplicate name"
+fi
+
+# GetGroup
+GET_GROUP_JSON=$($AWS get-group \
+  --user-pool-id "$POOL_ID" \
+  --group-name "$GROUP_NAME" 2>&1)
+if echo "$GET_GROUP_JSON" | grep -q '"GroupName"'; then
+  ok "GetGroup"
+else
+  fail "GetGroup"
+fi
+if echo "$GET_GROUP_JSON" | grep -q 'E2E admin group'; then
+  ok "GetGroup — description matches"
+else
+  fail "GetGroup — expected description"
+fi
+
+# UpdateGroup
+run "UpdateGroup" \
+  $AWS update-group \
+    --user-pool-id "$POOL_ID" \
+    --group-name "$GROUP_NAME" \
+    --description "Updated description" \
+    --precedence 5
+
+UPDATED_GROUP_JSON=$($AWS get-group \
+  --user-pool-id "$POOL_ID" \
+  --group-name "$GROUP_NAME" 2>&1)
+if echo "$UPDATED_GROUP_JSON" | grep -q 'Updated description'; then
+  ok "UpdateGroup — description updated"
+else
+  fail "UpdateGroup — expected updated description"
+fi
+
+# ListGroups
+LIST_GROUPS_JSON=$($AWS list-groups \
+  --user-pool-id "$POOL_ID" 2>&1)
+if echo "$LIST_GROUPS_JSON" | grep -q '"Groups"'; then
+  ok "ListGroups"
+else
+  fail "ListGroups"
+fi
+if echo "$LIST_GROUPS_JSON" | grep -q "$GROUP_NAME"; then
+  ok "ListGroups — created group appears in list"
+else
+  fail "ListGroups — expected group in list"
+fi
+
+# GetGroup not found
+GET_NF_JSON=$($AWS get-group \
+  --user-pool-id "$POOL_ID" \
+  --group-name "no-such-group-e2e" 2>&1) || true
+if echo "$GET_NF_JSON" | grep -qi 'ResourceNotFoundException'; then
+  ok "GetGroup — ResourceNotFoundException for unknown group"
+else
+  fail "GetGroup — expected ResourceNotFoundException"
+fi
+
+# ---------------------------------------------------------------------------
+# Group membership
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- Group membership ---"
+
+# Create a user to add to the group
+GROUP_USER_CREATE_JSON=$($AWS admin-create-user \
+  --user-pool-id "$POOL_ID" \
+  --username "$GROUP_USER" \
+  --user-attributes "Name=email,Value=$GROUP_USER" 2>&1)
+if echo "$GROUP_USER_CREATE_JSON" | grep -q '"Username"'; then
+  ok "AdminCreateUser (for group membership)"
+else
+  fail "AdminCreateUser (for group membership)"
+fi
+
+# AdminAddUserToGroup
+run "AdminAddUserToGroup" \
+  $AWS admin-add-user-to-group \
+    --user-pool-id "$POOL_ID" \
+    --group-name "$GROUP_NAME" \
+    --username "$GROUP_USER"
+
+# AdminListGroupsForUser
+GROUPS_FOR_USER_JSON=$($AWS admin-list-groups-for-user \
+  --user-pool-id "$POOL_ID" \
+  --username "$GROUP_USER" 2>&1)
+if echo "$GROUPS_FOR_USER_JSON" | grep -q '"Groups"'; then
+  ok "AdminListGroupsForUser"
+else
+  fail "AdminListGroupsForUser"
+fi
+if echo "$GROUPS_FOR_USER_JSON" | grep -q "$GROUP_NAME"; then
+  ok "AdminListGroupsForUser — group appears in user's groups"
+else
+  fail "AdminListGroupsForUser — expected group in user's groups"
+fi
+
+# ListUsersInGroup
+USERS_IN_GROUP_JSON=$($AWS list-users-in-group \
+  --user-pool-id "$POOL_ID" \
+  --group-name "$GROUP_NAME" 2>&1)
+if echo "$USERS_IN_GROUP_JSON" | grep -q '"Users"'; then
+  ok "ListUsersInGroup"
+else
+  fail "ListUsersInGroup"
+fi
+if echo "$USERS_IN_GROUP_JSON" | grep -q "$GROUP_USER"; then
+  ok "ListUsersInGroup — added user appears in group"
+else
+  fail "ListUsersInGroup — expected user in group"
+fi
+
+# AdminAddUserToGroup — user not found
+ADD_NF_JSON=$($AWS admin-add-user-to-group \
+  --user-pool-id "$POOL_ID" \
+  --group-name "$GROUP_NAME" \
+  --username "no-such-user-e2e@example.com" 2>&1) || true
+if echo "$ADD_NF_JSON" | grep -qi 'UserNotFoundException'; then
+  ok "AdminAddUserToGroup — UserNotFoundException for unknown user"
+else
+  fail "AdminAddUserToGroup — expected UserNotFoundException"
+fi
+
+# AdminRemoveUserFromGroup
+run "AdminRemoveUserFromGroup" \
+  $AWS admin-remove-user-from-group \
+    --user-pool-id "$POOL_ID" \
+    --group-name "$GROUP_NAME" \
+    --username "$GROUP_USER"
+
+GROUPS_AFTER_REMOVE_JSON=$($AWS admin-list-groups-for-user \
+  --user-pool-id "$POOL_ID" \
+  --username "$GROUP_USER" 2>&1)
+if echo "$GROUPS_AFTER_REMOVE_JSON" | grep -q '"Groups"'; then
+  GROUPS_COUNT=$(echo "$GROUPS_AFTER_REMOVE_JSON" | jq -r '.Groups | length')
+  if [[ "$GROUPS_COUNT" == "0" ]]; then
+    ok "AdminRemoveUserFromGroup — user no longer in group"
+  else
+    fail "AdminRemoveUserFromGroup — expected empty groups after removal"
+  fi
+else
+  fail "AdminRemoveUserFromGroup — admin-list-groups-for-user failed after removal"
+fi
+
+# Delete the group (before pool/client cleanup)
+run "DeleteGroup" \
+  $AWS delete-group \
+    --user-pool-id "$POOL_ID" \
+    --group-name "$GROUP_NAME"
+
+# DeleteGroup not found
+DEL_NF_JSON=$($AWS delete-group \
+  --user-pool-id "$POOL_ID" \
+  --group-name "$GROUP_NAME" 2>&1) || true
+if echo "$DEL_NF_JSON" | grep -qi 'ResourceNotFoundException'; then
+  ok "DeleteGroup — ResourceNotFoundException after deletion"
+else
+  fail "DeleteGroup — expected ResourceNotFoundException after deletion"
+fi
+
+# ---------------------------------------------------------------------------
 # Cleanup
 # ---------------------------------------------------------------------------
 # Only clear CLIENT_ID / POOL_ID after a successful delete so the EXIT-trap

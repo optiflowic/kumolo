@@ -130,6 +130,15 @@ func (s *Storage) DeleteUserPool(poolID string) error {
 	if err := s.deleteFlatDirLocked(filepath.Join("pools", poolID, "refresh_tokens")); err != nil {
 		return fmt.Errorf("delete refresh_tokens dir: %w", err)
 	}
+	if err := s.deleteFlatDirLocked(filepath.Join("pools", poolID, "groups")); err != nil {
+		return fmt.Errorf("delete groups dir: %w", err)
+	}
+	if err := s.deleteNestedDirLocked(filepath.Join("pools", poolID, "group_members")); err != nil {
+		return fmt.Errorf("delete group_members dir: %w", err)
+	}
+	if err := s.deleteNestedDirLocked(filepath.Join("pools", poolID, "user_groups")); err != nil {
+		return fmt.Errorf("delete user_groups dir: %w", err)
+	}
 	keysPath := filepath.Join("pools", poolID, "keys.json")
 	if err := s.removeFile(keysPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("remove keys.json: %w", err)
@@ -144,6 +153,34 @@ func (s *Storage) DeleteUserPool(poolID string) error {
 	return nil
 }
 
+// deleteNestedDirLocked removes a two-level directory (dir/{subdir}/files) and then the top dir.
+// It is a no-op when the directory does not exist.
+func (s *Storage) deleteNestedDirLocked(dir string) error {
+	entries, err := s.listDirFn(dir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("list %s: %w", dir, err)
+	}
+	for _, e := range entries {
+		child := filepath.Join(dir, e.Name())
+		if e.IsDir() {
+			if err := s.deleteFlatDirLocked(child); err != nil {
+				return fmt.Errorf("delete subdir %s: %w", child, err)
+			}
+		} else {
+			if err := s.removeFile(child); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("remove %s: %w", child, err)
+			}
+		}
+	}
+	if err := s.removeFile(dir); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove %s: %w", dir, err)
+	}
+	return nil
+}
+
 // deleteFlatDirLocked removes all files inside a flat (non-nested) directory, then the directory itself.
 // It is a no-op when the directory does not exist.
 func (s *Storage) deleteFlatDirLocked(dir string) error {
@@ -152,16 +189,16 @@ func (s *Storage) deleteFlatDirLocked(dir string) error {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
 		}
-		return err
+		return fmt.Errorf("list %s: %w", dir, err)
 	}
 	for _, e := range entries {
-		if err := s.removeFile(filepath.Join(dir, e.Name())); err != nil &&
-			!errors.Is(err, os.ErrNotExist) {
-			return err
+		child := filepath.Join(dir, e.Name())
+		if err := s.removeFile(child); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove %s: %w", child, err)
 		}
 	}
 	if err := s.removeFile(dir); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
+		return fmt.Errorf("remove %s: %w", dir, err)
 	}
 	return nil
 }
