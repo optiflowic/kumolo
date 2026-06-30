@@ -33,7 +33,7 @@ func (ro *Router) handleGetUser(w http.ResponseWriter, body []byte) {
 	if !ok {
 		return
 	}
-	sub, jti, ok := validateAccessJWT(w, token, &privateKey.PublicKey)
+	sub, jti, _, ok := validateAccessJWT(w, token, &privateKey.PublicKey)
 	if !ok {
 		return
 	}
@@ -111,13 +111,14 @@ func validateAccessJWT(
 	w http.ResponseWriter,
 	token string,
 	publicKey *rsa.PublicKey,
-) (sub, jti string, ok bool) {
+) (sub, jti string, exp float64, ok bool) {
 	claims, err := verifyJWT(token, publicKey)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException, "Invalid access token.")
-		return "", "", false
+		return "", "", 0, false
 	}
-	exp, expOK := claims[jwtClaimExp].(float64)
+	var expOK bool
+	exp, expOK = claims[jwtClaimExp].(float64)
 	if !expOK || int64(exp) <= time.Now().Unix() {
 		writeError(
 			w,
@@ -125,19 +126,19 @@ func validateAccessJWT(
 			ErrTypeNotAuthorizedException,
 			"Access Token has expired",
 		)
-		return "", "", false
+		return "", "", 0, false
 	}
 	if tokenUse, _ := claims[jwtClaimTokenUse].(string); tokenUse != jwtTokenUseAccess {
 		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException, "Invalid access token.")
-		return "", "", false
+		return "", "", 0, false
 	}
 	sub, _ = claims[jwtClaimSub].(string)
 	if sub == "" {
 		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException, "Invalid access token.")
-		return "", "", false
+		return "", "", 0, false
 	}
 	jti, _ = claims["jti"].(string)
-	return sub, jti, true
+	return sub, jti, exp, true
 }
 
 func (ro *Router) lookupUser(w http.ResponseWriter, poolID, sub string) (*UserMetadata, bool) {
@@ -209,7 +210,7 @@ func (ro *Router) handleGlobalSignOut(w http.ResponseWriter, body []byte) {
 	if !ok {
 		return
 	}
-	sub, jti, ok := validateAccessJWT(w, req.AccessToken, &privateKey.PublicKey)
+	sub, jti, exp, ok := validateAccessJWT(w, req.AccessToken, &privateKey.PublicKey)
 	if !ok {
 		return
 	}
@@ -219,8 +220,6 @@ func (ro *Router) handleGlobalSignOut(w http.ResponseWriter, body []byte) {
 
 	// Revoke the current access token JTI.
 	if jti != "" {
-		rawClaims, _ := parseRawClaims(req.AccessToken)
-		exp, _ := rawClaims[jwtClaimExp].(float64)
 		if err := ro.storage.RevokeAccessToken(poolID, jti, exp); err != nil {
 			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
 				"failed to revoke access token")

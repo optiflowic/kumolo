@@ -8,19 +8,18 @@ import (
 )
 
 const (
-	ErrTypeInvalidParameterException     = "InvalidParameterException"
-	ErrTypeResourceNotFoundException     = "ResourceNotFoundException"
-	ErrTypeUserNotFoundException         = "UserNotFoundException"
-	ErrTypeUserNotConfirmedException     = "UserNotConfirmedException"
-	ErrTypeNotAuthorizedException        = "NotAuthorizedException"
-	ErrTypeUsernameExistsException       = "UsernameExistsException"
-	ErrTypeCodeMismatchException         = "CodeMismatchException"
-	ErrTypeInvalidPasswordException      = "InvalidPasswordException"
-	ErrTypeInternalErrorException        = "InternalErrorException"
-	ErrTypeUnknownOperationException     = "UnknownOperationException"
-	ErrTypeGroupExistsException          = "GroupExistsException"
-	ErrTypeUnauthorizedException         = "UnauthorizedException"
-	ErrTypeUnsupportedTokenTypeException = "UnsupportedTokenTypeException"
+	ErrTypeInvalidParameterException = "InvalidParameterException"
+	ErrTypeResourceNotFoundException = "ResourceNotFoundException"
+	ErrTypeUserNotFoundException     = "UserNotFoundException"
+	ErrTypeUserNotConfirmedException = "UserNotConfirmedException"
+	ErrTypeNotAuthorizedException    = "NotAuthorizedException"
+	ErrTypeUsernameExistsException   = "UsernameExistsException"
+	ErrTypeCodeMismatchException     = "CodeMismatchException"
+	ErrTypeInvalidPasswordException  = "InvalidPasswordException"
+	ErrTypeInternalErrorException    = "InternalErrorException"
+	ErrTypeUnknownOperationException = "UnknownOperationException"
+	ErrTypeGroupExistsException      = "GroupExistsException"
+	ErrTypeUnauthorizedException     = "UnauthorizedException"
 )
 
 type responseRecorder struct {

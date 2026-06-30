@@ -903,7 +903,11 @@ func (ro *Router) handleRevokeToken(w http.ResponseWriter, body []byte) {
 
 	// Revoke the access token that was issued alongside this refresh token.
 	if rt.AccessJTI != "" {
-		if err := ro.storage.RevokeAccessToken(poolID, rt.AccessJTI, rt.ExpiresAt); err != nil {
+		if err := ro.storage.RevokeAccessToken(
+			poolID,
+			rt.AccessJTI,
+			rt.IssuedAt+float64(accessTokenExpiry),
+		); err != nil {
 			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
 				"failed to revoke access token")
 			return
