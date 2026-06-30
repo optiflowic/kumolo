@@ -1012,6 +1012,34 @@ func TestRewriteStreamFileRenameError(t *testing.T) {
 	assert.True(t, os.IsNotExist(statErr), "temp file must be cleaned up after rename failure")
 }
 
+// TestCleanupTmpRemoveError covers lines 607-609: when cleanupTmp's removeFile call
+// itself fails with a real error (not ErrNotExist), the error is logged and the
+// function returns without panicking.
+func TestCleanupTmpRemoveError(t *testing.T) {
+	s := newTestStorage(t)
+	mustCreateStreamTable(t, s, "cleanup-tmp-err", "NEW_IMAGE")
+
+	_, err := s.PutItem("cleanup-tmp-err", map[string]any{"pk": map[string]any{"S": "k"}}, nil)
+	require.NoError(t, err)
+
+	origRemoveFile := s.removeFile
+	// Fail rename to trigger cleanupTmp, then fail removeFile for the .tmp path.
+	s.renameFn = func(_, _ string) error { return errors.New("rename failed") }
+	s.removeFile = func(name string) error {
+		if strings.HasSuffix(name, streamTempFileSuffix) {
+			return errors.New("remove tmp failed")
+		}
+		return origRemoveFile(name)
+	}
+
+	buf := s.getStreamBuffer("cleanup-tmp-err")
+	require.NotNil(t, buf)
+	buf.mu.Lock()
+	s.rewriteStreamFile("cleanup-tmp-err", buf.records)
+	buf.mu.Unlock()
+	// Reaches here without panic; slog.Error is emitted for the failed tmp cleanup.
+}
+
 // TestRewriteStreamFileMarshalError covers the marshal-first path: when json.Marshal
 // fails for any record in the slice, rewriteStreamFile must not truncate the existing
 // JSONL file so that previously persisted records survive the failed rewrite.
