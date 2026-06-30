@@ -509,6 +509,7 @@ func (s *Storage) loadStreamRecordsFromDisk(tableName string) []streamRecord {
 	}
 	cutoff := time.Now().UTC().Add(-streamRetentionPeriod)
 	var records []streamRecord
+	filtered := false
 	for _, line := range strings.Split(string(data), "\n") {
 		if line == "" {
 			continue
@@ -516,11 +517,18 @@ func (s *Storage) loadStreamRecordsFromDisk(tableName string) []streamRecord {
 		var rec streamRecord
 		if err := json.Unmarshal([]byte(line), &rec); err != nil {
 			slog.Warn("skipping corrupt stream record", "table", tableName, "err", err)
+			filtered = true
 			continue
 		}
 		if rec.CreatedAt.After(cutoff) {
 			records = append(records, rec)
+		} else {
+			filtered = true
 		}
+	}
+	if filtered {
+		// No buf.mu needed here — the buffer does not exist yet at load time.
+		s.rewriteStreamFile(tableName, records)
 	}
 	return records
 }
