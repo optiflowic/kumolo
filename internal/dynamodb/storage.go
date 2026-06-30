@@ -87,6 +87,21 @@ func newStorage(dataDir string, openRoot func(string) (*os.Root, error)) (*Stora
 	s.seqNum.Store(uint64(time.Now().UnixNano() / 1e6))
 	s.stopCh = make(chan struct{})
 	s.loadAllStreamBuffers()
+
+	// Ensure seqNum is strictly beyond every restored record so that the first
+	// Add(1) after restart cannot produce a duplicate sequence number.
+	var maxSeq uint64
+	for _, buf := range s.streams {
+		for _, rec := range buf.records {
+			if rec.SeqNum > maxSeq {
+				maxSeq = rec.SeqNum
+			}
+		}
+	}
+	if cur := s.seqNum.Load(); maxSeq > cur {
+		s.seqNum.Store(maxSeq)
+	}
+
 	return s, nil
 }
 
