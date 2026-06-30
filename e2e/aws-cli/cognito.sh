@@ -647,6 +647,87 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Token revocation
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- Token revocation ---"
+
+if [[ -n "${ACCESS_TOKEN:-}" && -n "${REFRESH_TOKEN:-}" ]]; then
+  # Obtain a fresh token pair so revocation tests do not interfere with earlier steps.
+  REVOKE_AUTH_JSON=$($AWS initiate-auth \
+    --client-id "$CLIENT_ID" \
+    --auth-flow "USER_PASSWORD_AUTH" \
+    --auth-parameters "USERNAME=$USERNAME,PASSWORD=$PASSWORD" 2>&1)
+  REVOKE_ACCESS_TOKEN=$(echo "$REVOKE_AUTH_JSON" | jq -r '.AuthenticationResult.AccessToken // empty' 2>/dev/null || true)
+  REVOKE_REFRESH_TOKEN=$(echo "$REVOKE_AUTH_JSON" | jq -r '.AuthenticationResult.RefreshToken // empty' 2>/dev/null || true)
+
+  if [[ -n "$REVOKE_REFRESH_TOKEN" ]]; then
+    run "RevokeToken" \
+      $AWS revoke-token \
+        --client-id "$CLIENT_ID" \
+        --token "$REVOKE_REFRESH_TOKEN"
+
+    # Revoked refresh token must be rejected on re-use.
+    REVOKE_REUSE_JSON=$($AWS initiate-auth \
+      --client-id "$CLIENT_ID" \
+      --auth-flow "REFRESH_TOKEN_AUTH" \
+      --auth-parameters "REFRESH_TOKEN=$REVOKE_REFRESH_TOKEN" 2>&1) || true
+    if echo "$REVOKE_REUSE_JSON" | grep -qi 'NotAuthorizedException'; then
+      ok "RevokeToken — revoked refresh token rejected"
+    else
+      fail "RevokeToken — expected NotAuthorizedException for revoked refresh token"
+    fi
+
+    # Access token paired with the revoked refresh token must also be rejected.
+    REVOKE_AT_JSON=$($AWS get-user --access-token "$REVOKE_ACCESS_TOKEN" 2>&1) || true
+    if echo "$REVOKE_AT_JSON" | grep -qi 'NotAuthorizedException'; then
+      ok "RevokeToken — paired access token rejected"
+    else
+      fail "RevokeToken — expected NotAuthorizedException for paired access token"
+    fi
+  else
+    skip "RevokeToken — could not obtain fresh token pair"
+  fi
+
+  # GlobalSignOut: obtain another fresh pair.
+  GSO_AUTH_JSON=$($AWS initiate-auth \
+    --client-id "$CLIENT_ID" \
+    --auth-flow "USER_PASSWORD_AUTH" \
+    --auth-parameters "USERNAME=$USERNAME,PASSWORD=$PASSWORD" 2>&1)
+  GSO_ACCESS_TOKEN=$(echo "$GSO_AUTH_JSON" | jq -r '.AuthenticationResult.AccessToken // empty' 2>/dev/null || true)
+  GSO_REFRESH_TOKEN=$(echo "$GSO_AUTH_JSON" | jq -r '.AuthenticationResult.RefreshToken // empty' 2>/dev/null || true)
+
+  if [[ -n "$GSO_ACCESS_TOKEN" ]]; then
+    run "GlobalSignOut" \
+      $AWS global-sign-out --access-token "$GSO_ACCESS_TOKEN"
+
+    # Access token must be rejected after GlobalSignOut.
+    GSO_AT_JSON=$($AWS get-user --access-token "$GSO_ACCESS_TOKEN" 2>&1) || true
+    if echo "$GSO_AT_JSON" | grep -qi 'NotAuthorizedException'; then
+      ok "GlobalSignOut — access token rejected"
+    else
+      fail "GlobalSignOut — expected NotAuthorizedException for access token"
+    fi
+
+    # All refresh tokens for the user must be rejected after GlobalSignOut.
+    GSO_RT_JSON=$($AWS initiate-auth \
+      --client-id "$CLIENT_ID" \
+      --auth-flow "REFRESH_TOKEN_AUTH" \
+      --auth-parameters "REFRESH_TOKEN=$GSO_REFRESH_TOKEN" 2>&1) || true
+    if echo "$GSO_RT_JSON" | grep -qi 'NotAuthorizedException'; then
+      ok "GlobalSignOut — refresh token rejected"
+    else
+      fail "GlobalSignOut — expected NotAuthorizedException for refresh token"
+    fi
+  else
+    skip "GlobalSignOut — could not obtain fresh access token"
+  fi
+else
+  skip "Token revocation — no confirmed user available"
+  echo "  Hint: set E2E_COGNITO_CODE=<code> from kumolo logs, or use Docker Compose"
+fi
+
+# ---------------------------------------------------------------------------
 # Cleanup
 # ---------------------------------------------------------------------------
 # Only clear CLIENT_ID / POOL_ID after a successful delete so the EXIT-trap

@@ -1295,6 +1295,143 @@ func TestCognitoIntegration_GroupMembership(t *testing.T) {
 	})
 }
 
+// ── Token revocation ──────────────────────────────────────────────────────────
+
+func TestCognitoIntegration_TokenRevocation(t *testing.T) {
+	cap := withCodeCapture(t)
+	clients := newTestClients(t)
+	ctx := context.Background()
+	c := clients.cognito
+
+	pool, err := c.CreateUserPool(ctx, &awscognito.CreateUserPoolInput{
+		PoolName: aws.String("revocation-test-pool"),
+	})
+	require.NoError(t, err)
+	poolID := aws.ToString(pool.UserPool.Id)
+
+	cl, err := c.CreateUserPoolClient(ctx, &awscognito.CreateUserPoolClientInput{
+		UserPoolId: aws.String(poolID),
+		ClientName: aws.String("revocation-test-client"),
+	})
+	require.NoError(t, err)
+	clientID := aws.ToString(cl.UserPoolClient.ClientId)
+
+	const (
+		username = "revocation-user"
+		password = "Password1!"
+	)
+
+	_, err = c.SignUp(ctx, &awscognito.SignUpInput{
+		ClientId: aws.String(clientID),
+		Username: aws.String(username),
+		Password: aws.String(password),
+	})
+	require.NoError(t, err)
+
+	code := cap.get(username)
+	require.NotEmpty(t, code)
+	_, err = c.ConfirmSignUp(ctx, &awscognito.ConfirmSignUpInput{
+		ClientId:         aws.String(clientID),
+		Username:         aws.String(username),
+		ConfirmationCode: aws.String(code),
+	})
+	require.NoError(t, err)
+
+	// authenticate issues a fresh token pair via USER_PASSWORD_AUTH.
+	authenticate := func(t *testing.T) (accessToken, refreshToken string) {
+		t.Helper()
+		out, err := c.InitiateAuth(ctx, &awscognito.InitiateAuthInput{
+			ClientId: aws.String(clientID),
+			AuthFlow: types.AuthFlowTypeUserPasswordAuth,
+			AuthParameters: map[string]string{
+				"USERNAME": username,
+				"PASSWORD": password,
+			},
+		})
+		require.NoError(t, err)
+		return aws.ToString(out.AuthenticationResult.AccessToken),
+			aws.ToString(out.AuthenticationResult.RefreshToken)
+	}
+
+	t.Run("RevokeToken_RefreshTokenNoLongerUsable", func(t *testing.T) {
+		_, refreshToken := authenticate(t)
+
+		_, err := c.RevokeToken(ctx, &awscognito.RevokeTokenInput{
+			ClientId: aws.String(clientID),
+			Token:    aws.String(refreshToken),
+		})
+		require.NoError(t, err)
+
+		_, err = c.InitiateAuth(ctx, &awscognito.InitiateAuthInput{
+			ClientId: aws.String(clientID),
+			AuthFlow: types.AuthFlowTypeRefreshTokenAuth,
+			AuthParameters: map[string]string{
+				"REFRESH_TOKEN": refreshToken,
+			},
+		})
+		require.Error(t, err)
+		assert.Equal(t, "NotAuthorizedException", apiErrorCode(err))
+	})
+
+	t.Run("RevokeToken_PairedAccessTokenRevoked", func(t *testing.T) {
+		accessToken, refreshToken := authenticate(t)
+
+		_, err := c.RevokeToken(ctx, &awscognito.RevokeTokenInput{
+			ClientId: aws.String(clientID),
+			Token:    aws.String(refreshToken),
+		})
+		require.NoError(t, err)
+
+		_, err = c.GetUser(ctx, &awscognito.GetUserInput{
+			AccessToken: aws.String(accessToken),
+		})
+		require.Error(t, err)
+		assert.Equal(t, "NotAuthorizedException", apiErrorCode(err))
+	})
+
+	t.Run("RevokeToken_Idempotent", func(t *testing.T) {
+		_, err := c.RevokeToken(ctx, &awscognito.RevokeTokenInput{
+			ClientId: aws.String(clientID),
+			Token:    aws.String("not-a-real-refresh-token"),
+		})
+		require.NoError(t, err)
+	})
+
+	t.Run("GlobalSignOut_AccessTokenRevoked", func(t *testing.T) {
+		accessToken, _ := authenticate(t)
+
+		_, err := c.GlobalSignOut(ctx, &awscognito.GlobalSignOutInput{
+			AccessToken: aws.String(accessToken),
+		})
+		require.NoError(t, err)
+
+		_, err = c.GetUser(ctx, &awscognito.GetUserInput{
+			AccessToken: aws.String(accessToken),
+		})
+		require.Error(t, err)
+		assert.Equal(t, "NotAuthorizedException", apiErrorCode(err))
+	})
+
+	t.Run("GlobalSignOut_RefreshTokensRevoked", func(t *testing.T) {
+		accessToken, refreshToken := authenticate(t)
+
+		_, err := c.GlobalSignOut(ctx, &awscognito.GlobalSignOutInput{
+			AccessToken: aws.String(accessToken),
+		})
+		require.NoError(t, err)
+
+		_, err = c.InitiateAuth(ctx, &awscognito.InitiateAuthInput{
+			ClientId: aws.String(clientID),
+			AuthFlow: types.AuthFlowTypeRefreshTokenAuth,
+			AuthParameters: map[string]string{
+				"REFRESH_TOKEN": refreshToken,
+			},
+		})
+		require.Error(t, err)
+		assert.Equal(t, "NotAuthorizedException", apiErrorCode(err))
+	})
+}
+
 func TestCognitoIntegration_RefreshTokenExpiry(t *testing.T) {
 	cap := withCodeCapture(t)
 	clients := newTestClients(t)
