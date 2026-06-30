@@ -500,6 +500,43 @@ func TestGlobalSignOut_InvalidToken(t *testing.T) {
 	assertErrType(t, w, ErrTypeNotAuthorizedException)
 }
 
+func TestGlobalSignOut_PoolKeyError(t *testing.T) {
+	key, _ := rsa.GenerateKey(rand.Reader, 2048)
+	poolID := "us-east-1_TestPool"
+	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
+	token, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil)
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return nil, nil, errors.New("disk error")
+		},
+	}}
+	body, _ := json.Marshal(map[string]string{"AccessToken": token})
+	w := doOp(t, ro, "GlobalSignOut", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestGlobalSignOut_WrongKeySignature(t *testing.T) {
+	key1, _ := rsa.GenerateKey(rand.Reader, 2048)
+	key2, _ := rsa.GenerateKey(rand.Reader, 2048)
+	poolID := "us-east-1_TestPool"
+	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
+	token, _, _, _, err := issueTokens(key1, "kid", poolID, "client-1", user, nil)
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: "kid"}, key2, nil
+		},
+	}}
+	body, _ := json.Marshal(map[string]string{"AccessToken": token})
+	w := doOp(t, ro, "GlobalSignOut", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeNotAuthorizedException)
+}
+
 func TestGlobalSignOut_RevokeAccessTokenStorageError(t *testing.T) {
 	key, _ := rsa.GenerateKey(rand.Reader, 2048)
 	poolID := "us-east-1_TestPool"

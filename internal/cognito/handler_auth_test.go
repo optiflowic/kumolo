@@ -1842,6 +1842,18 @@ func TestRevokeToken_InvalidJSON(t *testing.T) {
 	assertErrType(t, w, ErrTypeInvalidParameterException)
 }
 
+func TestRevokeToken_GetPoolIDStorageError(t *testing.T) {
+	ro := &Router{storage: &mockStore{
+		getPoolForClient: func(string) (string, error) {
+			return "", errors.New("disk error")
+		},
+	}}
+	body, _ := json.Marshal(map[string]string{"ClientId": "c", "Token": "tok"})
+	w := doOp(t, ro, "RevokeToken", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
 func TestRevokeToken_GetRefreshTokenStorageError(t *testing.T) {
 	ro := &Router{storage: &mockStore{
 		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
