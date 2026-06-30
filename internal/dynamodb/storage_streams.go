@@ -69,6 +69,7 @@ type streamBuffer struct {
 	label   string // ISO8601 timestamp when streaming was enabled
 	shardID string // deterministic shard ID for this stream
 	records []streamRecord
+	deleted bool // set under mu by deleteStreamBuffer; prevents stale file writes
 }
 
 // shardIterState is the state encoded inside a shard iterator token.
@@ -144,8 +145,19 @@ func (s *Storage) getStreamBuffer(tableName string) *streamBuffer {
 // Called on DeleteTable or when streaming is disabled.
 func (s *Storage) deleteStreamBuffer(tableName string) {
 	s.streamsMu.Lock()
-	defer s.streamsMu.Unlock()
+	buf := s.streams[tableName]
 	delete(s.streams, tableName)
+	s.streamsMu.Unlock()
+
+	// Mark the buffer deleted before removing the file so that any goroutine
+	// which already holds a pointer to buf (captured before the map removal)
+	// sees deleted=true when it next acquires buf.mu and skips the file write.
+	if buf != nil {
+		buf.mu.Lock()
+		buf.deleted = true
+		buf.mu.Unlock()
+	}
+
 	if err := s.removeFile(
 		streamFilePath(tableName),
 	); err != nil &&
@@ -197,8 +209,10 @@ func (s *Storage) emitStreamRecord(
 	}
 
 	buf.mu.Lock()
-	buf.records = append(buf.records, rec)
-	s.appendToStreamFile(tableName, rec)
+	if !buf.deleted {
+		buf.records = append(buf.records, rec)
+		s.appendToStreamFile(tableName, rec)
+	}
 	buf.mu.Unlock()
 }
 
@@ -593,6 +607,9 @@ func (s *Storage) trimStreamForTable(tableName string, cutoff time.Time) {
 	}
 	buf.mu.Lock()
 	defer buf.mu.Unlock()
+	if buf.deleted {
+		return
+	}
 	trimmed := buf.records[:0:0]
 	for _, r := range buf.records {
 		if r.CreatedAt.After(cutoff) {
