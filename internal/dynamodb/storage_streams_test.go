@@ -860,7 +860,11 @@ func TestRewriteStreamFileOpenError(t *testing.T) {
 	recs := []streamRecord{
 		{EventID: "1", EventName: "INSERT", SeqNum: 1, CreatedAt: time.Now()},
 	}
+	buf := s.getStreamBuffer("rw-open-err")
+	require.NotNil(t, buf)
+	buf.mu.Lock()
 	s.rewriteStreamFile("rw-open-err", recs)
+	buf.mu.Unlock()
 }
 
 // TestRewriteStreamFileWriteError covers lines 557-566: Write returns an error while
@@ -875,7 +879,11 @@ func TestRewriteStreamFileWriteError(t *testing.T) {
 	recs := []streamRecord{
 		{EventID: "1", EventName: "INSERT", SeqNum: 1, CreatedAt: time.Now()},
 	}
+	buf := s.getStreamBuffer("rw-write-err")
+	require.NotNil(t, buf)
+	buf.mu.Lock()
 	s.rewriteStreamFile("rw-write-err", recs)
+	buf.mu.Unlock()
 }
 
 // TestTrimStreamForTableNilBuf covers lines 574-576: trimStreamForTable returns immediately
