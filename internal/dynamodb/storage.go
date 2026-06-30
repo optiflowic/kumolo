@@ -53,7 +53,9 @@ func (s *Storage) Close() error {
 	s.closeOnce.Do(func() {
 		close(s.stopCh)
 		s.trimWg.Wait()
-		err = s.root.Close()
+		if closeErr := s.root.Close(); closeErr != nil {
+			err = fmt.Errorf("close storage root: %w", closeErr)
+		}
 	})
 	return err
 }
