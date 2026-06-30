@@ -497,14 +497,14 @@ func (s *Storage) loadStreamRecordsFromDisk(tableName string) []streamRecord {
 		if !errors.Is(err, os.ErrNotExist) {
 			// untestable: triggering a non-ErrNotExist Open failure requires OS-level
 			// permission manipulation (e.g. chmod 000) which is fragile in CI.
-			slog.Warn("failed to open stream file", "table", tableName, "err", err)
+			slog.Error("failed to open stream file", "table", tableName, "err", err)
 		}
 		return nil
 	}
 	defer func() { _ = f.Close() }()
 	data, err := s.readAll(f)
 	if err != nil {
-		slog.Warn("failed to read stream file", "table", tableName, "err", err)
+		slog.Error("failed to read stream file", "table", tableName, "err", err)
 		return nil
 	}
 	cutoff := time.Now().UTC().Add(-streamRetentionPeriod)
@@ -534,12 +534,12 @@ func (s *Storage) appendToStreamFile(tableName string, rec streamRecord) {
 	line := append(data, '\n')
 	f, err := s.openFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
 	if err != nil {
-		slog.Warn("failed to open stream file for append", "table", tableName, "err", err)
+		slog.Error("failed to open stream file for append", "table", tableName, "err", err)
 		return
 	}
 	defer func() { _ = f.Close() }()
 	if _, err := f.Write(line); err != nil {
-		slog.Warn("failed to append stream record", "table", tableName, "err", err)
+		slog.Error("failed to append stream record", "table", tableName, "err", err)
 	}
 }
 
@@ -551,20 +551,20 @@ func (s *Storage) rewriteStreamFile(tableName string, records []streamRecord) {
 	path := streamFilePath(tableName)
 	if len(records) == 0 {
 		if err := s.removeFile(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			slog.Warn("failed to remove empty stream file", "table", tableName, "err", err)
+			slog.Error("failed to remove empty stream file", "table", tableName, "err", err)
 		}
 		return
 	}
 	f, err := s.openFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
-		slog.Warn("failed to rewrite stream file", "table", tableName, "err", err)
+		slog.Error("failed to rewrite stream file", "table", tableName, "err", err)
 		return
 	}
 	defer func() { _ = f.Close() }()
 	for _, rec := range records {
 		data, _ := json.Marshal(rec)
 		if _, err := f.Write(append(data, '\n')); err != nil {
-			slog.Warn(
+			slog.Error(
 				"failed to write stream record during rewrite",
 				"table",
 				tableName,
