@@ -5,12 +5,19 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// errWriter is an io.WriteCloser whose Write always returns an error.
+type errWriter struct{ writeErr error }
+
+func (w errWriter) Write([]byte) (int, error) { return 0, w.writeErr }
+func (errWriter) Close() error                { return nil }
 
 func TestStreamARNParsing(t *testing.T) {
 	tests := []struct {
@@ -693,4 +700,284 @@ func TestStreamFileRemovedOnDisable(t *testing.T) {
 		errors.Is(err, os.ErrNotExist),
 		"stream file should be removed when streaming is disabled",
 	)
+}
+
+// TestDeleteStreamBufferRemoveFileError covers lines 145-147: the removeFile warning path
+// when the stream JSONL file cannot be removed for a reason other than ErrNotExist.
+func TestDeleteStreamBufferRemoveFileError(t *testing.T) {
+	s := newTestStorage(t)
+	mustCreateStreamTable(t, s, "buf-rm-err", "NEW_IMAGE")
+	_, err := s.PutItem("buf-rm-err", map[string]any{"pk": map[string]any{"S": "k"}}, nil)
+	require.NoError(t, err)
+
+	s.removeFile = func(string) error { return errors.New("remove failed") }
+	s.deleteStreamBuffer("buf-rm-err")
+	assert.Nil(t, s.getStreamBuffer("buf-rm-err"))
+}
+
+// TestLoadStreamRecordsFromDiskReadAllError covers lines 497-500: readAll returns an error
+// after the stream file was successfully opened.
+func TestLoadStreamRecordsFromDiskReadAllError(t *testing.T) {
+	s := newTestStorage(t)
+	mustCreateStreamTable(t, s, "readall-err", "NEW_IMAGE")
+	_, err := s.PutItem("readall-err", map[string]any{"pk": map[string]any{"S": "k"}}, nil)
+	require.NoError(t, err)
+
+	s.readAll = func(io.Reader) ([]byte, error) { return nil, errors.New("disk read error") }
+	records := s.loadStreamRecordsFromDisk("readall-err")
+	assert.Nil(t, records)
+}
+
+// TestLoadStreamRecordsFromDiskCorruptLine covers lines 508-510: a corrupt JSON line in the
+// stream file is skipped while valid lines are still returned.
+func TestLoadStreamRecordsFromDiskCorruptLine(t *testing.T) {
+	s := newTestStorage(t)
+	mustCreateStreamTable(t, s, "corrupt-stream", "NEW_IMAGE")
+	_, err := s.PutItem("corrupt-stream", map[string]any{"pk": map[string]any{"S": "k1"}}, nil)
+	require.NoError(t, err)
+
+	f, err := s.root.OpenFile(streamFilePath("corrupt-stream"), os.O_WRONLY|os.O_APPEND, 0o600)
+	require.NoError(t, err)
+	_, err = f.Write([]byte("not-valid-json\n"))
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	s.streamsMu.Lock()
+	delete(s.streams, "corrupt-stream")
+	s.streamsMu.Unlock()
+
+	records := s.loadStreamRecordsFromDisk("corrupt-stream")
+	assert.Len(t, records, 1, "valid record should survive; corrupt line should be skipped")
+}
+
+// TestAppendToStreamFileOpenError covers lines 527-530: openFile returns an error when the
+// stream JSONL file is being opened for append.
+func TestAppendToStreamFileOpenError(t *testing.T) {
+	s := newTestStorage(t)
+	mustCreateStreamTable(t, s, "append-open-err", "NEW_IMAGE")
+
+	origOpenFile := s.openFile
+	s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+		if strings.HasSuffix(name, ".stream.jsonl") {
+			return nil, errors.New("open failed")
+		}
+		return origOpenFile(name, flag, perm)
+	}
+	_, err := s.PutItem(
+		"append-open-err",
+		map[string]any{"pk": map[string]any{"S": "k"}},
+		nil,
+	)
+	require.NoError(t, err, "PutItem itself must succeed even when stream file cannot be opened")
+}
+
+// TestAppendToStreamFileWriteError covers lines 532-534: Write returns an error after the
+// stream file was opened successfully.
+func TestAppendToStreamFileWriteError(t *testing.T) {
+	s := newTestStorage(t)
+	mustCreateStreamTable(t, s, "append-write-err", "NEW_IMAGE")
+
+	origOpenFile := s.openFile
+	s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+		if strings.HasSuffix(name, ".stream.jsonl") {
+			return errWriter{writeErr: errors.New("write failed")}, nil
+		}
+		return origOpenFile(name, flag, perm)
+	}
+	_, err := s.PutItem(
+		"append-write-err",
+		map[string]any{"pk": map[string]any{"S": "k"}},
+		nil,
+	)
+	require.NoError(t, err, "PutItem itself must succeed even when stream record write fails")
+}
+
+// TestRewriteStreamFileAllExpired covers lines 543 and 547: rewriteStreamFile is called with
+// an empty slice when trimStreamForTable removes all records.
+func TestRewriteStreamFileAllExpired(t *testing.T) {
+	s := newTestStorage(t)
+	mustCreateStreamTable(t, s, "all-expired", "KEYS_ONLY")
+	for i := range 3 {
+		item := map[string]any{"pk": map[string]any{"S": fmt.Sprintf("k%d", i)}}
+		_, err := s.PutItem("all-expired", item, nil)
+		require.NoError(t, err)
+	}
+
+	buf := s.getStreamBuffer("all-expired")
+	require.NotNil(t, buf)
+	cutoff := time.Now().UTC()
+	buf.mu.Lock()
+	for i := range len(buf.records) {
+		buf.records[i].CreatedAt = cutoff.Add(-time.Hour)
+	}
+	buf.mu.Unlock()
+
+	s.trimStreamForTable("all-expired", cutoff)
+
+	buf.mu.RLock()
+	n := len(buf.records)
+	buf.mu.RUnlock()
+	assert.Equal(t, 0, n, "all records should be trimmed")
+}
+
+// TestRewriteStreamFileEmptyRemoveError covers lines 544-546: removeFile returns a
+// non-ErrNotExist error when rewriteStreamFile tries to delete the empty stream file.
+func TestRewriteStreamFileEmptyRemoveError(t *testing.T) {
+	s := newTestStorage(t)
+	mustCreateStreamTable(t, s, "rw-rm-err", "KEYS_ONLY")
+	_, err := s.PutItem("rw-rm-err", map[string]any{"pk": map[string]any{"S": "k"}}, nil)
+	require.NoError(t, err)
+
+	origRemoveFile := s.removeFile
+	s.removeFile = func(name string) error {
+		if strings.HasSuffix(name, ".stream.jsonl") {
+			return errors.New("remove failed")
+		}
+		return origRemoveFile(name)
+	}
+
+	buf := s.getStreamBuffer("rw-rm-err")
+	require.NotNil(t, buf)
+	cutoff := time.Now().UTC()
+	buf.mu.Lock()
+	for i := range len(buf.records) {
+		buf.records[i].CreatedAt = cutoff.Add(-time.Hour)
+	}
+	buf.mu.Unlock()
+
+	s.trimStreamForTable("rw-rm-err", cutoff)
+}
+
+// TestRewriteStreamFileOpenError covers lines 550-553: openFile returns an error when
+// rewriteStreamFile tries to open the stream file for truncation write.
+func TestRewriteStreamFileOpenError(t *testing.T) {
+	s := newTestStorage(t)
+	mustCreateStreamTable(t, s, "rw-open-err", "NEW_IMAGE")
+
+	s.openFile = func(string, int, os.FileMode) (io.WriteCloser, error) {
+		return nil, errors.New("open failed")
+	}
+	recs := []streamRecord{
+		{EventID: "1", EventName: "INSERT", SeqNum: 1, CreatedAt: time.Now()},
+	}
+	s.rewriteStreamFile("rw-open-err", recs)
+}
+
+// TestRewriteStreamFileWriteError covers lines 557-566: Write returns an error while
+// rewriteStreamFile is iterating over records.
+func TestRewriteStreamFileWriteError(t *testing.T) {
+	s := newTestStorage(t)
+	mustCreateStreamTable(t, s, "rw-write-err", "NEW_IMAGE")
+
+	s.openFile = func(string, int, os.FileMode) (io.WriteCloser, error) {
+		return errWriter{writeErr: errors.New("write failed")}, nil
+	}
+	recs := []streamRecord{
+		{EventID: "1", EventName: "INSERT", SeqNum: 1, CreatedAt: time.Now()},
+	}
+	s.rewriteStreamFile("rw-write-err", recs)
+}
+
+// TestTrimStreamForTableNilBuf covers lines 574-576: trimStreamForTable returns immediately
+// when there is no stream buffer for the given table.
+func TestTrimStreamForTableNilBuf(t *testing.T) {
+	s := newTestStorage(t)
+	s.trimStreamForTable("nonexistent-table", time.Now())
+}
+
+// TestTrimStreamForTableNoOp covers lines 585-587: trimStreamForTable returns early when no
+// records fall before the cutoff (nothing to trim).
+func TestTrimStreamForTableNoOp(t *testing.T) {
+	s := newTestStorage(t)
+	mustCreateStreamTable(t, s, "trim-noop", "KEYS_ONLY")
+	_, err := s.PutItem("trim-noop", map[string]any{"pk": map[string]any{"S": "k"}}, nil)
+	require.NoError(t, err)
+
+	// Zero cutoff: all records are after it, so nothing gets trimmed.
+	s.trimStreamForTable("trim-noop", time.Time{})
+
+	buf := s.getStreamBuffer("trim-noop")
+	require.NotNil(t, buf)
+	buf.mu.RLock()
+	n := len(buf.records)
+	buf.mu.RUnlock()
+	assert.Equal(t, 1, n)
+}
+
+// TestTrimAllStreams covers lines 593-604: trimAllStreams iterates over all active stream
+// buffers and trims records older than 24 hours.
+func TestTrimAllStreams(t *testing.T) {
+	s := newTestStorage(t)
+	for _, tn := range []string{"trim-all-a", "trim-all-b"} {
+		mustCreateStreamTable(t, s, tn, "KEYS_ONLY")
+		_, err := s.PutItem(tn, map[string]any{"pk": map[string]any{"S": "k"}}, nil)
+		require.NoError(t, err)
+	}
+
+	for _, tn := range []string{"trim-all-a", "trim-all-b"} {
+		buf := s.getStreamBuffer(tn)
+		require.NotNil(t, buf)
+		buf.mu.Lock()
+		for i := range len(buf.records) {
+			buf.records[i].CreatedAt = time.Now().UTC().Add(-25 * time.Hour)
+		}
+		buf.mu.Unlock()
+	}
+
+	s.trimAllStreams()
+
+	for _, tn := range []string{"trim-all-a", "trim-all-b"} {
+		buf := s.getStreamBuffer(tn)
+		require.NotNil(t, buf)
+		buf.mu.RLock()
+		n := len(buf.records)
+		buf.mu.RUnlock()
+		assert.Equal(t, 0, n, "table %s: all expired records should be trimmed", tn)
+	}
+}
+
+// TestLoadAllStreamBuffersReadDirError covers lines 610-613: loadAllStreamBuffers logs a
+// warning and returns when readDir fails.
+func TestLoadAllStreamBuffersReadDirError(t *testing.T) {
+	s := newTestStorage(t)
+	s.listDirFn = func(string) ([]os.DirEntry, error) { return nil, errors.New("readdir failed") }
+	s.loadAllStreamBuffers()
+}
+
+// TestLoadAllStreamBuffersReadTableMetaError covers lines 620-622: loadAllStreamBuffers logs
+// a warning and continues when a table metadata file cannot be parsed.
+func TestLoadAllStreamBuffersReadTableMetaError(t *testing.T) {
+	s := newTestStorage(t)
+
+	f, err := s.root.OpenFile("corrupt.table.json", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	require.NoError(t, err)
+	_, err = f.Write([]byte("not-valid-json"))
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	s.loadAllStreamBuffers()
+}
+
+// TestStartTrimLoopTickerFires covers lines 640-641: the ticker case in startTrimLoop fires
+// and calls trimAllStreams, which removes expired records.
+func TestStartTrimLoopTickerFires(t *testing.T) {
+	s := newTestStorage(t)
+	mustCreateStreamTable(t, s, "trim-loop", "KEYS_ONLY")
+	_, err := s.PutItem("trim-loop", map[string]any{"pk": map[string]any{"S": "k"}}, nil)
+	require.NoError(t, err)
+
+	buf := s.getStreamBuffer("trim-loop")
+	require.NotNil(t, buf)
+	buf.mu.Lock()
+	buf.records[0].CreatedAt = time.Now().UTC().Add(-25 * time.Hour)
+	s.rewriteStreamFile("trim-loop", buf.records)
+	buf.mu.Unlock()
+
+	s.startTrimLoop(1 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
+
+	buf.mu.RLock()
+	n := len(buf.records)
+	buf.mu.RUnlock()
+	assert.Equal(t, 0, n, "trim loop should have removed the expired record")
 }

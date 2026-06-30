@@ -488,6 +488,8 @@ func (s *Storage) loadStreamRecordsFromDisk(tableName string) []streamRecord {
 	f, err := s.root.Open(path)
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
+			// untestable: triggering a non-ErrNotExist Open failure requires OS-level
+			// permission manipulation (e.g. chmod 000) which is fragile in CI.
 			slog.Warn("failed to open stream file", "table", tableName, "err", err)
 		}
 		return nil
