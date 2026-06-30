@@ -47,11 +47,15 @@ func NewStorage(dataDir string) (*Storage, error) {
 }
 
 // Close stops the background trim goroutine and releases the os.Root handle.
-// Safe to call multiple times.
+// Safe to call multiple times; subsequent calls are no-ops that return nil.
 func (s *Storage) Close() error {
-	s.closeOnce.Do(func() { close(s.stopCh) })
-	s.trimWg.Wait()
-	return s.root.Close()
+	var err error
+	s.closeOnce.Do(func() {
+		close(s.stopCh)
+		s.trimWg.Wait()
+		err = s.root.Close()
+	})
+	return err
 }
 
 func newStorage(dataDir string, openRoot func(string) (*os.Root, error)) (*Storage, error) {

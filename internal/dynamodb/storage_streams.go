@@ -518,6 +518,7 @@ func (s *Storage) loadStreamRecordsFromDisk(tableName string) []streamRecord {
 
 // appendToStreamFile appends rec as a single JSON line to the table's JSONL file.
 // Must be called with buf.mu held to preserve write ordering.
+// A new file descriptor is opened per call; acceptable at emulator scale.
 func (s *Storage) appendToStreamFile(tableName string, rec streamRecord) {
 	path := streamFilePath(tableName)
 	data, _ := json.Marshal(rec)
@@ -533,7 +534,9 @@ func (s *Storage) appendToStreamFile(tableName string, rec streamRecord) {
 	}
 }
 
-// rewriteStreamFile atomically replaces the table's JSONL file with records.
+// rewriteStreamFile replaces the table's JSONL file using truncate-and-write (same
+// pattern as writeJSON). A crash mid-write may leave a partial file; corrupt lines are
+// skipped on reload so recovery is graceful, but records after the crash point are lost.
 // If records is empty the file is removed. Must be called with buf.mu held.
 func (s *Storage) rewriteStreamFile(tableName string, records []streamRecord) {
 	path := streamFilePath(tableName)
