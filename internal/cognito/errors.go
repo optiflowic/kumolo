@@ -19,6 +19,7 @@ const (
 	ErrTypeInternalErrorException    = "InternalErrorException"
 	ErrTypeUnknownOperationException = "UnknownOperationException"
 	ErrTypeGroupExistsException      = "GroupExistsException"
+	ErrTypeUnauthorizedException     = "UnauthorizedException"
 )
 
 type responseRecorder struct {

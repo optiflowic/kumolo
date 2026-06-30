@@ -164,28 +164,32 @@ func TestStorage_Close(t *testing.T) {
 
 // mockStore is a minimal store implementation for testing non-group handler error paths.
 type mockStore struct {
-	createErr          error
-	getErr             error
-	updateErr          error
-	deleteErr          error
-	listErr            error
-	createClientErr    error
-	getClientErr       error
-	updateClientErr    error
-	deleteClientErr    error
-	listClientErr      error
-	getPoolForClient   func(string) (string, error)
-	createUserErr      error
-	getUserFn          func(string, string) (*UserMetadata, error)
-	getUserBySubFn     func(string, string) (*UserMetadata, error)
-	updateUserErr      error
-	deleteUserErr      error
-	getOrCreateKeysFn  func(string) (*poolKeys, *rsa.PrivateKey, error)
-	getPoolKeysFn      func(string) (*poolKeys, *rsa.PrivateKey, error)
-	createRefreshErr   error
-	getRefreshFn       func(string, string) (*refreshTokenData, error)
-	deleteRefreshErr   error
-	getGroupsForUserFn func(string, string) ([]string, error)
+	createErr                 error
+	getErr                    error
+	updateErr                 error
+	deleteErr                 error
+	listErr                   error
+	createClientErr           error
+	getClientErr              error
+	updateClientErr           error
+	deleteClientErr           error
+	listClientErr             error
+	getPoolForClient          func(string) (string, error)
+	createUserErr             error
+	getUserFn                 func(string, string) (*UserMetadata, error)
+	getUserBySubFn            func(string, string) (*UserMetadata, error)
+	updateUserErr             error
+	deleteUserErr             error
+	getOrCreateKeysFn         func(string) (*poolKeys, *rsa.PrivateKey, error)
+	getPoolKeysFn             func(string) (*poolKeys, *rsa.PrivateKey, error)
+	createRefreshErr          error
+	getRefreshFn              func(string, string) (*refreshTokenData, error)
+	deleteRefreshErr          error
+	getGroupsForUserFn        func(string, string) ([]string, error)
+	revokeAccessTokenErr      error
+	isRevokedFn               func(string, string) (bool, error)
+	deleteRefreshBySubErr     error
+	revokeOriginJTIsForSubErr error
 }
 
 func (m *mockStore) CreateUserPool(*UserPoolMetadata) error { return m.createErr }
@@ -283,6 +287,25 @@ func (m *mockStore) GetGroupsForUser(poolID, username string) ([]string, error) 
 		return m.getGroupsForUserFn(poolID, username)
 	}
 	return nil, nil
+}
+
+func (m *mockStore) RevokeAccessToken(string, string, float64) error {
+	return m.revokeAccessTokenErr
+}
+
+func (m *mockStore) IsAccessTokenRevoked(poolID, jti string) (bool, error) {
+	if m.isRevokedFn != nil {
+		return m.isRevokedFn(poolID, jti)
+	}
+	return false, nil
+}
+
+func (m *mockStore) DeleteRefreshTokensBySub(string, string) error {
+	return m.deleteRefreshBySubErr
+}
+
+func (m *mockStore) RevokeOriginJTIsForSub(string, string, float64) error {
+	return m.revokeOriginJTIsForSubErr
 }
 
 // mockGroupStore is a minimal groupStore implementation for testing group handler error paths.

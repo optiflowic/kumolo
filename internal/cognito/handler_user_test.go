@@ -254,6 +254,31 @@ func TestGetUser_EmptySub(t *testing.T) {
 	assertErrType(t, w, ErrTypeNotAuthorizedException)
 }
 
+func TestGetUser_MissingJTI(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+
+	poolID, err := ro.storage.GetPoolIDForClient(clientID)
+	require.NoError(t, err)
+	keys, privateKey, err := ro.storage.GetOrCreatePoolKeys(poolID)
+	require.NoError(t, err)
+
+	now := time.Now().Unix()
+	token, err := buildJWT(privateKey, keys.KeyID, map[string]any{
+		"sub":       "some-sub",
+		"iss":       issuerURL(poolID),
+		"token_use": "access",
+		"exp":       now + 3600,
+		"iat":       now,
+		// jti is intentionally omitted — must be rejected
+	})
+	require.NoError(t, err)
+
+	w := doGetUserDirect(t, ro, token)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeNotAuthorizedException)
+}
+
 func TestGetUser_UserNotFound(t *testing.T) {
 	ro := newTestRouter(t)
 	_, clientID := setupPool(t, ro)
@@ -265,11 +290,13 @@ func TestGetUser_UserNotFound(t *testing.T) {
 
 	now := time.Now().Unix()
 	token, err := buildJWT(privateKey, keys.KeyID, map[string]any{
-		"sub":       "00000000-0000-0000-0000-000000000000",
-		"iss":       issuerURL(poolID),
-		"token_use": "access",
-		"exp":       now + 3600,
-		"iat":       now,
+		"sub":        "00000000-0000-0000-0000-000000000000",
+		"iss":        issuerURL(poolID),
+		"token_use":  "access",
+		"exp":        now + 3600,
+		"iat":        now,
+		"jti":        "some-jti-user-not-found",
+		"origin_jti": "some-origin-jti",
 	})
 	require.NoError(t, err)
 
@@ -343,11 +370,13 @@ func TestGetUser_GetUserBySubStorageError(t *testing.T) {
 	keyID := "k1"
 	now := time.Now().Unix()
 	token, err := buildJWT(privKey, keyID, map[string]any{
-		"sub":       "some-sub",
-		"iss":       issuerURL(poolID),
-		"token_use": "access",
-		"exp":       now + 3600,
-		"iat":       now,
+		"sub":        "some-sub",
+		"iss":        issuerURL(poolID),
+		"token_use":  "access",
+		"exp":        now + 3600,
+		"iat":        now,
+		"jti":        "some-jti-storage-error",
+		"origin_jti": "some-origin-jti",
 	})
 	require.NoError(t, err)
 
@@ -406,4 +435,319 @@ func TestPrependSub_EmptyAttrs(t *testing.T) {
 	result := prependSub(nil, "uuid-1")
 	require.Len(t, result, 1)
 	assert.Equal(t, "sub", result[0].Name)
+}
+
+// ── GlobalSignOut ─────────────────────────────────────────────────────────────
+
+func TestGlobalSignOut_Success(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	token := doAuth(t, ro, clientID, "alice", "Password123!")
+
+	body, _ := json.Marshal(map[string]string{"AccessToken": token})
+	w := doOp(t, ro, "GlobalSignOut", string(body))
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestGlobalSignOut_AccessTokenRejectedAfterSignOut(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	token := doAuth(t, ro, clientID, "alice", "Password123!")
+
+	// Sign out.
+	signOutBody, _ := json.Marshal(map[string]string{"AccessToken": token})
+	w := doOp(t, ro, "GlobalSignOut", string(signOutBody))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// Access token must now be rejected.
+	getUserBody, _ := json.Marshal(map[string]string{"AccessToken": token})
+	w2 := doOp(t, ro, "GetUser", string(getUserBody))
+	assert.Equal(t, http.StatusBadRequest, w2.Code)
+	assertErrType(t, w2, ErrTypeNotAuthorizedException)
+}
+
+func TestGlobalSignOut_RefreshTokensRevokedAfterSignOut(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	result := doFullAuth(t, ro, clientID, "alice", "Password123!")
+	accessToken := result["AccessToken"].(string)
+	refreshToken := result["RefreshToken"].(string)
+
+	// Sign out.
+	signOutBody, _ := json.Marshal(map[string]string{"AccessToken": accessToken})
+	w := doOp(t, ro, "GlobalSignOut", string(signOutBody))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// Refresh token must now be rejected.
+	refreshBody, _ := json.Marshal(map[string]any{
+		"ClientId": clientID,
+		"AuthFlow": "REFRESH_TOKEN_AUTH",
+		"AuthParameters": map[string]string{
+			"REFRESH_TOKEN": refreshToken,
+		},
+	})
+	w2 := doOp(t, ro, "InitiateAuth", string(refreshBody))
+	assert.Equal(t, http.StatusBadRequest, w2.Code)
+	assertErrType(t, w2, ErrTypeNotAuthorizedException)
+}
+
+func TestGlobalSignOut_AlreadyRevokedTokenRejected(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	token := doAuth(t, ro, clientID, "alice", "Password123!")
+
+	// First sign out.
+	body, _ := json.Marshal(map[string]string{"AccessToken": token})
+	w := doOp(t, ro, "GlobalSignOut", string(body))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// Second sign out with same token must fail.
+	w2 := doOp(t, ro, "GlobalSignOut", string(body))
+	assert.Equal(t, http.StatusBadRequest, w2.Code)
+	assertErrType(t, w2, ErrTypeNotAuthorizedException)
+}
+
+func TestGlobalSignOut_MissingAccessToken(t *testing.T) {
+	ro := newTestRouter(t)
+	w := doOp(t, ro, "GlobalSignOut", `{}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeInvalidParameterException)
+}
+
+func TestGlobalSignOut_InvalidJSON(t *testing.T) {
+	ro := newTestRouter(t)
+	w := doOp(t, ro, "GlobalSignOut", `{bad}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeInvalidParameterException)
+}
+
+func TestGlobalSignOut_InvalidToken(t *testing.T) {
+	ro := newTestRouter(t)
+	body, _ := json.Marshal(map[string]string{"AccessToken": "not.a.jwt"})
+	w := doOp(t, ro, "GlobalSignOut", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeNotAuthorizedException)
+}
+
+func TestGlobalSignOut_PoolKeyError(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	poolID := "us-east-1_TestPool"
+	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
+	token, _, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil, "")
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return nil, nil, errors.New("disk error")
+		},
+	}}
+	body, _ := json.Marshal(map[string]string{"AccessToken": token})
+	w := doOp(t, ro, "GlobalSignOut", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestGlobalSignOut_WrongKeySignature(t *testing.T) {
+	key1, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	key2, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	poolID := "us-east-1_TestPool"
+	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
+	token, _, _, _, _, err := issueTokens(key1, "kid", poolID, "client-1", user, nil, "")
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: "kid"}, key2, nil
+		},
+	}}
+	body, _ := json.Marshal(map[string]string{"AccessToken": token})
+	w := doOp(t, ro, "GlobalSignOut", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeNotAuthorizedException)
+}
+
+func TestGlobalSignOut_RevokeAccessTokenStorageError(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	poolID := "us-east-1_TestPool"
+	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
+	token, _, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil, "")
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: "kid"}, key, nil
+		},
+		getUserBySubFn: func(string, string) (*UserMetadata, error) {
+			return user, nil
+		},
+		revokeAccessTokenErr: errors.New("disk error"),
+	}}
+	body, _ := json.Marshal(map[string]string{"AccessToken": token})
+	w := doOp(t, ro, "GlobalSignOut", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestGetUser_TokenWithoutOriginJTI(t *testing.T) {
+	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	poolID := "us-east-1_TestPool"
+	keyID := "kid"
+	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
+
+	now := time.Now().Unix()
+	// Build a token with jti but without origin_jti — exercises the empty-key skip
+	// in checkTokenNotRevoked (line 177-178 of handler_user.go).
+	token, err := buildJWT(privKey, keyID, map[string]any{
+		"sub":       user.Sub,
+		"iss":       issuerURL(poolID),
+		"token_use": "access",
+		"exp":       now + 3600,
+		"iat":       now,
+		"jti":       "some-jti-no-origin",
+	})
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: keyID}, privKey, nil
+		},
+		getUserBySubFn: func(string, string) (*UserMetadata, error) {
+			return user, nil
+		},
+	}}
+	body, _ := json.Marshal(map[string]string{"AccessToken": token})
+	w := doOp(t, ro, "GetUser", string(body))
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestGetUser_CheckTokenRevokedStorageError(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	poolID := "us-east-1_TestPool"
+	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
+	token, _, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil, "")
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: "kid"}, key, nil
+		},
+		isRevokedFn: func(string, string) (bool, error) {
+			return false, errors.New("disk error")
+		},
+	}}
+	body, _ := json.Marshal(map[string]string{"AccessToken": token})
+	w := doOp(t, ro, "GetUser", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestGlobalSignOut_OtherSessionAccessTokenAlsoRevoked(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+
+	// Session 1: sign up, confirm, and sign in alice.
+	token1 := doAuth(t, ro, clientID, "alice", "Password123!")
+
+	// Session 2: second independent login for the same user.
+	w2 := doInitAuth(t, ro, clientID, "alice", "Password123!")
+	require.Equal(t, http.StatusOK, w2.Code)
+	var authResp struct {
+		AuthenticationResult struct {
+			AccessToken string `json:"AccessToken"`
+		} `json:"AuthenticationResult"`
+	}
+	require.NoError(t, json.NewDecoder(w2.Body).Decode(&authResp))
+	token2 := authResp.AuthenticationResult.AccessToken
+	require.NotEmpty(t, token2)
+
+	// Confirm that session 2's token is accepted before sign-out.
+	getUserBody2, _ := json.Marshal(map[string]string{"AccessToken": token2})
+	wCheck := doOp(t, ro, "GetUser", string(getUserBody2))
+	require.Equal(t, http.StatusOK, wCheck.Code)
+
+	// Sign out using session 1's token.
+	signOutBody, _ := json.Marshal(map[string]string{"AccessToken": token1})
+	wOut := doOp(t, ro, "GlobalSignOut", string(signOutBody))
+	require.Equal(t, http.StatusOK, wOut.Code)
+
+	// Session 2's token must now also be rejected.
+	wAfter := doOp(t, ro, "GetUser", string(getUserBody2))
+	assert.Equal(t, http.StatusBadRequest, wAfter.Code)
+	assertErrType(t, wAfter, ErrTypeNotAuthorizedException)
+}
+
+func TestGlobalSignOut_NewTokenValidAfterSignOut(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	token := doAuth(t, ro, clientID, "alice", "Password123!")
+
+	// Sign out.
+	signOutBody, _ := json.Marshal(map[string]string{"AccessToken": token})
+	wOut := doOp(t, ro, "GlobalSignOut", string(signOutBody))
+	require.Equal(t, http.StatusOK, wOut.Code)
+
+	// Sign in again — the new token must work.
+	wNew := doInitAuth(t, ro, clientID, "alice", "Password123!")
+	require.Equal(t, http.StatusOK, wNew.Code)
+	var authResp struct {
+		AuthenticationResult struct {
+			AccessToken string `json:"AccessToken"`
+		} `json:"AuthenticationResult"`
+	}
+	require.NoError(t, json.NewDecoder(wNew.Body).Decode(&authResp))
+	newToken := authResp.AuthenticationResult.AccessToken
+	require.NotEmpty(t, newToken)
+
+	getUserBody, _ := json.Marshal(map[string]string{"AccessToken": newToken})
+	wCheck := doOp(t, ro, "GetUser", string(getUserBody))
+	assert.Equal(t, http.StatusOK, wCheck.Code)
+}
+
+func TestGlobalSignOut_RevokeTokenFamiliesStorageError(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	poolID := "us-east-1_TestPool"
+	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
+	token, _, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil, "")
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: "kid"}, key, nil
+		},
+		revokeOriginJTIsForSubErr: errors.New("disk error"),
+	}}
+	body, _ := json.Marshal(map[string]string{"AccessToken": token})
+	w := doOp(t, ro, "GlobalSignOut", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestGlobalSignOut_DeleteRefreshTokensStorageError(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	poolID := "us-east-1_TestPool"
+	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
+	token, _, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil, "")
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: "kid"}, key, nil
+		},
+		getUserBySubFn: func(string, string) (*UserMetadata, error) {
+			return user, nil
+		},
+		deleteRefreshBySubErr: errors.New("disk error"),
+	}}
+	body, _ := json.Marshal(map[string]string{"AccessToken": token})
+	w := doOp(t, ro, "GlobalSignOut", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
 }

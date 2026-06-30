@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 var errRefreshTokenNotFound = errors.New("refresh token not found")
@@ -19,6 +20,15 @@ type refreshTokenData struct {
 	Username  string  `json:"Username"`
 	Sub       string  `json:"Sub"`
 	IssuedAt  float64 `json:"IssuedAt"`
+	ExpiresAt float64 `json:"ExpiresAt"`
+	// OriginJTI is the origin_jti of the auth event that created this refresh token.
+	// All access tokens issued from this refresh token family share the same OriginJTI.
+	// Used by RevokeToken to revoke the entire token family in one operation.
+	OriginJTI string `json:"OriginJTI,omitempty"`
+}
+
+// revokedJTIEntry records a revoked access token JTI with its expiry for future cleanup.
+type revokedJTIEntry struct {
 	ExpiresAt float64 `json:"ExpiresAt"`
 }
 
@@ -86,6 +96,123 @@ func (s *Storage) DeleteRefreshToken(poolID, token string) error {
 			return errRefreshTokenNotFound
 		}
 		return fmt.Errorf("remove refresh token: %w", err)
+	}
+	return nil
+}
+
+func revokedJTIPath(poolID, jti string) string {
+	return filepath.Join("pools", poolID, "revoked_jtis", jti+".json")
+}
+
+func (s *Storage) ensureRevokedJTIsDir(poolID string) error {
+	dir := filepath.Join("pools", poolID, "revoked_jtis")
+	if err := s.mkdirFn(dir, 0o750); err != nil && !errors.Is(err, os.ErrExist) {
+		return fmt.Errorf("create revoked_jtis dir: %w", err)
+	}
+	return nil
+}
+
+// RevokeAccessToken marks an access token JTI as revoked.
+// expiresAt is the token's exp claim; stored for future cleanup.
+func (s *Storage) RevokeAccessToken(poolID, jti string, expiresAt float64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.ensureRevokedJTIsDir(poolID); err != nil {
+		return err
+	}
+	return s.writeJSON(revokedJTIPath(poolID, jti), revokedJTIEntry{ExpiresAt: expiresAt})
+}
+
+// IsAccessTokenRevoked reports whether the given JTI has been explicitly revoked.
+func (s *Storage) IsAccessTokenRevoked(poolID, jti string) (bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	_, err := s.statFn(revokedJTIPath(poolID, jti))
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return false, fmt.Errorf("check revoked JTI: %w", err)
+}
+
+// DeleteRefreshTokensBySub deletes all refresh tokens belonging to the given user sub.
+func (s *Storage) DeleteRefreshTokensBySub(poolID, sub string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	dir := filepath.Join("pools", poolID, "refresh_tokens")
+	entries, err := s.listDirFn(dir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("list refresh tokens: %w", err)
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		token := strings.TrimSuffix(entry.Name(), ".json")
+		rt, rerr := readJSON[refreshTokenData](s, refreshTokenPath(poolID, token))
+		if rerr != nil {
+			return fmt.Errorf("read refresh token %s: %w", token, rerr)
+		}
+		if rt.Sub == sub {
+			if removeErr := s.removeFile(refreshTokenPath(poolID, token)); removeErr != nil {
+				return fmt.Errorf("delete refresh token %s: %w", token, removeErr)
+			}
+		}
+	}
+	return nil
+}
+
+// RevokeOriginJTIsForSub revokes the origin_jti of every refresh token belonging to
+// the given sub. It does not delete the refresh tokens themselves; call
+// DeleteRefreshTokensBySub separately. Used by GlobalSignOut to block all outstanding
+// access tokens for a user across every concurrent session.
+func (s *Storage) RevokeOriginJTIsForSub(poolID, sub string, expiresAt float64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	dir := filepath.Join("pools", poolID, "refresh_tokens")
+	entries, err := s.listDirFn(dir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("list refresh tokens: %w", err)
+	}
+
+	revokedDirEnsured := false
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		token := strings.TrimSuffix(entry.Name(), ".json")
+		rt, rerr := readJSON[refreshTokenData](s, refreshTokenPath(poolID, token))
+		if rerr != nil {
+			return fmt.Errorf("read refresh token %s: %w", token, rerr)
+		}
+		if rt.Sub != sub || rt.OriginJTI == "" {
+			continue
+		}
+		if !revokedDirEnsured {
+			if dirErr := s.ensureRevokedJTIsDir(poolID); dirErr != nil {
+				return dirErr
+			}
+			revokedDirEnsured = true
+		}
+		if werr := s.writeJSON(
+			revokedJTIPath(poolID, rt.OriginJTI),
+			revokedJTIEntry{ExpiresAt: expiresAt},
+		); werr != nil {
+			return fmt.Errorf("revoke origin_jti %s: %w", rt.OriginJTI, werr)
+		}
 	}
 	return nil
 }

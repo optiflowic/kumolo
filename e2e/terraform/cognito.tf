@@ -40,6 +40,8 @@ resource "aws_cognito_user_pool_client" "main" {
 
   refresh_token_validity = 30
   access_token_validity  = 1
+
+  enable_token_revocation = true
 }
 
 resource "aws_cognito_user_group" "admins" {

@@ -1703,3 +1703,232 @@ func TestResendConfirmationCode_UpdateUserStorageError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 	assertErrType(t, w, ErrTypeInternalErrorException)
 }
+
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+// doFullAuth signs up, confirms, and authenticates a user, returning the full auth result.
+func doFullAuth(t *testing.T, ro *Router, clientID, username, password string) map[string]any {
+	t.Helper()
+	signUpUser(t, ro, clientID, username, password)
+	confirmUser(t, ro, clientID, username)
+	w := doInitAuth(t, ro, clientID, username, password)
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp map[string]any
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	return resp["AuthenticationResult"].(map[string]any)
+}
+
+// ── RevokeToken ───────────────────────────────────────────────────────────────
+
+func TestRevokeToken_Success(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	result := doFullAuth(t, ro, clientID, "alice", "Password123!")
+	refreshToken := result["RefreshToken"].(string)
+
+	body, _ := json.Marshal(map[string]string{
+		"ClientId": clientID,
+		"Token":    refreshToken,
+	})
+	w := doOp(t, ro, "RevokeToken", string(body))
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestRevokeToken_RefreshTokenNoLongerUsable(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	result := doFullAuth(t, ro, clientID, "alice", "Password123!")
+	refreshToken := result["RefreshToken"].(string)
+
+	// Revoke the refresh token.
+	revokeBody, _ := json.Marshal(map[string]string{"ClientId": clientID, "Token": refreshToken})
+	w := doOp(t, ro, "RevokeToken", string(revokeBody))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// The refresh token must now be rejected.
+	refreshBody, _ := json.Marshal(map[string]any{
+		"ClientId": clientID,
+		"AuthFlow": "REFRESH_TOKEN_AUTH",
+		"AuthParameters": map[string]string{
+			"REFRESH_TOKEN": refreshToken,
+		},
+	})
+	w2 := doOp(t, ro, "InitiateAuth", string(refreshBody))
+	assert.Equal(t, http.StatusBadRequest, w2.Code)
+	assertErrType(t, w2, ErrTypeNotAuthorizedException)
+}
+
+func TestRevokeToken_AccessTokenRevoked(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	result := doFullAuth(t, ro, clientID, "alice", "Password123!")
+	accessToken := result["AccessToken"].(string)
+	refreshToken := result["RefreshToken"].(string)
+
+	// Verify the access token works before revocation.
+	getUserBody, _ := json.Marshal(map[string]string{"AccessToken": accessToken})
+	w := doOp(t, ro, "GetUser", string(getUserBody))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// Revoke the refresh token (and paired access token).
+	revokeBody, _ := json.Marshal(map[string]string{"ClientId": clientID, "Token": refreshToken})
+	w2 := doOp(t, ro, "RevokeToken", string(revokeBody))
+	require.Equal(t, http.StatusOK, w2.Code)
+
+	// The access token must now be rejected.
+	w3 := doOp(t, ro, "GetUser", string(getUserBody))
+	assert.Equal(t, http.StatusBadRequest, w3.Code)
+	assertErrType(t, w3, ErrTypeNotAuthorizedException)
+}
+
+func TestRevokeToken_AccessTokenFromRefreshAlsoRevoked(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	result := doFullAuth(t, ro, clientID, "alice", "Password123!")
+	refreshToken := result["RefreshToken"].(string)
+
+	// Refresh to get a new access token from the same refresh token family.
+	refreshBody, _ := json.Marshal(map[string]any{
+		"ClientId": clientID,
+		"AuthFlow": "REFRESH_TOKEN_AUTH",
+		"AuthParameters": map[string]string{
+			"REFRESH_TOKEN": refreshToken,
+		},
+	})
+	w := doOp(t, ro, "InitiateAuth", string(refreshBody))
+	require.Equal(t, http.StatusOK, w.Code)
+	var refreshResp map[string]any
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&refreshResp))
+	newAccessToken := refreshResp["AuthenticationResult"].(map[string]any)["AccessToken"].(string)
+
+	// Confirm the new access token works.
+	getUserBody, _ := json.Marshal(map[string]string{"AccessToken": newAccessToken})
+	w2 := doOp(t, ro, "GetUser", string(getUserBody))
+	require.Equal(t, http.StatusOK, w2.Code)
+
+	// Revoke the refresh token — should invalidate the entire family via origin_jti.
+	revokeBody, _ := json.Marshal(map[string]string{"ClientId": clientID, "Token": refreshToken})
+	w3 := doOp(t, ro, "RevokeToken", string(revokeBody))
+	require.Equal(t, http.StatusOK, w3.Code)
+
+	// The access token issued after the refresh must also be rejected.
+	w4 := doOp(t, ro, "GetUser", string(getUserBody))
+	assert.Equal(t, http.StatusBadRequest, w4.Code)
+	assertErrType(t, w4, ErrTypeNotAuthorizedException)
+}
+
+func TestRevokeToken_IdempotentUnknownToken(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+
+	body, _ := json.Marshal(map[string]string{
+		"ClientId": clientID,
+		"Token":    "unknown-refresh-token",
+	})
+	w := doOp(t, ro, "RevokeToken", string(body))
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestRevokeToken_ClientMismatch(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID, clientID := setupPool(t, ro)
+	result := doFullAuth(t, ro, clientID, "alice", "Password123!")
+	refreshToken := result["RefreshToken"].(string)
+
+	// Create a second client in the same pool.
+	clientID2 := createClient(t, ro, poolID, "other-client")
+
+	body, _ := json.Marshal(map[string]string{
+		"ClientId": clientID2,
+		"Token":    refreshToken,
+	})
+	w := doOp(t, ro, "RevokeToken", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeUnauthorizedException)
+}
+
+func TestRevokeToken_MissingClientId(t *testing.T) {
+	ro := newTestRouter(t)
+	body, _ := json.Marshal(map[string]string{"Token": "tok"})
+	w := doOp(t, ro, "RevokeToken", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeInvalidParameterException)
+}
+
+func TestRevokeToken_MissingToken(t *testing.T) {
+	ro := newTestRouter(t)
+	body, _ := json.Marshal(map[string]string{"ClientId": "cid"})
+	w := doOp(t, ro, "RevokeToken", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeInvalidParameterException)
+}
+
+func TestRevokeToken_UnknownClient(t *testing.T) {
+	ro := newTestRouter(t)
+	body, _ := json.Marshal(map[string]string{"ClientId": "no-such-client", "Token": "tok"})
+	w := doOp(t, ro, "RevokeToken", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeResourceNotFoundException)
+}
+
+func TestRevokeToken_InvalidJSON(t *testing.T) {
+	ro := newTestRouter(t)
+	w := doOp(t, ro, "RevokeToken", `{bad}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeInvalidParameterException)
+}
+
+func TestRevokeToken_GetPoolIDStorageError(t *testing.T) {
+	ro := &Router{storage: &mockStore{
+		getPoolForClient: func(string) (string, error) {
+			return "", errors.New("disk error")
+		},
+	}}
+	body, _ := json.Marshal(map[string]string{"ClientId": "c", "Token": "tok"})
+	w := doOp(t, ro, "RevokeToken", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestRevokeToken_GetRefreshTokenStorageError(t *testing.T) {
+	ro := &Router{storage: &mockStore{
+		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
+		getRefreshFn: func(string, string) (*refreshTokenData, error) {
+			return nil, errors.New("disk error")
+		},
+	}}
+	body, _ := json.Marshal(map[string]string{"ClientId": "c", "Token": "tok"})
+	w := doOp(t, ro, "RevokeToken", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestRevokeToken_RevokeAccessTokenStorageError(t *testing.T) {
+	rt := &refreshTokenData{
+		Token:     "tok",
+		ClientID:  "c",
+		OriginJTI: "origin-jti-123",
+	}
+	ro := &Router{storage: &mockStore{
+		getPoolForClient:     func(string) (string, error) { return "pool-1", nil },
+		getRefreshFn:         func(string, string) (*refreshTokenData, error) { return rt, nil },
+		revokeAccessTokenErr: errors.New("disk error"),
+	}}
+	body, _ := json.Marshal(map[string]string{"ClientId": "c", "Token": "tok"})
+	w := doOp(t, ro, "RevokeToken", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestRevokeToken_DeleteRefreshTokenStorageError(t *testing.T) {
+	rt := &refreshTokenData{Token: "tok", ClientID: "c"}
+	ro := &Router{storage: &mockStore{
+		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
+		getRefreshFn:     func(string, string) (*refreshTokenData, error) { return rt, nil },
+		deleteRefreshErr: errors.New("disk error"),
+	}}
+	body, _ := json.Marshal(map[string]string{"ClientId": "c", "Token": "tok"})
+	w := doOp(t, ro, "RevokeToken", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
