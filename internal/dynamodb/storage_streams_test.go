@@ -893,6 +893,33 @@ func TestTrimStreamForTableNilBuf(t *testing.T) {
 	s.trimStreamForTable("nonexistent-table", time.Now())
 }
 
+// TestTrimStreamForTableDeletedBuffer covers lines 610-612: trimStreamForTable returns early
+// when buf.deleted is true, simulating the race where deleteStreamBuffer marks the buffer
+// deleted between getStreamBuffer returning and buf.mu being acquired.
+func TestTrimStreamForTableDeletedBuffer(t *testing.T) {
+	s := newTestStorage(t)
+	mustCreateStreamTable(t, s, "deleted-trim", "KEYS_ONLY")
+	_, err := s.PutItem("deleted-trim", map[string]any{"pk": map[string]any{"S": "k"}}, nil)
+	require.NoError(t, err)
+
+	buf := s.getStreamBuffer("deleted-trim")
+	require.NotNil(t, buf)
+
+	// Simulate the race: mark deleted while the buffer is still in the map so
+	// that getStreamBuffer inside trimStreamForTable returns a non-nil buf.
+	buf.mu.Lock()
+	buf.deleted = true
+	buf.mu.Unlock()
+
+	// Must return early without trimming or rewriting the file.
+	s.trimStreamForTable("deleted-trim", time.Now().UTC())
+
+	buf.mu.RLock()
+	n := len(buf.records)
+	buf.mu.RUnlock()
+	assert.Equal(t, 1, n, "deleted buffer: records must not be modified by trim")
+}
+
 // TestTrimStreamForTableNoOp covers lines 585-587: trimStreamForTable returns early when no
 // records fall before the cutoff (nothing to trim).
 func TestTrimStreamForTableNoOp(t *testing.T) {
