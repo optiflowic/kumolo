@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -362,6 +363,189 @@ func TestDeleteRefreshTokensBySub_RemoveError(t *testing.T) {
 	err := s.DeleteRefreshTokensBySub(poolID, "sub-alice")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "delete refresh token")
+}
+
+// ── RevokeOriginJTIsForSub ───────────────────────────────────────────────────
+
+func TestRevokeOriginJTIsForSub_RevokesMatchingOriginJTIs(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+
+	rt1 := &refreshTokenData{
+		Token:     "tok-1",
+		PoolID:    poolID,
+		ClientID:  "c",
+		Sub:       "sub-alice",
+		OriginJTI: "origin-1",
+	}
+	rt2 := &refreshTokenData{
+		Token:     "tok-2",
+		PoolID:    poolID,
+		ClientID:  "c",
+		Sub:       "sub-alice",
+		OriginJTI: "origin-2",
+	}
+	rt3 := &refreshTokenData{
+		Token:     "tok-3",
+		PoolID:    poolID,
+		ClientID:  "c",
+		Sub:       "sub-bob",
+		OriginJTI: "origin-3",
+	}
+	require.NoError(t, s.CreateRefreshToken(rt1))
+	require.NoError(t, s.CreateRefreshToken(rt2))
+	require.NoError(t, s.CreateRefreshToken(rt3))
+
+	require.NoError(t, s.RevokeOriginJTIsForSub(poolID, "sub-alice", 9999999999))
+
+	revoked1, err := s.IsAccessTokenRevoked(poolID, "origin-1")
+	require.NoError(t, err)
+	assert.True(t, revoked1)
+
+	revoked2, err := s.IsAccessTokenRevoked(poolID, "origin-2")
+	require.NoError(t, err)
+	assert.True(t, revoked2)
+
+	// Bob's origin_jti must not be revoked.
+	revoked3, err := s.IsAccessTokenRevoked(poolID, "origin-3")
+	require.NoError(t, err)
+	assert.False(t, revoked3)
+}
+
+func TestRevokeOriginJTIsForSub_NoRefreshTokensDir(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+
+	// No refresh_tokens dir — must return nil.
+	require.NoError(t, s.RevokeOriginJTIsForSub(poolID, "sub-alice", 9999999999))
+}
+
+func TestRevokeOriginJTIsForSub_SkipsTokenWithNoOriginJTI(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+
+	rt := &refreshTokenData{Token: "tok-1", PoolID: poolID, ClientID: "c", Sub: "sub-alice"}
+	require.NoError(t, s.CreateRefreshToken(rt))
+
+	// Token with no OriginJTI must be skipped without error.
+	require.NoError(t, s.RevokeOriginJTIsForSub(poolID, "sub-alice", 9999999999))
+}
+
+func TestRevokeOriginJTIsForSub_SkipsDirectory(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+
+	require.NoError(t, s.CreateRefreshToken(
+		&refreshTokenData{
+			Token:     "tok-1",
+			PoolID:    poolID,
+			ClientID:  "c",
+			Sub:       "sub-alice",
+			OriginJTI: "origin-1",
+		},
+	))
+	subdir := filepath.Join("pools", poolID, "refresh_tokens", "subdir")
+	require.NoError(t, s.mkdirFn(subdir, 0o750))
+
+	require.NoError(t, s.RevokeOriginJTIsForSub(poolID, "sub-alice", 9999999999))
+
+	revoked, err := s.IsAccessTokenRevoked(poolID, "origin-1")
+	require.NoError(t, err)
+	assert.True(t, revoked)
+}
+
+func TestRevokeOriginJTIsForSub_ListDirError(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+
+	require.NoError(t, s.CreateRefreshToken(
+		&refreshTokenData{
+			Token:     "tok-1",
+			PoolID:    poolID,
+			ClientID:  "c",
+			Sub:       "sub-alice",
+			OriginJTI: "origin-1",
+		},
+	))
+	s.listDirFn = func(string) ([]os.DirEntry, error) {
+		return nil, errors.New("disk error")
+	}
+	err := s.RevokeOriginJTIsForSub(poolID, "sub-alice", 9999999999)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "list refresh tokens")
+}
+
+func TestRevokeOriginJTIsForSub_ReadError(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+
+	require.NoError(t, s.CreateRefreshToken(
+		&refreshTokenData{
+			Token:     "tok-1",
+			PoolID:    poolID,
+			ClientID:  "c",
+			Sub:       "sub-alice",
+			OriginJTI: "origin-1",
+		},
+	))
+	calls := 0
+	realReadAll := s.readAll
+	s.readAll = func(r io.Reader) ([]byte, error) {
+		calls++
+		if calls == 1 {
+			return nil, errors.New("read error")
+		}
+		return realReadAll(r)
+	}
+	err := s.RevokeOriginJTIsForSub(poolID, "sub-alice", 9999999999)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "read refresh token")
+}
+
+func TestRevokeOriginJTIsForSub_EnsureDirError(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+
+	require.NoError(t, s.CreateRefreshToken(
+		&refreshTokenData{
+			Token:     "tok-1",
+			PoolID:    poolID,
+			ClientID:  "c",
+			Sub:       "sub-alice",
+			OriginJTI: "origin-1",
+		},
+	))
+	s.mkdirFn = func(string, os.FileMode) error {
+		return errors.New("permission denied")
+	}
+	err := s.RevokeOriginJTIsForSub(poolID, "sub-alice", 9999999999)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "create revoked_jtis dir")
+}
+
+func TestRevokeOriginJTIsForSub_WriteError(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+
+	require.NoError(t, s.CreateRefreshToken(
+		&refreshTokenData{
+			Token:     "tok-1",
+			PoolID:    poolID,
+			ClientID:  "c",
+			Sub:       "sub-alice",
+			OriginJTI: "origin-1",
+		},
+	))
+	realOpenFile := s.openFile
+	s.openFile = func(path string, flag int, mode os.FileMode) (io.WriteCloser, error) {
+		if strings.Contains(path, "revoked_jtis") {
+			return nil, errors.New("disk full")
+		}
+		return realOpenFile(path, flag, mode)
+	}
+	err := s.RevokeOriginJTIsForSub(poolID, "sub-alice", 9999999999)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "revoke origin_jti")
 }
 
 // ── ensureRevokedJTIsDir / RevokeAccessToken error paths ─────────────────────

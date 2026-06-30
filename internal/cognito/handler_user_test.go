@@ -614,6 +614,88 @@ func TestGetUser_CheckTokenRevokedStorageError(t *testing.T) {
 	assertErrType(t, w, ErrTypeInternalErrorException)
 }
 
+func TestGlobalSignOut_OtherSessionAccessTokenAlsoRevoked(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+
+	// Session 1: sign up, confirm, and sign in alice.
+	token1 := doAuth(t, ro, clientID, "alice", "Password123!")
+
+	// Session 2: second independent login for the same user.
+	w2 := doInitAuth(t, ro, clientID, "alice", "Password123!")
+	require.Equal(t, http.StatusOK, w2.Code)
+	var authResp struct {
+		AuthenticationResult struct {
+			AccessToken string `json:"AccessToken"`
+		} `json:"AuthenticationResult"`
+	}
+	require.NoError(t, json.NewDecoder(w2.Body).Decode(&authResp))
+	token2 := authResp.AuthenticationResult.AccessToken
+	require.NotEmpty(t, token2)
+
+	// Confirm that session 2's token is accepted before sign-out.
+	getUserBody2, _ := json.Marshal(map[string]string{"AccessToken": token2})
+	wCheck := doOp(t, ro, "GetUser", string(getUserBody2))
+	require.Equal(t, http.StatusOK, wCheck.Code)
+
+	// Sign out using session 1's token.
+	signOutBody, _ := json.Marshal(map[string]string{"AccessToken": token1})
+	wOut := doOp(t, ro, "GlobalSignOut", string(signOutBody))
+	require.Equal(t, http.StatusOK, wOut.Code)
+
+	// Session 2's token must now also be rejected.
+	wAfter := doOp(t, ro, "GetUser", string(getUserBody2))
+	assert.Equal(t, http.StatusBadRequest, wAfter.Code)
+	assertErrType(t, wAfter, ErrTypeNotAuthorizedException)
+}
+
+func TestGlobalSignOut_NewTokenValidAfterSignOut(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	token := doAuth(t, ro, clientID, "alice", "Password123!")
+
+	// Sign out.
+	signOutBody, _ := json.Marshal(map[string]string{"AccessToken": token})
+	wOut := doOp(t, ro, "GlobalSignOut", string(signOutBody))
+	require.Equal(t, http.StatusOK, wOut.Code)
+
+	// Sign in again — the new token must work.
+	wNew := doInitAuth(t, ro, clientID, "alice", "Password123!")
+	require.Equal(t, http.StatusOK, wNew.Code)
+	var authResp struct {
+		AuthenticationResult struct {
+			AccessToken string `json:"AccessToken"`
+		} `json:"AuthenticationResult"`
+	}
+	require.NoError(t, json.NewDecoder(wNew.Body).Decode(&authResp))
+	newToken := authResp.AuthenticationResult.AccessToken
+	require.NotEmpty(t, newToken)
+
+	getUserBody, _ := json.Marshal(map[string]string{"AccessToken": newToken})
+	wCheck := doOp(t, ro, "GetUser", string(getUserBody))
+	assert.Equal(t, http.StatusOK, wCheck.Code)
+}
+
+func TestGlobalSignOut_RevokeTokenFamiliesStorageError(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	poolID := "us-east-1_TestPool"
+	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
+	token, _, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil, "")
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: "kid"}, key, nil
+		},
+		revokeOriginJTIsForSubErr: errors.New("disk error"),
+	}}
+	body, _ := json.Marshal(map[string]string{"AccessToken": token})
+	w := doOp(t, ro, "GlobalSignOut", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
 func TestGlobalSignOut_DeleteRefreshTokensStorageError(t *testing.T) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
