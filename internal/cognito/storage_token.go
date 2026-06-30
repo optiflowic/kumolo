@@ -21,9 +21,10 @@ type refreshTokenData struct {
 	Sub       string  `json:"Sub"`
 	IssuedAt  float64 `json:"IssuedAt"`
 	ExpiresAt float64 `json:"ExpiresAt"`
-	// AccessJTI is the JTI of the access token issued in the same auth event.
-	// Used by RevokeToken to revoke the paired access token.
-	AccessJTI string `json:"AccessJTI,omitempty"`
+	// OriginJTI is the origin_jti of the auth event that created this refresh token.
+	// All access tokens issued from this refresh token family share the same OriginJTI.
+	// Used by RevokeToken to revoke the entire token family in one operation.
+	OriginJTI string `json:"OriginJTI,omitempty"`
 }
 
 // revokedJTIEntry records a revoked access token JTI with its expiry for future cleanup.
@@ -159,10 +160,12 @@ func (s *Storage) DeleteRefreshTokensBySub(poolID, sub string) error {
 		token := strings.TrimSuffix(entry.Name(), ".json")
 		rt, rerr := readJSON[refreshTokenData](s, refreshTokenPath(poolID, token))
 		if rerr != nil {
-			continue // untestable: silently skips entries that cannot be deserialized
+			return fmt.Errorf("read refresh token %s: %w", token, rerr)
 		}
 		if rt.Sub == sub {
-			_ = s.removeFile(refreshTokenPath(poolID, token))
+			if removeErr := s.removeFile(refreshTokenPath(poolID, token)); removeErr != nil {
+				return fmt.Errorf("delete refresh token %s: %w", token, removeErr)
+			}
 		}
 	}
 	return nil

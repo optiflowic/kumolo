@@ -24,6 +24,8 @@ const (
 	jwtClaimExp       = "exp"
 	jwtClaimTokenUse  = "token_use"
 	jwtClaimSub       = "sub"
+	jwtClaimJTI       = "jti"
+	jwtClaimOriginJTI = "origin_jti"
 	jwtTokenUseAccess = "access"
 )
 
@@ -117,54 +119,60 @@ func buildJWKS(publicKey *rsa.PublicKey, keyID string) map[string]any {
 // issueTokens generates a new access token, ID token, and refresh token for the given user.
 // groups is the list of group names to include in the cognito:groups claim; pass nil if the user
 // has no group membership.
-// Also returns accessJTI so callers can associate the access token with the refresh token.
+// originJTI ties all tokens issued from the same refresh token family together; pass "" to
+// generate a new one (initial auth). Pass the stored origin_jti when refreshing so that
+// RevokeToken can revoke the entire family in one operation.
+// Returns accessJTI and the used originJTI so callers can associate tokens with the refresh token.
 func issueTokens(
 	privateKey *rsa.PrivateKey,
 	keyID, poolID, clientID string,
 	user *UserMetadata,
 	groups []string,
-) (accessToken, idToken, refreshToken, accessJTI string, err error) {
+	originJTI string,
+) (accessToken, idToken, refreshToken, accessJTI, retOriginJTI string, err error) {
 	now := time.Now().Unix()
 	exp := now + accessTokenExpiry
-	originJTI, err := generateTokenID()
-	if err != nil {
-		// untestable: crypto/rand.Read only fails on OS-level entropy source errors
-		return "", "", "", "", fmt.Errorf("generate origin_jti: %w", err)
+	if originJTI == "" {
+		originJTI, err = generateTokenID()
+		if err != nil {
+			// untestable: crypto/rand.Read only fails on OS-level entropy source errors
+			return "", "", "", "", "", fmt.Errorf("generate origin_jti: %w", err)
+		}
 	}
 
 	accessJTI, err = generateTokenID()
 	if err != nil {
 		// untestable: crypto/rand.Read only fails on OS-level entropy source errors
-		return "", "", "", "", fmt.Errorf("generate access jti: %w", err)
+		return "", "", "", "", "", fmt.Errorf("generate access jti: %w", err)
 	}
 
 	idJTI, err := generateTokenID()
 	if err != nil {
 		// untestable: crypto/rand.Read only fails on OS-level entropy source errors
-		return "", "", "", "", fmt.Errorf("generate id jti: %w", err)
+		return "", "", "", "", "", fmt.Errorf("generate id jti: %w", err)
 	}
 
 	refreshToken, err = generateTokenID()
 	if err != nil {
 		// untestable: crypto/rand.Read only fails on OS-level entropy source errors
-		return "", "", "", "", fmt.Errorf("generate refresh token: %w", err)
+		return "", "", "", "", "", fmt.Errorf("generate refresh token: %w", err)
 	}
 
 	iss := issuerURL(poolID)
 
 	accessClaims := map[string]any{
-		"sub":        user.Sub,
-		"iss":        iss,
-		"version":    2,
-		"client_id":  clientID,
-		"origin_jti": originJTI,
-		"token_use":  "access",
-		"scope":      "aws.cognito.signin.user.admin",
-		"auth_time":  now,
-		"exp":        exp,
-		"iat":        now,
-		"jti":        accessJTI,
-		"username":   user.Username,
+		"sub":             user.Sub,
+		"iss":             iss,
+		"version":         2,
+		"client_id":       clientID,
+		jwtClaimOriginJTI: originJTI,
+		jwtClaimTokenUse:  "access",
+		"scope":           "aws.cognito.signin.user.admin",
+		"auth_time":       now,
+		jwtClaimExp:       exp,
+		"iat":             now,
+		jwtClaimJTI:       accessJTI,
+		"username":        user.Username,
 	}
 	if len(groups) > 0 {
 		accessClaims["cognito:groups"] = groups
@@ -176,15 +184,15 @@ func issueTokens(
 		"aud":              clientID,
 		"token_use":        "id",
 		"cognito:username": user.Username,
-		"origin_jti":       originJTI,
+		jwtClaimOriginJTI:  originJTI,
 		"auth_time":        now,
-		"exp":              exp,
+		jwtClaimExp:        exp,
 		"iat":              now,
 		"jti":              idJTI,
 	}
 	reservedClaims := map[string]bool{
 		"sub": true, "iss": true, "aud": true, "token_use": true,
-		"cognito:username": true, "origin_jti": true, "auth_time": true,
+		"cognito:username": true, jwtClaimOriginJTI: true, "auth_time": true,
 		"exp": true, "iat": true, "jti": true,
 	}
 	for _, attr := range user.Attributes {
@@ -198,16 +206,16 @@ func issueTokens(
 
 	accessToken, err = buildJWT(privateKey, keyID, accessClaims)
 	if err != nil {
-		return "", "", "", "", fmt.Errorf("build access token: %w", err)
+		return "", "", "", "", "", fmt.Errorf("build access token: %w", err)
 	}
 
 	idToken, err = buildJWT(privateKey, keyID, idClaims)
 	if err != nil {
 		// unreachable: same key and algorithm as access token; if access token signing succeeded, this will too
-		return "", "", "", "", fmt.Errorf("build id token: %w", err)
+		return "", "", "", "", "", fmt.Errorf("build id token: %w", err)
 	}
 
-	return accessToken, idToken, refreshToken, accessJTI, nil
+	return accessToken, idToken, refreshToken, accessJTI, originJTI, nil
 }
 
 // buildSessionToken creates a signed session JWT for challenge flows.

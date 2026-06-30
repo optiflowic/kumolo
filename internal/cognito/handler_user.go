@@ -33,11 +33,11 @@ func (ro *Router) handleGetUser(w http.ResponseWriter, body []byte) {
 	if !ok {
 		return
 	}
-	sub, jti, _, ok := validateAccessJWT(w, token, &privateKey.PublicKey)
+	sub, jti, originJTI, _, ok := validateAccessJWT(w, token, &privateKey.PublicKey)
 	if !ok {
 		return
 	}
-	if ok2 := ro.checkTokenNotRevoked(w, poolID, jti); !ok2 {
+	if ok2 := ro.checkTokenNotRevoked(w, poolID, jti, originJTI); !ok2 {
 		return
 	}
 	user, ok := ro.lookupUser(w, poolID, sub)
@@ -111,11 +111,11 @@ func validateAccessJWT(
 	w http.ResponseWriter,
 	token string,
 	publicKey *rsa.PublicKey,
-) (sub, jti string, exp float64, ok bool) {
+) (sub, jti, originJTI string, exp float64, ok bool) {
 	claims, err := verifyJWT(token, publicKey)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException, "Invalid access token.")
-		return "", "", 0, false
+		return "", "", "", 0, false
 	}
 	var expOK bool
 	exp, expOK = claims[jwtClaimExp].(float64)
@@ -126,19 +126,24 @@ func validateAccessJWT(
 			ErrTypeNotAuthorizedException,
 			"Access Token has expired",
 		)
-		return "", "", 0, false
+		return "", "", "", 0, false
 	}
 	if tokenUse, _ := claims[jwtClaimTokenUse].(string); tokenUse != jwtTokenUseAccess {
 		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException, "Invalid access token.")
-		return "", "", 0, false
+		return "", "", "", 0, false
 	}
 	sub, _ = claims[jwtClaimSub].(string)
 	if sub == "" {
 		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException, "Invalid access token.")
-		return "", "", 0, false
+		return "", "", "", 0, false
 	}
-	jti, _ = claims["jti"].(string)
-	return sub, jti, exp, true
+	jti, _ = claims[jwtClaimJTI].(string)
+	if jti == "" {
+		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException, "Invalid access token.")
+		return "", "", "", 0, false
+	}
+	originJTI, _ = claims[jwtClaimOriginJTI].(string)
+	return sub, jti, originJTI, exp, true
 }
 
 func (ro *Router) lookupUser(w http.ResponseWriter, poolID, sub string) (*UserMetadata, bool) {
@@ -164,21 +169,25 @@ func (ro *Router) lookupUser(w http.ResponseWriter, poolID, sub string) (*UserMe
 	return user, true
 }
 
-// checkTokenNotRevoked returns false (and writes an error) if the JTI has been revoked.
-func (ro *Router) checkTokenNotRevoked(w http.ResponseWriter, poolID, jti string) bool {
-	if jti == "" {
-		return true
-	}
-	revoked, err := ro.storage.IsAccessTokenRevoked(poolID, jti)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
-			"failed to check token revocation")
-		return false
-	}
-	if revoked {
-		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException,
-			"Access Token has been revoked")
-		return false
+// checkTokenNotRevoked returns false (and writes an error) if the token is revoked.
+// It checks both the token's own JTI (revoked by GlobalSignOut) and its origin_jti
+// (revoked by RevokeToken, which marks the entire token family as invalid).
+func (ro *Router) checkTokenNotRevoked(w http.ResponseWriter, poolID, jti, originJTI string) bool {
+	for _, key := range []string{jti, originJTI} {
+		if key == "" {
+			continue
+		}
+		revoked, err := ro.storage.IsAccessTokenRevoked(poolID, key)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+				"failed to check token revocation")
+			return false
+		}
+		if revoked {
+			writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException,
+				"Access Token has been revoked")
+			return false
+		}
 	}
 	return true
 }
@@ -210,21 +219,19 @@ func (ro *Router) handleGlobalSignOut(w http.ResponseWriter, body []byte) {
 	if !ok {
 		return
 	}
-	sub, jti, exp, ok := validateAccessJWT(w, req.AccessToken, &privateKey.PublicKey)
+	sub, jti, originJTI, exp, ok := validateAccessJWT(w, req.AccessToken, &privateKey.PublicKey)
 	if !ok {
 		return
 	}
-	if ok2 := ro.checkTokenNotRevoked(w, poolID, jti); !ok2 {
+	if ok2 := ro.checkTokenNotRevoked(w, poolID, jti, originJTI); !ok2 {
 		return
 	}
 
-	// Revoke the current access token JTI.
-	if jti != "" {
-		if err := ro.storage.RevokeAccessToken(poolID, jti, exp); err != nil {
-			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
-				"failed to revoke access token")
-			return
-		}
+	// Revoke the current access token JTI so it is rejected immediately.
+	if err := ro.storage.RevokeAccessToken(poolID, jti, exp); err != nil {
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to revoke access token")
+		return
 	}
 
 	// Delete all refresh tokens for this user.

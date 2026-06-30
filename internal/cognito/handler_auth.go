@@ -480,7 +480,7 @@ func (ro *Router) handleUserPasswordAuth(
 		return
 	}
 
-	ro.writeAuthResult(w, poolID, clientID, user, privateKey, keys.KeyID, true)
+	ro.writeAuthResult(w, poolID, clientID, user, privateKey, keys.KeyID, true, "")
 }
 
 func (ro *Router) handleRefreshTokenAuth(
@@ -530,10 +530,13 @@ func (ro *Router) handleRefreshTokenAuth(
 	}
 
 	// Refresh token flow: new access/ID tokens only; no new refresh token.
-	ro.writeAuthResult(w, poolID, clientID, user, privateKey, keys.KeyID, false)
+	// Pass the stored OriginJTI so the new access token belongs to the same family.
+	ro.writeAuthResult(w, poolID, clientID, user, privateKey, keys.KeyID, false, rt.OriginJTI)
 }
 
 // writeAuthResult issues tokens and writes the AuthenticationResult JSON response.
+// originJTI ties the new access token to an existing refresh token family; pass "" for
+// initial auth (a new origin_jti is generated and stored with the refresh token).
 func (ro *Router) writeAuthResult(
 	w http.ResponseWriter,
 	poolID, clientID string,
@@ -541,6 +544,7 @@ func (ro *Router) writeAuthResult(
 	privateKey *rsa.PrivateKey,
 	keyID string,
 	includeRefreshToken bool,
+	originJTI string,
 ) {
 	groups, err := ro.storage.GetGroupsForUser(poolID, user.Username)
 	if err != nil {
@@ -549,13 +553,14 @@ func (ro *Router) writeAuthResult(
 		return
 	}
 
-	accessToken, idToken, rt, accessJTI, err := issueTokens(
+	accessToken, idToken, rt, _, retOriginJTI, err := issueTokens(
 		privateKey,
 		keyID,
 		poolID,
 		clientID,
 		user,
 		groups,
+		originJTI,
 	)
 	if err != nil {
 		// untestable: issueTokens only fails on crypto/rand.Read OS-level failures
@@ -584,7 +589,7 @@ func (ro *Router) writeAuthResult(
 			Sub:       user.Sub,
 			IssuedAt:  issuedAt,
 			ExpiresAt: issuedAt + float64(validity)*secondsPerDay,
-			AccessJTI: accessJTI,
+			OriginJTI: retOriginJTI,
 		}
 		if err := ro.storage.CreateRefreshToken(rtData); err != nil {
 			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
@@ -756,7 +761,7 @@ func (ro *Router) handleNewPasswordRequired(
 		return
 	}
 
-	ro.writeAuthResult(w, poolID, clientID, updatedUser, privateKey, keys.KeyID, true)
+	ro.writeAuthResult(w, poolID, clientID, updatedUser, privateKey, keys.KeyID, true, "")
 }
 
 // ──── ResendConfirmationCode ─────────────────────────────────────────────────
@@ -901,12 +906,12 @@ func (ro *Router) handleRevokeToken(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	// Revoke the access token that was issued alongside this refresh token.
-	if rt.AccessJTI != "" {
+	// Revoke all access tokens in this refresh token's family via origin_jti.
+	if rt.OriginJTI != "" {
 		if err := ro.storage.RevokeAccessToken(
 			poolID,
-			rt.AccessJTI,
-			rt.IssuedAt+float64(accessTokenExpiry),
+			rt.OriginJTI,
+			nowUnix()+float64(accessTokenExpiry),
 		); err != nil {
 			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
 				"failed to revoke access token")

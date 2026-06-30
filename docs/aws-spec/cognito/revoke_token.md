@@ -37,6 +37,7 @@ return 200 without error.
 ## kumolo deviations
 
 - `ClientSecret` is accepted but ignored; kumolo does not validate client secrets.
-- Only the access token issued in the same `InitiateAuth` event (stored as `AccessJTI`
-  in the refresh token record) is revoked. Access tokens obtained later via
-  `REFRESH_TOKEN_AUTH` are not individually tracked.
+- Revocation is implemented via `origin_jti`: all access tokens issued from the same
+  refresh token family (initial auth + subsequent `REFRESH_TOKEN_AUTH` calls) share the
+  same `origin_jti`, which is stored in the refresh token record. `RevokeToken` marks
+  that `origin_jti` as revoked so that any token in the family is rejected.

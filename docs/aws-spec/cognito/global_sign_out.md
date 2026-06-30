@@ -6,12 +6,15 @@
 
 ## Contract
 
-Invalidates all tokens for the currently authenticated user:
-- All refresh tokens for the user are deleted.
+Invalidates tokens for the currently authenticated user:
+- All refresh tokens for the user's sub are deleted (no new sessions can be started).
 - The supplied access token's JTI is marked as revoked.
 
-Subsequent calls to token-validated operations (e.g. GetUser) with revoked tokens
+Subsequent calls to token-validated operations (e.g. GetUser) with the revoked token
 must return `NotAuthorizedException` with message "Access Token has been revoked".
+
+Other active access tokens for the same user (from concurrent sessions) are not
+proactively revoked, but can no longer be refreshed after this call.
 
 ## Request
 
