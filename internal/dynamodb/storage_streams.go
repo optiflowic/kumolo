@@ -551,8 +551,12 @@ func (s *Storage) loadStreamRecordsFromDisk(tableName string) []streamRecord {
 // Must be called with buf.mu held to preserve write ordering.
 // A new file descriptor is opened per call; acceptable at emulator scale.
 func (s *Storage) appendToStreamFile(tableName string, rec streamRecord) {
+	data, err := json.Marshal(rec)
+	if err != nil {
+		slog.Error("failed to marshal stream record", "table", tableName, "err", err)
+		return
+	}
 	path := streamFilePath(tableName)
-	data, _ := json.Marshal(rec)
 	line := append(data, '\n')
 	f, err := s.openFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
 	if err != nil {
@@ -584,8 +588,18 @@ func (s *Storage) rewriteStreamFile(tableName string, records []streamRecord) {
 	}
 	defer func() { _ = f.Close() }()
 	for _, rec := range records {
-		data, _ := json.Marshal(rec)
-		if _, err := f.Write(append(data, '\n')); err != nil {
+		recData, merr := json.Marshal(rec)
+		if merr != nil {
+			slog.Error(
+				"failed to marshal stream record during rewrite",
+				"table",
+				tableName,
+				"err",
+				merr,
+			)
+			return
+		}
+		if _, err := f.Write(append(recData, '\n')); err != nil {
 			slog.Error(
 				"failed to write stream record during rewrite",
 				"table",
