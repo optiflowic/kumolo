@@ -1,6 +1,7 @@
 package dynamodb
 
 import (
+	"bytes"
 	"crypto/md5" // #nosec G501 -- MD5 used only for deterministic shard ID generation, not security
 	"encoding/base64"
 	"encoding/hex"
@@ -569,9 +570,11 @@ func (s *Storage) appendToStreamFile(tableName string, rec streamRecord) {
 	}
 }
 
-// rewriteStreamFile replaces the table's JSONL file using truncate-and-write (same
-// pattern as writeJSON). A crash mid-write may leave a partial file; corrupt lines are
-// skipped on reload so recovery is graceful, but records after the crash point are lost.
+// rewriteStreamFile replaces the table's JSONL file. All records are marshaled into
+// an in-memory buffer first; the file is truncated only after every record has been
+// serialised successfully, so a marshal failure leaves the existing JSONL intact.
+// A crash mid-write may still leave a partial file; corrupt lines are skipped on
+// reload so recovery is graceful, but records after the crash point are lost.
 // If records is empty the file is removed. Must be called with buf.mu held.
 func (s *Storage) rewriteStreamFile(tableName string, records []streamRecord) {
 	path := streamFilePath(tableName)
@@ -581,12 +584,7 @@ func (s *Storage) rewriteStreamFile(tableName string, records []streamRecord) {
 		}
 		return
 	}
-	f, err := s.openFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
-		slog.Error("failed to rewrite stream file", "table", tableName, "err", err)
-		return
-	}
-	defer func() { _ = f.Close() }()
+	var payload bytes.Buffer
 	for _, rec := range records {
 		recData, merr := json.Marshal(rec)
 		if merr != nil {
@@ -599,16 +597,17 @@ func (s *Storage) rewriteStreamFile(tableName string, records []streamRecord) {
 			)
 			return
 		}
-		if _, err := f.Write(append(recData, '\n')); err != nil {
-			slog.Error(
-				"failed to write stream record during rewrite",
-				"table",
-				tableName,
-				"err",
-				err,
-			)
-			return
-		}
+		payload.Write(recData)
+		payload.WriteByte('\n')
+	}
+	f, err := s.openFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		slog.Error("failed to rewrite stream file", "table", tableName, "err", err)
+		return
+	}
+	defer func() { _ = f.Close() }()
+	if _, err := f.Write(payload.Bytes()); err != nil {
+		slog.Error("failed to write stream file during rewrite", "table", tableName, "err", err)
 	}
 }
 

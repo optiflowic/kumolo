@@ -812,7 +812,18 @@ func TestAppendToStreamFileMarshalError(t *testing.T) {
 	buf.mu.Lock()
 	s.appendToStreamFile("marshal-append-err", rec)
 	buf.mu.Unlock()
-	// No panic; error is logged and the function returns without touching the file.
+
+	// The JSONL file must not have been created: the function must return before
+	// calling openFile when json.Marshal fails.
+	f, openErr := s.root.Open(streamFilePath("marshal-append-err"))
+	if openErr == nil {
+		_ = f.Close()
+	}
+	assert.True(
+		t,
+		errors.Is(openErr, os.ErrNotExist),
+		"stream file must not be created on marshal error",
+	)
 }
 
 // TestRewriteStreamFileAllExpired covers lines 543 and 547: rewriteStreamFile is called with
@@ -909,29 +920,42 @@ func TestRewriteStreamFileWriteError(t *testing.T) {
 	buf.mu.Unlock()
 }
 
-// TestRewriteStreamFileMarshalError covers lines 592-601: json.Marshal fails during
-// rewrite when a record contains a non-serializable type (e.g. a channel).
+// TestRewriteStreamFileMarshalError covers the marshal-first path: when json.Marshal
+// fails for any record in the slice, rewriteStreamFile must not truncate the existing
+// JSONL file so that previously persisted records survive the failed rewrite.
 func TestRewriteStreamFileMarshalError(t *testing.T) {
 	s := newTestStorage(t)
 	mustCreateStreamTable(t, s, "rw-marshal-err", "NEW_IMAGE")
 
+	// Write a valid record so the JSONL file exists on disk.
+	_, err := s.PutItem("rw-marshal-err", map[string]any{"pk": map[string]any{"S": "k1"}}, nil)
+	require.NoError(t, err)
+
 	buf := s.getStreamBuffer("rw-marshal-err")
 	require.NotNil(t, buf)
+	buf.mu.RLock()
+	originalCount := len(buf.records)
+	buf.mu.RUnlock()
+	require.Equal(t, 1, originalCount)
 
 	// channels are not JSON-serializable; json.Marshal returns an error.
-	recs := []streamRecord{
+	bad := []streamRecord{
 		{
-			EventID:   "1",
+			EventID:   "bad",
 			EventName: "INSERT",
-			SeqNum:    1,
+			SeqNum:    99,
 			CreatedAt: time.Now(),
 			Keys:      map[string]any{"pk": make(chan int)},
 		},
 	}
 	buf.mu.Lock()
-	s.rewriteStreamFile("rw-marshal-err", recs)
+	s.rewriteStreamFile("rw-marshal-err", bad)
 	buf.mu.Unlock()
-	// No panic; error is logged and the rewrite stops early.
+
+	// The original JSONL file must be intact: the marshal failure must prevent
+	// truncation, so the on-disk record count stays at 1.
+	restored := s.loadStreamRecordsFromDisk("rw-marshal-err")
+	assert.Len(t, restored, 1, "pre-existing JSONL must be unchanged after failed marshal")
 }
 
 // TestTrimStreamForTableNilBuf covers lines 574-576: trimStreamForTable returns immediately
