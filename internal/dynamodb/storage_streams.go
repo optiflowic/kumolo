@@ -18,6 +18,13 @@ import (
 // ErrStreamNotFound is returned when a stream ARN does not match any known stream.
 var ErrStreamNotFound = errors.New("stream not found")
 
+const (
+	// streamRetentionPeriod is the AWS DynamoDB Streams retention window.
+	streamRetentionPeriod = 24 * time.Hour
+	// streamTrimInterval is how often the background goroutine evicts expired records.
+	streamTrimInterval = time.Hour
+)
+
 func deepCloneAny(v any) any {
 	switch x := v.(type) {
 	case map[string]any:
@@ -500,7 +507,7 @@ func (s *Storage) loadStreamRecordsFromDisk(tableName string) []streamRecord {
 		slog.Warn("failed to read stream file", "table", tableName, "err", err)
 		return nil
 	}
-	cutoff := time.Now().UTC().Add(-24 * time.Hour)
+	cutoff := time.Now().UTC().Add(-streamRetentionPeriod)
 	var records []streamRecord
 	for _, line := range strings.Split(string(data), "\n") {
 		if line == "" {
@@ -600,7 +607,7 @@ func (s *Storage) trimAllStreams() {
 	}
 	s.streamsMu.RUnlock()
 
-	cutoff := time.Now().UTC().Add(-24 * time.Hour)
+	cutoff := time.Now().UTC().Add(-streamRetentionPeriod)
 	for _, t := range tables {
 		s.trimStreamForTable(t, cutoff)
 	}

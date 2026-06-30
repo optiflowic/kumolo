@@ -42,7 +42,7 @@ func NewStorage(dataDir string) (*Storage, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.startTrimLoop(time.Hour)
+	s.startTrimLoop(streamTrimInterval)
 	return s, nil
 }
 
