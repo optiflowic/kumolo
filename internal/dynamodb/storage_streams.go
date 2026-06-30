@@ -162,7 +162,7 @@ func (s *Storage) deleteStreamBuffer(tableName string) {
 		streamFilePath(tableName),
 	); err != nil &&
 		!errors.Is(err, os.ErrNotExist) {
-		slog.Warn("failed to remove stream file", "table", tableName, "err", err)
+		slog.Error("failed to remove stream file", "table", tableName, "err", err)
 	}
 }
 
