@@ -159,11 +159,19 @@ func TestIssueTokens_Success(t *testing.T) {
 			{Name: "email", Value: "alice@example.com"},
 		},
 	}
-	access, id, refresh, err := issueTokens(key, keyID, "us-east-1_Pool1", "client-1", user, nil)
+	access, id, refresh, accessJTI, err := issueTokens(
+		key,
+		keyID,
+		"us-east-1_Pool1",
+		"client-1",
+		user,
+		nil,
+	)
 	require.NoError(t, err)
 	require.NotEmpty(t, access)
 	require.NotEmpty(t, id)
 	require.NotEmpty(t, refresh)
+	require.NotEmpty(t, accessJTI)
 
 	// Verify access token claims.
 	claims, err := verifyJWT(access, &key.PublicKey)
@@ -193,7 +201,7 @@ func TestIssueTokens_ReservedClaimsNotOverridden(t *testing.T) {
 			{Name: "email", Value: "alice@example.com"},
 		},
 	}
-	_, id, _, err := issueTokens(key, keyID, "us-east-1_Pool1", "client-1", user, nil)
+	_, id, _, _, err := issueTokens(key, keyID, "us-east-1_Pool1", "client-1", user, nil)
 	require.NoError(t, err)
 
 	idClaims, err := verifyJWT(id, &key.PublicKey)
@@ -222,7 +230,7 @@ func TestIssueTokens_CognitoPrefixAttributesBlocked(t *testing.T) {
 			{Name: "custom:plan", Value: "pro"},
 		},
 	}
-	_, id, _, err := issueTokens(key, keyID, "us-east-1_Pool1", "client-1", user, nil)
+	_, id, _, _, err := issueTokens(key, keyID, "us-east-1_Pool1", "client-1", user, nil)
 	require.NoError(t, err)
 
 	idClaims, err := verifyJWT(id, &key.PublicKey)
@@ -243,7 +251,7 @@ func TestIssueTokens_AccessTokenBuildFails(t *testing.T) {
 		Primes:    []*big.Int{big.NewInt(127)},
 	}
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
-	_, _, _, err := issueTokens(key, "kid", "us-east-1_Pool1", "client-1", user, nil)
+	_, _, _, _, err := issueTokens(key, "kid", "us-east-1_Pool1", "client-1", user, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "build access token")
 }

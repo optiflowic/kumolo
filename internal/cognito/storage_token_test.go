@@ -190,3 +190,177 @@ func TestEnsureRefreshTokensDir_AlreadyExists(t *testing.T) {
 	// Calling again must not fail (ErrExist is swallowed).
 	require.NoError(t, s.ensureRefreshTokensDir(poolID))
 }
+
+// ── RevokeAccessToken / IsAccessTokenRevoked ─────────────────────────────────
+
+func TestRevokeAccessToken_Success(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+
+	require.NoError(t, s.RevokeAccessToken(poolID, "jti-abc", 9999999999))
+
+	revoked, err := s.IsAccessTokenRevoked(poolID, "jti-abc")
+	require.NoError(t, err)
+	assert.True(t, revoked)
+}
+
+func TestIsAccessTokenRevoked_NotRevoked(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+
+	revoked, err := s.IsAccessTokenRevoked(poolID, "no-such-jti")
+	require.NoError(t, err)
+	assert.False(t, revoked)
+}
+
+func TestEnsureRevokedJTIsDir_AlreadyExists(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+
+	dir := filepath.Join("pools", poolID, "revoked_jtis")
+	require.NoError(t, s.mkdirFn(dir, 0o750))
+
+	// Calling again must not fail.
+	require.NoError(t, s.ensureRevokedJTIsDir(poolID))
+}
+
+// ── DeleteRefreshTokensBySub ──────────────────────────────────────────────────
+
+func TestDeleteRefreshTokensBySub_DeletesMatchingTokens(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+
+	rt1 := &refreshTokenData{
+		Token:    "tok-1",
+		PoolID:   poolID,
+		ClientID: "c",
+		Username: "alice",
+		Sub:      "sub-alice",
+	}
+	rt2 := &refreshTokenData{
+		Token:    "tok-2",
+		PoolID:   poolID,
+		ClientID: "c",
+		Username: "alice",
+		Sub:      "sub-alice",
+	}
+	rt3 := &refreshTokenData{
+		Token:    "tok-3",
+		PoolID:   poolID,
+		ClientID: "c",
+		Username: "bob",
+		Sub:      "sub-bob",
+	}
+	require.NoError(t, s.CreateRefreshToken(rt1))
+	require.NoError(t, s.CreateRefreshToken(rt2))
+	require.NoError(t, s.CreateRefreshToken(rt3))
+
+	require.NoError(t, s.DeleteRefreshTokensBySub(poolID, "sub-alice"))
+
+	_, err1 := s.GetRefreshToken(poolID, "tok-1")
+	assert.ErrorIs(t, err1, errRefreshTokenNotFound)
+	_, err2 := s.GetRefreshToken(poolID, "tok-2")
+	assert.ErrorIs(t, err2, errRefreshTokenNotFound)
+	// Bob's token must still exist.
+	_, err3 := s.GetRefreshToken(poolID, "tok-3")
+	assert.NoError(t, err3)
+}
+
+func TestDeleteRefreshTokensBySub_NoTokensForSub(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+
+	rt := &refreshTokenData{
+		Token:    "tok-1",
+		PoolID:   poolID,
+		ClientID: "c",
+		Username: "alice",
+		Sub:      "sub-alice",
+	}
+	require.NoError(t, s.CreateRefreshToken(rt))
+
+	// Deleting for an unrelated sub must succeed without error.
+	require.NoError(t, s.DeleteRefreshTokensBySub(poolID, "sub-nobody"))
+
+	// alice's token must still exist.
+	_, err := s.GetRefreshToken(poolID, "tok-1")
+	assert.NoError(t, err)
+}
+
+func TestDeleteRefreshTokensBySub_NoRefreshTokensDir(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+
+	// No refresh_tokens dir exists yet — must return nil.
+	require.NoError(t, s.DeleteRefreshTokensBySub(poolID, "sub-alice"))
+}
+
+func TestDeleteRefreshTokensBySub_ListDirError(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+
+	rt := &refreshTokenData{Token: "tok-1", PoolID: poolID, ClientID: "c", Sub: "sub-alice"}
+	require.NoError(t, s.CreateRefreshToken(rt))
+
+	s.listDirFn = func(string) ([]os.DirEntry, error) {
+		return nil, errors.New("disk error")
+	}
+	err := s.DeleteRefreshTokensBySub(poolID, "sub-alice")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "list refresh tokens")
+}
+
+func TestDeleteRefreshTokensBySub_SkipsDirectory(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+
+	// Create a subdirectory inside refresh_tokens — it must be silently skipped.
+	require.NoError(t, s.CreateRefreshToken(
+		&refreshTokenData{Token: "tok-1", PoolID: poolID, ClientID: "c", Sub: "sub-alice"},
+	))
+	subdir := filepath.Join("pools", poolID, "refresh_tokens", "subdir")
+	require.NoError(t, s.mkdirFn(subdir, 0o750))
+
+	require.NoError(t, s.DeleteRefreshTokensBySub(poolID, "sub-alice"))
+	_, err := s.GetRefreshToken(poolID, "tok-1")
+	assert.ErrorIs(t, err, errRefreshTokenNotFound)
+}
+
+// ── ensureRevokedJTIsDir / RevokeAccessToken error paths ─────────────────────
+
+func TestEnsureRevokedJTIsDir_MkdirError(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+
+	s.mkdirFn = func(string, os.FileMode) error {
+		return errors.New("permission denied")
+	}
+	err := s.ensureRevokedJTIsDir(poolID)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "create revoked_jtis dir")
+}
+
+func TestRevokeAccessToken_EnsureDirError(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+
+	s.mkdirFn = func(string, os.FileMode) error {
+		return errors.New("permission denied")
+	}
+	err := s.RevokeAccessToken(poolID, "jti-abc", 9999999999)
+	require.Error(t, err)
+}
+
+// ── IsAccessTokenRevoked stat error ──────────────────────────────────────────
+
+func TestIsAccessTokenRevoked_StatError(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+
+	s.statFn = func(string) (os.FileInfo, error) {
+		return nil, errors.New("permission denied")
+	}
+	_, err := s.IsAccessTokenRevoked(poolID, "jti-abc")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "check revoked JTI")
+}

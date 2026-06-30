@@ -117,36 +117,37 @@ func buildJWKS(publicKey *rsa.PublicKey, keyID string) map[string]any {
 // issueTokens generates a new access token, ID token, and refresh token for the given user.
 // groups is the list of group names to include in the cognito:groups claim; pass nil if the user
 // has no group membership.
+// Also returns accessJTI so callers can associate the access token with the refresh token.
 func issueTokens(
 	privateKey *rsa.PrivateKey,
 	keyID, poolID, clientID string,
 	user *UserMetadata,
 	groups []string,
-) (accessToken, idToken, refreshToken string, err error) {
+) (accessToken, idToken, refreshToken, accessJTI string, err error) {
 	now := time.Now().Unix()
 	exp := now + accessTokenExpiry
 	originJTI, err := generateTokenID()
 	if err != nil {
 		// untestable: crypto/rand.Read only fails on OS-level entropy source errors
-		return "", "", "", fmt.Errorf("generate origin_jti: %w", err)
+		return "", "", "", "", fmt.Errorf("generate origin_jti: %w", err)
 	}
 
-	accessJTI, err := generateTokenID()
+	accessJTI, err = generateTokenID()
 	if err != nil {
 		// untestable: crypto/rand.Read only fails on OS-level entropy source errors
-		return "", "", "", fmt.Errorf("generate access jti: %w", err)
+		return "", "", "", "", fmt.Errorf("generate access jti: %w", err)
 	}
 
 	idJTI, err := generateTokenID()
 	if err != nil {
 		// untestable: crypto/rand.Read only fails on OS-level entropy source errors
-		return "", "", "", fmt.Errorf("generate id jti: %w", err)
+		return "", "", "", "", fmt.Errorf("generate id jti: %w", err)
 	}
 
 	refreshToken, err = generateTokenID()
 	if err != nil {
 		// untestable: crypto/rand.Read only fails on OS-level entropy source errors
-		return "", "", "", fmt.Errorf("generate refresh token: %w", err)
+		return "", "", "", "", fmt.Errorf("generate refresh token: %w", err)
 	}
 
 	iss := issuerURL(poolID)
@@ -197,16 +198,16 @@ func issueTokens(
 
 	accessToken, err = buildJWT(privateKey, keyID, accessClaims)
 	if err != nil {
-		return "", "", "", fmt.Errorf("build access token: %w", err)
+		return "", "", "", "", fmt.Errorf("build access token: %w", err)
 	}
 
 	idToken, err = buildJWT(privateKey, keyID, idClaims)
 	if err != nil {
 		// unreachable: same key and algorithm as access token; if access token signing succeeded, this will too
-		return "", "", "", fmt.Errorf("build id token: %w", err)
+		return "", "", "", "", fmt.Errorf("build id token: %w", err)
 	}
 
-	return accessToken, idToken, refreshToken, nil
+	return accessToken, idToken, refreshToken, accessJTI, nil
 }
 
 // buildSessionToken creates a signed session JWT for challenge flows.

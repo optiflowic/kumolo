@@ -33,8 +33,11 @@ func (ro *Router) handleGetUser(w http.ResponseWriter, body []byte) {
 	if !ok {
 		return
 	}
-	sub, ok := validateAccessJWT(w, token, &privateKey.PublicKey)
+	sub, jti, ok := validateAccessJWT(w, token, &privateKey.PublicKey)
 	if !ok {
+		return
+	}
+	if ok2 := ro.checkTokenNotRevoked(w, poolID, jti); !ok2 {
 		return
 	}
 	user, ok := ro.lookupUser(w, poolID, sub)
@@ -108,32 +111,33 @@ func validateAccessJWT(
 	w http.ResponseWriter,
 	token string,
 	publicKey *rsa.PublicKey,
-) (string, bool) {
+) (sub, jti string, ok bool) {
 	claims, err := verifyJWT(token, publicKey)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException, "Invalid access token.")
-		return "", false
+		return "", "", false
 	}
-	exp, ok := claims[jwtClaimExp].(float64)
-	if !ok || int64(exp) <= time.Now().Unix() {
+	exp, expOK := claims[jwtClaimExp].(float64)
+	if !expOK || int64(exp) <= time.Now().Unix() {
 		writeError(
 			w,
 			http.StatusBadRequest,
 			ErrTypeNotAuthorizedException,
 			"Access Token has expired",
 		)
-		return "", false
+		return "", "", false
 	}
 	if tokenUse, _ := claims[jwtClaimTokenUse].(string); tokenUse != jwtTokenUseAccess {
 		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException, "Invalid access token.")
-		return "", false
+		return "", "", false
 	}
-	sub, _ := claims[jwtClaimSub].(string)
+	sub, _ = claims[jwtClaimSub].(string)
 	if sub == "" {
 		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException, "Invalid access token.")
-		return "", false
+		return "", "", false
 	}
-	return sub, true
+	jti, _ = claims["jti"].(string)
+	return sub, jti, true
 }
 
 func (ro *Router) lookupUser(w http.ResponseWriter, poolID, sub string) (*UserMetadata, bool) {
@@ -157,6 +161,81 @@ func (ro *Router) lookupUser(w http.ResponseWriter, poolID, sub string) (*UserMe
 		return nil, false
 	}
 	return user, true
+}
+
+// checkTokenNotRevoked returns false (and writes an error) if the JTI has been revoked.
+func (ro *Router) checkTokenNotRevoked(w http.ResponseWriter, poolID, jti string) bool {
+	if jti == "" {
+		return true
+	}
+	revoked, err := ro.storage.IsAccessTokenRevoked(poolID, jti)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to check token revocation")
+		return false
+	}
+	if revoked {
+		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException,
+			"Access Token has been revoked")
+		return false
+	}
+	return true
+}
+
+// ──── GlobalSignOut ─────────────────────────────────────────────────────────
+
+type globalSignOutRequest struct {
+	AccessToken string `json:"AccessToken"`
+}
+
+func (ro *Router) handleGlobalSignOut(w http.ResponseWriter, body []byte) {
+	var req globalSignOutRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"invalid request body")
+		return
+	}
+	if req.AccessToken == "" {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"AccessToken is required")
+		return
+	}
+
+	poolID, ok := poolIDFromToken(w, req.AccessToken)
+	if !ok {
+		return
+	}
+	privateKey, ok := ro.poolKey(w, poolID)
+	if !ok {
+		return
+	}
+	sub, jti, ok := validateAccessJWT(w, req.AccessToken, &privateKey.PublicKey)
+	if !ok {
+		return
+	}
+	if ok2 := ro.checkTokenNotRevoked(w, poolID, jti); !ok2 {
+		return
+	}
+
+	// Revoke the current access token JTI.
+	if jti != "" {
+		rawClaims, _ := parseRawClaims(req.AccessToken)
+		exp, _ := rawClaims[jwtClaimExp].(float64)
+		if err := ro.storage.RevokeAccessToken(poolID, jti, exp); err != nil {
+			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+				"failed to revoke access token")
+			return
+		}
+	}
+
+	// Delete all refresh tokens for this user.
+	if err := ro.storage.DeleteRefreshTokensBySub(poolID, sub); err != nil {
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to revoke refresh tokens")
+		return
+	}
+
+	writeEmpty(w)
 }
 
 // prependSub ensures sub is always the first element of attrs.

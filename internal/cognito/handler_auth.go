@@ -549,7 +549,14 @@ func (ro *Router) writeAuthResult(
 		return
 	}
 
-	accessToken, idToken, rt, err := issueTokens(privateKey, keyID, poolID, clientID, user, groups)
+	accessToken, idToken, rt, accessJTI, err := issueTokens(
+		privateKey,
+		keyID,
+		poolID,
+		clientID,
+		user,
+		groups,
+	)
 	if err != nil {
 		// untestable: issueTokens only fails on crypto/rand.Read OS-level failures
 		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
@@ -577,6 +584,7 @@ func (ro *Router) writeAuthResult(
 			Sub:       user.Sub,
 			IssuedAt:  issuedAt,
 			ExpiresAt: issuedAt + float64(validity)*secondsPerDay,
+			AccessJTI: accessJTI,
 		}
 		if err := ro.storage.CreateRefreshToken(rtData); err != nil {
 			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
@@ -835,6 +843,84 @@ func (ro *Router) handleResendConfirmationCode(w http.ResponseWriter, body []byt
 	writeJSON(w, http.StatusOK, resendConfirmationCodeResponse{
 		CodeDeliveryDetails: delivery,
 	})
+}
+
+// ──── RevokeToken ───────────────────────────────────────────────────────────
+
+type revokeTokenRequest struct {
+	ClientID     string `json:"ClientId"`
+	Token        string `json:"Token"`
+	ClientSecret string `json:"ClientSecret"` // accepted but ignored
+}
+
+func (ro *Router) handleRevokeToken(w http.ResponseWriter, body []byte) {
+	var req revokeTokenRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"invalid request body")
+		return
+	}
+	if req.ClientID == "" {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"ClientId is required")
+		return
+	}
+	if req.Token == "" {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"Token is required")
+		return
+	}
+
+	poolID, err := ro.storage.GetPoolIDForClient(req.ClientID)
+	if err != nil {
+		if errors.Is(err, errUserPoolClientNotFound) {
+			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException,
+				"User pool client not found.")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to resolve client")
+		return
+	}
+
+	rt, err := ro.storage.GetRefreshToken(poolID, req.Token)
+	if err != nil {
+		if errors.Is(err, errRefreshTokenNotFound) {
+			// Revocation is idempotent: unknown token is treated as already revoked.
+			writeEmpty(w)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to get refresh token")
+		return
+	}
+
+	if rt.ClientID != req.ClientID {
+		writeError(w, http.StatusBadRequest, ErrTypeUnauthorizedException,
+			"The client is not authorized to revoke this token.")
+		return
+	}
+
+	// Revoke the access token that was issued alongside this refresh token.
+	if rt.AccessJTI != "" {
+		if err := ro.storage.RevokeAccessToken(poolID, rt.AccessJTI, rt.ExpiresAt); err != nil {
+			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+				"failed to revoke access token")
+			return
+		}
+	}
+
+	if err := ro.storage.DeleteRefreshToken(
+		poolID,
+		req.Token,
+	); err != nil &&
+		!errors.Is(err, errRefreshTokenNotFound) {
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to delete refresh token")
+		return
+	}
+
+	writeEmpty(w)
 }
 
 // ──── JWKS ──────────────────────────────────────────────────────────────────

@@ -47,6 +47,11 @@ type store interface {
 	GetRefreshToken(poolID, token string) (*refreshTokenData, error)
 	DeleteRefreshToken(poolID, token string) error
 
+	// Token revocation operations
+	RevokeAccessToken(poolID, jti string, expiresAt float64) error
+	IsAccessTokenRevoked(poolID, jti string) (bool, error)
+	DeleteRefreshTokensBySub(poolID, sub string) error
+
 	// GetGroupsForUser is used by auth handlers to embed group claims in JWTs.
 	GetGroupsForUser(poolID, username string) ([]string, error)
 }
@@ -178,6 +183,10 @@ func (ro *Router) serveHTTP(w http.ResponseWriter, r *http.Request, op string) {
 		ro.handleAdminListGroupsForUser(w, body)
 	case "ListUsersInGroup":
 		ro.handleListUsersInGroup(w, body)
+	case "RevokeToken":
+		ro.handleRevokeToken(w, body)
+	case "GlobalSignOut":
+		ro.handleGlobalSignOut(w, body)
 	default:
 		writeError(
 			w,
