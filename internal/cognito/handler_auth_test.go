@@ -1781,6 +1781,42 @@ func TestRevokeToken_AccessTokenRevoked(t *testing.T) {
 	assertErrType(t, w3, ErrTypeNotAuthorizedException)
 }
 
+func TestRevokeToken_AccessTokenFromRefreshAlsoRevoked(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	result := doFullAuth(t, ro, clientID, "alice", "Password123!")
+	refreshToken := result["RefreshToken"].(string)
+
+	// Refresh to get a new access token from the same refresh token family.
+	refreshBody, _ := json.Marshal(map[string]any{
+		"ClientId": clientID,
+		"AuthFlow": "REFRESH_TOKEN_AUTH",
+		"AuthParameters": map[string]string{
+			"REFRESH_TOKEN": refreshToken,
+		},
+	})
+	w := doOp(t, ro, "InitiateAuth", string(refreshBody))
+	require.Equal(t, http.StatusOK, w.Code)
+	var refreshResp map[string]any
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&refreshResp))
+	newAccessToken := refreshResp["AuthenticationResult"].(map[string]any)["AccessToken"].(string)
+
+	// Confirm the new access token works.
+	getUserBody, _ := json.Marshal(map[string]string{"AccessToken": newAccessToken})
+	w2 := doOp(t, ro, "GetUser", string(getUserBody))
+	require.Equal(t, http.StatusOK, w2.Code)
+
+	// Revoke the refresh token — should invalidate the entire family via origin_jti.
+	revokeBody, _ := json.Marshal(map[string]string{"ClientId": clientID, "Token": refreshToken})
+	w3 := doOp(t, ro, "RevokeToken", string(revokeBody))
+	require.Equal(t, http.StatusOK, w3.Code)
+
+	// The access token issued after the refresh must also be rejected.
+	w4 := doOp(t, ro, "GetUser", string(getUserBody))
+	assert.Equal(t, http.StatusBadRequest, w4.Code)
+	assertErrType(t, w4, ErrTypeNotAuthorizedException)
+}
+
 func TestRevokeToken_IdempotentUnknownToken(t *testing.T) {
 	ro := newTestRouter(t)
 	_, clientID := setupPool(t, ro)
@@ -1871,7 +1907,7 @@ func TestRevokeToken_RevokeAccessTokenStorageError(t *testing.T) {
 	rt := &refreshTokenData{
 		Token:     "tok",
 		ClientID:  "c",
-		AccessJTI: "jti-123",
+		OriginJTI: "origin-jti-123",
 	}
 	ro := &Router{storage: &mockStore{
 		getPoolForClient:     func(string) (string, error) { return "pool-1", nil },

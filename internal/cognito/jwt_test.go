@@ -159,19 +159,21 @@ func TestIssueTokens_Success(t *testing.T) {
 			{Name: "email", Value: "alice@example.com"},
 		},
 	}
-	access, id, refresh, accessJTI, err := issueTokens(
+	access, id, refresh, accessJTI, originJTI, err := issueTokens(
 		key,
 		keyID,
 		"us-east-1_Pool1",
 		"client-1",
 		user,
 		nil,
+		"",
 	)
 	require.NoError(t, err)
 	require.NotEmpty(t, access)
 	require.NotEmpty(t, id)
 	require.NotEmpty(t, refresh)
 	require.NotEmpty(t, accessJTI)
+	require.NotEmpty(t, originJTI)
 
 	// Verify access token claims.
 	claims, err := verifyJWT(access, &key.PublicKey)
@@ -179,6 +181,8 @@ func TestIssueTokens_Success(t *testing.T) {
 	assert.Equal(t, "sub-alice", claims["sub"])
 	assert.Equal(t, "access", claims["token_use"])
 	assert.Equal(t, "alice", claims["username"])
+	assert.Equal(t, accessJTI, claims["jti"])
+	assert.Equal(t, originJTI, claims["origin_jti"])
 
 	// Verify ID token claims including user attributes.
 	idClaims, err := verifyJWT(id, &key.PublicKey)
@@ -201,7 +205,7 @@ func TestIssueTokens_ReservedClaimsNotOverridden(t *testing.T) {
 			{Name: "email", Value: "alice@example.com"},
 		},
 	}
-	_, id, _, _, err := issueTokens(key, keyID, "us-east-1_Pool1", "client-1", user, nil)
+	_, id, _, _, _, err := issueTokens(key, keyID, "us-east-1_Pool1", "client-1", user, nil, "")
 	require.NoError(t, err)
 
 	idClaims, err := verifyJWT(id, &key.PublicKey)
@@ -230,7 +234,7 @@ func TestIssueTokens_CognitoPrefixAttributesBlocked(t *testing.T) {
 			{Name: "custom:plan", Value: "pro"},
 		},
 	}
-	_, id, _, _, err := issueTokens(key, keyID, "us-east-1_Pool1", "client-1", user, nil)
+	_, id, _, _, _, err := issueTokens(key, keyID, "us-east-1_Pool1", "client-1", user, nil, "")
 	require.NoError(t, err)
 
 	idClaims, err := verifyJWT(id, &key.PublicKey)
@@ -251,7 +255,7 @@ func TestIssueTokens_AccessTokenBuildFails(t *testing.T) {
 		Primes:    []*big.Int{big.NewInt(127)},
 	}
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
-	_, _, _, _, err := issueTokens(key, "kid", "us-east-1_Pool1", "client-1", user, nil)
+	_, _, _, _, _, err := issueTokens(key, "kid", "us-east-1_Pool1", "client-1", user, nil, "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "build access token")
 }

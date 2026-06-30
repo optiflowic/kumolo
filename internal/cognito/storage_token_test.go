@@ -326,6 +326,44 @@ func TestDeleteRefreshTokensBySub_SkipsDirectory(t *testing.T) {
 	assert.ErrorIs(t, err, errRefreshTokenNotFound)
 }
 
+func TestDeleteRefreshTokensBySub_ReadError(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+
+	require.NoError(t, s.CreateRefreshToken(
+		&refreshTokenData{Token: "tok-1", PoolID: poolID, ClientID: "c", Sub: "sub-alice"},
+	))
+
+	calls := 0
+	realReadAll := s.readAll
+	s.readAll = func(r io.Reader) ([]byte, error) {
+		calls++
+		if calls == 1 {
+			return nil, errors.New("read error") // fail on the token file read
+		}
+		return realReadAll(r)
+	}
+	err := s.DeleteRefreshTokensBySub(poolID, "sub-alice")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "read refresh token")
+}
+
+func TestDeleteRefreshTokensBySub_RemoveError(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+
+	require.NoError(t, s.CreateRefreshToken(
+		&refreshTokenData{Token: "tok-1", PoolID: poolID, ClientID: "c", Sub: "sub-alice"},
+	))
+
+	s.removeFile = func(string) error {
+		return errors.New("permission denied")
+	}
+	err := s.DeleteRefreshTokensBySub(poolID, "sub-alice")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "delete refresh token")
+}
+
 // ── ensureRevokedJTIsDir / RevokeAccessToken error paths ─────────────────────
 
 func TestEnsureRevokedJTIsDir_MkdirError(t *testing.T) {
