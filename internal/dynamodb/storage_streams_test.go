@@ -13,11 +13,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// errWriter is an io.WriteCloser whose Write always returns an error.
-type errWriter struct{ writeErr error }
+// errWriter is an io.WriteCloser with injectable Write and Close errors.
+// If writeErr is nil, Write succeeds and returns len(p); if closeErr is nil, Close succeeds.
+type errWriter struct {
+	writeErr error
+	closeErr error
+}
 
-func (w errWriter) Write([]byte) (int, error) { return 0, w.writeErr }
-func (errWriter) Close() error                { return nil }
+func (w errWriter) Write(p []byte) (int, error) {
+	if w.writeErr != nil {
+		return 0, w.writeErr
+	}
+	return len(p), nil
+}
+func (w errWriter) Close() error { return w.closeErr }
 
 func TestStreamARNParsing(t *testing.T) {
 	tests := []struct {
@@ -882,14 +891,21 @@ func TestRewriteStreamFileEmptyRemoveError(t *testing.T) {
 	s.trimStreamForTable("rw-rm-err", cutoff)
 }
 
-// TestRewriteStreamFileOpenError covers lines 550-553: openFile returns an error when
-// rewriteStreamFile tries to open the stream file for truncation write.
+// TestRewriteStreamFileOpenError covers the path where openFile fails when creating
+// the temp stream file; rewriteStreamFile must log and return without touching the original.
 func TestRewriteStreamFileOpenError(t *testing.T) {
 	s := newTestStorage(t)
 	mustCreateStreamTable(t, s, "rw-open-err", "NEW_IMAGE")
 
-	s.openFile = func(string, int, os.FileMode) (io.WriteCloser, error) {
-		return nil, errors.New("open failed")
+	_, err := s.PutItem("rw-open-err", map[string]any{"pk": map[string]any{"S": "k1"}}, nil)
+	require.NoError(t, err)
+
+	origOpenFile := s.openFile
+	s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+		if strings.HasSuffix(name, ".tmp") {
+			return nil, errors.New("open failed")
+		}
+		return origOpenFile(name, flag, perm)
 	}
 	recs := []streamRecord{
 		{EventID: "1", EventName: "INSERT", SeqNum: 1, CreatedAt: time.Now()},
@@ -899,25 +915,101 @@ func TestRewriteStreamFileOpenError(t *testing.T) {
 	buf.mu.Lock()
 	s.rewriteStreamFile("rw-open-err", recs)
 	buf.mu.Unlock()
+
+	// Original file must be intact.
+	restored := s.loadStreamRecordsFromDisk("rw-open-err")
+	assert.Len(t, restored, 1, "original JSONL must be unchanged when temp file open fails")
 }
 
-// TestRewriteStreamFileWriteError covers lines 557-566: Write returns an error while
-// rewriteStreamFile is iterating over records.
+// TestRewriteStreamFileWriteError covers the path where Write fails on the temp file;
+// rewriteStreamFile must remove the temp file and leave the original JSONL intact.
 func TestRewriteStreamFileWriteError(t *testing.T) {
 	s := newTestStorage(t)
 	mustCreateStreamTable(t, s, "rw-write-err", "NEW_IMAGE")
 
-	s.openFile = func(string, int, os.FileMode) (io.WriteCloser, error) {
-		return errWriter{writeErr: errors.New("write failed")}, nil
+	_, err := s.PutItem("rw-write-err", map[string]any{"pk": map[string]any{"S": "k1"}}, nil)
+	require.NoError(t, err)
+
+	origOpenFile := s.openFile
+	s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+		if strings.HasSuffix(name, ".tmp") {
+			return errWriter{writeErr: errors.New("write failed")}, nil
+		}
+		return origOpenFile(name, flag, perm)
 	}
 	recs := []streamRecord{
-		{EventID: "1", EventName: "INSERT", SeqNum: 1, CreatedAt: time.Now()},
+		{EventID: "2", EventName: "MODIFY", SeqNum: 2, CreatedAt: time.Now()},
 	}
 	buf := s.getStreamBuffer("rw-write-err")
 	require.NotNil(t, buf)
 	buf.mu.Lock()
 	s.rewriteStreamFile("rw-write-err", recs)
 	buf.mu.Unlock()
+
+	// Original file must be intact; tmp file must not be left behind.
+	restored := s.loadStreamRecordsFromDisk("rw-write-err")
+	assert.Len(t, restored, 1, "original JSONL must be unchanged when temp file write fails")
+	_, statErr := s.statFn(streamFilePath("rw-write-err") + ".tmp")
+	assert.True(t, os.IsNotExist(statErr), "temp file must be cleaned up after write failure")
+}
+
+// TestRewriteStreamFileCloseError covers the path where Close fails on the temp file;
+// rewriteStreamFile must remove the temp file and leave the original JSONL intact.
+func TestRewriteStreamFileCloseError(t *testing.T) {
+	s := newTestStorage(t)
+	mustCreateStreamTable(t, s, "rw-close-err", "NEW_IMAGE")
+
+	_, err := s.PutItem("rw-close-err", map[string]any{"pk": map[string]any{"S": "k1"}}, nil)
+	require.NoError(t, err)
+
+	origOpenFile := s.openFile
+	s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
+		if strings.HasSuffix(name, ".tmp") {
+			return errWriter{closeErr: errors.New("close failed")}, nil
+		}
+		return origOpenFile(name, flag, perm)
+	}
+	recs := []streamRecord{
+		{EventID: "2", EventName: "MODIFY", SeqNum: 2, CreatedAt: time.Now()},
+	}
+	buf := s.getStreamBuffer("rw-close-err")
+	require.NotNil(t, buf)
+	buf.mu.Lock()
+	s.rewriteStreamFile("rw-close-err", recs)
+	buf.mu.Unlock()
+
+	// Original file must be intact; tmp file must not be left behind.
+	restored := s.loadStreamRecordsFromDisk("rw-close-err")
+	assert.Len(t, restored, 1, "original JSONL must be unchanged when temp file close fails")
+	_, statErr := s.statFn(streamFilePath("rw-close-err") + ".tmp")
+	assert.True(t, os.IsNotExist(statErr), "temp file must be cleaned up after close failure")
+}
+
+// TestRewriteStreamFileRenameError covers the path where renameFn fails; rewriteStreamFile
+// must remove the temp file and leave the original JSONL intact.
+func TestRewriteStreamFileRenameError(t *testing.T) {
+	s := newTestStorage(t)
+	mustCreateStreamTable(t, s, "rw-rename-err", "NEW_IMAGE")
+
+	_, err := s.PutItem("rw-rename-err", map[string]any{"pk": map[string]any{"S": "k1"}}, nil)
+	require.NoError(t, err)
+
+	s.renameFn = func(_, _ string) error { return errors.New("rename failed") }
+
+	recs := []streamRecord{
+		{EventID: "2", EventName: "MODIFY", SeqNum: 2, CreatedAt: time.Now()},
+	}
+	buf := s.getStreamBuffer("rw-rename-err")
+	require.NotNil(t, buf)
+	buf.mu.Lock()
+	s.rewriteStreamFile("rw-rename-err", recs)
+	buf.mu.Unlock()
+
+	// Original file must be intact; tmp file must not be left behind.
+	restored := s.loadStreamRecordsFromDisk("rw-rename-err")
+	assert.Len(t, restored, 1, "original JSONL must be unchanged when rename fails")
+	_, statErr := s.statFn(streamFilePath("rw-rename-err") + ".tmp")
+	assert.True(t, os.IsNotExist(statErr), "temp file must be cleaned up after rename failure")
 }
 
 // TestRewriteStreamFileMarshalError covers the marshal-first path: when json.Marshal

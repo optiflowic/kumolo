@@ -570,11 +570,11 @@ func (s *Storage) appendToStreamFile(tableName string, rec streamRecord) {
 	}
 }
 
-// rewriteStreamFile replaces the table's JSONL file. All records are marshaled into
-// an in-memory buffer first; the file is truncated only after every record has been
-// serialised successfully, so a marshal failure leaves the existing JSONL intact.
-// A crash mid-write may still leave a partial file; corrupt lines are skipped on
-// reload so recovery is graceful, but records after the crash point are lost.
+// rewriteStreamFile atomically replaces the table's JSONL file. Records are marshaled
+// into an in-memory buffer first so a marshal failure never touches the existing file.
+// The payload is then written to a sibling ".tmp" file; only after a successful write
+// and close is the tmp file renamed over the destination. Any failure cleans up the
+// tmp file, leaving the original JSONL intact.
 // If records is empty the file is removed. Must be called with buf.mu held.
 func (s *Storage) rewriteStreamFile(tableName string, records []streamRecord) {
 	path := streamFilePath(tableName)
@@ -600,14 +600,27 @@ func (s *Storage) rewriteStreamFile(tableName string, records []streamRecord) {
 		payload.Write(recData)
 		payload.WriteByte('\n')
 	}
-	f, err := s.openFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	tmpPath := path + ".tmp"
+	f, err := s.openFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
-		slog.Error("failed to rewrite stream file", "table", tableName, "err", err)
+		slog.Error("failed to create temp stream file", "table", tableName, "err", err)
 		return
 	}
-	defer func() { _ = f.Close() }()
-	if _, err := f.Write(payload.Bytes()); err != nil {
-		slog.Error("failed to write stream file during rewrite", "table", tableName, "err", err)
+	_, writeErr := f.Write(payload.Bytes())
+	closeErr := f.Close()
+	if writeErr != nil {
+		slog.Error("failed to write temp stream file", "table", tableName, "err", writeErr)
+		_ = s.removeFile(tmpPath)
+		return
+	}
+	if closeErr != nil {
+		slog.Error("failed to close temp stream file", "table", tableName, "err", closeErr)
+		_ = s.removeFile(tmpPath)
+		return
+	}
+	if err := s.renameFn(tmpPath, path); err != nil {
+		slog.Error("failed to rename temp stream file", "table", tableName, "err", err)
+		_ = s.removeFile(tmpPath)
 	}
 }
 

@@ -24,6 +24,7 @@ type Storage struct {
 	mkdirFn    func(name string, perm os.FileMode) error
 	removeFile func(name string) error
 	openFile   func(name string, flag int, perm os.FileMode) (io.WriteCloser, error)
+	renameFn   func(oldpath, newpath string) error
 	readAll    func(r io.Reader) ([]byte, error)
 	listDirFn  func(name string) ([]os.DirEntry, error)
 	statFn     func(name string) (os.FileInfo, error)
@@ -77,6 +78,7 @@ func newStorage(dataDir string, openRoot func(string) (*os.Root, error)) (*Stora
 	s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
 		return s.root.OpenFile(name, flag, perm)
 	}
+	s.renameFn = s.root.Rename
 	s.readAll = io.ReadAll
 	s.listDirFn = func(name string) ([]os.DirEntry, error) {
 		f, err := s.root.Open(name)
