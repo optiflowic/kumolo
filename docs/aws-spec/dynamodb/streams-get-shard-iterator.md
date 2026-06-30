@@ -19,10 +19,11 @@ Last verified: 2026-05-28
 ## Implemented errors
 
 - `ResourceNotFoundException` 400 — stream or shard not found
-- `TrimmedDataAccessException` 400 — sequence number references trimmed data (not applicable; kumolo never trims)
+- `TrimmedDataAccessException` 400 — not returned; see deviations
 - `InternalServerError` 500
 
 ## kumolo deviations
 
 - Iterator encoded as base64-JSON `{"t":"<tableName>","p":<nextIndex>}`; stateless, no server-side expiry.
 - `TRIM_HORIZON` → position 0; `LATEST` → position equal to current record count; AT/AFTER decode sequence number to index.
+- `TrimmedDataAccessException` is not returned when `AT_SEQUENCE_NUMBER` / `AFTER_SEQUENCE_NUMBER` references a record that has been trimmed (older than 24 h). kumolo silently falls back to the nearest available position (the first record with a higher SeqNum), whereas real AWS returns 400.

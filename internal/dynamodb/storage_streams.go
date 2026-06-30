@@ -1,20 +1,32 @@
 package dynamodb
 
 import (
+	"bytes"
 	"crypto/md5" // #nosec G501 -- MD5 used only for deterministic shard ID generation, not security
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
 
 // ErrStreamNotFound is returned when a stream ARN does not match any known stream.
 var ErrStreamNotFound = errors.New("stream not found")
+
+const (
+	// streamRetentionPeriod is the AWS DynamoDB Streams retention window.
+	streamRetentionPeriod = 24 * time.Hour
+	// streamTrimInterval is how often the background goroutine evicts expired records.
+	streamTrimInterval = time.Hour
+	// streamTempFileSuffix is the suffix used for atomic temp-file rewrites.
+	streamTempFileSuffix = ".tmp"
+)
 
 func deepCloneAny(v any) any {
 	switch x := v.(type) {
@@ -60,6 +72,7 @@ type streamBuffer struct {
 	label   string // ISO8601 timestamp when streaming was enabled
 	shardID string // deterministic shard ID for this stream
 	records []streamRecord
+	deleted bool // set under mu by deleteStreamBuffer; prevents stale file writes
 }
 
 // shardIterState is the state encoded inside a shard iterator token.
@@ -107,7 +120,8 @@ func shardID(tableName, label string) string {
 }
 
 // ensureStreamBuffer returns the existing buffer for tableName, or creates one
-// using the label stored in the table metadata.
+// using the label stored in the table metadata. On first creation the buffer is
+// populated with any records persisted to disk, minus those older than 24 hours.
 func (s *Storage) ensureStreamBuffer(tableName, label string) *streamBuffer {
 	s.streamsMu.Lock()
 	defer s.streamsMu.Unlock()
@@ -117,6 +131,7 @@ func (s *Storage) ensureStreamBuffer(tableName, label string) *streamBuffer {
 	buf := &streamBuffer{
 		label:   label,
 		shardID: shardID(tableName, label),
+		records: s.loadStreamRecordsFromDisk(tableName),
 	}
 	s.streams[tableName] = buf
 	return buf
@@ -129,11 +144,29 @@ func (s *Storage) getStreamBuffer(tableName string) *streamBuffer {
 	return s.streams[tableName]
 }
 
-// deleteStreamBuffer removes the buffer for a table (called on DeleteTable).
+// deleteStreamBuffer removes the buffer and the on-disk JSONL file for a table.
+// Called on DeleteTable or when streaming is disabled.
 func (s *Storage) deleteStreamBuffer(tableName string) {
 	s.streamsMu.Lock()
-	defer s.streamsMu.Unlock()
+	buf := s.streams[tableName]
 	delete(s.streams, tableName)
+	s.streamsMu.Unlock()
+
+	// Mark the buffer deleted before removing the file so that any goroutine
+	// which already holds a pointer to buf (captured before the map removal)
+	// sees deleted=true when it next acquires buf.mu and skips the file write.
+	if buf != nil {
+		buf.mu.Lock()
+		buf.deleted = true
+		buf.mu.Unlock()
+	}
+
+	if err := s.removeFile(
+		streamFilePath(tableName),
+	); err != nil &&
+		!errors.Is(err, os.ErrNotExist) {
+		slog.Error("failed to remove stream file", "table", tableName, "err", err)
+	}
 }
 
 // emitStreamRecord records a mutation event if streaming is enabled for tableName.
@@ -179,7 +212,10 @@ func (s *Storage) emitStreamRecord(
 	}
 
 	buf.mu.Lock()
-	buf.records = append(buf.records, rec)
+	if !buf.deleted {
+		buf.records = append(buf.records, rec)
+		s.appendToStreamFile(tableName, rec)
+	}
 	buf.mu.Unlock()
 }
 
@@ -462,4 +498,217 @@ func streamLabelToUnix(label string) float64 {
 		}
 	}
 	return float64(t.Unix())
+}
+
+// streamFilePath returns the JSONL file path for a table's stream records.
+func streamFilePath(tableName string) string {
+	return tableName + ".stream.jsonl"
+}
+
+// loadStreamRecordsFromDisk reads the JSONL file for tableName and returns all
+// records whose CreatedAt is within the last 24 hours. Corrupt lines are skipped.
+func (s *Storage) loadStreamRecordsFromDisk(tableName string) []streamRecord {
+	path := streamFilePath(tableName)
+	f, err := s.root.Open(path)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			// untestable: triggering a non-ErrNotExist Open failure requires OS-level
+			// permission manipulation (e.g. chmod 000) which is fragile in CI.
+			slog.Error("failed to open stream file", "table", tableName, "err", err)
+		}
+		return nil
+	}
+	defer func() { _ = f.Close() }()
+	data, err := s.readAll(f)
+	if err != nil {
+		slog.Error("failed to read stream file", "table", tableName, "err", err)
+		return nil
+	}
+	cutoff := time.Now().UTC().Add(-streamRetentionPeriod)
+	var records []streamRecord
+	filtered := false
+	for _, line := range strings.Split(string(data), "\n") {
+		if line == "" {
+			continue
+		}
+		var rec streamRecord
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			slog.Warn("skipping corrupt stream record", "table", tableName, "err", err)
+			filtered = true
+			continue
+		}
+		if rec.CreatedAt.After(cutoff) {
+			records = append(records, rec)
+		} else {
+			filtered = true
+		}
+	}
+	if filtered {
+		// No buf.mu needed here — the buffer does not exist yet at load time.
+		s.rewriteStreamFile(tableName, records)
+	}
+	return records
+}
+
+// appendToStreamFile appends rec as a single JSON line to the table's JSONL file.
+// Must be called with buf.mu held to preserve write ordering.
+// A new file descriptor is opened per call; acceptable at emulator scale.
+func (s *Storage) appendToStreamFile(tableName string, rec streamRecord) {
+	data, err := json.Marshal(rec)
+	if err != nil {
+		slog.Error("failed to marshal stream record", "table", tableName, "err", err)
+		return
+	}
+	path := streamFilePath(tableName)
+	line := append(data, '\n')
+	f, err := s.openFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
+	if err != nil {
+		slog.Error("failed to open stream file for append", "table", tableName, "err", err)
+		return
+	}
+	defer func() { _ = f.Close() }()
+	if _, err := f.Write(line); err != nil {
+		slog.Error("failed to append stream record", "table", tableName, "err", err)
+	}
+}
+
+// rewriteStreamFile atomically replaces the table's JSONL file. Records are marshaled
+// into an in-memory buffer first so a marshal failure never touches the existing file.
+// The payload is then written to a sibling ".tmp" file; only after a successful write
+// and close is the tmp file renamed over the destination. Any failure cleans up the
+// tmp file, leaving the original JSONL intact.
+// If records is empty the file is removed. Must be called with buf.mu held.
+func (s *Storage) rewriteStreamFile(tableName string, records []streamRecord) {
+	path := streamFilePath(tableName)
+	if len(records) == 0 {
+		if err := s.removeFile(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			slog.Error("failed to remove empty stream file", "table", tableName, "err", err)
+		}
+		return
+	}
+	var payload bytes.Buffer
+	for _, rec := range records {
+		recData, merr := json.Marshal(rec)
+		if merr != nil {
+			slog.Error(
+				"failed to marshal stream record during rewrite",
+				"table",
+				tableName,
+				"err",
+				merr,
+			)
+			return
+		}
+		payload.Write(recData)
+		payload.WriteByte('\n')
+	}
+	tmpPath := path + streamTempFileSuffix
+	cleanupTmp := func() {
+		if err := s.removeFile(tmpPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			slog.Error("failed to remove temp stream file", "table", tableName, "err", err)
+		}
+	}
+	f, err := s.openFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		slog.Error("failed to create temp stream file", "table", tableName, "err", err)
+		return
+	}
+	_, writeErr := f.Write(payload.Bytes())
+	closeErr := f.Close()
+	if writeErr != nil {
+		slog.Error("failed to write temp stream file", "table", tableName, "err", writeErr)
+		cleanupTmp()
+		return
+	}
+	if closeErr != nil {
+		slog.Error("failed to close temp stream file", "table", tableName, "err", closeErr)
+		cleanupTmp()
+		return
+	}
+	if err := s.renameFn(tmpPath, path); err != nil {
+		slog.Error("failed to rename temp stream file", "table", tableName, "err", err)
+		cleanupTmp()
+	}
+}
+
+// trimStreamForTable removes records older than cutoff from the buffer and rewrites
+// the JSONL file. No-op if the buffer has no expired records.
+func (s *Storage) trimStreamForTable(tableName string, cutoff time.Time) {
+	buf := s.getStreamBuffer(tableName)
+	if buf == nil {
+		return
+	}
+	buf.mu.Lock()
+	defer buf.mu.Unlock()
+	if buf.deleted {
+		return
+	}
+	trimmed := buf.records[:0:0]
+	for _, r := range buf.records {
+		if r.CreatedAt.After(cutoff) {
+			trimmed = append(trimmed, r)
+		}
+	}
+	if len(trimmed) == len(buf.records) {
+		return
+	}
+	buf.records = trimmed
+	s.rewriteStreamFile(tableName, trimmed)
+}
+
+// trimAllStreams trims expired records for every active stream buffer.
+func (s *Storage) trimAllStreams() {
+	s.streamsMu.RLock()
+	tables := make([]string, 0, len(s.streams))
+	for t := range s.streams {
+		tables = append(tables, t)
+	}
+	s.streamsMu.RUnlock()
+
+	cutoff := time.Now().UTC().Add(-streamRetentionPeriod)
+	for _, t := range tables {
+		s.trimStreamForTable(t, cutoff)
+	}
+}
+
+// loadAllStreamBuffers is called at startup to restore in-memory buffers from disk.
+func (s *Storage) loadAllStreamBuffers() {
+	entries, err := s.readDir(".")
+	if err != nil {
+		slog.Warn("failed to read storage root during startup", "err", err)
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".table.json") {
+			continue
+		}
+		tableName := strings.TrimSuffix(e.Name(), ".table.json")
+		meta, err := s.readTableMeta(tableName)
+		if err != nil {
+			slog.Warn("failed to read table meta during startup", "table", tableName, "err", err)
+			continue
+		}
+		if meta.StreamSpec != nil && meta.StreamSpec.StreamEnabled && meta.StreamLabel != "" {
+			s.ensureStreamBuffer(tableName, meta.StreamLabel)
+		}
+	}
+}
+
+// startTrimLoop starts a background goroutine that trims expired stream records
+// every interval. It runs only when started via NewStorage (not in tests).
+func (s *Storage) startTrimLoop(interval time.Duration) {
+	s.trimWg.Add(1)
+	go func() {
+		defer s.trimWg.Done()
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				s.trimAllStreams()
+			case <-s.stopCh:
+				return
+			}
+		}
+	}()
 }

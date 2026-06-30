@@ -20,9 +20,11 @@ import (
 type Storage struct {
 	mu         sync.RWMutex
 	root       *os.Root
+	closeRoot  func() error
 	mkdirFn    func(name string, perm os.FileMode) error
 	removeFile func(name string) error
 	openFile   func(name string, flag int, perm os.FileMode) (io.WriteCloser, error)
+	renameFn   func(oldpath, newpath string) error
 	readAll    func(r io.Reader) ([]byte, error)
 	listDirFn  func(name string) ([]os.DirEntry, error)
 	statFn     func(name string) (os.FileInfo, error)
@@ -30,16 +32,34 @@ type Storage struct {
 	streamsMu sync.RWMutex
 	streams   map[string]*streamBuffer // tableName → in-memory stream buffer
 	seqNum    atomic.Uint64
+
+	stopCh    chan struct{}
+	trimWg    sync.WaitGroup
+	closeOnce sync.Once
 }
 
 // NewStorage roots the storage at dataDir/dynamodb, creating the directory if needed.
 func NewStorage(dataDir string) (*Storage, error) {
-	return newStorage(dataDir, os.OpenRoot)
+	s, err := newStorage(dataDir, os.OpenRoot)
+	if err != nil {
+		return nil, err
+	}
+	s.startTrimLoop(streamTrimInterval)
+	return s, nil
 }
 
-// Close releases the os.Root handle held by the storage.
+// Close stops the background trim goroutine and releases the os.Root handle.
+// Safe to call multiple times; subsequent calls are no-ops that return nil.
 func (s *Storage) Close() error {
-	return s.root.Close()
+	var err error
+	s.closeOnce.Do(func() {
+		close(s.stopCh)
+		s.trimWg.Wait()
+		if closeErr := s.closeRoot(); closeErr != nil {
+			err = fmt.Errorf("close storage root: %w", closeErr)
+		}
+	})
+	return err
 }
 
 func newStorage(dataDir string, openRoot func(string) (*os.Root, error)) (*Storage, error) {
@@ -52,11 +72,13 @@ func newStorage(dataDir string, openRoot func(string) (*os.Root, error)) (*Stora
 		return nil, fmt.Errorf("open storage root: %w", err)
 	}
 	s := &Storage{root: root}
+	s.closeRoot = s.root.Close
 	s.mkdirFn = s.root.Mkdir
 	s.removeFile = s.root.Remove
 	s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
 		return s.root.OpenFile(name, flag, perm)
 	}
+	s.renameFn = s.root.Rename
 	s.readAll = io.ReadAll
 	s.listDirFn = func(name string) ([]os.DirEntry, error) {
 		f, err := s.root.Open(name)
@@ -69,6 +91,23 @@ func newStorage(dataDir string, openRoot func(string) (*os.Root, error)) (*Stora
 	s.statFn = s.root.Stat
 	s.streams = make(map[string]*streamBuffer)
 	s.seqNum.Store(uint64(time.Now().UnixNano() / 1e6))
+	s.stopCh = make(chan struct{})
+	s.loadAllStreamBuffers()
+
+	// Ensure seqNum is strictly beyond every restored record so that the first
+	// Add(1) after restart cannot produce a duplicate sequence number.
+	var maxSeq uint64
+	for _, buf := range s.streams {
+		for _, rec := range buf.records {
+			if rec.SeqNum > maxSeq {
+				maxSeq = rec.SeqNum
+			}
+		}
+	}
+	if cur := s.seqNum.Load(); maxSeq > cur {
+		s.seqNum.Store(maxSeq)
+	}
+
 	return s, nil
 }
 

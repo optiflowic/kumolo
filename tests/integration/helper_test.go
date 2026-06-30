@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -40,22 +41,29 @@ func apiErrorCode(err error) string {
 	return ""
 }
 
-func newTestClients(t *testing.T) testClients {
+// newServerAt starts a kumolo server rooted at dataDir and returns clients plus
+// an explicit stop function. The stop function is idempotent and is also
+// registered as a t.Cleanup safety net. Callers that need to simulate a
+// process restart should call stop() explicitly before creating a second server.
+func newServerAt(t *testing.T, dataDir string) (testClients, func()) {
 	t.Helper()
-
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-
-	dataDir := t.TempDir()
 	mux, cleanup, err := server.NewMux(ctx, dataDir, time.Minute)
 	require.NoError(t, err)
-	t.Cleanup(cleanup)
-
 	srv := httptest.NewServer(mux)
-	t.Cleanup(srv.Close)
+
+	var once sync.Once
+	stop := func() {
+		once.Do(func() {
+			srv.Close()
+			cleanup()
+			cancel()
+		})
+	}
+	t.Cleanup(stop)
 
 	cfg, err := config.LoadDefaultConfig(
-		ctx,
+		context.Background(),
 		config.WithRegion("us-east-1"),
 		config.WithCredentialsProvider(
 			credentials.NewStaticCredentialsProvider("test", "test", ""),
@@ -75,5 +83,11 @@ func newTestClients(t *testing.T) testClients {
 		cognito: awscognito.NewFromConfig(cfg),
 		baseURL: srv.URL,
 		dataDir: dataDir,
-	}
+	}, stop
+}
+
+func newTestClients(t *testing.T) testClients {
+	t.Helper()
+	clients, _ := newServerAt(t, t.TempDir())
+	return clients
 }

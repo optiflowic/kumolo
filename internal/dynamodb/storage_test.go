@@ -25,6 +25,16 @@ func newTestStorage(t *testing.T) *Storage {
 	return s
 }
 
+// TestCloseRootError covers storage.go:56-58: Close propagates an error when the
+// underlying root Close function fails.
+func TestCloseRootError(t *testing.T) {
+	s := newTestStorage(t)
+	s.closeRoot = func() error { return errors.New("simulated root close failure") }
+	err := s.Close()
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "close storage root")
+}
+
 func mustPutItem(t *testing.T, s *Storage, tableName string, item map[string]any) {
 	t.Helper()
 	_, err := s.PutItem(tableName, item, nil)
