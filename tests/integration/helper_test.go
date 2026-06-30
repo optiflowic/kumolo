@@ -88,38 +88,6 @@ func newServerAt(t *testing.T, dataDir string) (testClients, func()) {
 
 func newTestClients(t *testing.T) testClients {
 	t.Helper()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-
-	dataDir := t.TempDir()
-	mux, cleanup, err := server.NewMux(ctx, dataDir, time.Minute)
-	require.NoError(t, err)
-	t.Cleanup(cleanup)
-
-	srv := httptest.NewServer(mux)
-	t.Cleanup(srv.Close)
-
-	cfg, err := config.LoadDefaultConfig(
-		ctx,
-		config.WithRegion("us-east-1"),
-		config.WithCredentialsProvider(
-			credentials.NewStaticCredentialsProvider("test", "test", ""),
-		),
-		config.WithBaseEndpoint(srv.URL),
-	)
-	require.NoError(t, err)
-
-	return testClients{
-		s3: awss3.NewFromConfig(cfg, func(o *awss3.Options) {
-			o.UsePathStyle = true
-		}),
-		ddb:     awsdynamodb.NewFromConfig(cfg),
-		streams: awsstreams.NewFromConfig(cfg),
-		sts:     awssts.NewFromConfig(cfg),
-		kms:     awskms.NewFromConfig(cfg),
-		cognito: awscognito.NewFromConfig(cfg),
-		baseURL: srv.URL,
-		dataDir: dataDir,
-	}
+	clients, _ := newServerAt(t, t.TempDir())
+	return clients
 }
