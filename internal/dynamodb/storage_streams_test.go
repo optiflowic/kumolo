@@ -982,10 +982,10 @@ func TestStartTrimLoopTickerFires(t *testing.T) {
 	buf.mu.Unlock()
 
 	s.startTrimLoop(1 * time.Millisecond)
-	time.Sleep(50 * time.Millisecond)
-
-	buf.mu.RLock()
-	n := len(buf.records)
-	buf.mu.RUnlock()
-	assert.Equal(t, 0, n, "trim loop should have removed the expired record")
+	assert.Eventually(t, func() bool {
+		buf.mu.RLock()
+		n := len(buf.records)
+		buf.mu.RUnlock()
+		return n == 0
+	}, 5*time.Second, time.Millisecond, "trim loop should have removed the expired record")
 }
