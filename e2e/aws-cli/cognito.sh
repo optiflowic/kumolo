@@ -719,6 +719,32 @@ if [[ -n "${ACCESS_TOKEN:-}" && -n "${REFRESH_TOKEN:-}" ]]; then
     else
       fail "GlobalSignOut — expected NotAuthorizedException for refresh token"
     fi
+
+    # A second session's access token must also be rejected after GlobalSignOut.
+    GSO2_AUTH_JSON=$($AWS initiate-auth \
+      --client-id "$CLIENT_ID" \
+      --auth-flow "USER_PASSWORD_AUTH" \
+      --auth-parameters "USERNAME=$USERNAME,PASSWORD=$PASSWORD" 2>&1)
+    GSO2_ACCESS_TOKEN=$(echo "$GSO2_AUTH_JSON" | jq -r '.AuthenticationResult.AccessToken // empty' 2>/dev/null || true)
+    GSO2_REFRESH_TOKEN=$(echo "$GSO2_AUTH_JSON" | jq -r '.AuthenticationResult.RefreshToken // empty' 2>/dev/null || true)
+    # Obtain a third session so we can sign out from session 2 while session 3 is open.
+    GSO3_AUTH_JSON=$($AWS initiate-auth \
+      --client-id "$CLIENT_ID" \
+      --auth-flow "USER_PASSWORD_AUTH" \
+      --auth-parameters "USERNAME=$USERNAME,PASSWORD=$PASSWORD" 2>&1)
+    GSO3_ACCESS_TOKEN=$(echo "$GSO3_AUTH_JSON" | jq -r '.AuthenticationResult.AccessToken // empty' 2>/dev/null || true)
+    if [[ -n "$GSO2_ACCESS_TOKEN" && -n "$GSO3_ACCESS_TOKEN" ]]; then
+      run "GlobalSignOut (second session)" \
+        $AWS global-sign-out --access-token "$GSO2_ACCESS_TOKEN"
+      GSO3_AT_JSON=$($AWS get-user --access-token "$GSO3_ACCESS_TOKEN" 2>&1) || true
+      if echo "$GSO3_AT_JSON" | grep -qi 'NotAuthorizedException'; then
+        ok "GlobalSignOut — concurrent session access token also rejected"
+      else
+        fail "GlobalSignOut — expected concurrent session access token to be rejected"
+      fi
+    else
+      skip "GlobalSignOut — could not obtain second session token pair"
+    fi
   else
     skip "GlobalSignOut — could not obtain fresh access token"
   fi

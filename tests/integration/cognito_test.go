@@ -1430,6 +1430,31 @@ func TestCognitoIntegration_TokenRevocation(t *testing.T) {
 		require.Error(t, err)
 		assert.Equal(t, "NotAuthorizedException", apiErrorCode(err))
 	})
+
+	t.Run("GlobalSignOut_OtherSessionAccessTokenRevoked", func(t *testing.T) {
+		// Sign in from two independent sessions.
+		token1, _ := authenticate(t)
+		token2, _ := authenticate(t)
+
+		// Confirm session 2's token is valid before sign-out.
+		_, err := c.GetUser(ctx, &awscognito.GetUserInput{
+			AccessToken: aws.String(token2),
+		})
+		require.NoError(t, err)
+
+		// Sign out using session 1's token.
+		_, err = c.GlobalSignOut(ctx, &awscognito.GlobalSignOutInput{
+			AccessToken: aws.String(token1),
+		})
+		require.NoError(t, err)
+
+		// Session 2's access token must also be rejected.
+		_, err = c.GetUser(ctx, &awscognito.GetUserInput{
+			AccessToken: aws.String(token2),
+		})
+		require.Error(t, err)
+		assert.Equal(t, "NotAuthorizedException", apiErrorCode(err))
+	})
 }
 
 func TestCognitoIntegration_RefreshTokenExpiry(t *testing.T) {
