@@ -1025,10 +1025,9 @@ func TestRewriteStreamFileMarshalError(t *testing.T) {
 
 	buf := s.getStreamBuffer("rw-marshal-err")
 	require.NotNil(t, buf)
-	buf.mu.RLock()
-	originalCount := len(buf.records)
-	buf.mu.RUnlock()
-	require.Equal(t, 1, originalCount)
+
+	originalRecords := s.loadStreamRecordsFromDisk("rw-marshal-err")
+	require.Len(t, originalRecords, 1)
 
 	// channels are not JSON-serializable; json.Marshal returns an error.
 	bad := []streamRecord{
@@ -1045,9 +1044,14 @@ func TestRewriteStreamFileMarshalError(t *testing.T) {
 	buf.mu.Unlock()
 
 	// The original JSONL file must be intact: the marshal failure must prevent
-	// truncation, so the on-disk record count stays at 1.
+	// truncation, so the on-disk records are byte-for-byte identical.
 	restored := s.loadStreamRecordsFromDisk("rw-marshal-err")
-	assert.Len(t, restored, 1, "pre-existing JSONL must be unchanged after failed marshal")
+	assert.Equal(
+		t,
+		originalRecords,
+		restored,
+		"pre-existing JSONL must be unchanged after failed marshal",
+	)
 }
 
 // TestTrimStreamForTableNilBuf covers lines 574-576: trimStreamForTable returns immediately

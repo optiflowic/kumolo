@@ -24,6 +24,8 @@ const (
 	streamRetentionPeriod = 24 * time.Hour
 	// streamTrimInterval is how often the background goroutine evicts expired records.
 	streamTrimInterval = time.Hour
+	// streamTempFileSuffix is the suffix used for atomic temp-file rewrites.
+	streamTempFileSuffix = ".tmp"
 )
 
 func deepCloneAny(v any) any {
@@ -600,7 +602,12 @@ func (s *Storage) rewriteStreamFile(tableName string, records []streamRecord) {
 		payload.Write(recData)
 		payload.WriteByte('\n')
 	}
-	tmpPath := path + ".tmp"
+	tmpPath := path + streamTempFileSuffix
+	cleanupTmp := func() {
+		if err := s.removeFile(tmpPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			slog.Error("failed to remove temp stream file", "table", tableName, "err", err)
+		}
+	}
 	f, err := s.openFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		slog.Error("failed to create temp stream file", "table", tableName, "err", err)
@@ -610,17 +617,17 @@ func (s *Storage) rewriteStreamFile(tableName string, records []streamRecord) {
 	closeErr := f.Close()
 	if writeErr != nil {
 		slog.Error("failed to write temp stream file", "table", tableName, "err", writeErr)
-		_ = s.removeFile(tmpPath)
+		cleanupTmp()
 		return
 	}
 	if closeErr != nil {
 		slog.Error("failed to close temp stream file", "table", tableName, "err", closeErr)
-		_ = s.removeFile(tmpPath)
+		cleanupTmp()
 		return
 	}
 	if err := s.renameFn(tmpPath, path); err != nil {
 		slog.Error("failed to rename temp stream file", "table", tableName, "err", err)
-		_ = s.removeFile(tmpPath)
+		cleanupTmp()
 	}
 }
 
