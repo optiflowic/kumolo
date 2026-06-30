@@ -792,6 +792,29 @@ func TestAppendToStreamFileWriteError(t *testing.T) {
 	require.NoError(t, err, "PutItem itself must succeed even when stream record write fails")
 }
 
+// TestAppendToStreamFileMarshalError covers lines 555-558: json.Marshal fails when a
+// stream record contains a non-serializable type (e.g. a channel).
+func TestAppendToStreamFileMarshalError(t *testing.T) {
+	s := newTestStorage(t)
+	mustCreateStreamTable(t, s, "marshal-append-err", "NEW_IMAGE")
+
+	buf := s.getStreamBuffer("marshal-append-err")
+	require.NotNil(t, buf)
+
+	// channels are not JSON-serializable; json.Marshal returns an error.
+	rec := streamRecord{
+		EventID:   "1",
+		EventName: "INSERT",
+		SeqNum:    1,
+		CreatedAt: time.Now(),
+		Keys:      map[string]any{"pk": make(chan int)},
+	}
+	buf.mu.Lock()
+	s.appendToStreamFile("marshal-append-err", rec)
+	buf.mu.Unlock()
+	// No panic; error is logged and the function returns without touching the file.
+}
+
 // TestRewriteStreamFileAllExpired covers lines 543 and 547: rewriteStreamFile is called with
 // an empty slice when trimStreamForTable removes all records.
 func TestRewriteStreamFileAllExpired(t *testing.T) {
@@ -884,6 +907,31 @@ func TestRewriteStreamFileWriteError(t *testing.T) {
 	buf.mu.Lock()
 	s.rewriteStreamFile("rw-write-err", recs)
 	buf.mu.Unlock()
+}
+
+// TestRewriteStreamFileMarshalError covers lines 592-601: json.Marshal fails during
+// rewrite when a record contains a non-serializable type (e.g. a channel).
+func TestRewriteStreamFileMarshalError(t *testing.T) {
+	s := newTestStorage(t)
+	mustCreateStreamTable(t, s, "rw-marshal-err", "NEW_IMAGE")
+
+	buf := s.getStreamBuffer("rw-marshal-err")
+	require.NotNil(t, buf)
+
+	// channels are not JSON-serializable; json.Marshal returns an error.
+	recs := []streamRecord{
+		{
+			EventID:   "1",
+			EventName: "INSERT",
+			SeqNum:    1,
+			CreatedAt: time.Now(),
+			Keys:      map[string]any{"pk": make(chan int)},
+		},
+	}
+	buf.mu.Lock()
+	s.rewriteStreamFile("rw-marshal-err", recs)
+	buf.mu.Unlock()
+	// No panic; error is logged and the rewrite stops early.
 }
 
 // TestTrimStreamForTableNilBuf covers lines 574-576: trimStreamForTable returns immediately

@@ -20,6 +20,7 @@ import (
 type Storage struct {
 	mu         sync.RWMutex
 	root       *os.Root
+	closeRoot  func() error
 	mkdirFn    func(name string, perm os.FileMode) error
 	removeFile func(name string) error
 	openFile   func(name string, flag int, perm os.FileMode) (io.WriteCloser, error)
@@ -53,7 +54,7 @@ func (s *Storage) Close() error {
 	s.closeOnce.Do(func() {
 		close(s.stopCh)
 		s.trimWg.Wait()
-		if closeErr := s.root.Close(); closeErr != nil {
+		if closeErr := s.closeRoot(); closeErr != nil {
 			err = fmt.Errorf("close storage root: %w", closeErr)
 		}
 	})
@@ -70,6 +71,7 @@ func newStorage(dataDir string, openRoot func(string) (*os.Root, error)) (*Stora
 		return nil, fmt.Errorf("open storage root: %w", err)
 	}
 	s := &Storage{root: root}
+	s.closeRoot = s.root.Close
 	s.mkdirFn = s.root.Mkdir
 	s.removeFile = s.root.Remove
 	s.openFile = func(name string, flag int, perm os.FileMode) (io.WriteCloser, error) {
