@@ -2,6 +2,7 @@ package dynamodb
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"testing"
@@ -552,4 +553,144 @@ func TestBatchWriteItemsDeletePreimageReadError(t *testing.T) {
 
 	err = s.BatchWriteItems("batch-del-err", nil, []map[string]any{item})
 	require.Error(t, err)
+}
+
+// newTestStorageAt creates a storage rooted at dir (shared across calls) so a
+// "restart" can be simulated by opening a second storage on the same directory.
+func newTestStorageAt(t *testing.T, dir string) *Storage {
+	t.Helper()
+	s, err := newStorage(dir, os.OpenRoot)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	return s
+}
+
+func TestStreamPersistenceAcrossRestart(t *testing.T) {
+	dir := t.TempDir()
+
+	// First storage instance: create table, emit records.
+	s1 := newTestStorageAt(t, dir)
+	meta := mustCreateStreamTable(t, s1, "persist-test", "NEW_AND_OLD_IMAGES")
+	item := map[string]any{"pk": map[string]any{"S": "k1"}, "v": map[string]any{"S": "hello"}}
+	_, err := s1.PutItem("persist-test", item, nil)
+	require.NoError(t, err)
+	_, err = s1.PutItem("persist-test", map[string]any{
+		"pk": map[string]any{"S": "k1"},
+		"v":  map[string]any{"S": "world"},
+	}, nil)
+	require.NoError(t, err)
+	require.NoError(t, s1.Close())
+
+	// Second storage instance: simulate restart against the same directory.
+	s2 := newTestStorageAt(t, dir)
+	arn := streamARN("persist-test", meta.StreamLabel)
+	shardIDStr := shardID("persist-test", meta.StreamLabel)
+
+	iter, err := s2.GetShardIterator(arn, shardIDStr, "TRIM_HORIZON", "")
+	require.NoError(t, err)
+	recs, _, err := s2.GetStreamRecords(iter, 1000)
+	require.NoError(t, err)
+	require.Len(t, recs, 2, "records written before restart must survive")
+	assert.Equal(t, "INSERT", recs[0].EventName)
+	assert.Equal(t, "MODIFY", recs[1].EventName)
+}
+
+func TestStreamExpiredRecordsFilteredOnLoad(t *testing.T) {
+	dir := t.TempDir()
+
+	s1 := newTestStorageAt(t, dir)
+	meta := mustCreateStreamTable(t, s1, "expiry-test", "NEW_IMAGE")
+	item := map[string]any{"pk": map[string]any{"S": "k1"}}
+	_, err := s1.PutItem("expiry-test", item, nil)
+	require.NoError(t, err)
+
+	// Back-date the one record in the JSONL file to 25 hours ago.
+	buf := s1.getStreamBuffer("expiry-test")
+	require.NotNil(t, buf)
+	buf.mu.Lock()
+	buf.records[0].CreatedAt = time.Now().UTC().Add(-25 * time.Hour)
+	s1.rewriteStreamFile("expiry-test", buf.records)
+	buf.mu.Unlock()
+
+	require.NoError(t, s1.Close())
+
+	// Restart: expired record must not be loaded.
+	s2 := newTestStorageAt(t, dir)
+	arn := streamARN("expiry-test", meta.StreamLabel)
+	shardIDStr := shardID("expiry-test", meta.StreamLabel)
+
+	iter, err := s2.GetShardIterator(arn, shardIDStr, "TRIM_HORIZON", "")
+	require.NoError(t, err)
+	recs, _, err := s2.GetStreamRecords(iter, 1000)
+	require.NoError(t, err)
+	assert.Empty(t, recs, "records older than 24 hours must not be loaded")
+}
+
+func TestTrimStreamForTable(t *testing.T) {
+	s := newTestStorage(t)
+	meta := mustCreateStreamTable(t, s, "trim-test", "KEYS_ONLY")
+	arn := streamARN("trim-test", meta.StreamLabel)
+	shardIDStr := shardID("trim-test", meta.StreamLabel)
+
+	for i := range 5 {
+		item := map[string]any{"pk": map[string]any{"S": fmt.Sprintf("k%d", i)}}
+		_, err := s.PutItem("trim-test", item, nil)
+		require.NoError(t, err)
+	}
+
+	// Back-date the first 3 records so they appear older than 24 hours.
+	buf := s.getStreamBuffer("trim-test")
+	require.NotNil(t, buf)
+	cutoff := time.Now().UTC().Add(-24 * time.Hour)
+	buf.mu.Lock()
+	for i := range 3 {
+		buf.records[i].CreatedAt = cutoff.Add(-time.Minute)
+	}
+	buf.mu.Unlock()
+
+	s.trimStreamForTable("trim-test", cutoff)
+
+	iter, err := s.GetShardIterator(arn, shardIDStr, "TRIM_HORIZON", "")
+	require.NoError(t, err)
+	recs, _, err := s.GetStreamRecords(iter, 1000)
+	require.NoError(t, err)
+	assert.Len(t, recs, 2, "only the 2 non-expired records should remain")
+}
+
+func TestStreamFileRemovedOnDeleteTable(t *testing.T) {
+	s := newTestStorage(t)
+	mustCreateStreamTable(t, s, "del-file-test", "NEW_IMAGE")
+	_, err := s.PutItem("del-file-test", map[string]any{"pk": map[string]any{"S": "k"}}, nil)
+	require.NoError(t, err)
+
+	// Verify the JSONL file exists before deletion.
+	_, err = s.root.Stat(streamFilePath("del-file-test"))
+	require.NoError(t, err, "stream file should exist after a PutItem")
+
+	require.NoError(t, s.DeleteTable("del-file-test"))
+
+	_, err = s.root.Stat(streamFilePath("del-file-test"))
+	assert.True(t, errors.Is(err, os.ErrNotExist), "stream file should be removed on DeleteTable")
+}
+
+func TestStreamFileRemovedOnDisable(t *testing.T) {
+	s := newTestStorage(t)
+	mustCreateStreamTable(t, s, "disable-file-test", "NEW_IMAGE")
+	_, err := s.PutItem("disable-file-test", map[string]any{"pk": map[string]any{"S": "k"}}, nil)
+	require.NoError(t, err)
+
+	_, err = s.root.Stat(streamFilePath("disable-file-test"))
+	require.NoError(t, err, "stream file should exist after a PutItem")
+
+	_, err = s.UpdateTable("disable-file-test", UpdateTableInput{
+		StreamSpec: &StreamSpecification{StreamEnabled: false},
+	})
+	require.NoError(t, err)
+
+	_, err = s.root.Stat(streamFilePath("disable-file-test"))
+	assert.True(
+		t,
+		errors.Is(err, os.ErrNotExist),
+		"stream file should be removed when streaming is disabled",
+	)
 }

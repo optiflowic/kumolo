@@ -30,15 +30,27 @@ type Storage struct {
 	streamsMu sync.RWMutex
 	streams   map[string]*streamBuffer // tableName → in-memory stream buffer
 	seqNum    atomic.Uint64
+
+	stopCh    chan struct{}
+	trimWg    sync.WaitGroup
+	closeOnce sync.Once
 }
 
 // NewStorage roots the storage at dataDir/dynamodb, creating the directory if needed.
 func NewStorage(dataDir string) (*Storage, error) {
-	return newStorage(dataDir, os.OpenRoot)
+	s, err := newStorage(dataDir, os.OpenRoot)
+	if err != nil {
+		return nil, err
+	}
+	s.startTrimLoop(time.Hour)
+	return s, nil
 }
 
-// Close releases the os.Root handle held by the storage.
+// Close stops the background trim goroutine and releases the os.Root handle.
+// Safe to call multiple times.
 func (s *Storage) Close() error {
+	s.closeOnce.Do(func() { close(s.stopCh) })
+	s.trimWg.Wait()
 	return s.root.Close()
 }
 
@@ -69,6 +81,8 @@ func newStorage(dataDir string, openRoot func(string) (*os.Root, error)) (*Stora
 	s.statFn = s.root.Stat
 	s.streams = make(map[string]*streamBuffer)
 	s.seqNum.Store(uint64(time.Now().UnixNano() / 1e6))
+	s.stopCh = make(chan struct{})
+	s.loadAllStreamBuffers()
 	return s, nil
 }
 

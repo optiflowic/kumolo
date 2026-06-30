@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -107,7 +109,8 @@ func shardID(tableName, label string) string {
 }
 
 // ensureStreamBuffer returns the existing buffer for tableName, or creates one
-// using the label stored in the table metadata.
+// using the label stored in the table metadata. On first creation the buffer is
+// populated with any records persisted to disk, minus those older than 24 hours.
 func (s *Storage) ensureStreamBuffer(tableName, label string) *streamBuffer {
 	s.streamsMu.Lock()
 	defer s.streamsMu.Unlock()
@@ -117,6 +120,7 @@ func (s *Storage) ensureStreamBuffer(tableName, label string) *streamBuffer {
 	buf := &streamBuffer{
 		label:   label,
 		shardID: shardID(tableName, label),
+		records: s.loadStreamRecordsFromDisk(tableName),
 	}
 	s.streams[tableName] = buf
 	return buf
@@ -129,11 +133,18 @@ func (s *Storage) getStreamBuffer(tableName string) *streamBuffer {
 	return s.streams[tableName]
 }
 
-// deleteStreamBuffer removes the buffer for a table (called on DeleteTable).
+// deleteStreamBuffer removes the buffer and the on-disk JSONL file for a table.
+// Called on DeleteTable or when streaming is disabled.
 func (s *Storage) deleteStreamBuffer(tableName string) {
 	s.streamsMu.Lock()
 	defer s.streamsMu.Unlock()
 	delete(s.streams, tableName)
+	if err := s.removeFile(
+		streamFilePath(tableName),
+	); err != nil &&
+		!errors.Is(err, os.ErrNotExist) {
+		slog.Warn("failed to remove stream file", "table", tableName, "err", err)
+	}
 }
 
 // emitStreamRecord records a mutation event if streaming is enabled for tableName.
@@ -180,6 +191,7 @@ func (s *Storage) emitStreamRecord(
 
 	buf.mu.Lock()
 	buf.records = append(buf.records, rec)
+	s.appendToStreamFile(tableName, rec)
 	buf.mu.Unlock()
 }
 
@@ -462,4 +474,171 @@ func streamLabelToUnix(label string) float64 {
 		}
 	}
 	return float64(t.Unix())
+}
+
+// streamFilePath returns the JSONL file path for a table's stream records.
+func streamFilePath(tableName string) string {
+	return tableName + ".stream.jsonl"
+}
+
+// loadStreamRecordsFromDisk reads the JSONL file for tableName and returns all
+// records whose CreatedAt is within the last 24 hours. Corrupt lines are skipped.
+func (s *Storage) loadStreamRecordsFromDisk(tableName string) []streamRecord {
+	path := streamFilePath(tableName)
+	f, err := s.root.Open(path)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			slog.Warn("failed to open stream file", "table", tableName, "err", err)
+		}
+		return nil
+	}
+	defer func() { _ = f.Close() }()
+	data, err := s.readAll(f)
+	if err != nil {
+		slog.Warn("failed to read stream file", "table", tableName, "err", err)
+		return nil
+	}
+	cutoff := time.Now().UTC().Add(-24 * time.Hour)
+	var records []streamRecord
+	for _, line := range strings.Split(string(data), "\n") {
+		if line == "" {
+			continue
+		}
+		var rec streamRecord
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			slog.Warn("skipping corrupt stream record", "table", tableName, "err", err)
+			continue
+		}
+		if rec.CreatedAt.After(cutoff) {
+			records = append(records, rec)
+		}
+	}
+	return records
+}
+
+// appendToStreamFile appends rec as a single JSON line to the table's JSONL file.
+// Must be called with buf.mu held to preserve write ordering.
+func (s *Storage) appendToStreamFile(tableName string, rec streamRecord) {
+	path := streamFilePath(tableName)
+	data, _ := json.Marshal(rec)
+	line := append(data, '\n')
+	f, err := s.openFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
+	if err != nil {
+		slog.Warn("failed to open stream file for append", "table", tableName, "err", err)
+		return
+	}
+	defer func() { _ = f.Close() }()
+	if _, err := f.Write(line); err != nil {
+		slog.Warn("failed to append stream record", "table", tableName, "err", err)
+	}
+}
+
+// rewriteStreamFile atomically replaces the table's JSONL file with records.
+// If records is empty the file is removed. Must be called with buf.mu held.
+func (s *Storage) rewriteStreamFile(tableName string, records []streamRecord) {
+	path := streamFilePath(tableName)
+	if len(records) == 0 {
+		if err := s.removeFile(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			slog.Warn("failed to remove empty stream file", "table", tableName, "err", err)
+		}
+		return
+	}
+	f, err := s.openFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		slog.Warn("failed to rewrite stream file", "table", tableName, "err", err)
+		return
+	}
+	defer func() { _ = f.Close() }()
+	for _, rec := range records {
+		data, _ := json.Marshal(rec)
+		if _, err := f.Write(append(data, '\n')); err != nil {
+			slog.Warn(
+				"failed to write stream record during rewrite",
+				"table",
+				tableName,
+				"err",
+				err,
+			)
+			return
+		}
+	}
+}
+
+// trimStreamForTable removes records older than cutoff from the buffer and rewrites
+// the JSONL file. No-op if the buffer has no expired records.
+func (s *Storage) trimStreamForTable(tableName string, cutoff time.Time) {
+	buf := s.getStreamBuffer(tableName)
+	if buf == nil {
+		return
+	}
+	buf.mu.Lock()
+	defer buf.mu.Unlock()
+	trimmed := buf.records[:0:0]
+	for _, r := range buf.records {
+		if r.CreatedAt.After(cutoff) {
+			trimmed = append(trimmed, r)
+		}
+	}
+	if len(trimmed) == len(buf.records) {
+		return
+	}
+	buf.records = trimmed
+	s.rewriteStreamFile(tableName, trimmed)
+}
+
+// trimAllStreams trims expired records for every active stream buffer.
+func (s *Storage) trimAllStreams() {
+	s.streamsMu.RLock()
+	tables := make([]string, 0, len(s.streams))
+	for t := range s.streams {
+		tables = append(tables, t)
+	}
+	s.streamsMu.RUnlock()
+
+	cutoff := time.Now().UTC().Add(-24 * time.Hour)
+	for _, t := range tables {
+		s.trimStreamForTable(t, cutoff)
+	}
+}
+
+// loadAllStreamBuffers is called at startup to restore in-memory buffers from disk.
+func (s *Storage) loadAllStreamBuffers() {
+	entries, err := s.readDir(".")
+	if err != nil {
+		slog.Warn("failed to read storage root during startup", "err", err)
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".table.json") {
+			continue
+		}
+		tableName := strings.TrimSuffix(e.Name(), ".table.json")
+		meta, err := s.readTableMeta(tableName)
+		if err != nil {
+			slog.Warn("failed to read table meta during startup", "table", tableName, "err", err)
+			continue
+		}
+		if meta.StreamSpec != nil && meta.StreamSpec.StreamEnabled && meta.StreamLabel != "" {
+			s.ensureStreamBuffer(tableName, meta.StreamLabel)
+		}
+	}
+}
+
+// startTrimLoop starts a background goroutine that trims expired stream records
+// every interval. It runs only when started via NewStorage (not in tests).
+func (s *Storage) startTrimLoop(interval time.Duration) {
+	s.trimWg.Add(1)
+	go func() {
+		defer s.trimWg.Done()
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				s.trimAllStreams()
+			case <-s.stopCh:
+				return
+			}
+		}
+	}()
 }
