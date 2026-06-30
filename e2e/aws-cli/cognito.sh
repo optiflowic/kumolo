@@ -190,13 +190,21 @@ fi
 echo ""
 echo "--- Refresh token expiry ---"
 
-# Create a client with explicit refresh_token_validity to verify the value is persisted
+# Create a client with explicit refresh_token_validity to verify the value is persisted.
+# ALLOW_USER_PASSWORD_AUTH is required so the happy-path re-auth step below can use
+# USER_PASSWORD_AUTH on this client (real AWS rejects the flow without this flag).
 RT_CLIENT_JSON=$($AWS create-user-pool-client \
   --user-pool-id "$POOL_ID" \
   --client-name "e2e-rt-validity-client" \
-  --refresh-token-validity 7 2>&1)
+  --refresh-token-validity 7 \
+  --explicit-auth-flows ALLOW_USER_PASSWORD_AUTH ALLOW_REFRESH_TOKEN_AUTH 2>&1)
 if echo "$RT_CLIENT_JSON" | grep -q '"ClientId"'; then
-  ok "CreateUserPoolClient (refresh_token_validity=7)"
+  RT_VALIDITY=$(echo "$RT_CLIENT_JSON" | jq -r '.UserPoolClient.RefreshTokenValidity // empty' 2>/dev/null || true)
+  if [[ "$RT_VALIDITY" == "7" ]]; then
+    ok "CreateUserPoolClient (refresh_token_validity=7)"
+  else
+    fail "CreateUserPoolClient (refresh_token_validity=7) — expected 7, got ${RT_VALIDITY:-<empty>}"
+  fi
   RT_CLIENT_ID=$(echo "$RT_CLIENT_JSON" | jq -r '.UserPoolClient.ClientId // empty' 2>/dev/null || true)
 else
   fail "CreateUserPoolClient (refresh_token_validity=7)"
