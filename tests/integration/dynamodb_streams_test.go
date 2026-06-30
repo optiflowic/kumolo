@@ -13,6 +13,78 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestDynamoDBStreamPersistenceAcrossRestart verifies that stream records written
+// before a server restart are still accessible after the server restarts with the
+// same data directory.
+func TestDynamoDBStreamPersistenceAcrossRestart(t *testing.T) {
+	dataDir := t.TempDir()
+	ctx := context.Background()
+	const tableName = "streams-restart-test"
+
+	// Phase 1: first server — create table and emit two INSERT records.
+	c1, stop1 := newServerAt(t, dataDir)
+	_, err := c1.ddb.CreateTable(ctx, &awsdynamodb.CreateTableInput{
+		TableName: aws.String(tableName),
+		KeySchema: []dbtypes.KeySchemaElement{
+			{AttributeName: aws.String("pk"), KeyType: dbtypes.KeyTypeHash},
+		},
+		AttributeDefinitions: []dbtypes.AttributeDefinition{
+			{AttributeName: aws.String("pk"), AttributeType: dbtypes.ScalarAttributeTypeS},
+		},
+		BillingMode: dbtypes.BillingModePayPerRequest,
+		StreamSpecification: &dbtypes.StreamSpecification{
+			StreamEnabled:  aws.Bool(true),
+			StreamViewType: dbtypes.StreamViewTypeNewImage,
+		},
+	})
+	require.NoError(t, err)
+
+	for _, pk := range []string{"k1", "k2"} {
+		_, err = c1.ddb.PutItem(ctx, &awsdynamodb.PutItemInput{
+			TableName: aws.String(tableName),
+			Item: map[string]dbtypes.AttributeValue{
+				"pk": &dbtypes.AttributeValueMemberS{Value: pk},
+			},
+		})
+		require.NoError(t, err)
+	}
+
+	// Capture stream coordinates before restarting.
+	listOut, err := c1.streams.ListStreams(ctx, &awsstreams.ListStreamsInput{
+		TableName: aws.String(tableName),
+	})
+	require.NoError(t, err)
+	require.Len(t, listOut.Streams, 1)
+	streamArn := aws.ToString(listOut.Streams[0].StreamArn)
+
+	descOut, err := c1.streams.DescribeStream(ctx, &awsstreams.DescribeStreamInput{
+		StreamArn: aws.String(streamArn),
+	})
+	require.NoError(t, err)
+	require.Len(t, descOut.StreamDescription.Shards, 1)
+	shardID := aws.ToString(descOut.StreamDescription.Shards[0].ShardId)
+
+	stop1() // simulate process restart
+
+	// Phase 2: second server with the same data directory.
+	c2, _ := newServerAt(t, dataDir)
+
+	iter, err := c2.streams.GetShardIterator(ctx, &awsstreams.GetShardIteratorInput{
+		StreamArn:         aws.String(streamArn),
+		ShardId:           aws.String(shardID),
+		ShardIteratorType: stypes.ShardIteratorTypeTrimHorizon,
+	})
+	require.NoError(t, err)
+
+	recs, err := c2.streams.GetRecords(ctx, &awsstreams.GetRecordsInput{
+		ShardIterator: aws.String(aws.ToString(iter.ShardIterator)),
+	})
+	require.NoError(t, err)
+	require.Len(t, recs.Records, 2, "stream records must survive a server restart")
+	assert.Equal(t, stypes.OperationTypeInsert, recs.Records[0].EventName)
+	assert.Equal(t, stypes.OperationTypeInsert, recs.Records[1].EventName)
+}
+
 // TestDynamoDBStreamsIntegration verifies the full DynamoDB Streams read path via
 // the AWS SDK: ListStreams → DescribeStream → GetShardIterator → GetRecords.
 // Sub-tests run sequentially and share state.
