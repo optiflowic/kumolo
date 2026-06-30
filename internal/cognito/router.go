@@ -51,6 +51,7 @@ type store interface {
 	RevokeAccessToken(poolID, jti string, expiresAt float64) error
 	IsAccessTokenRevoked(poolID, jti string) (bool, error)
 	DeleteRefreshTokensBySub(poolID, sub string) error
+	RevokeOriginJTIsForSub(poolID, sub string, expiresAt float64) error
 
 	// GetGroupsForUser is used by auth handlers to embed group claims in JWTs.
 	GetGroupsForUser(poolID, username string) ([]string, error)

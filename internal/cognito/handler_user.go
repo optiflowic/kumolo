@@ -219,7 +219,7 @@ func (ro *Router) handleGlobalSignOut(w http.ResponseWriter, body []byte) {
 	if !ok {
 		return
 	}
-	sub, jti, originJTI, exp, ok := validateAccessJWT(w, req.AccessToken, &privateKey.PublicKey)
+	sub, jti, originJTI, _, ok := validateAccessJWT(w, req.AccessToken, &privateKey.PublicKey)
 	if !ok {
 		return
 	}
@@ -227,11 +227,22 @@ func (ro *Router) handleGlobalSignOut(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	// Revoke the current access token JTI so it is rejected immediately.
-	if err := ro.storage.RevokeAccessToken(poolID, jti, exp); err != nil {
+	// Revoke the origin_jti of every refresh token for this user, blocking all
+	// outstanding access tokens across every concurrent session.
+	revokeExp := float64(nowUnix()) + float64(accessTokenExpiry)
+	if err := ro.storage.RevokeOriginJTIsForSub(poolID, sub, revokeExp); err != nil {
 		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
-			"failed to revoke access token")
+			"failed to revoke all sessions")
 		return
+	}
+	// Belt-and-suspenders: also revoke the presented token's origin_jti directly, covering
+	// the edge case where its refresh token was already deleted before this call.
+	if originJTI != "" {
+		if err := ro.storage.RevokeAccessToken(poolID, originJTI, revokeExp); err != nil {
+			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+				"failed to revoke access token")
+			return
+		}
 	}
 
 	// Delete all refresh tokens for this user.

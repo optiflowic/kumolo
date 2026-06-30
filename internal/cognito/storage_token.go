@@ -171,6 +171,52 @@ func (s *Storage) DeleteRefreshTokensBySub(poolID, sub string) error {
 	return nil
 }
 
+// RevokeOriginJTIsForSub revokes the origin_jti of every refresh token belonging to
+// the given sub. It does not delete the refresh tokens themselves; call
+// DeleteRefreshTokensBySub separately. Used by GlobalSignOut to block all outstanding
+// access tokens for a user across every concurrent session.
+func (s *Storage) RevokeOriginJTIsForSub(poolID, sub string, expiresAt float64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	dir := filepath.Join("pools", poolID, "refresh_tokens")
+	entries, err := s.listDirFn(dir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("list refresh tokens: %w", err)
+	}
+
+	revokedDirEnsured := false
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		token := strings.TrimSuffix(entry.Name(), ".json")
+		rt, rerr := readJSON[refreshTokenData](s, refreshTokenPath(poolID, token))
+		if rerr != nil {
+			return fmt.Errorf("read refresh token %s: %w", token, rerr)
+		}
+		if rt.Sub != sub || rt.OriginJTI == "" {
+			continue
+		}
+		if !revokedDirEnsured {
+			if dirErr := s.ensureRevokedJTIsDir(poolID); dirErr != nil {
+				return dirErr
+			}
+			revokedDirEnsured = true
+		}
+		if werr := s.writeJSON(
+			revokedJTIPath(poolID, rt.OriginJTI),
+			revokedJTIEntry{ExpiresAt: expiresAt},
+		); werr != nil {
+			return fmt.Errorf("revoke origin_jti %s: %w", rt.OriginJTI, werr)
+		}
+	}
+	return nil
+}
+
 // writeClientIndexLocked records that clientID belongs to poolID.
 // Callers must hold s.mu.Lock().
 func (s *Storage) writeClientIndexLocked(poolID, clientID string) error {
