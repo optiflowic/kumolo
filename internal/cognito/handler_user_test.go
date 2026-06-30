@@ -592,6 +592,39 @@ func TestGlobalSignOut_RevokeAccessTokenStorageError(t *testing.T) {
 	assertErrType(t, w, ErrTypeInternalErrorException)
 }
 
+func TestGetUser_TokenWithoutOriginJTI(t *testing.T) {
+	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	poolID := "us-east-1_TestPool"
+	keyID := "kid"
+	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
+
+	now := time.Now().Unix()
+	// Build a token with jti but without origin_jti — exercises the empty-key skip
+	// in checkTokenNotRevoked (line 177-178 of handler_user.go).
+	token, err := buildJWT(privKey, keyID, map[string]any{
+		"sub":       user.Sub,
+		"iss":       issuerURL(poolID),
+		"token_use": "access",
+		"exp":       now + 3600,
+		"iat":       now,
+		"jti":       "some-jti-no-origin",
+	})
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: keyID}, privKey, nil
+		},
+		getUserBySubFn: func(string, string) (*UserMetadata, error) {
+			return user, nil
+		},
+	}}
+	body, _ := json.Marshal(map[string]string{"AccessToken": token})
+	w := doOp(t, ro, "GetUser", string(body))
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
 func TestGetUser_CheckTokenRevokedStorageError(t *testing.T) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
