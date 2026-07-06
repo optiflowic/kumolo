@@ -188,6 +188,12 @@ func (ro *Router) serveHTTP(w http.ResponseWriter, r *http.Request, op string) {
 		ro.handleRevokeToken(w, body)
 	case "GlobalSignOut":
 		ro.handleGlobalSignOut(w, body)
+	case "TagResource":
+		ro.handleTagResource(w, body)
+	case "UntagResource":
+		ro.handleUntagResource(w, body)
+	case "ListTagsForResource":
+		ro.handleListTagsForResource(w, body)
 	default:
 		writeError(
 			w,
