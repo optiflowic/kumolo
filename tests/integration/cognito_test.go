@@ -1457,6 +1457,112 @@ func TestCognitoIntegration_TokenRevocation(t *testing.T) {
 	})
 }
 
+// ── Tagging ───────────────────────────────────────────────────────────────────
+
+func TestCognitoIntegration_Tagging(t *testing.T) {
+	clients := newTestClients(t)
+	ctx := context.Background()
+	c := clients.cognito
+
+	pool, err := c.CreateUserPool(ctx, &awscognito.CreateUserPoolInput{
+		PoolName: aws.String("tagging-test-pool"),
+	})
+	require.NoError(t, err)
+	arn := aws.ToString(pool.UserPool.Arn)
+	require.NotEmpty(t, arn)
+
+	t.Run("TagResource", func(t *testing.T) {
+		_, err := c.TagResource(ctx, &awscognito.TagResourceInput{
+			ResourceArn: aws.String(arn),
+			Tags:        map[string]string{"env": "test", "owner": "alice"},
+		})
+		require.NoError(t, err)
+
+		out, err := c.ListTagsForResource(ctx, &awscognito.ListTagsForResourceInput{
+			ResourceArn: aws.String(arn),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, map[string]string{"env": "test", "owner": "alice"}, out.Tags)
+	})
+
+	t.Run("TagResource_merge", func(t *testing.T) {
+		_, err := c.TagResource(ctx, &awscognito.TagResourceInput{
+			ResourceArn: aws.String(arn),
+			Tags:        map[string]string{"owner": "bob", "team": "platform"},
+		})
+		require.NoError(t, err)
+
+		out, err := c.ListTagsForResource(ctx, &awscognito.ListTagsForResourceInput{
+			ResourceArn: aws.String(arn),
+		})
+		require.NoError(t, err)
+		assert.Equal(
+			t,
+			map[string]string{"env": "test", "owner": "bob", "team": "platform"},
+			out.Tags,
+		)
+	})
+
+	t.Run("UntagResource", func(t *testing.T) {
+		_, err := c.UntagResource(ctx, &awscognito.UntagResourceInput{
+			ResourceArn: aws.String(arn),
+			TagKeys:     []string{"env"},
+		})
+		require.NoError(t, err)
+
+		out, err := c.ListTagsForResource(ctx, &awscognito.ListTagsForResourceInput{
+			ResourceArn: aws.String(arn),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, map[string]string{"owner": "bob", "team": "platform"}, out.Tags)
+	})
+
+	t.Run("ListTagsForResource_empty", func(t *testing.T) {
+		emptyPool, err := c.CreateUserPool(ctx, &awscognito.CreateUserPoolInput{
+			PoolName: aws.String("notag-pool"),
+		})
+		require.NoError(t, err)
+
+		out, err := c.ListTagsForResource(ctx, &awscognito.ListTagsForResourceInput{
+			ResourceArn: aws.String(aws.ToString(emptyPool.UserPool.Arn)),
+		})
+		require.NoError(t, err)
+		assert.Empty(t, out.Tags)
+	})
+
+	t.Run("TagResource_NotFound", func(t *testing.T) {
+		_, err := c.TagResource(ctx, &awscognito.TagResourceInput{
+			ResourceArn: aws.String(
+				"arn:aws:cognito-idp:us-east-1:000000000000:userpool/us-east-1_notexist",
+			),
+			Tags: map[string]string{"k": "v"},
+		})
+		require.Error(t, err)
+		assert.Equal(t, "ResourceNotFoundException", apiErrorCode(err))
+	})
+
+	t.Run("UntagResource_NotFound", func(t *testing.T) {
+		_, err := c.UntagResource(ctx, &awscognito.UntagResourceInput{
+			ResourceArn: aws.String(
+				"arn:aws:cognito-idp:us-east-1:000000000000:userpool/us-east-1_notexist",
+			),
+			TagKeys: []string{"k"},
+		})
+		require.Error(t, err)
+		assert.Equal(t, "ResourceNotFoundException", apiErrorCode(err))
+	})
+
+	t.Run("ListTagsForResource_NotFound", func(t *testing.T) {
+		_, err := c.ListTagsForResource(ctx, &awscognito.ListTagsForResourceInput{
+			ResourceArn: aws.String(
+				"arn:aws:cognito-idp:us-east-1:000000000000:userpool/us-east-1_notexist",
+			),
+		})
+		require.Error(t, err)
+		assert.Equal(t, "ResourceNotFoundException", apiErrorCode(err))
+	})
+}
+
 func TestCognitoIntegration_RefreshTokenExpiry(t *testing.T) {
 	cap := withCodeCapture(t)
 	clients := newTestClients(t)
