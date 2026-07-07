@@ -85,6 +85,7 @@ The same pattern applies to DynamoDB, KMS, STS, and other supported services.
 
 | Service      | Operations |
 |--------------|------------|
+| **Cognito**  | User pool and client CRUD, auth flows (SignUp, ConfirmSignUp, InitiateAuth, RespondToAuthChallenge), admin operations, group management, token lifecycle (RevokeToken, GlobalSignOut, refresh token expiry), JWKS endpoint, Tags |
 | **DynamoDB** | Table CRUD, Item operations (Get/Put/Delete/Update), Query, Scan, Batch operations, Transactions, PartiQL (ExecuteStatement / BatchExecuteStatement / ExecuteTransaction), Streams, TTL, Tags, Kinesis streaming destinations |
 | **KMS**      | Key management (Create/Describe/Enable/Disable/Schedule deletion), Data plane (Encrypt/Decrypt/GenerateDataKey/GenerateDataKeyPair), Aliases, Key rotation, Grants, Tags |
 | **S3**       | Bucket CRUD, Object CRUD, Multipart Upload, Versioning, Tagging, CORS, Policy, Lifecycle, ACL (enforced), Encryption (SSE-S3 / SSE-KMS / SSE-C), Object Lock, SelectObjectContent, BucketLogging, BucketReplication, and more |
