@@ -1470,6 +1470,11 @@ func TestCognitoIntegration_Tagging(t *testing.T) {
 	require.NoError(t, err)
 	arn := aws.ToString(pool.UserPool.Arn)
 	require.NotEmpty(t, arn)
+	t.Cleanup(func() {
+		_, _ = c.DeleteUserPool(ctx, &awscognito.DeleteUserPoolInput{
+			UserPoolId: pool.UserPool.Id,
+		})
+	})
 
 	t.Run("TagResource", func(t *testing.T) {
 		_, err := c.TagResource(ctx, &awscognito.TagResourceInput{
@@ -1522,6 +1527,11 @@ func TestCognitoIntegration_Tagging(t *testing.T) {
 			PoolName: aws.String("notag-pool"),
 		})
 		require.NoError(t, err)
+		t.Cleanup(func() {
+			_, _ = c.DeleteUserPool(ctx, &awscognito.DeleteUserPoolInput{
+				UserPoolId: emptyPool.UserPool.Id,
+			})
+		})
 
 		out, err := c.ListTagsForResource(ctx, &awscognito.ListTagsForResourceInput{
 			ResourceArn: aws.String(aws.ToString(emptyPool.UserPool.Arn)),

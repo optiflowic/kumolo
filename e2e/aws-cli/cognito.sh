@@ -772,10 +772,9 @@ echo "--- Tagging ---"
 
 if [[ -n "${POOL_ARN:-}" ]]; then
   # TagResource
-  TAG_JSON=$($AWS tag-resource \
+  if TAG_JSON=$($AWS tag-resource \
     --resource-arn "$POOL_ARN" \
-    --tags "env=e2e,owner=kumolo" 2>&1)
-  if [[ $? -eq 0 ]]; then
+    --tags "env=e2e,owner=kumolo" 2>&1); then
     ok "tag-resource"
   else
     fail "tag-resource: $TAG_JSON"
@@ -800,10 +799,9 @@ if [[ -n "${POOL_ARN:-}" ]]; then
   fi
 
   # UntagResource — remove the env key
-  UNTAG_JSON=$($AWS untag-resource \
+  if UNTAG_JSON=$($AWS untag-resource \
     --resource-arn "$POOL_ARN" \
-    --tag-keys "env" 2>&1)
-  if [[ $? -eq 0 ]]; then
+    --tag-keys "env" 2>&1); then
     ok "untag-resource"
   else
     fail "untag-resource: $UNTAG_JSON"

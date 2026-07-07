@@ -8,7 +8,11 @@ import (
 	"unicode/utf8"
 )
 
-const maxUserPoolTags = 50
+const (
+	maxUserPoolTags   = 50
+	maxTagKeyLength   = 128
+	maxTagValueLength = 256
+)
 
 var errTagLimitExceeded = errors.New("tag limit exceeded")
 
@@ -105,12 +109,12 @@ func (ro *Router) handleTagResource(w http.ResponseWriter, body []byte) {
 		return
 	}
 	for k, v := range req.Tags {
-		if kLen := utf8.RuneCountInString(k); kLen < 1 || kLen > 128 {
+		if kLen := utf8.RuneCountInString(k); kLen < 1 || kLen > maxTagKeyLength {
 			writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
 				"Tag key must be between 1 and 128 characters")
 			return
 		}
-		if utf8.RuneCountInString(v) > 256 {
+		if utf8.RuneCountInString(v) > maxTagValueLength {
 			writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
 				"Tag value must be 256 characters or fewer")
 			return
