@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 )
 
 // poolIDFromARN extracts the user pool ID from an ARN of the form
@@ -72,12 +73,12 @@ func (ro *Router) handleTagResource(w http.ResponseWriter, body []byte) {
 		return
 	}
 	for k, v := range req.Tags {
-		if len(k) < 1 || len(k) > 128 {
+		if kLen := utf8.RuneCountInString(k); kLen < 1 || kLen > 128 {
 			writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
 				"Tag key must be between 1 and 128 characters")
 			return
 		}
-		if len(v) > 256 {
+		if utf8.RuneCountInString(v) > 256 {
 			writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
 				"Tag value must be 256 characters or fewer")
 			return
