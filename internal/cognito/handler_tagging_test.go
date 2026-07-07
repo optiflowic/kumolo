@@ -2,8 +2,10 @@ package cognito
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -15,6 +17,7 @@ func poolARNFromID(poolID string) string {
 }
 
 func TestPoolIDFromARN(t *testing.T) {
+	longARN := "arn:aws:cognito-idp:us-east-1:000000000000:userpool/" + strings.Repeat("a", 2000)
 	tests := []struct {
 		arn    string
 		wantID string
@@ -34,6 +37,8 @@ func TestPoolIDFromARN(t *testing.T) {
 		{arn: "arn:aws:cognito-idp:us-east-1:000000000000:userpool/", wantOK: false},
 		{arn: "arn:aws:cognito-idp:us-east-1:000000000000:somethingelse/id", wantOK: false},
 		{arn: "not-an-arn", wantOK: false},
+		{arn: "userpool/abc12345", wantOK: false}, // 17 chars — below minimum (20)
+		{arn: longARN, wantOK: false},             // 2051 chars — above maximum (2048)
 	}
 	for _, tc := range tests {
 		t.Run(tc.arn, func(t *testing.T) {
@@ -103,6 +108,55 @@ func TestTagResource(t *testing.T) {
 			`{"ResourceArn":%q,"Tags":{"k":"v"}}`, arn))
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
+
+	t.Run("tag key empty", func(t *testing.T) {
+		ro := newTestRouter(t)
+		poolID := createPool(t, ro, "tag-pool")
+		arn := poolARNFromID(poolID)
+		w := doOp(t, ro, "TagResource", fmt.Sprintf(`{"ResourceArn":%q,"Tags":{"":"v"}}`, arn))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("tag key too long", func(t *testing.T) {
+		ro := newTestRouter(t)
+		poolID := createPool(t, ro, "tag-pool")
+		arn := poolARNFromID(poolID)
+		longKey := strings.Repeat("k", 129)
+		w := doOp(
+			t,
+			ro,
+			"TagResource",
+			fmt.Sprintf(`{"ResourceArn":%q,"Tags":{%q:"v"}}`, arn, longKey),
+		)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("tag value too long", func(t *testing.T) {
+		ro := newTestRouter(t)
+		poolID := createPool(t, ro, "tag-pool")
+		arn := poolARNFromID(poolID)
+		longVal := strings.Repeat("v", 257)
+		w := doOp(
+			t,
+			ro,
+			"TagResource",
+			fmt.Sprintf(`{"ResourceArn":%q,"Tags":{"k":%q}}`, arn, longVal),
+		)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("invalid JSON body", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := doOp(t, ro, "TagResource", "invalid-json")
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("storage error", func(t *testing.T) {
+		ro := &Router{storage: &mockStore{updateErr: errors.New("disk full")}}
+		arn := "arn:aws:cognito-idp:us-east-1:000000000000:userpool/us-east-1_abc123"
+		w := doOp(t, ro, "TagResource", fmt.Sprintf(`{"ResourceArn":%q,"Tags":{"k":"v"}}`, arn))
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
 }
 
 func TestUntagResource(t *testing.T) {
@@ -169,6 +223,19 @@ func TestUntagResource(t *testing.T) {
 			`{"ResourceArn":%q,"TagKeys":["k"]}`, arn))
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
+
+	t.Run("invalid JSON body", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := doOp(t, ro, "UntagResource", "invalid-json")
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("storage error", func(t *testing.T) {
+		ro := &Router{storage: &mockStore{updateErr: errors.New("disk full")}}
+		arn := "arn:aws:cognito-idp:us-east-1:000000000000:userpool/us-east-1_abc123"
+		w := doOp(t, ro, "UntagResource", fmt.Sprintf(`{"ResourceArn":%q,"TagKeys":["k"]}`, arn))
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
 }
 
 func TestListTagsForResource(t *testing.T) {
@@ -221,5 +288,18 @@ func TestListTagsForResource(t *testing.T) {
 		arn := poolARNFromID("us-east-1_notexist")
 		w := doOp(t, ro, "ListTagsForResource", fmt.Sprintf(`{"ResourceArn":%q}`, arn))
 		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("invalid JSON body", func(t *testing.T) {
+		ro := newTestRouter(t)
+		w := doOp(t, ro, "ListTagsForResource", "invalid-json")
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("storage error", func(t *testing.T) {
+		ro := &Router{storage: &mockStore{getErr: errors.New("disk full")}}
+		arn := "arn:aws:cognito-idp:us-east-1:000000000000:userpool/us-east-1_abc123"
+		w := doOp(t, ro, "ListTagsForResource", fmt.Sprintf(`{"ResourceArn":%q}`, arn))
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
 }

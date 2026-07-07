@@ -10,6 +10,9 @@ import (
 // poolIDFromARN extracts the user pool ID from an ARN of the form
 // arn:...:userpool/{poolID}. Returns ("", false) for malformed input.
 func poolIDFromARN(arn string) (string, bool) {
+	if len(arn) < 20 || len(arn) > 2048 {
+		return "", false
+	}
 	const prefix = "userpool/"
 	idx := strings.LastIndex(arn, prefix)
 	if idx == -1 {
@@ -67,6 +70,18 @@ func (ro *Router) handleTagResource(w http.ResponseWriter, body []byte) {
 			"Tags must not be empty",
 		)
 		return
+	}
+	for k, v := range req.Tags {
+		if len(k) < 1 || len(k) > 128 {
+			writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+				"Tag key must be between 1 and 128 characters")
+			return
+		}
+		if len(v) > 256 {
+			writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+				"Tag value must be 256 characters or fewer")
+			return
+		}
 	}
 	err := ro.storage.UpdateUserPool(poolID, func(meta *UserPoolMetadata) error {
 		if meta.UserPoolTags == nil {
