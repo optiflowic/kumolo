@@ -8,6 +8,10 @@ import (
 	"unicode/utf8"
 )
 
+const maxUserPoolTags = 50
+
+var errTagLimitExceeded = errors.New("tag limit exceeded")
+
 // poolIDFromARN extracts the user pool ID from an ARN of the form
 // arn:...:userpool/{poolID}. Returns ("", false) for malformed input.
 func poolIDFromARN(arn string) (string, bool) {
@@ -24,6 +28,49 @@ func poolIDFromARN(arn string) (string, bool) {
 		return "", false
 	}
 	return id, true
+}
+
+// resolvePoolID validates ResourceArn and returns the pool ID.
+// Writes a 400 response and returns ("", false) on any failure.
+func resolvePoolID(w http.ResponseWriter, resourceArn string) (string, bool) {
+	if resourceArn == "" {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"ResourceArn is required",
+		)
+		return "", false
+	}
+	poolID, ok := poolIDFromARN(resourceArn)
+	if !ok {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"Invalid ResourceArn",
+		)
+		return "", false
+	}
+	return poolID, true
+}
+
+// writeStorageErr maps storage errors to appropriate HTTP responses.
+func writeStorageErr(w http.ResponseWriter, err error, internalMsg string) {
+	switch {
+	case errors.Is(err, errUserPoolNotFound):
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeResourceNotFoundException,
+			"User pool not found.",
+		)
+	case errors.Is(err, errTagLimitExceeded):
+		writeError(w, http.StatusBadRequest, ErrTypeLimitExceededException,
+			"Too many tags. User pool may not have more than 50 user-created tags.")
+	default:
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException, internalMsg)
+	}
 }
 
 // ──── TagResource ─────────────────────────────────────────────────────────────
@@ -44,23 +91,8 @@ func (ro *Router) handleTagResource(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
-	if req.ResourceArn == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"ResourceArn is required",
-		)
-		return
-	}
-	poolID, ok := poolIDFromARN(req.ResourceArn)
+	poolID, ok := resolvePoolID(w, req.ResourceArn)
 	if !ok {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"Invalid ResourceArn",
-		)
 		return
 	}
 	if len(req.Tags) == 0 {
@@ -88,27 +120,22 @@ func (ro *Router) handleTagResource(w http.ResponseWriter, body []byte) {
 		if meta.UserPoolTags == nil {
 			meta.UserPoolTags = make(map[string]string)
 		}
+		newCount := 0
+		for k := range req.Tags {
+			if _, exists := meta.UserPoolTags[k]; !exists {
+				newCount++
+			}
+		}
+		if len(meta.UserPoolTags)+newCount > maxUserPoolTags {
+			return errTagLimitExceeded
+		}
 		for k, v := range req.Tags {
 			meta.UserPoolTags[k] = v
 		}
 		return nil
 	})
 	if err != nil {
-		if errors.Is(err, errUserPoolNotFound) {
-			writeError(
-				w,
-				http.StatusBadRequest,
-				ErrTypeResourceNotFoundException,
-				"User pool not found.",
-			)
-			return
-		}
-		writeError(
-			w,
-			http.StatusInternalServerError,
-			ErrTypeInternalErrorException,
-			"failed to update user pool tags",
-		)
+		writeStorageErr(w, err, "failed to update user pool tags")
 		return
 	}
 	writeEmpty(w)
@@ -132,23 +159,8 @@ func (ro *Router) handleUntagResource(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
-	if req.ResourceArn == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"ResourceArn is required",
-		)
-		return
-	}
-	poolID, ok := poolIDFromARN(req.ResourceArn)
+	poolID, ok := resolvePoolID(w, req.ResourceArn)
 	if !ok {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"Invalid ResourceArn",
-		)
 		return
 	}
 	if len(req.TagKeys) == 0 {
@@ -167,21 +179,7 @@ func (ro *Router) handleUntagResource(w http.ResponseWriter, body []byte) {
 		return nil
 	})
 	if err != nil {
-		if errors.Is(err, errUserPoolNotFound) {
-			writeError(
-				w,
-				http.StatusBadRequest,
-				ErrTypeResourceNotFoundException,
-				"User pool not found.",
-			)
-			return
-		}
-		writeError(
-			w,
-			http.StatusInternalServerError,
-			ErrTypeInternalErrorException,
-			"failed to update user pool tags",
-		)
+		writeStorageErr(w, err, "failed to update user pool tags")
 		return
 	}
 	writeEmpty(w)
@@ -204,42 +202,13 @@ func (ro *Router) handleListTagsForResource(w http.ResponseWriter, body []byte) 
 		)
 		return
 	}
-	if req.ResourceArn == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"ResourceArn is required",
-		)
-		return
-	}
-	poolID, ok := poolIDFromARN(req.ResourceArn)
+	poolID, ok := resolvePoolID(w, req.ResourceArn)
 	if !ok {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"Invalid ResourceArn",
-		)
 		return
 	}
 	meta, err := ro.storage.GetUserPool(poolID)
 	if err != nil {
-		if errors.Is(err, errUserPoolNotFound) {
-			writeError(
-				w,
-				http.StatusBadRequest,
-				ErrTypeResourceNotFoundException,
-				"User pool not found.",
-			)
-			return
-		}
-		writeError(
-			w,
-			http.StatusInternalServerError,
-			ErrTypeInternalErrorException,
-			"failed to get user pool",
-		)
+		writeStorageErr(w, err, "failed to get user pool")
 		return
 	}
 	tags := meta.UserPoolTags

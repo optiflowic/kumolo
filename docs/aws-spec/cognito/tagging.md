@@ -18,7 +18,7 @@ All three operations act on a user pool identified by its ARN. Tags are key-valu
 - Target: `AWSCognitoIdentityProviderService.TagResource`
 - Request: `ResourceArn` (required, ARN pattern), `Tags` (required, map[string]string)
 - Response: HTTP 200, empty body `{}`
-- Errors: `ResourceNotFoundException` (404→400), `InvalidParameterException` (400), `NotAuthorizedException` (400), `InternalErrorException` (500)
+- Errors: `ResourceNotFoundException` (404→400), `InvalidParameterException` (400), `LimitExceededException` (400), `NotAuthorizedException` (400), `InternalErrorException` (500)
 - Behaviour: merges tags — existing keys are overwritten, unmentioned keys are preserved.
 
 ## UntagResource
@@ -45,5 +45,4 @@ ResourceArn must resolve to an existing user pool. kumolo derives pool ID from t
 
 ## kumolo deviations
 
-- 50-tag limit is not enforced (test ergonomics).
 - ARN pattern is validated only for minimum/maximum length (20–2048); regex is not applied.

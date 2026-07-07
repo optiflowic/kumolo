@@ -81,73 +81,74 @@ func TestTagResource(t *testing.T) {
 		}, resp.Tags)
 	})
 
-	t.Run("missing ResourceArn", func(t *testing.T) {
-		ro := newTestRouter(t)
-		w := doOp(t, ro, "TagResource", `{"Tags":{"k":"v"}}`)
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-	})
-
-	t.Run("invalid ARN", func(t *testing.T) {
-		ro := newTestRouter(t)
-		w := doOp(t, ro, "TagResource", `{"ResourceArn":"not-an-arn","Tags":{"k":"v"}}`)
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-	})
-
-	t.Run("empty Tags", func(t *testing.T) {
+	t.Run("tag limit exceeded", func(t *testing.T) {
 		ro := newTestRouter(t)
 		poolID := createPool(t, ro, "tag-pool")
 		arn := poolARNFromID(poolID)
-		w := doOp(t, ro, "TagResource", fmt.Sprintf(`{"ResourceArn":%q,"Tags":{}}`, arn))
+
+		// Fill to the limit
+		tags := make(map[string]string, maxUserPoolTags)
+		for i := range maxUserPoolTags {
+			tags[fmt.Sprintf("key%d", i)] = "v"
+		}
+		body, err := json.Marshal(map[string]any{"ResourceArn": arn, "Tags": tags})
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, doOp(t, ro, "TagResource", string(body)).Code)
+
+		// One additional new key must fail
+		w := doOp(t, ro, "TagResource", fmt.Sprintf(`{"ResourceArn":%q,"Tags":{"extra":"v"}}`, arn))
 		assert.Equal(t, http.StatusBadRequest, w.Code)
+
+		// Overwriting an existing key must still succeed
+		w = doOp(
+			t,
+			ro,
+			"TagResource",
+			fmt.Sprintf(`{"ResourceArn":%q,"Tags":{"key0":"updated"}}`, arn),
+		)
+		assert.Equal(t, http.StatusOK, w.Code)
 	})
 
-	t.Run("pool not found", func(t *testing.T) {
-		ro := newTestRouter(t)
-		arn := poolARNFromID("us-east-1_notexist")
-		w := doOp(t, ro, "TagResource", fmt.Sprintf(
-			`{"ResourceArn":%q,"Tags":{"k":"v"}}`, arn))
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-	})
+	// Common validation errors that require no pool setup.
+	for _, tc := range []struct {
+		name       string
+		body       string
+		wantStatus int
+	}{
+		{"invalid JSON body", "invalid-json", http.StatusBadRequest},
+		{"missing ResourceArn", `{"Tags":{"k":"v"}}`, http.StatusBadRequest},
+		{"invalid ARN", `{"ResourceArn":"not-an-arn","Tags":{"k":"v"}}`, http.StatusBadRequest},
+		{"empty Tags", fmt.Sprintf(`{"ResourceArn":%q,"Tags":{}}`, poolARNFromID("us-east-1_x")), http.StatusBadRequest},
+		{"pool not found", fmt.Sprintf(`{"ResourceArn":%q,"Tags":{"k":"v"}}`, poolARNFromID("us-east-1_notexist")), http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := doOp(t, newTestRouter(t), "TagResource", tc.body)
+			assert.Equal(t, tc.wantStatus, w.Code)
+		})
+	}
 
 	t.Run("tag key empty", func(t *testing.T) {
 		ro := newTestRouter(t)
-		poolID := createPool(t, ro, "tag-pool")
-		arn := poolARNFromID(poolID)
+		arn := poolARNFromID(createPool(t, ro, "tag-pool"))
 		w := doOp(t, ro, "TagResource", fmt.Sprintf(`{"ResourceArn":%q,"Tags":{"":"v"}}`, arn))
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 
 	t.Run("tag key too long", func(t *testing.T) {
 		ro := newTestRouter(t)
-		poolID := createPool(t, ro, "tag-pool")
-		arn := poolARNFromID(poolID)
+		arn := poolARNFromID(createPool(t, ro, "tag-pool"))
 		longKey := strings.Repeat("k", 129)
-		w := doOp(
-			t,
-			ro,
-			"TagResource",
-			fmt.Sprintf(`{"ResourceArn":%q,"Tags":{%q:"v"}}`, arn, longKey),
-		)
+		w := doOp(t, ro, "TagResource",
+			fmt.Sprintf(`{"ResourceArn":%q,"Tags":{%q:"v"}}`, arn, longKey))
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 
 	t.Run("tag value too long", func(t *testing.T) {
 		ro := newTestRouter(t)
-		poolID := createPool(t, ro, "tag-pool")
-		arn := poolARNFromID(poolID)
+		arn := poolARNFromID(createPool(t, ro, "tag-pool"))
 		longVal := strings.Repeat("v", 257)
-		w := doOp(
-			t,
-			ro,
-			"TagResource",
-			fmt.Sprintf(`{"ResourceArn":%q,"Tags":{"k":%q}}`, arn, longVal),
-		)
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-	})
-
-	t.Run("invalid JSON body", func(t *testing.T) {
-		ro := newTestRouter(t)
-		w := doOp(t, ro, "TagResource", "invalid-json")
+		w := doOp(t, ro, "TagResource",
+			fmt.Sprintf(`{"ResourceArn":%q,"Tags":{"k":%q}}`, arn, longVal))
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 
@@ -187,48 +188,29 @@ func TestUntagResource(t *testing.T) {
 
 	t.Run("non-existent keys are silently ignored", func(t *testing.T) {
 		ro := newTestRouter(t)
-		poolID := createPool(t, ro, "untag-pool")
-		arn := poolARNFromID(poolID)
-
+		arn := poolARNFromID(createPool(t, ro, "untag-pool"))
 		w := doOp(t, ro, "UntagResource", fmt.Sprintf(
 			`{"ResourceArn":%q,"TagKeys":["doesnotexist"]}`, arn))
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
 
-	t.Run("missing ResourceArn", func(t *testing.T) {
-		ro := newTestRouter(t)
-		w := doOp(t, ro, "UntagResource", `{"TagKeys":["k"]}`)
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-	})
-
-	t.Run("invalid ARN", func(t *testing.T) {
-		ro := newTestRouter(t)
-		w := doOp(t, ro, "UntagResource", `{"ResourceArn":"bad","TagKeys":["k"]}`)
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-	})
-
-	t.Run("empty TagKeys", func(t *testing.T) {
-		ro := newTestRouter(t)
-		poolID := createPool(t, ro, "untag-pool")
-		arn := poolARNFromID(poolID)
-		w := doOp(t, ro, "UntagResource", fmt.Sprintf(
-			`{"ResourceArn":%q,"TagKeys":[]}`, arn))
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-	})
-
-	t.Run("pool not found", func(t *testing.T) {
-		ro := newTestRouter(t)
-		arn := poolARNFromID("us-east-1_notexist")
-		w := doOp(t, ro, "UntagResource", fmt.Sprintf(
-			`{"ResourceArn":%q,"TagKeys":["k"]}`, arn))
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-	})
-
-	t.Run("invalid JSON body", func(t *testing.T) {
-		ro := newTestRouter(t)
-		w := doOp(t, ro, "UntagResource", "invalid-json")
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-	})
+	// Common validation errors that require no pool setup.
+	for _, tc := range []struct {
+		name       string
+		body       string
+		wantStatus int
+	}{
+		{"invalid JSON body", "invalid-json", http.StatusBadRequest},
+		{"missing ResourceArn", `{"TagKeys":["k"]}`, http.StatusBadRequest},
+		{"invalid ARN", `{"ResourceArn":"bad","TagKeys":["k"]}`, http.StatusBadRequest},
+		{"empty TagKeys", fmt.Sprintf(`{"ResourceArn":%q,"TagKeys":[]}`, poolARNFromID("us-east-1_x")), http.StatusBadRequest},
+		{"pool not found", fmt.Sprintf(`{"ResourceArn":%q,"TagKeys":["k"]}`, poolARNFromID("us-east-1_notexist")), http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := doOp(t, newTestRouter(t), "UntagResource", tc.body)
+			assert.Equal(t, tc.wantStatus, w.Code)
+		})
+	}
 
 	t.Run("storage error", func(t *testing.T) {
 		ro := &Router{storage: &mockStore{updateErr: errors.New("disk full")}}
@@ -241,8 +223,7 @@ func TestUntagResource(t *testing.T) {
 func TestListTagsForResource(t *testing.T) {
 	t.Run("success — returns tags", func(t *testing.T) {
 		ro := newTestRouter(t)
-		poolID := createPool(t, ro, "list-tag-pool")
-		arn := poolARNFromID(poolID)
+		arn := poolARNFromID(createPool(t, ro, "list-tag-pool"))
 
 		w := doOp(t, ro, "TagResource", fmt.Sprintf(
 			`{"ResourceArn":%q,"Tags":{"env":"prod"}}`, arn))
@@ -259,8 +240,7 @@ func TestListTagsForResource(t *testing.T) {
 
 	t.Run("success — empty map when no tags", func(t *testing.T) {
 		ro := newTestRouter(t)
-		poolID := createPool(t, ro, "notag-pool")
-		arn := poolARNFromID(poolID)
+		arn := poolARNFromID(createPool(t, ro, "notag-pool"))
 
 		w := doOp(t, ro, "ListTagsForResource", fmt.Sprintf(`{"ResourceArn":%q}`, arn))
 		require.Equal(t, http.StatusOK, w.Code)
@@ -271,30 +251,22 @@ func TestListTagsForResource(t *testing.T) {
 		assert.Empty(t, resp.Tags)
 	})
 
-	t.Run("missing ResourceArn", func(t *testing.T) {
-		ro := newTestRouter(t)
-		w := doOp(t, ro, "ListTagsForResource", `{}`)
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-	})
-
-	t.Run("invalid ARN", func(t *testing.T) {
-		ro := newTestRouter(t)
-		w := doOp(t, ro, "ListTagsForResource", `{"ResourceArn":"bad"}`)
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-	})
-
-	t.Run("pool not found", func(t *testing.T) {
-		ro := newTestRouter(t)
-		arn := poolARNFromID("us-east-1_notexist")
-		w := doOp(t, ro, "ListTagsForResource", fmt.Sprintf(`{"ResourceArn":%q}`, arn))
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-	})
-
-	t.Run("invalid JSON body", func(t *testing.T) {
-		ro := newTestRouter(t)
-		w := doOp(t, ro, "ListTagsForResource", "invalid-json")
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-	})
+	// Common validation errors that require no pool setup.
+	for _, tc := range []struct {
+		name       string
+		body       string
+		wantStatus int
+	}{
+		{"invalid JSON body", "invalid-json", http.StatusBadRequest},
+		{"missing ResourceArn", `{}`, http.StatusBadRequest},
+		{"invalid ARN", `{"ResourceArn":"bad"}`, http.StatusBadRequest},
+		{"pool not found", fmt.Sprintf(`{"ResourceArn":%q}`, poolARNFromID("us-east-1_notexist")), http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := doOp(t, newTestRouter(t), "ListTagsForResource", tc.body)
+			assert.Equal(t, tc.wantStatus, w.Code)
+		})
+	}
 
 	t.Run("storage error", func(t *testing.T) {
 		ro := &Router{storage: &mockStore{getErr: errors.New("disk full")}}

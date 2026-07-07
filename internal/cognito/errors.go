@@ -20,6 +20,7 @@ const (
 	ErrTypeUnknownOperationException = "UnknownOperationException"
 	ErrTypeGroupExistsException      = "GroupExistsException"
 	ErrTypeUnauthorizedException     = "UnauthorizedException"
+	ErrTypeLimitExceededException    = "LimitExceededException"
 )
 
 type responseRecorder struct {
