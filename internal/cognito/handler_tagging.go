@@ -16,18 +16,22 @@ const (
 
 var errTagLimitExceeded = errors.New("tag limit exceeded")
 
-// poolIDFromARN extracts the user pool ID from an ARN of the form
-// arn:...:userpool/{poolID}. Returns ("", false) for malformed input.
+// poolIDFromARN extracts the user pool ID from a Cognito user pool ARN of the
+// form arn:{partition}:cognito-idp:{region}:{account}:userpool/{poolID}.
+// Returns ("", false) for malformed input.
 func poolIDFromARN(arn string) (string, bool) {
 	if len(arn) < 20 || len(arn) > 2048 {
 		return "", false
 	}
-	const prefix = "userpool/"
-	idx := strings.LastIndex(arn, prefix)
-	if idx == -1 {
+	parts := strings.SplitN(arn, ":", 6)
+	if len(parts) != 6 || parts[0] != "arn" || parts[2] != "cognito-idp" {
 		return "", false
 	}
-	id := arn[idx+len(prefix):]
+	const prefix = "userpool/"
+	if !strings.HasPrefix(parts[5], prefix) {
+		return "", false
+	}
+	id := parts[5][len(prefix):]
 	if id == "" {
 		return "", false
 	}
