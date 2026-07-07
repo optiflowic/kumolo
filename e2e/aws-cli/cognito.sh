@@ -51,9 +51,11 @@ POOL_JSON=$($AWS create-user-pool --pool-name "e2e-pool" 2>&1)
 if echo "$POOL_JSON" | grep -q '"Id"'; then
   ok "CreateUserPool"
   POOL_ID=$(echo "$POOL_JSON" | jq -r '.UserPool.Id // empty' 2>/dev/null || true)
+  POOL_ARN=$(echo "$POOL_JSON" | jq -r '.UserPool.Arn // empty' 2>/dev/null || true)
 else
   fail "CreateUserPool"
   POOL_ID="us-east-1_UNKNOWN"
+  POOL_ARN=""
 fi
 
 run "DescribeUserPool" \
@@ -760,6 +762,65 @@ if [[ -n "${ACCESS_TOKEN:-}" && -n "${REFRESH_TOKEN:-}" ]]; then
 else
   skip "Token revocation — no confirmed user available"
   echo "  Hint: set E2E_COGNITO_CODE=<code> from kumolo logs, or use Docker Compose"
+fi
+
+# ---------------------------------------------------------------------------
+# Tagging
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- Tagging ---"
+
+if [[ -n "${POOL_ARN:-}" ]]; then
+  # TagResource
+  if TAG_JSON=$($AWS tag-resource \
+    --resource-arn "$POOL_ARN" \
+    --tags "env=e2e,owner=kumolo" 2>&1); then
+    ok "tag-resource"
+  else
+    fail "tag-resource: $TAG_JSON"
+  fi
+
+  # ListTagsForResource — verify both tags are present
+  LIST_TAGS_JSON=$($AWS list-tags-for-resource --resource-arn "$POOL_ARN" 2>&1)
+  if echo "$LIST_TAGS_JSON" | grep -q '"Tags"'; then
+    ok "list-tags-for-resource"
+  else
+    fail "list-tags-for-resource: $LIST_TAGS_JSON"
+  fi
+  if echo "$LIST_TAGS_JSON" | grep -q '"e2e"'; then
+    ok "list-tags-for-resource — env=e2e tag present"
+  else
+    fail "list-tags-for-resource — expected env=e2e tag"
+  fi
+  if echo "$LIST_TAGS_JSON" | grep -q '"kumolo"'; then
+    ok "list-tags-for-resource — owner=kumolo tag present"
+  else
+    fail "list-tags-for-resource — expected owner=kumolo tag"
+  fi
+
+  # UntagResource — remove the env key
+  if UNTAG_JSON=$($AWS untag-resource \
+    --resource-arn "$POOL_ARN" \
+    --tag-keys "env" 2>&1); then
+    ok "untag-resource"
+  else
+    fail "untag-resource: $UNTAG_JSON"
+  fi
+
+  # Verify env is gone, owner is preserved
+  LIST_TAGS_JSON2=$($AWS list-tags-for-resource --resource-arn "$POOL_ARN" 2>&1)
+  if echo "$LIST_TAGS_JSON2" | grep -q '"e2e"'; then
+    fail "untag-resource — env tag should have been removed"
+  else
+    ok "untag-resource — env tag removed"
+  fi
+  if echo "$LIST_TAGS_JSON2" | grep -q '"kumolo"'; then
+    ok "untag-resource — owner tag preserved"
+  else
+    fail "untag-resource — expected owner tag to be preserved"
+  fi
+else
+  skip "Tagging — pool ARN not available"
 fi
 
 # ---------------------------------------------------------------------------

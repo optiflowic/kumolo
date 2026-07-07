@@ -84,3 +84,7 @@ output "cognito_group_editors" {
 output "cognito_client_refresh_token_validity" {
   value = aws_cognito_user_pool_client.main.refresh_token_validity
 }
+
+output "cognito_user_pool_tags" {
+  value = aws_cognito_user_pool.main.tags_all
+}
