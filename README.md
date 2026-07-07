@@ -4,7 +4,6 @@
 
 # kumolo
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/optiflowic/kumolo)](https://goreportcard.com/report/github.com/optiflowic/kumolo)
 [![Latest Release](https://img.shields.io/github/v/release/optiflowic/kumolo?sort=semver)](https://github.com/optiflowic/kumolo/releases)
 [![CI](https://github.com/optiflowic/kumolo/actions/workflows/ci.yaml/badge.svg)](https://github.com/optiflowic/kumolo/actions/workflows/ci.yaml)
 [![Release](https://github.com/optiflowic/kumolo/actions/workflows/release.yaml/badge.svg)](https://github.com/optiflowic/kumolo/actions/workflows/release.yaml)
