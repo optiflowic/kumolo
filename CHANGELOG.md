@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-07-08
+
+### Added
+
+#### Cognito
+
+- New service: Amazon Cognito User Pools is now supported
+- User pool operations: `CreateUserPool`, `DescribeUserPool`, `UpdateUserPool`, `DeleteUserPool`, `ListUserPools`, `GetUserPoolMfaConfig`
+- User pool client operations: `CreateUserPoolClient`, `DescribeUserPoolClient`, `UpdateUserPoolClient`, `DeleteUserPoolClient`, `ListUserPoolClients`
+- Auth flows: `SignUp`, `ConfirmSignUp`, `ResendConfirmationCode`, `InitiateAuth` (`USER_PASSWORD_AUTH`, `REFRESH_TOKEN_AUTH`), `RespondToAuthChallenge` (`NEW_PASSWORD_REQUIRED` challenge)
+- Authenticated user operations: `GetUser`
+- Admin operations: `AdminCreateUser`, `AdminGetUser`, `AdminSetUserPassword`, `AdminConfirmSignUp`, `AdminDeleteUser`
+- Group management: `CreateGroup`, `GetGroup`, `UpdateGroup`, `DeleteGroup`, `ListGroups`, `AdminAddUserToGroup`, `AdminRemoveUserFromGroup`, `AdminListGroupsForUser`, `ListUsersInGroup`
+- Token lifecycle: refresh token expiry enforcement, `RevokeToken`, `GlobalSignOut`
+- JWKS endpoint (`/.well-known/jwks.json`) for JWT verification by downstream services
+- Tag operations: `TagResource`, `UntagResource`, `ListTagsForResource`
+
+#### DynamoDB Streams
+
+- Stream records are now persisted to disk and survive process restarts
+
+### Fixed
+
+#### Cognito
+
+- ARN structure validation in `poolIDFromARN` now correctly rejects malformed ARNs
+
 ## [0.2.3] - 2026-06-19
 
 ### Added

@@ -37,8 +37,20 @@ func TestPoolIDFromARN(t *testing.T) {
 		{arn: "arn:aws:cognito-idp:us-east-1:000000000000:userpool/", wantOK: false},
 		{arn: "arn:aws:cognito-idp:us-east-1:000000000000:somethingelse/id", wantOK: false},
 		{arn: "not-an-arn", wantOK: false},
-		{arn: "userpool/abc12345", wantOK: false}, // 17 chars — below minimum (20)
-		{arn: longARN, wantOK: false},             // 2051 chars — above maximum (2048)
+		{
+			arn:    "userpool/abc12345",
+			wantOK: false,
+		}, // 17 chars — below minimum (20)
+		{
+			arn:    longARN,
+			wantOK: false,
+		}, // 2051 chars — above maximum (2048)
+		{arn: "arn:aws:s3:us-east-1:000000000000:userpool/id", wantOK: false},    // wrong service
+		{arn: "notarn:aws:cognito-idp:us-east-1:000:userpool/id", wantOK: false}, // wrong scheme
+		{
+			arn:    "arn:cognito-idp:userpool/id",
+			wantOK: false,
+		}, // too few segments
 	}
 	for _, tc := range tests {
 		t.Run(tc.arn, func(t *testing.T) {
