@@ -1116,3 +1116,216 @@ func TestAdminUpdateUserAttributes_UserNotFoundOnUpdate(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assertErrType(t, w, ErrTypeUserNotFoundException)
 }
+
+// ──── AdminDisableUser / AdminEnableUser ─────────────────────────────────────
+
+func TestAdminDisableUser_Success(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "test-pool")
+	createAdminUser(t, ro, poolID, "alice")
+
+	body, _ := json.Marshal(map[string]any{"UserPoolId": poolID, "Username": "alice"})
+	w := doOp(t, ro, "AdminDisableUser", string(body))
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.JSONEq(t, `{}`, w.Body.String())
+
+	u, err := ro.storage.GetUser(poolID, "alice")
+	require.NoError(t, err)
+	assert.False(t, u.Enabled)
+}
+
+func TestAdminDisableUser_RevokesExistingSession(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID, clientID := setupPool(t, ro)
+	token := doAuth(t, ro, clientID, "alice", "Password123!")
+
+	// Confirm the token works before disabling.
+	require.Equal(t, http.StatusOK, doGetUserDirect(t, ro, token).Code)
+
+	body, _ := json.Marshal(map[string]any{"UserPoolId": poolID, "Username": "alice"})
+	require.Equal(t, http.StatusOK, doOp(t, ro, "AdminDisableUser", string(body)).Code)
+
+	w := doGetUserDirect(t, ro, token)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeNotAuthorizedException)
+}
+
+func TestAdminEnableUser_Success(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID, clientID := setupPool(t, ro)
+	signUpUser(t, ro, clientID, "alice", "Password123!")
+	confirmUser(t, ro, clientID, "alice")
+
+	disableBody, _ := json.Marshal(map[string]any{"UserPoolId": poolID, "Username": "alice"})
+	require.Equal(t, http.StatusOK, doOp(t, ro, "AdminDisableUser", string(disableBody)).Code)
+
+	w := doOp(t, ro, "AdminEnableUser", string(disableBody))
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.JSONEq(t, `{}`, w.Body.String())
+
+	u, err := ro.storage.GetUser(poolID, "alice")
+	require.NoError(t, err)
+	assert.True(t, u.Enabled)
+
+	// Sign-in works again after re-enabling.
+	w2 := doInitAuth(t, ro, clientID, "alice", "Password123!")
+	assert.Equal(t, http.StatusOK, w2.Code)
+}
+
+func TestAdminDisableUser_ValidationErrors(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "test-pool")
+
+	tests := []struct {
+		name string
+		body map[string]any
+	}{
+		{"missing UserPoolId", map[string]any{"Username": "alice"}},
+		{"missing Username", map[string]any{"UserPoolId": poolID}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			b, _ := json.Marshal(tc.body)
+			w := doOp(t, ro, "AdminDisableUser", string(b))
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assertErrType(t, w, ErrTypeInvalidParameterException)
+		})
+	}
+}
+
+func TestAdminEnableUser_ValidationErrors(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "test-pool")
+
+	tests := []struct {
+		name string
+		body map[string]any
+	}{
+		{"missing UserPoolId", map[string]any{"Username": "alice"}},
+		{"missing Username", map[string]any{"UserPoolId": poolID}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			b, _ := json.Marshal(tc.body)
+			w := doOp(t, ro, "AdminEnableUser", string(b))
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assertErrType(t, w, ErrTypeInvalidParameterException)
+		})
+	}
+}
+
+func TestAdminDisableUser_InvalidJSON(t *testing.T) {
+	ro := newTestRouter(t)
+	w := doOp(t, ro, "AdminDisableUser", `not json`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeInvalidParameterException)
+}
+
+func TestAdminEnableUser_InvalidJSON(t *testing.T) {
+	ro := newTestRouter(t)
+	w := doOp(t, ro, "AdminEnableUser", `not json`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeInvalidParameterException)
+}
+
+func TestAdminDisableUser_UserPoolNotFound(t *testing.T) {
+	ro := newTestRouter(t)
+	body, _ := json.Marshal(
+		map[string]any{"UserPoolId": "us-east-1_nonexistent", "Username": "alice"},
+	)
+	w := doOp(t, ro, "AdminDisableUser", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeResourceNotFoundException)
+}
+
+func TestAdminEnableUser_UserPoolNotFound(t *testing.T) {
+	ro := newTestRouter(t)
+	body, _ := json.Marshal(
+		map[string]any{"UserPoolId": "us-east-1_nonexistent", "Username": "alice"},
+	)
+	w := doOp(t, ro, "AdminEnableUser", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeResourceNotFoundException)
+}
+
+func TestAdminDisableUser_UserNotFound(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "test-pool")
+	body, _ := json.Marshal(map[string]any{"UserPoolId": poolID, "Username": "nonexistent"})
+	w := doOp(t, ro, "AdminDisableUser", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeUserNotFoundException)
+}
+
+func TestAdminEnableUser_UserNotFound(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "test-pool")
+	body, _ := json.Marshal(map[string]any{"UserPoolId": poolID, "Username": "nonexistent"})
+	w := doOp(t, ro, "AdminEnableUser", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeUserNotFoundException)
+}
+
+func TestAdminDisableUser_GetUserPoolStorageError(t *testing.T) {
+	ro := &Router{storage: &mockStore{getErr: errors.New("storage error")}}
+	body, _ := json.Marshal(map[string]any{"UserPoolId": "us-east-1_X", "Username": "alice"})
+	w := doOp(t, ro, "AdminDisableUser", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestAdminEnableUser_GetUserPoolStorageError(t *testing.T) {
+	ro := &Router{storage: &mockStore{getErr: errors.New("storage error")}}
+	body, _ := json.Marshal(map[string]any{"UserPoolId": "us-east-1_X", "Username": "alice"})
+	w := doOp(t, ro, "AdminEnableUser", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestAdminDisableUser_UpdateUserStorageError(t *testing.T) {
+	ro := &Router{storage: &mockStore{updateUserErr: errors.New("disk error")}}
+	body, _ := json.Marshal(map[string]any{"UserPoolId": "us-east-1_X", "Username": "alice"})
+	w := doOp(t, ro, "AdminDisableUser", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestAdminEnableUser_UpdateUserStorageError(t *testing.T) {
+	ro := &Router{storage: &mockStore{updateUserErr: errors.New("disk error")}}
+	body, _ := json.Marshal(map[string]any{"UserPoolId": "us-east-1_X", "Username": "alice"})
+	w := doOp(t, ro, "AdminEnableUser", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestAdminDisableUser_RevokeOriginJTIsError(t *testing.T) {
+	ro := &Router{storage: &mockStore{revokeOriginJTIsForSubErr: errors.New("disk error")}}
+	body, _ := json.Marshal(map[string]any{"UserPoolId": "us-east-1_X", "Username": "alice"})
+	w := doOp(t, ro, "AdminDisableUser", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestAdminDisableUser_DeleteRefreshTokensError(t *testing.T) {
+	ro := &Router{storage: &mockStore{deleteRefreshBySubErr: errors.New("disk error")}}
+	body, _ := json.Marshal(map[string]any{"UserPoolId": "us-east-1_X", "Username": "alice"})
+	w := doOp(t, ro, "AdminDisableUser", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestAdminDisableUser_UserNotFoundOnUpdate(t *testing.T) {
+	ro := &Router{storage: &mockStore{updateUserErr: errUserNotFound}}
+	body, _ := json.Marshal(map[string]any{"UserPoolId": "us-east-1_X", "Username": "alice"})
+	w := doOp(t, ro, "AdminDisableUser", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeUserNotFoundException)
+}
+
+func TestAdminEnableUser_UserNotFoundOnUpdate(t *testing.T) {
+	ro := &Router{storage: &mockStore{updateUserErr: errUserNotFound}}
+	body, _ := json.Marshal(map[string]any{"UserPoolId": "us-east-1_X", "Username": "alice"})
+	w := doOp(t, ro, "AdminEnableUser", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeUserNotFoundException)
+}

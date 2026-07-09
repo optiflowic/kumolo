@@ -174,6 +174,10 @@ func (ro *Router) serveHTTP(w http.ResponseWriter, r *http.Request, op string) {
 		ro.handleAdminConfirmSignUp(w, body)
 	case "AdminDeleteUser":
 		ro.handleAdminDeleteUser(w, body)
+	case "AdminDisableUser":
+		ro.handleAdminDisableUser(w, body)
+	case "AdminEnableUser":
+		ro.handleAdminEnableUser(w, body)
 	case "AdminUpdateUserAttributes":
 		ro.handleAdminUpdateUserAttributes(w, body)
 	case "ListUsers":

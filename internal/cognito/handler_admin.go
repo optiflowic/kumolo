@@ -469,6 +469,129 @@ func (ro *Router) handleAdminDeleteUser(w http.ResponseWriter, body []byte) {
 	writeJSON(w, http.StatusOK, map[string]any{})
 }
 
+// ──── AdminDisableUser ───────────────────────────────────────────────────────
+
+type adminDisableUserRequest struct {
+	UserPoolID string `json:"UserPoolId"`
+	Username   string `json:"Username"`
+}
+
+func (ro *Router) handleAdminDisableUser(w http.ResponseWriter, body []byte) {
+	var req adminDisableUserRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"invalid request body")
+		return
+	}
+	if req.UserPoolID == "" {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"UserPoolId is required")
+		return
+	}
+	if req.Username == "" {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"Username is required")
+		return
+	}
+
+	if _, err := ro.storage.GetUserPool(req.UserPoolID); err != nil {
+		if errors.Is(err, errUserPoolNotFound) {
+			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException,
+				"User pool not found.")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to get user pool")
+		return
+	}
+
+	var sub string
+	err := ro.storage.UpdateUser(req.UserPoolID, req.Username, func(u *UserMetadata) error {
+		u.Enabled = false
+		sub = u.Sub
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, errUserNotFound) {
+			writeError(w, http.StatusBadRequest, ErrTypeUserNotFoundException,
+				"User does not exist.")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to disable user")
+		return
+	}
+
+	// Revoke every outstanding session, matching AWS's "revokes all access tokens" behavior.
+	revokeExp := float64(nowUnix()) + float64(accessTokenExpiry)
+	if err := ro.storage.RevokeOriginJTIsForSub(req.UserPoolID, sub, revokeExp); err != nil {
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to revoke sessions")
+		return
+	}
+	if err := ro.storage.DeleteRefreshTokensBySub(req.UserPoolID, sub); err != nil {
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to revoke refresh tokens")
+		return
+	}
+
+	writeEmpty(w)
+}
+
+// ──── AdminEnableUser ────────────────────────────────────────────────────────
+
+type adminEnableUserRequest struct {
+	UserPoolID string `json:"UserPoolId"`
+	Username   string `json:"Username"`
+}
+
+func (ro *Router) handleAdminEnableUser(w http.ResponseWriter, body []byte) {
+	var req adminEnableUserRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"invalid request body")
+		return
+	}
+	if req.UserPoolID == "" {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"UserPoolId is required")
+		return
+	}
+	if req.Username == "" {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"Username is required")
+		return
+	}
+
+	if _, err := ro.storage.GetUserPool(req.UserPoolID); err != nil {
+		if errors.Is(err, errUserPoolNotFound) {
+			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException,
+				"User pool not found.")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to get user pool")
+		return
+	}
+
+	err := ro.storage.UpdateUser(req.UserPoolID, req.Username, func(u *UserMetadata) error {
+		u.Enabled = true
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, errUserNotFound) {
+			writeError(w, http.StatusBadRequest, ErrTypeUserNotFoundException,
+				"User does not exist.")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to enable user")
+		return
+	}
+
+	writeEmpty(w)
+}
+
 // ──── AdminUpdateUserAttributes ──────────────────────────────────────────────
 
 type adminUpdateUserAttributesRequest struct {

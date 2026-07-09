@@ -438,6 +438,11 @@ func (ro *Router) handleUserPasswordAuth(
 		return
 	}
 
+	if !user.Enabled {
+		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException, "User is disabled.")
+		return
+	}
+
 	if user.Status == userStatusUnconfirmed {
 		writeError(w, http.StatusBadRequest, ErrTypeUserNotConfirmedException,
 			"User is not confirmed.")
@@ -520,6 +525,11 @@ func (ro *Router) handleRefreshTokenAuth(
 	user, err := ro.storage.GetUserBySub(poolID, rt.Sub)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, ErrTypeUserNotFoundException, "User does not exist.")
+		return
+	}
+
+	if !user.Enabled {
+		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException, "User is disabled.")
 		return
 	}
 
