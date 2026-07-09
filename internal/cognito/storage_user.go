@@ -30,8 +30,12 @@ type UserMetadata struct {
 	PasswordHash     string          `json:"PasswordHash"`
 	Attributes       []AttributeType `json:"Attributes"`
 	ConfirmationCode string          `json:"ConfirmationCode"`
-	CreatedAt        float64         `json:"CreatedAt"`
-	UpdatedAt        float64         `json:"UpdatedAt"`
+	// VerificationCodes holds pending attribute-verification codes keyed by
+	// attribute name (e.g. "email", "phone_number"), set by UpdateUserAttributes
+	// / GetUserAttributeVerificationCode and consumed by VerifyUserAttribute.
+	VerificationCodes map[string]string `json:"VerificationCodes,omitempty"`
+	CreatedAt         float64           `json:"CreatedAt"`
+	UpdatedAt         float64           `json:"UpdatedAt"`
 }
 
 type userIndexEntry struct {
