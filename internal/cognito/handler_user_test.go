@@ -986,6 +986,310 @@ func TestUpdateUserAttributes_StorageUpdateError(t *testing.T) {
 	assertErrType(t, w, ErrTypeInternalErrorException)
 }
 
+// ── GetUserAttributeVerificationCode / VerifyUserAttribute ─────────────────────
+
+func doGetVerificationCode(
+	t *testing.T,
+	ro *Router,
+	token, attrName string,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	body, _ := json.Marshal(map[string]string{
+		"AccessToken": token, "AttributeName": attrName,
+	})
+	return doOp(t, ro, "GetUserAttributeVerificationCode", string(body))
+}
+
+func doVerifyUserAttribute(
+	t *testing.T,
+	ro *Router,
+	token, attrName, code string,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	body, _ := json.Marshal(map[string]string{
+		"AccessToken": token, "AttributeName": attrName, "Code": code,
+	})
+	return doOp(t, ro, "VerifyUserAttribute", string(body))
+}
+
+func TestGetUserAttributeVerificationCode_Success(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID, clientID := setupPool(t, ro)
+	token := doAuth(t, ro, clientID, "alice", "Password123!")
+
+	w := doGetVerificationCode(t, ro, token, "email")
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp struct {
+		CodeDeliveryDetails codeDeliveryDetails `json:"CodeDeliveryDetails"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, "email", resp.CodeDeliveryDetails.AttributeName)
+	assert.Equal(t, deliveryEmail, resp.CodeDeliveryDetails.DeliveryMedium)
+
+	u, err := ro.storage.GetUser(poolID, "alice")
+	require.NoError(t, err)
+	require.NotEmpty(t, u.VerificationCodes["email"])
+}
+
+func TestGetUserAttributeVerificationCode_PhoneNumber(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID, clientID := setupPool(t, ro)
+	token := doAuth(t, ro, clientID, "alice", "Password123!")
+
+	updateBody, _ := json.Marshal(map[string]any{
+		"AccessToken":    token,
+		"UserAttributes": []map[string]string{{"Name": "phone_number", "Value": "+15551234567"}},
+	})
+	require.Equal(t, http.StatusOK, doOp(t, ro, "UpdateUserAttributes", string(updateBody)).Code)
+
+	w := doGetVerificationCode(t, ro, token, "phone_number")
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp struct {
+		CodeDeliveryDetails codeDeliveryDetails `json:"CodeDeliveryDetails"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, "phone_number", resp.CodeDeliveryDetails.AttributeName)
+	assert.Equal(t, deliverySMS, resp.CodeDeliveryDetails.DeliveryMedium)
+
+	u, err := ro.storage.GetUser(poolID, "alice")
+	require.NoError(t, err)
+	require.NotEmpty(t, u.VerificationCodes["phone_number"])
+}
+
+func TestGetUserAttributeVerificationCode_MissingAccessToken(t *testing.T) {
+	ro := newTestRouter(t)
+	w := doOp(t, ro, "GetUserAttributeVerificationCode", `{"AttributeName":"email"}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeInvalidParameterException)
+}
+
+func TestGetUserAttributeVerificationCode_UnsupportedAttribute(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	token := doAuth(t, ro, clientID, "alice", "Password123!")
+
+	w := doGetVerificationCode(t, ro, token, "given_name")
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeInvalidParameterException)
+}
+
+func TestGetUserAttributeVerificationCode_NoValueSet(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	token := doAuth(t, ro, clientID, "alice", "Password123!")
+
+	w := doGetVerificationCode(t, ro, token, "phone_number")
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeInvalidParameterException)
+}
+
+func TestGetUserAttributeVerificationCode_InvalidJSON(t *testing.T) {
+	ro := newTestRouter(t)
+	w := doOp(t, ro, "GetUserAttributeVerificationCode", `not json`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeInvalidParameterException)
+}
+
+func TestGetUserAttributeVerificationCode_InvalidToken(t *testing.T) {
+	ro := newTestRouter(t)
+	w := doGetVerificationCode(t, ro, "not-a-jwt", "email")
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeNotAuthorizedException)
+}
+
+func TestGetUserAttributeVerificationCode_CodeGenerationError(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	token := doAuth(t, ro, clientID, "alice", "Password123!")
+	ro.codeReader = &errorReader{err: errors.New("entropy failed")}
+
+	w := doGetVerificationCode(t, ro, token, "email")
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestGetUserAttributeVerificationCode_UpdateUserStorageError(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	poolID := "us-east-1_TestPool"
+	user := &UserMetadata{
+		Username: "alice", Sub: "sub-alice",
+		Attributes: []AttributeType{{Name: "email", Value: "alice@example.com"}},
+	}
+	token, _, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil, "")
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: "kid"}, key, nil
+		},
+		getUserBySubFn: func(string, string) (*UserMetadata, error) { return user, nil },
+		updateUserErr:  errors.New("disk error"),
+	}}
+	w := doGetVerificationCode(t, ro, token, "email")
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestGetUserAttributeVerificationCode_UserNotFoundOnUpdate(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	poolID := "us-east-1_TestPool"
+	user := &UserMetadata{
+		Username: "alice", Sub: "sub-alice",
+		Attributes: []AttributeType{{Name: "email", Value: "alice@example.com"}},
+	}
+	token, _, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil, "")
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: "kid"}, key, nil
+		},
+		getUserBySubFn: func(string, string) (*UserMetadata, error) { return user, nil },
+		updateUserErr:  errUserNotFound,
+	}}
+	w := doGetVerificationCode(t, ro, token, "email")
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeUserNotFoundException)
+}
+
+func TestVerifyUserAttribute_Success(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID, clientID := setupPool(t, ro)
+	token := doAuth(t, ro, clientID, "alice", "Password123!")
+
+	updateBody, _ := json.Marshal(map[string]any{
+		"AccessToken":    token,
+		"UserAttributes": []map[string]string{{"Name": "email", "Value": "new@example.com"}},
+	})
+	require.Equal(t, http.StatusOK, doOp(t, ro, "UpdateUserAttributes", string(updateBody)).Code)
+
+	u, err := ro.storage.GetUser(poolID, "alice")
+	require.NoError(t, err)
+	code := u.VerificationCodes["email"]
+	require.NotEmpty(t, code)
+
+	w := doVerifyUserAttribute(t, ro, token, "email", code)
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.JSONEq(t, `{}`, w.Body.String())
+
+	u, err = ro.storage.GetUser(poolID, "alice")
+	require.NoError(t, err)
+	verified, _ := getAttr(u.Attributes, "email_verified")
+	assert.Equal(t, "true", verified)
+	_, hasCode := u.VerificationCodes["email"]
+	assert.False(t, hasCode)
+}
+
+func TestVerifyUserAttribute_CodeMismatch(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	token := doAuth(t, ro, clientID, "alice", "Password123!")
+
+	updateBody, _ := json.Marshal(map[string]any{
+		"AccessToken":    token,
+		"UserAttributes": []map[string]string{{"Name": "email", "Value": "new@example.com"}},
+	})
+	require.Equal(t, http.StatusOK, doOp(t, ro, "UpdateUserAttributes", string(updateBody)).Code)
+
+	w := doVerifyUserAttribute(t, ro, token, "email", "000000")
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeCodeMismatchException)
+}
+
+func TestVerifyUserAttribute_NoPendingCode(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	token := doAuth(t, ro, clientID, "alice", "Password123!")
+
+	w := doVerifyUserAttribute(t, ro, token, "email", "123456")
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeCodeMismatchException)
+}
+
+func TestVerifyUserAttribute_MissingAccessToken(t *testing.T) {
+	ro := newTestRouter(t)
+	w := doOp(t, ro, "VerifyUserAttribute", `{"AttributeName":"email","Code":"123456"}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeInvalidParameterException)
+}
+
+func TestVerifyUserAttribute_UnsupportedAttribute(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	token := doAuth(t, ro, clientID, "alice", "Password123!")
+
+	w := doVerifyUserAttribute(t, ro, token, "given_name", "123456")
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeInvalidParameterException)
+}
+
+func TestVerifyUserAttribute_MissingCode(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	token := doAuth(t, ro, clientID, "alice", "Password123!")
+
+	body, _ := json.Marshal(map[string]string{"AccessToken": token, "AttributeName": "email"})
+	w := doOp(t, ro, "VerifyUserAttribute", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeInvalidParameterException)
+}
+
+func TestVerifyUserAttribute_InvalidJSON(t *testing.T) {
+	ro := newTestRouter(t)
+	w := doOp(t, ro, "VerifyUserAttribute", `not json`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeInvalidParameterException)
+}
+
+func TestVerifyUserAttribute_InvalidToken(t *testing.T) {
+	ro := newTestRouter(t)
+	w := doVerifyUserAttribute(t, ro, "not-a-jwt", "email", "123456")
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeNotAuthorizedException)
+}
+
+func TestVerifyUserAttribute_StorageError(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	poolID := "us-east-1_TestPool"
+	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
+	token, _, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil, "")
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: "kid"}, key, nil
+		},
+		getUserBySubFn: func(string, string) (*UserMetadata, error) { return user, nil },
+		updateUserErr:  errors.New("disk error"),
+	}}
+	w := doVerifyUserAttribute(t, ro, token, "email", "123456")
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestVerifyUserAttribute_UserNotFoundOnUpdate(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	poolID := "us-east-1_TestPool"
+	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
+	token, _, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil, "")
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: "kid"}, key, nil
+		},
+		getUserBySubFn: func(string, string) (*UserMetadata, error) { return user, nil },
+		updateUserErr:  errUserNotFound,
+	}}
+	w := doVerifyUserAttribute(t, ro, token, "email", "123456")
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeUserNotFoundException)
+}
+
 // ── DeleteUser ─────────────────────────────────────────────────────────────────
 
 func doDeleteUser(t *testing.T, ro *Router, token string) *httptest.ResponseRecorder {

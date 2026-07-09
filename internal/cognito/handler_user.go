@@ -2,6 +2,7 @@ package cognito
 
 import (
 	"crypto/rsa"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -193,6 +194,187 @@ func (ro *Router) checkTokenNotRevoked(w http.ResponseWriter, poolID, jti, origi
 		}
 	}
 	return true
+}
+
+// ──── GetUserAttributeVerificationCode ───────────────────────────────────────
+
+// verifiableAttr reports whether attrName is one kumolo tracks a "_verified"
+// companion attribute and pending-code slot for.
+func verifiableAttr(attrName string) bool {
+	return attrName == attrEmail || attrName == attrPhoneNumber
+}
+
+type getUserAttributeVerificationCodeRequest struct {
+	AccessToken   string `json:"AccessToken"`
+	AttributeName string `json:"AttributeName"`
+}
+
+func (ro *Router) handleGetUserAttributeVerificationCode(w http.ResponseWriter, body []byte) {
+	var req getUserAttributeVerificationCodeRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"invalid request body")
+		return
+	}
+	if req.AccessToken == "" {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"AccessToken is required")
+		return
+	}
+	if !verifiableAttr(req.AttributeName) {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"AttributeName must be email or phone_number")
+		return
+	}
+
+	poolID, ok := poolIDFromToken(w, req.AccessToken)
+	if !ok {
+		return
+	}
+	privateKey, ok := ro.poolKey(w, poolID)
+	if !ok {
+		return
+	}
+	sub, jti, originJTI, _, ok := validateAccessJWT(w, req.AccessToken, &privateKey.PublicKey)
+	if !ok {
+		return
+	}
+	if ok2 := ro.checkTokenNotRevoked(w, poolID, jti, originJTI); !ok2 {
+		return
+	}
+	user, ok := ro.lookupUser(w, poolID, sub)
+	if !ok {
+		return
+	}
+
+	value, has := getAttr(user.Attributes, req.AttributeName)
+	if !has || value == "" {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			fmt.Sprintf("user has no value set for attribute %q", req.AttributeName))
+		return
+	}
+
+	codeR := ro.codeReader
+	if codeR == nil {
+		codeR = randReader
+	}
+	code, err := generateConfirmationCodeFrom(codeR)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to generate verification code")
+		return
+	}
+
+	updateErr := ro.storage.UpdateUser(poolID, user.Username, func(u *UserMetadata) error {
+		if u.VerificationCodes == nil {
+			u.VerificationCodes = map[string]string{}
+		}
+		u.VerificationCodes[req.AttributeName] = code
+		return nil
+	})
+	if updateErr != nil {
+		if errors.Is(updateErr, errUserNotFound) {
+			writeError(w, http.StatusBadRequest, ErrTypeUserNotFoundException,
+				"User does not exist.")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to store verification code")
+		return
+	}
+
+	slog.Info("GetUserAttributeVerificationCode", "pool_id", poolID, "username", user.Username,
+		"attribute", req.AttributeName, "code", code)
+
+	medium, dest := deliveryEmail, maskEmail(value)
+	if req.AttributeName == attrPhoneNumber {
+		medium, dest = deliverySMS, maskPhone(value)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"CodeDeliveryDetails": codeDeliveryDetails{
+			AttributeName:  req.AttributeName,
+			DeliveryMedium: medium,
+			Destination:    dest,
+		},
+	})
+}
+
+// ──── VerifyUserAttribute ────────────────────────────────────────────────────
+
+type verifyUserAttributeRequest struct {
+	AccessToken   string `json:"AccessToken"`
+	AttributeName string `json:"AttributeName"`
+	Code          string `json:"Code"`
+}
+
+func (ro *Router) handleVerifyUserAttribute(w http.ResponseWriter, body []byte) {
+	var req verifyUserAttributeRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"invalid request body")
+		return
+	}
+	if req.AccessToken == "" {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"AccessToken is required")
+		return
+	}
+	if !verifiableAttr(req.AttributeName) {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"AttributeName must be email or phone_number")
+		return
+	}
+	if req.Code == "" {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"Code is required")
+		return
+	}
+
+	poolID, ok := poolIDFromToken(w, req.AccessToken)
+	if !ok {
+		return
+	}
+	privateKey, ok := ro.poolKey(w, poolID)
+	if !ok {
+		return
+	}
+	sub, jti, originJTI, _, ok := validateAccessJWT(w, req.AccessToken, &privateKey.PublicKey)
+	if !ok {
+		return
+	}
+	if ok2 := ro.checkTokenNotRevoked(w, poolID, jti, originJTI); !ok2 {
+		return
+	}
+	user, ok := ro.lookupUser(w, poolID, sub)
+	if !ok {
+		return
+	}
+
+	err := ro.storage.UpdateUser(poolID, user.Username, func(u *UserMetadata) error {
+		stored := u.VerificationCodes[req.AttributeName]
+		if subtle.ConstantTimeCompare([]byte(req.Code), []byte(stored)) != 1 {
+			return errCodeMismatch
+		}
+		u.Attributes = setAttr(u.Attributes, req.AttributeName+"_verified", "true")
+		delete(u.VerificationCodes, req.AttributeName)
+		return nil
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, errUserNotFound):
+			writeError(w, http.StatusBadRequest, ErrTypeUserNotFoundException,
+				"User does not exist.")
+		case errors.Is(err, errCodeMismatch):
+			writeError(w, http.StatusBadRequest, ErrTypeCodeMismatchException,
+				"Invalid verification code provided, please try again.")
+		default:
+			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+				"failed to verify attribute")
+		}
+		return
+	}
+
+	writeEmpty(w)
 }
 
 // ──── DeleteUser ────────────────────────────────────────────────────────────
