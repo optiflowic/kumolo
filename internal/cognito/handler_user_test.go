@@ -986,6 +986,117 @@ func TestUpdateUserAttributes_StorageUpdateError(t *testing.T) {
 	assertErrType(t, w, ErrTypeInternalErrorException)
 }
 
+// ── DeleteUser ─────────────────────────────────────────────────────────────────
+
+func doDeleteUser(t *testing.T, ro *Router, token string) *httptest.ResponseRecorder {
+	t.Helper()
+	body, _ := json.Marshal(map[string]string{"AccessToken": token})
+	return doOp(t, ro, "DeleteUser", string(body))
+}
+
+func TestDeleteUser_Success(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID, clientID := setupPool(t, ro)
+	token := doAuth(t, ro, clientID, "alice", "Password123!")
+
+	w := doDeleteUser(t, ro, token)
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.JSONEq(t, `{}`, w.Body.String())
+
+	_, err := ro.storage.GetUser(poolID, "alice")
+	require.ErrorIs(t, err, errUserNotFound)
+}
+
+func TestDeleteUser_AccessTokenRejectedAfterDelete(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	token := doAuth(t, ro, clientID, "alice", "Password123!")
+
+	require.Equal(t, http.StatusOK, doDeleteUser(t, ro, token).Code)
+
+	w := doGetUserDirect(t, ro, token)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeUserNotFoundException)
+}
+
+func TestDeleteUser_MissingAccessToken(t *testing.T) {
+	ro := newTestRouter(t)
+	w := doOp(t, ro, "DeleteUser", `{}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeInvalidParameterException)
+}
+
+func TestDeleteUser_InvalidJSON(t *testing.T) {
+	ro := newTestRouter(t)
+	w := doOp(t, ro, "DeleteUser", `not json`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeInvalidParameterException)
+}
+
+func TestDeleteUser_InvalidToken(t *testing.T) {
+	ro := newTestRouter(t)
+	w := doDeleteUser(t, ro, "not-a-jwt")
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeNotAuthorizedException)
+}
+
+func TestDeleteUser_RevokedToken(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	token := doAuth(t, ro, clientID, "alice", "Password123!")
+
+	globalSignOutBody, _ := json.Marshal(map[string]string{"AccessToken": token})
+	require.Equal(t, http.StatusOK, doOp(t, ro, "GlobalSignOut", string(globalSignOutBody)).Code)
+
+	w := doDeleteUser(t, ro, token)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeNotAuthorizedException)
+}
+
+func TestDeleteUser_StorageError(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	poolID := "us-east-1_TestPool"
+	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
+	token, _, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil, "")
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: "kid"}, key, nil
+		},
+		getUserBySubFn: func(string, string) (*UserMetadata, error) {
+			return user, nil
+		},
+		deleteUserErr: errors.New("disk error"),
+	}}
+	w := doDeleteUser(t, ro, token)
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestDeleteUser_UserNotFoundOnDelete(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	poolID := "us-east-1_TestPool"
+	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
+	token, _, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil, "")
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: "kid"}, key, nil
+		},
+		getUserBySubFn: func(string, string) (*UserMetadata, error) {
+			return user, nil
+		},
+		deleteUserErr: errUserNotFound,
+	}}
+	w := doDeleteUser(t, ro, token)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeUserNotFoundException)
+}
+
 func TestUpdateUserAttributes_UserNotFoundOnUpdate(t *testing.T) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)

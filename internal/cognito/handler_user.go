@@ -195,6 +195,59 @@ func (ro *Router) checkTokenNotRevoked(w http.ResponseWriter, poolID, jti, origi
 	return true
 }
 
+// ──── DeleteUser ────────────────────────────────────────────────────────────
+
+type deleteUserRequest struct {
+	AccessToken string `json:"AccessToken"`
+}
+
+func (ro *Router) handleDeleteUser(w http.ResponseWriter, body []byte) {
+	var req deleteUserRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"invalid request body")
+		return
+	}
+	if req.AccessToken == "" {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"AccessToken is required")
+		return
+	}
+
+	poolID, ok := poolIDFromToken(w, req.AccessToken)
+	if !ok {
+		return
+	}
+	privateKey, ok := ro.poolKey(w, poolID)
+	if !ok {
+		return
+	}
+	sub, jti, originJTI, _, ok := validateAccessJWT(w, req.AccessToken, &privateKey.PublicKey)
+	if !ok {
+		return
+	}
+	if ok2 := ro.checkTokenNotRevoked(w, poolID, jti, originJTI); !ok2 {
+		return
+	}
+	user, ok := ro.lookupUser(w, poolID, sub)
+	if !ok {
+		return
+	}
+
+	if err := ro.storage.DeleteUser(poolID, user.Username); err != nil {
+		if errors.Is(err, errUserNotFound) {
+			writeError(w, http.StatusBadRequest, ErrTypeUserNotFoundException,
+				"User does not exist.")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to delete user")
+		return
+	}
+
+	writeEmpty(w)
+}
+
 // ──── GlobalSignOut ─────────────────────────────────────────────────────────
 
 type globalSignOutRequest struct {

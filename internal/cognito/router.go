@@ -164,6 +164,8 @@ func (ro *Router) serveHTTP(w http.ResponseWriter, r *http.Request, op string) {
 		ro.handleGetUser(w, body)
 	case "UpdateUserAttributes":
 		ro.handleUpdateUserAttributes(w, body)
+	case "DeleteUser":
+		ro.handleDeleteUser(w, body)
 	case "AdminCreateUser":
 		ro.handleAdminCreateUser(w, body)
 	case "AdminGetUser":
