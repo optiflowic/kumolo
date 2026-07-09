@@ -153,6 +153,7 @@ func (ro *Router) handleSignUp(w http.ResponseWriter, body []byte) {
 		Username:         req.Username,
 		Sub:              sub,
 		Status:           userStatusUnconfirmed,
+		Enabled:          true,
 		PasswordHash:     passwordHash,
 		Attributes:       req.UserAttributes,
 		ConfirmationCode: code,

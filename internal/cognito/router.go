@@ -37,6 +37,12 @@ type store interface {
 	GetUserBySub(poolID, sub string) (*UserMetadata, error)
 	UpdateUser(poolID, username string, fn func(*UserMetadata) error) error
 	DeleteUser(poolID, username string) error
+	ListUsers(
+		poolID string,
+		filter func(*UserMetadata) bool,
+		maxResults int,
+		nextToken string,
+	) ([]*UserMetadata, string, error)
 
 	// RSA key operations
 	GetOrCreatePoolKeys(poolID string) (*poolKeys, *rsa.PrivateKey, error)
@@ -166,6 +172,8 @@ func (ro *Router) serveHTTP(w http.ResponseWriter, r *http.Request, op string) {
 		ro.handleAdminConfirmSignUp(w, body)
 	case "AdminDeleteUser":
 		ro.handleAdminDeleteUser(w, body)
+	case "ListUsers":
+		ro.handleListUsers(w, body)
 	case "CreateGroup":
 		ro.handleCreateGroup(w, body)
 	case "DeleteGroup":

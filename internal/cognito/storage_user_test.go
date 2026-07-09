@@ -319,3 +319,98 @@ func TestDeleteUser_IndexReadError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "read user index")
 }
+
+// ── ListUsers ────────────────────────────────────────────────────────────────
+
+func TestStorageListUsers_NoUsersDir(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+
+	users, nextToken, err := s.ListUsers(poolID, nil, 60, "")
+	require.NoError(t, err)
+	assert.Empty(t, users)
+	assert.Empty(t, nextToken)
+}
+
+func TestStorageListUsers_SortedAndPaginated(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	for _, name := range []string{"charlie", "alice", "bob"} {
+		require.NoError(t, s.CreateUser(poolID,
+			&UserMetadata{Username: name, Sub: "sub-" + name, Status: userStatusConfirmed},
+		))
+	}
+
+	users, nextToken, err := s.ListUsers(poolID, nil, 2, "")
+	require.NoError(t, err)
+	require.Len(t, users, 2)
+	assert.Equal(t, "alice", users[0].Username)
+	assert.Equal(t, "bob", users[1].Username)
+	require.NotEmpty(t, nextToken)
+
+	users2, nextToken2, err := s.ListUsers(poolID, nil, 2, nextToken)
+	require.NoError(t, err)
+	require.Len(t, users2, 1)
+	assert.Equal(t, "charlie", users2[0].Username)
+	assert.Empty(t, nextToken2)
+}
+
+func TestStorageListUsers_WithFilter(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	for _, name := range []string{"alice", "bob"} {
+		require.NoError(t, s.CreateUser(poolID,
+			&UserMetadata{Username: name, Sub: "sub-" + name, Status: userStatusConfirmed},
+		))
+	}
+
+	filter := func(u *UserMetadata) bool { return u.Username == "alice" }
+	users, _, err := s.ListUsers(poolID, filter, 60, "")
+	require.NoError(t, err)
+	require.Len(t, users, 1)
+	assert.Equal(t, "alice", users[0].Username)
+}
+
+func TestStorageListUsers_InvalidNextToken(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	require.NoError(t, s.CreateUser(poolID,
+		&UserMetadata{Username: "alice", Sub: "sub-alice", Status: userStatusConfirmed},
+	))
+
+	_, _, err := s.ListUsers(poolID, nil, 60, "bad-token")
+	require.ErrorIs(t, err, errInvalidNextToken)
+}
+
+func TestStorageListUsers_ListDirError(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+
+	s.listDirFn = func(string) ([]os.DirEntry, error) {
+		return nil, errors.New("disk error")
+	}
+	_, _, err := s.ListUsers(poolID, nil, 60, "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "list users dir")
+}
+
+func TestStorageListUsers_CorruptedUserFileSkipped(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	require.NoError(t, s.CreateUser(poolID,
+		&UserMetadata{Username: "alice", Sub: "sub-alice", Status: userStatusConfirmed},
+	))
+
+	calls := 0
+	realReadAll := s.readAll
+	s.readAll = func(r io.Reader) ([]byte, error) {
+		calls++
+		if calls == 1 {
+			return nil, errors.New("corrupted")
+		}
+		return realReadAll(r)
+	}
+	users, _, err := s.ListUsers(poolID, nil, 60, "")
+	require.NoError(t, err)
+	assert.Empty(t, users)
+}

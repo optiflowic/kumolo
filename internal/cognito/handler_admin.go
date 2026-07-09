@@ -5,6 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -35,7 +38,7 @@ func newUserTypeResponse(u *UserMetadata) userTypeResponse {
 		Attributes:           prependSub(u.Attributes, u.Sub),
 		UserCreateDate:       u.CreatedAt,
 		UserLastModifiedDate: u.UpdatedAt,
-		Enabled:              true,
+		Enabled:              u.Enabled,
 		UserStatus:           u.Status,
 		MFAOptions:           []any{},
 	}
@@ -132,6 +135,7 @@ func (ro *Router) handleAdminCreateUser(w http.ResponseWriter, body []byte) {
 		Username:     req.Username,
 		Sub:          sub,
 		Status:       status,
+		Enabled:      true,
 		PasswordHash: passwordHash,
 		Attributes:   req.UserAttributes,
 		CreatedAt:    ts,
@@ -229,7 +233,7 @@ func (ro *Router) handleAdminGetUser(w http.ResponseWriter, body []byte) {
 		UserAttributes:       prependSub(user.Attributes, user.Sub),
 		UserCreateDate:       user.CreatedAt,
 		UserLastModifiedDate: user.UpdatedAt,
-		Enabled:              true,
+		Enabled:              user.Enabled,
 		UserStatus:           user.Status,
 		MFAOptions:           []any{},
 		UserMFASettingList:   []string{},
@@ -462,4 +466,146 @@ func (ro *Router) handleAdminDeleteUser(w http.ResponseWriter, body []byte) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{})
+}
+
+// ──── ListUsers ──────────────────────────────────────────────────────────────
+
+const listUsersDefaultLimit = 60
+
+type listUsersRequest struct {
+	UserPoolID      string `json:"UserPoolId"`
+	Filter          string `json:"Filter"`
+	Limit           *int   `json:"Limit"`
+	PaginationToken string `json:"PaginationToken"`
+}
+
+// reUserFilter matches ListUsers' Filter grammar: AttributeName Op "Value",
+// where Op is "=" (exact match) or "^=" (prefix match).
+var reUserFilter = regexp.MustCompile(`^\s*([\w:]+)\s*(\^?=)\s*"(.*)"\s*$`)
+
+// parseUserFilter compiles a ListUsers Filter string into a predicate over UserMetadata.
+// A nil predicate (with nil error) means "match everything" (empty filter).
+func parseUserFilter(filterStr string) (func(*UserMetadata) bool, error) {
+	if filterStr == "" {
+		return nil, nil
+	}
+	m := reUserFilter.FindStringSubmatch(filterStr)
+	if m == nil {
+		return nil, errors.New(
+			`filter must have the form: AttributeName = "Value" or AttributeName ^= "Value"`,
+		)
+	}
+	attrName, op, value := m[1], m[2], m[3]
+
+	var extract func(*UserMetadata) (string, bool)
+	switch attrName {
+	case "username":
+		extract = func(u *UserMetadata) (string, bool) { return u.Username, true }
+	case "sub":
+		extract = func(u *UserMetadata) (string, bool) { return u.Sub, true }
+	case "cognito:user_status":
+		value = strings.ToLower(value)
+		extract = func(u *UserMetadata) (string, bool) { return strings.ToLower(u.Status), true }
+	case "status":
+		extract = func(u *UserMetadata) (string, bool) { return strconv.FormatBool(u.Enabled), true }
+	case "email", "phone_number", "name", "given_name", "family_name", "preferred_username":
+		extract = func(u *UserMetadata) (string, bool) {
+			for _, a := range u.Attributes {
+				if a.Name == attrName {
+					return a.Value, true
+				}
+			}
+			return "", false
+		}
+	default:
+		return nil, fmt.Errorf("unsupported filter attribute: %s", attrName)
+	}
+
+	return func(u *UserMetadata) bool {
+		v, ok := extract(u)
+		if !ok {
+			return false
+		}
+		if op == "^=" {
+			return strings.HasPrefix(v, value)
+		}
+		return v == value
+	}, nil
+}
+
+func (ro *Router) handleListUsers(w http.ResponseWriter, body []byte) {
+	var req listUsersRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"invalid request body",
+		)
+		return
+	}
+	if req.UserPoolID == "" {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"UserPoolId is required",
+		)
+		return
+	}
+
+	if _, err := ro.storage.GetUserPool(req.UserPoolID); err != nil {
+		if errors.Is(err, errUserPoolNotFound) {
+			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException,
+				"User pool not found.")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to get user pool")
+		return
+	}
+
+	limit := listUsersDefaultLimit
+	if req.Limit != nil {
+		limit = *req.Limit
+		if limit < 1 || limit > listUsersDefaultLimit {
+			writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+				"Limit must be between 1 and 60")
+			return
+		}
+	}
+
+	filter, err := parseUserFilter(req.Filter)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException, err.Error())
+		return
+	}
+
+	users, nextToken, err := ro.storage.ListUsers(
+		req.UserPoolID,
+		filter,
+		limit,
+		req.PaginationToken,
+	)
+	if err != nil {
+		if errors.Is(err, errInvalidNextToken) {
+			writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+				"Invalid pagination token.")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to list users")
+		return
+	}
+
+	userResps := make([]userTypeResponse, len(users))
+	for i, u := range users {
+		userResps[i] = newUserTypeResponse(u)
+	}
+
+	resp := map[string]any{"Users": userResps}
+	if nextToken != "" {
+		resp["PaginationToken"] = nextToken
+	}
+	writeJSON(w, http.StatusOK, resp)
 }

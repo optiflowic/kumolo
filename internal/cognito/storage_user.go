@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -25,6 +26,7 @@ type UserMetadata struct {
 	Username         string          `json:"Username"`
 	Sub              string          `json:"Sub"`
 	Status           string          `json:"Status"`
+	Enabled          bool            `json:"Enabled"`
 	PasswordHash     string          `json:"PasswordHash"`
 	Attributes       []AttributeType `json:"Attributes"`
 	ConfirmationCode string          `json:"ConfirmationCode"`
@@ -158,6 +160,66 @@ func (s *Storage) DeleteUser(poolID, username string) error {
 		return fmt.Errorf("remove user index: %w", err)
 	}
 	return nil
+}
+
+// ListUsers returns a page of users in the pool matching filter, sorted by Username.
+// filter may be nil to match all users.
+func (s *Storage) ListUsers(
+	poolID string,
+	filter func(*UserMetadata) bool,
+	maxResults int,
+	nextToken string,
+) ([]*UserMetadata, string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	dir := filepath.Join("pools", poolID, "users")
+	entries, err := s.listDirFn(dir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, "", nil
+		}
+		return nil, "", fmt.Errorf("list users dir: %w", err)
+	}
+
+	var users []*UserMetadata
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		user, err := readJSON[UserMetadata](s, filepath.Join(dir, e.Name()))
+		if err != nil {
+			// untestable: dir entry exists but file is unreadable — only from external corruption
+			continue
+		}
+		if filter == nil || filter(&user) {
+			users = append(users, &user)
+		}
+	}
+	sort.Slice(users, func(i, j int) bool {
+		return users[i].Username < users[j].Username
+	})
+
+	if nextToken != "" {
+		found := false
+		for i, u := range users {
+			if u.Username == nextToken {
+				users = users[i+1:]
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, "", errInvalidNextToken
+		}
+	}
+
+	var retNextToken string
+	if maxResults > 0 && len(users) > maxResults {
+		retNextToken = users[maxResults-1].Username
+		users = users[:maxResults]
+	}
+	return users, retNextToken, nil
 }
 
 // UpdateUser applies fn to the user and persists the result.

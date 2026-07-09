@@ -3,6 +3,7 @@ package cognito
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -578,6 +579,284 @@ func TestAdminConfirmSignUp_UpdateUserStorageError(t *testing.T) {
 	ro := &Router{storage: &mockStore{updateUserErr: errors.New("disk full")}}
 	body, _ := json.Marshal(map[string]any{"UserPoolId": "us-east-1_X", "Username": "u"})
 	w := doOp(t, ro, "AdminConfirmSignUp", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+// ──── ListUsers ──────────────────────────────────────────────────────────────
+
+func TestListUsers_Success(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "test-pool")
+	createAdminUser(t, ro, poolID, "alice")
+	createAdminUser(t, ro, poolID, "bob")
+
+	body, _ := json.Marshal(map[string]any{"UserPoolId": poolID})
+	w := doOp(t, ro, "ListUsers", string(body))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp struct {
+		Users []struct {
+			Username   string          `json:"Username"`
+			Attributes []AttributeType `json:"Attributes"`
+			Enabled    bool            `json:"Enabled"`
+			UserStatus string          `json:"UserStatus"`
+		} `json:"Users"`
+		PaginationToken string `json:"PaginationToken"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	require.Len(t, resp.Users, 2)
+	assert.Equal(t, "alice", resp.Users[0].Username)
+	assert.Equal(t, "bob", resp.Users[1].Username)
+	assert.True(t, resp.Users[0].Enabled)
+	assert.Equal(t, "sub", resp.Users[0].Attributes[0].Name)
+	assert.Empty(t, resp.PaginationToken)
+}
+
+func TestListUsers_Pagination(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "test-pool")
+	for _, u := range []string{"charlie", "alice", "bob"} {
+		createAdminUser(t, ro, poolID, u)
+	}
+
+	body, _ := json.Marshal(map[string]any{"UserPoolId": poolID, "Limit": 2})
+	w := doOp(t, ro, "ListUsers", string(body))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp struct {
+		Users           []struct{ Username string } `json:"Users"`
+		PaginationToken string                      `json:"PaginationToken"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	require.Len(t, resp.Users, 2)
+	assert.Equal(t, "alice", resp.Users[0].Username)
+	assert.Equal(t, "bob", resp.Users[1].Username)
+	require.NotEmpty(t, resp.PaginationToken)
+
+	body2, _ := json.Marshal(map[string]any{
+		"UserPoolId": poolID, "Limit": 2, "PaginationToken": resp.PaginationToken,
+	})
+	w2 := doOp(t, ro, "ListUsers", string(body2))
+	require.Equal(t, http.StatusOK, w2.Code)
+	var resp2 struct {
+		Users           []struct{ Username string } `json:"Users"`
+		PaginationToken string                      `json:"PaginationToken"`
+	}
+	require.NoError(t, json.NewDecoder(w2.Body).Decode(&resp2))
+	require.Len(t, resp2.Users, 1)
+	assert.Equal(t, "charlie", resp2.Users[0].Username)
+	assert.Empty(t, resp2.PaginationToken)
+}
+
+func TestListUsers_FilterExactMatch(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "test-pool")
+	createAdminUser(t, ro, poolID, "alice")
+	createAdminUser(t, ro, poolID, "bob")
+
+	body, _ := json.Marshal(map[string]any{
+		"UserPoolId": poolID, "Filter": `username = "alice"`,
+	})
+	w := doOp(t, ro, "ListUsers", string(body))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp struct {
+		Users []struct{ Username string } `json:"Users"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	require.Len(t, resp.Users, 1)
+	assert.Equal(t, "alice", resp.Users[0].Username)
+}
+
+func TestListUsers_FilterPrefixMatch(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "test-pool")
+	createAdminUser(t, ro, poolID, "alice")
+	createAdminUser(t, ro, poolID, "alicia")
+	createAdminUser(t, ro, poolID, "bob")
+
+	body, _ := json.Marshal(map[string]any{
+		"UserPoolId": poolID, "Filter": `username ^= "ali"`,
+	})
+	w := doOp(t, ro, "ListUsers", string(body))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp struct {
+		Users []struct{ Username string } `json:"Users"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	require.Len(t, resp.Users, 2)
+}
+
+func TestListUsers_FilterByEmailAttribute(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "test-pool")
+	body, _ := json.Marshal(map[string]any{
+		"UserPoolId":     poolID,
+		"Username":       "alice",
+		"UserAttributes": []map[string]string{{"Name": "email", "Value": "alice@example.com"}},
+	})
+	require.Equal(t, http.StatusOK, doOp(t, ro, "AdminCreateUser", string(body)).Code)
+	createAdminUser(t, ro, poolID, "bob")
+
+	listBody, _ := json.Marshal(map[string]any{
+		"UserPoolId": poolID, "Filter": `email = "alice@example.com"`,
+	})
+	w := doOp(t, ro, "ListUsers", string(listBody))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp struct {
+		Users []struct{ Username string } `json:"Users"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	require.Len(t, resp.Users, 1)
+	assert.Equal(t, "alice", resp.Users[0].Username)
+}
+
+func TestListUsers_FilterCognitoUserStatus(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "test-pool")
+	createAdminUser(t, ro, poolID, "alice") // CONFIRMED (no temp password)
+
+	body, _ := json.Marshal(map[string]any{
+		"UserPoolId": poolID, "Filter": `cognito:user_status = "confirmed"`,
+	})
+	w := doOp(t, ro, "ListUsers", string(body))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp struct {
+		Users []struct{ Username string } `json:"Users"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	require.Len(t, resp.Users, 1)
+}
+
+func TestListUsers_FilterBySub(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "test-pool")
+	createAdminUser(t, ro, poolID, "alice")
+
+	getBody, _ := json.Marshal(map[string]any{"UserPoolId": poolID, "Username": "alice"})
+	gw := doOp(t, ro, "AdminGetUser", string(getBody))
+	require.Equal(t, http.StatusOK, gw.Code)
+	var getResp struct {
+		UserAttributes []AttributeType `json:"UserAttributes"`
+	}
+	require.NoError(t, json.NewDecoder(gw.Body).Decode(&getResp))
+	sub := getResp.UserAttributes[0].Value
+	require.NotEmpty(t, sub)
+
+	body, _ := json.Marshal(map[string]any{
+		"UserPoolId": poolID, "Filter": fmt.Sprintf(`sub = "%s"`, sub),
+	})
+	w := doOp(t, ro, "ListUsers", string(body))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp struct {
+		Users []struct{ Username string } `json:"Users"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	require.Len(t, resp.Users, 1)
+	assert.Equal(t, "alice", resp.Users[0].Username)
+}
+
+func TestListUsers_FilterByStatusEnabled(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "test-pool")
+	createAdminUser(t, ro, poolID, "alice")
+
+	body, _ := json.Marshal(map[string]any{
+		"UserPoolId": poolID, "Filter": `status = "true"`,
+	})
+	w := doOp(t, ro, "ListUsers", string(body))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp struct {
+		Users []struct{ Username string } `json:"Users"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	require.Len(t, resp.Users, 1)
+}
+
+func TestListUsers_FilterNoMatch(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "test-pool")
+	createAdminUser(t, ro, poolID, "alice")
+
+	body, _ := json.Marshal(map[string]any{
+		"UserPoolId": poolID, "Filter": `email = "nobody@example.com"`,
+	})
+	w := doOp(t, ro, "ListUsers", string(body))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp struct {
+		Users []struct{ Username string } `json:"Users"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Empty(t, resp.Users)
+}
+
+func TestListUsers_ValidationErrors(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "test-pool")
+
+	tests := []struct {
+		name string
+		body map[string]any
+	}{
+		{"missing UserPoolId", map[string]any{}},
+		{"limit too low", map[string]any{"UserPoolId": poolID, "Limit": 0}},
+		{"limit too high", map[string]any{"UserPoolId": poolID, "Limit": 61}},
+		{"malformed filter", map[string]any{"UserPoolId": poolID, "Filter": "not a filter"}},
+		{
+			"unsupported filter attribute",
+			map[string]any{"UserPoolId": poolID, "Filter": `custom:foo = "bar"`},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			b, _ := json.Marshal(tc.body)
+			w := doOp(t, ro, "ListUsers", string(b))
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assertErrType(t, w, ErrTypeInvalidParameterException)
+		})
+	}
+}
+
+func TestListUsers_InvalidPaginationToken(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "test-pool")
+	createAdminUser(t, ro, poolID, "alice")
+
+	body, _ := json.Marshal(map[string]any{
+		"UserPoolId": poolID, "PaginationToken": "bogus",
+	})
+	w := doOp(t, ro, "ListUsers", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeInvalidParameterException)
+}
+
+func TestListUsers_UserPoolNotFound(t *testing.T) {
+	ro := newTestRouter(t)
+	body, _ := json.Marshal(map[string]any{"UserPoolId": "us-east-1_nonexistent"})
+	w := doOp(t, ro, "ListUsers", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeResourceNotFoundException)
+}
+
+func TestListUsers_GetUserPoolStorageError(t *testing.T) {
+	ro := &Router{storage: &mockStore{getErr: errors.New("storage error")}}
+	body, _ := json.Marshal(map[string]any{"UserPoolId": "us-east-1_X"})
+	w := doOp(t, ro, "ListUsers", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestListUsers_ListUsersStorageError(t *testing.T) {
+	ro := &Router{storage: &mockStore{listUsersErr: errors.New("storage error")}}
+	body, _ := json.Marshal(map[string]any{"UserPoolId": "us-east-1_X"})
+	w := doOp(t, ro, "ListUsers", string(body))
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 	assertErrType(t, w, ErrTypeInternalErrorException)
 }
