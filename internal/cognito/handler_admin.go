@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -466,6 +467,162 @@ func (ro *Router) handleAdminDeleteUser(w http.ResponseWriter, body []byte) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{})
+}
+
+// ──── AdminUpdateUserAttributes ──────────────────────────────────────────────
+
+type adminUpdateUserAttributesRequest struct {
+	UserPoolID     string          `json:"UserPoolId"`
+	Username       string          `json:"Username"`
+	UserAttributes []AttributeType `json:"UserAttributes"`
+}
+
+// planAdminAttributeChanges computes attribute mutations for AdminUpdateUserAttributes.
+// Unlike the self-service UpdateUserAttributes flow, an admin can bypass the
+// verification-code step for email/phone_number by including the paired
+// "_verified" attribute set to "true" in the same request.
+func planAdminAttributeChanges(
+	codeR io.Reader,
+	current []AttributeType,
+	requested []AttributeType,
+) ([]attrChange, error) {
+	bypass := map[string]bool{}
+	requestedNames := map[string]bool{}
+	for _, attr := range requested {
+		requestedNames[attr.Name] = true
+		switch attr.Name {
+		case attrEmail + "_verified":
+			bypass[attrEmail] = attr.Value == "true"
+		case attrPhoneNumber + "_verified":
+			bypass[attrPhoneNumber] = attr.Value == "true"
+		}
+	}
+
+	var changes []attrChange
+	for _, attr := range requested {
+		if attr.Value == "" {
+			changes = append(changes, attrChange{name: attr.Name, delete: true})
+			continue
+		}
+
+		if attr.Name != attrEmail && attr.Name != attrPhoneNumber {
+			changes = append(changes, attrChange{name: attr.Name, value: attr.Value})
+			continue
+		}
+
+		if bypass[attr.Name] {
+			changes = append(
+				changes,
+				attrChange{name: attr.Name, value: attr.Value, clearCode: true},
+			)
+			continue
+		}
+
+		oldValue, _ := getAttr(current, attr.Name)
+		if oldValue == attr.Value {
+			changes = append(changes, attrChange{name: attr.Name, value: attr.Value})
+			continue
+		}
+
+		code, err := generateConfirmationCodeFrom(codeR)
+		if err != nil {
+			return nil, fmt.Errorf("generate verification code: %w", err)
+		}
+		changes = append(changes, attrChange{name: attr.Name, value: attr.Value, verifyCode: code})
+	}
+
+	// A bypass ("email_verified"/"phone_number_verified" = "true") may arrive
+	// without a matching email/phone_number update in the same request — still
+	// drop any pending verification code for that attribute.
+	for _, name := range []string{attrEmail, attrPhoneNumber} {
+		if bypass[name] && !requestedNames[name] {
+			changes = append(changes, attrChange{name: name, clearCodeOnly: true})
+		}
+	}
+	return changes, nil
+}
+
+func (ro *Router) handleAdminUpdateUserAttributes(w http.ResponseWriter, body []byte) {
+	var req adminUpdateUserAttributesRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"invalid request body")
+		return
+	}
+	if req.UserPoolID == "" {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"UserPoolId is required")
+		return
+	}
+	if req.Username == "" {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"Username is required")
+		return
+	}
+	if len(req.UserAttributes) == 0 {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"UserAttributes is required")
+		return
+	}
+	for _, attr := range req.UserAttributes {
+		if attr.Name == "sub" {
+			writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+				"Attribute modifications are not allowed for sub")
+			return
+		}
+	}
+
+	if _, err := ro.storage.GetUserPool(req.UserPoolID); err != nil {
+		if errors.Is(err, errUserPoolNotFound) {
+			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException,
+				"User pool not found.")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to get user pool")
+		return
+	}
+
+	user, err := ro.storage.GetUser(req.UserPoolID, req.Username)
+	if err != nil {
+		if errors.Is(err, errUserNotFound) {
+			writeError(w, http.StatusBadRequest, ErrTypeUserNotFoundException,
+				"User does not exist.")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to get user")
+		return
+	}
+
+	codeR := ro.codeReader
+	if codeR == nil {
+		codeR = randReader
+	}
+
+	changes, err := planAdminAttributeChanges(codeR, user.Attributes, req.UserAttributes)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to generate verification code")
+		return
+	}
+
+	updateErr := ro.storage.UpdateUser(req.UserPoolID, req.Username, func(u *UserMetadata) error {
+		applyAttributeChanges(u, changes)
+		return nil
+	})
+	if updateErr != nil {
+		if errors.Is(updateErr, errUserNotFound) {
+			writeError(w, http.StatusBadRequest, ErrTypeUserNotFoundException,
+				"User does not exist.")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to update user attributes")
+		return
+	}
+
+	writeEmpty(w)
 }
 
 // ──── ListUsers ──────────────────────────────────────────────────────────────

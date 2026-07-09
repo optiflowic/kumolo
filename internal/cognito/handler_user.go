@@ -344,10 +344,12 @@ func (ro *Router) handleUpdateUserAttributes(w http.ResponseWriter, body []byte)
 
 // attrChange describes one attribute update or deletion to apply to a user.
 type attrChange struct {
-	name       string
-	value      string // ignored when delete is true
-	delete     bool
-	verifyCode string // non-empty when this change also resets verification for name
+	name          string
+	value         string // ignored when delete or clearCodeOnly is true
+	delete        bool
+	verifyCode    string // non-empty when this change also resets verification for name
+	clearCode     bool   // true when applying value should also drop a pending code for name
+	clearCodeOnly bool   // true when only a pending code should be dropped (no attribute touched)
 }
 
 // planAttributeChanges computes the attribute mutations and verification-code
@@ -413,14 +415,21 @@ func applyAttributeChanges(u *UserMetadata, changes []attrChange) {
 			}
 			continue
 		}
+		if c.clearCodeOnly {
+			delete(u.VerificationCodes, c.name)
+			continue
+		}
 
 		u.Attributes = setAttr(u.Attributes, c.name, c.value)
-		if c.verifyCode != "" {
+		switch {
+		case c.verifyCode != "":
 			u.Attributes = setAttr(u.Attributes, c.name+"_verified", "false")
 			if u.VerificationCodes == nil {
 				u.VerificationCodes = map[string]string{}
 			}
 			u.VerificationCodes[c.name] = c.verifyCode
+		case c.clearCode:
+			delete(u.VerificationCodes, c.name)
 		}
 	}
 }

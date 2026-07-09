@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -859,4 +860,259 @@ func TestListUsers_ListUsersStorageError(t *testing.T) {
 	w := doOp(t, ro, "ListUsers", string(body))
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+// ──── AdminUpdateUserAttributes ─────────────────────────────────────────────
+
+func doAdminUpdateUserAttributes(
+	t *testing.T,
+	ro *Router,
+	poolID, username string,
+	attrs []map[string]string,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	body, _ := json.Marshal(map[string]any{
+		"UserPoolId":     poolID,
+		"Username":       username,
+		"UserAttributes": attrs,
+	})
+	return doOp(t, ro, "AdminUpdateUserAttributes", string(body))
+}
+
+func TestAdminUpdateUserAttributes_NonVerifiedAttribute(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "test-pool")
+	createAdminUser(t, ro, poolID, "alice")
+
+	w := doAdminUpdateUserAttributes(t, ro, poolID, "alice", []map[string]string{
+		{"Name": "given_name", "Value": "Alice"},
+	})
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.JSONEq(t, `{}`, w.Body.String())
+
+	u, err := ro.storage.GetUser(poolID, "alice")
+	require.NoError(t, err)
+	v, ok := getAttr(u.Attributes, "given_name")
+	require.True(t, ok)
+	assert.Equal(t, "Alice", v)
+}
+
+func TestAdminUpdateUserAttributes_EmailChange_GeneratesCode(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "test-pool")
+	createAdminUser(t, ro, poolID, "alice")
+
+	w := doAdminUpdateUserAttributes(t, ro, poolID, "alice", []map[string]string{
+		{"Name": "email", "Value": "alice@example.com"},
+	})
+	require.Equal(t, http.StatusOK, w.Code)
+
+	u, err := ro.storage.GetUser(poolID, "alice")
+	require.NoError(t, err)
+	email, _ := getAttr(u.Attributes, "email")
+	assert.Equal(t, "alice@example.com", email)
+	verified, _ := getAttr(u.Attributes, "email_verified")
+	assert.Equal(t, "false", verified)
+	require.NotEmpty(t, u.VerificationCodes["email"])
+}
+
+func TestAdminUpdateUserAttributes_BypassWithEmailVerifiedTrue(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "test-pool")
+	createAdminUser(t, ro, poolID, "alice")
+
+	w := doAdminUpdateUserAttributes(t, ro, poolID, "alice", []map[string]string{
+		{"Name": "email", "Value": "alice@example.com"},
+		{"Name": "email_verified", "Value": "true"},
+	})
+	require.Equal(t, http.StatusOK, w.Code)
+
+	u, err := ro.storage.GetUser(poolID, "alice")
+	require.NoError(t, err)
+	email, _ := getAttr(u.Attributes, "email")
+	assert.Equal(t, "alice@example.com", email)
+	verified, _ := getAttr(u.Attributes, "email_verified")
+	assert.Equal(t, "true", verified)
+	_, hasCode := u.VerificationCodes["email"]
+	assert.False(t, hasCode)
+}
+
+func TestAdminUpdateUserAttributes_BypassWithPhoneNumberVerifiedTrue(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "test-pool")
+	createAdminUser(t, ro, poolID, "alice")
+
+	w := doAdminUpdateUserAttributes(t, ro, poolID, "alice", []map[string]string{
+		{"Name": "phone_number", "Value": "+15551234567"},
+		{"Name": "phone_number_verified", "Value": "true"},
+	})
+	require.Equal(t, http.StatusOK, w.Code)
+
+	u, err := ro.storage.GetUser(poolID, "alice")
+	require.NoError(t, err)
+	phone, _ := getAttr(u.Attributes, "phone_number")
+	assert.Equal(t, "+15551234567", phone)
+	verified, _ := getAttr(u.Attributes, "phone_number_verified")
+	assert.Equal(t, "true", verified)
+	_, hasCode := u.VerificationCodes["phone_number"]
+	assert.False(t, hasCode)
+}
+
+func TestAdminUpdateUserAttributes_BypassClearsExistingCode(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "test-pool")
+	createAdminUser(t, ro, poolID, "alice")
+
+	require.Equal(t, http.StatusOK, doAdminUpdateUserAttributes(t, ro, poolID, "alice",
+		[]map[string]string{{"Name": "email", "Value": "alice@example.com"}}).Code)
+	u, err := ro.storage.GetUser(poolID, "alice")
+	require.NoError(t, err)
+	require.NotEmpty(t, u.VerificationCodes["email"])
+
+	require.Equal(t, http.StatusOK, doAdminUpdateUserAttributes(t, ro, poolID, "alice",
+		[]map[string]string{{"Name": "email_verified", "Value": "true"}}).Code)
+
+	u, err = ro.storage.GetUser(poolID, "alice")
+	require.NoError(t, err)
+	_, hasCode := u.VerificationCodes["email"]
+	assert.False(t, hasCode)
+}
+
+func TestAdminUpdateUserAttributes_DeleteAttribute(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "test-pool")
+	body, _ := json.Marshal(map[string]any{
+		"UserPoolId":     poolID,
+		"Username":       "alice",
+		"UserAttributes": []map[string]string{{"Name": "email", "Value": "alice@example.com"}},
+	})
+	require.Equal(t, http.StatusOK, doOp(t, ro, "AdminCreateUser", string(body)).Code)
+
+	w := doAdminUpdateUserAttributes(t, ro, poolID, "alice", []map[string]string{
+		{"Name": "email", "Value": ""},
+	})
+	require.Equal(t, http.StatusOK, w.Code)
+
+	u, err := ro.storage.GetUser(poolID, "alice")
+	require.NoError(t, err)
+	_, ok := getAttr(u.Attributes, "email")
+	assert.False(t, ok)
+}
+
+func TestAdminUpdateUserAttributes_ValidationErrors(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "test-pool")
+	createAdminUser(t, ro, poolID, "alice")
+
+	tests := []struct {
+		name string
+		body map[string]any
+	}{
+		{"missing UserPoolId", map[string]any{"Username": "alice"}},
+		{"missing Username", map[string]any{"UserPoolId": poolID}},
+		{
+			"missing UserAttributes",
+			map[string]any{"UserPoolId": poolID, "Username": "alice"},
+		},
+		{
+			"sub immutable",
+			map[string]any{
+				"UserPoolId": poolID, "Username": "alice",
+				"UserAttributes": []map[string]string{{"Name": "sub", "Value": "hacked"}},
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			b, _ := json.Marshal(tc.body)
+			w := doOp(t, ro, "AdminUpdateUserAttributes", string(b))
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assertErrType(t, w, ErrTypeInvalidParameterException)
+		})
+	}
+}
+
+func TestAdminUpdateUserAttributes_InvalidJSON(t *testing.T) {
+	ro := newTestRouter(t)
+	w := doOp(t, ro, "AdminUpdateUserAttributes", `not json`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeInvalidParameterException)
+}
+
+func TestAdminUpdateUserAttributes_UserPoolNotFound(t *testing.T) {
+	ro := newTestRouter(t)
+	w := doAdminUpdateUserAttributes(t, ro, "us-east-1_nonexistent", "alice",
+		[]map[string]string{{"Name": "given_name", "Value": "A"}})
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeResourceNotFoundException)
+}
+
+func TestAdminUpdateUserAttributes_UserNotFound(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "test-pool")
+	w := doAdminUpdateUserAttributes(t, ro, poolID, "nonexistent",
+		[]map[string]string{{"Name": "given_name", "Value": "A"}})
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeUserNotFoundException)
+}
+
+func TestAdminUpdateUserAttributes_GetUserPoolStorageError(t *testing.T) {
+	ro := &Router{storage: &mockStore{getErr: errors.New("storage error")}}
+	w := doAdminUpdateUserAttributes(t, ro, "us-east-1_X", "alice",
+		[]map[string]string{{"Name": "given_name", "Value": "A"}})
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestAdminUpdateUserAttributes_GetUserStorageError(t *testing.T) {
+	ro := &Router{
+		storage: &mockStore{
+			getUserFn: func(string, string) (*UserMetadata, error) {
+				return nil, errors.New("storage error")
+			},
+		},
+	}
+	w := doAdminUpdateUserAttributes(t, ro, "us-east-1_X", "alice",
+		[]map[string]string{{"Name": "given_name", "Value": "A"}})
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestAdminUpdateUserAttributes_CodeGenerationError(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "test-pool")
+	createAdminUser(t, ro, poolID, "alice")
+	ro.codeReader = &errorReader{err: errors.New("entropy failed")}
+
+	w := doAdminUpdateUserAttributes(t, ro, poolID, "alice", []map[string]string{
+		{"Name": "email", "Value": "alice@example.com"},
+	})
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestAdminUpdateUserAttributes_UpdateUserStorageError(t *testing.T) {
+	ro := &Router{
+		storage: &mockStore{
+			getUserFn:     func(string, string) (*UserMetadata, error) { return &UserMetadata{}, nil },
+			updateUserErr: errors.New("disk error"),
+		},
+	}
+	w := doAdminUpdateUserAttributes(t, ro, "us-east-1_X", "alice",
+		[]map[string]string{{"Name": "given_name", "Value": "A"}})
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestAdminUpdateUserAttributes_UserNotFoundOnUpdate(t *testing.T) {
+	ro := &Router{
+		storage: &mockStore{
+			getUserFn:     func(string, string) (*UserMetadata, error) { return &UserMetadata{}, nil },
+			updateUserErr: errUserNotFound,
+		},
+	}
+	w := doAdminUpdateUserAttributes(t, ro, "us-east-1_X", "alice",
+		[]map[string]string{{"Name": "given_name", "Value": "A"}})
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeUserNotFoundException)
 }
