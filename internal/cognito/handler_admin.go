@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -745,6 +746,12 @@ func (ro *Router) handleAdminUpdateUserAttributes(w http.ResponseWriter, body []
 		return
 	}
 
+	for _, c := range changes {
+		if c.verifyCode != "" {
+			slog.Info("AdminUpdateUserAttributes verification code", "pool_id", req.UserPoolID,
+				"username", req.Username, "attribute", c.name, "code", c.verifyCode)
+		}
+	}
 	writeEmpty(w)
 }
 

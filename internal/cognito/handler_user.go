@@ -572,8 +572,12 @@ func (ro *Router) handleUpdateUserAttributes(w http.ResponseWriter, body []byte)
 		return
 	}
 
-	slog.Info("UpdateUserAttributes", "pool_id", poolID, "username", user.Username,
-		"verified_count", len(deliveries))
+	for _, c := range changes {
+		if c.verifyCode != "" {
+			slog.Info("UpdateUserAttributes verification code", "pool_id", poolID,
+				"username", user.Username, "attribute", c.name, "code", c.verifyCode)
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"CodeDeliveryDetailsList": deliveries})
 }
 
