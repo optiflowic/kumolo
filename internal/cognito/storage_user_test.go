@@ -51,7 +51,10 @@ var testRSAKeyIdx atomic.Uint32
 // TestRespondToAuthChallenge_WrongSessionPool checks that a session token
 // signed by one pool's key fails verification against another pool's key —
 // round-robin over a pool of >1 keys preserves that for any two calls in
-// immediate succession.
+// immediate succession. This assumes no test in this package calls
+// t.Parallel(): interleaved calls from unrelated parallel tests could shift
+// which pool index a given test's calls land on, silently breaking that
+// distinctness guarantee.
 func nextTestRSAKey() *rsa.PrivateKey {
 	keys := testRSAKeyPool()
 	idx := testRSAKeyIdx.Add(1) - 1
