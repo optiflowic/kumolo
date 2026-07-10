@@ -1097,8 +1097,8 @@ func TestAdminUpdateUserAttributes_GetUserPoolStorageError(t *testing.T) {
 func TestAdminUpdateUserAttributes_GetUserStorageError(t *testing.T) {
 	ro := &Router{
 		storage: &mockStore{
-			getUserFn: func(string, string) (*UserMetadata, error) {
-				return nil, errors.New("storage error")
+			updateUserFn: func(string, string, func(*UserMetadata) error) error {
+				return errors.New("storage error")
 			},
 		},
 	}

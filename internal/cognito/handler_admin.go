@@ -707,31 +707,18 @@ func (ro *Router) handleAdminUpdateUserAttributes(w http.ResponseWriter, body []
 		return
 	}
 
-	user, err := ro.storage.GetUser(req.UserPoolID, req.Username)
-	if err != nil {
-		if errors.Is(err, errUserNotFound) {
-			writeError(w, http.StatusBadRequest, ErrTypeUserNotFoundException,
-				"User does not exist.")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
-			"failed to get user")
-		return
-	}
-
 	codeR := ro.codeReader
 	if codeR == nil {
 		codeR = randReader
 	}
 
-	changes, err := planAdminAttributeChanges(codeR, user.Attributes, req.UserAttributes)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
-			"failed to generate verification code")
-		return
-	}
-
+	var changes []attrChange
+	var planErr error
 	updateErr := ro.storage.UpdateUser(req.UserPoolID, req.Username, func(u *UserMetadata) error {
+		changes, planErr = planAdminAttributeChanges(codeR, u.Attributes, req.UserAttributes)
+		if planErr != nil {
+			return planErr
+		}
 		applyAttributeChanges(u, changes)
 		return nil
 	})
@@ -739,6 +726,11 @@ func (ro *Router) handleAdminUpdateUserAttributes(w http.ResponseWriter, body []
 		if errors.Is(updateErr, errUserNotFound) {
 			writeError(w, http.StatusBadRequest, ErrTypeUserNotFoundException,
 				"User does not exist.")
+			return
+		}
+		if planErr != nil {
+			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+				"failed to generate verification code")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
