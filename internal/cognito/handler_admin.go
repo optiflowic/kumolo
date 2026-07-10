@@ -4,7 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -35,7 +40,7 @@ func newUserTypeResponse(u *UserMetadata) userTypeResponse {
 		Attributes:           prependSub(u.Attributes, u.Sub),
 		UserCreateDate:       u.CreatedAt,
 		UserLastModifiedDate: u.UpdatedAt,
-		Enabled:              true,
+		Enabled:              u.Enabled,
 		UserStatus:           u.Status,
 		MFAOptions:           []any{},
 	}
@@ -132,6 +137,7 @@ func (ro *Router) handleAdminCreateUser(w http.ResponseWriter, body []byte) {
 		Username:     req.Username,
 		Sub:          sub,
 		Status:       status,
+		Enabled:      true,
 		PasswordHash: passwordHash,
 		Attributes:   req.UserAttributes,
 		CreatedAt:    ts,
@@ -229,7 +235,7 @@ func (ro *Router) handleAdminGetUser(w http.ResponseWriter, body []byte) {
 		UserAttributes:       prependSub(user.Attributes, user.Sub),
 		UserCreateDate:       user.CreatedAt,
 		UserLastModifiedDate: user.UpdatedAt,
-		Enabled:              true,
+		Enabled:              user.Enabled,
 		UserStatus:           user.Status,
 		MFAOptions:           []any{},
 		UserMFASettingList:   []string{},
@@ -462,4 +468,423 @@ func (ro *Router) handleAdminDeleteUser(w http.ResponseWriter, body []byte) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{})
+}
+
+// ──── AdminDisableUser ───────────────────────────────────────────────────────
+
+type adminDisableUserRequest struct {
+	UserPoolID string `json:"UserPoolId"`
+	Username   string `json:"Username"`
+}
+
+func (ro *Router) handleAdminDisableUser(w http.ResponseWriter, body []byte) {
+	var req adminDisableUserRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"invalid request body")
+		return
+	}
+	if req.UserPoolID == "" {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"UserPoolId is required")
+		return
+	}
+	if req.Username == "" {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"Username is required")
+		return
+	}
+
+	if _, err := ro.storage.GetUserPool(req.UserPoolID); err != nil {
+		if errors.Is(err, errUserPoolNotFound) {
+			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException,
+				"User pool not found.")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to get user pool")
+		return
+	}
+
+	var sub string
+	err := ro.storage.UpdateUser(req.UserPoolID, req.Username, func(u *UserMetadata) error {
+		u.Enabled = false
+		sub = u.Sub
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, errUserNotFound) {
+			writeError(w, http.StatusBadRequest, ErrTypeUserNotFoundException,
+				"User does not exist.")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to disable user")
+		return
+	}
+
+	// Revoke every outstanding session, matching AWS's "revokes all access tokens" behavior.
+	revokeExp := float64(nowUnix()) + float64(accessTokenExpiry)
+	if err := ro.storage.RevokeOriginJTIsForSub(req.UserPoolID, sub, revokeExp); err != nil {
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to revoke sessions")
+		return
+	}
+	if err := ro.storage.DeleteRefreshTokensBySub(req.UserPoolID, sub); err != nil {
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to revoke refresh tokens")
+		return
+	}
+
+	writeEmpty(w)
+}
+
+// ──── AdminEnableUser ────────────────────────────────────────────────────────
+
+type adminEnableUserRequest struct {
+	UserPoolID string `json:"UserPoolId"`
+	Username   string `json:"Username"`
+}
+
+func (ro *Router) handleAdminEnableUser(w http.ResponseWriter, body []byte) {
+	var req adminEnableUserRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"invalid request body")
+		return
+	}
+	if req.UserPoolID == "" {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"UserPoolId is required")
+		return
+	}
+	if req.Username == "" {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"Username is required")
+		return
+	}
+
+	if _, err := ro.storage.GetUserPool(req.UserPoolID); err != nil {
+		if errors.Is(err, errUserPoolNotFound) {
+			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException,
+				"User pool not found.")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to get user pool")
+		return
+	}
+
+	err := ro.storage.UpdateUser(req.UserPoolID, req.Username, func(u *UserMetadata) error {
+		u.Enabled = true
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, errUserNotFound) {
+			writeError(w, http.StatusBadRequest, ErrTypeUserNotFoundException,
+				"User does not exist.")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to enable user")
+		return
+	}
+
+	writeEmpty(w)
+}
+
+// ──── AdminUpdateUserAttributes ──────────────────────────────────────────────
+
+type adminUpdateUserAttributesRequest struct {
+	UserPoolID     string          `json:"UserPoolId"`
+	Username       string          `json:"Username"`
+	UserAttributes []AttributeType `json:"UserAttributes"`
+}
+
+// planAdminAttributeChanges computes attribute mutations for AdminUpdateUserAttributes.
+// Unlike the self-service UpdateUserAttributes flow, an admin can bypass the
+// verification-code step for email/phone_number by including the paired
+// "_verified" attribute set to "true" in the same request.
+func planAdminAttributeChanges(
+	codeR io.Reader,
+	current []AttributeType,
+	requested []AttributeType,
+) ([]attrChange, error) {
+	bypass := map[string]bool{}
+	requestedNames := map[string]bool{}
+	for _, attr := range requested {
+		requestedNames[attr.Name] = true
+		switch attr.Name {
+		case attrEmail + "_verified":
+			bypass[attrEmail] = attr.Value == "true"
+		case attrPhoneNumber + "_verified":
+			bypass[attrPhoneNumber] = attr.Value == "true"
+		}
+	}
+
+	var changes []attrChange
+	for _, attr := range requested {
+		if attr.Value == "" {
+			changes = append(changes, attrChange{name: attr.Name, delete: true})
+			continue
+		}
+
+		if attr.Name != attrEmail && attr.Name != attrPhoneNumber {
+			changes = append(changes, attrChange{name: attr.Name, value: attr.Value})
+			continue
+		}
+
+		if bypass[attr.Name] {
+			changes = append(
+				changes,
+				attrChange{name: attr.Name, value: attr.Value, clearCode: true},
+			)
+			continue
+		}
+
+		oldValue, _ := getAttr(current, attr.Name)
+		if oldValue == attr.Value {
+			changes = append(changes, attrChange{name: attr.Name, value: attr.Value})
+			continue
+		}
+
+		code, err := generateConfirmationCodeFrom(codeR)
+		if err != nil {
+			return nil, fmt.Errorf("generate verification code: %w", err)
+		}
+		changes = append(changes, attrChange{name: attr.Name, value: attr.Value, verifyCode: code})
+	}
+
+	// A bypass ("email_verified"/"phone_number_verified" = "true") may arrive
+	// without a matching email/phone_number update in the same request — still
+	// drop any pending verification code for that attribute.
+	for _, name := range []string{attrEmail, attrPhoneNumber} {
+		if bypass[name] && !requestedNames[name] {
+			changes = append(changes, attrChange{name: name, clearCodeOnly: true})
+		}
+	}
+	return changes, nil
+}
+
+func (ro *Router) handleAdminUpdateUserAttributes(w http.ResponseWriter, body []byte) {
+	var req adminUpdateUserAttributesRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"invalid request body")
+		return
+	}
+	if req.UserPoolID == "" {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"UserPoolId is required")
+		return
+	}
+	if req.Username == "" {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"Username is required")
+		return
+	}
+	if len(req.UserAttributes) == 0 {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"UserAttributes is required")
+		return
+	}
+	for _, attr := range req.UserAttributes {
+		if attr.Name == "sub" {
+			writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+				"Attribute modifications are not allowed for sub")
+			return
+		}
+	}
+
+	if _, err := ro.storage.GetUserPool(req.UserPoolID); err != nil {
+		if errors.Is(err, errUserPoolNotFound) {
+			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException,
+				"User pool not found.")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to get user pool")
+		return
+	}
+
+	codeR := ro.codeReader
+	if codeR == nil {
+		codeR = randReader
+	}
+
+	var changes []attrChange
+	var planErr error
+	updateErr := ro.storage.UpdateUser(req.UserPoolID, req.Username, func(u *UserMetadata) error {
+		changes, planErr = planAdminAttributeChanges(codeR, u.Attributes, req.UserAttributes)
+		if planErr != nil {
+			return planErr
+		}
+		applyAttributeChanges(u, changes)
+		return nil
+	})
+	if updateErr != nil {
+		if errors.Is(updateErr, errUserNotFound) {
+			writeError(w, http.StatusBadRequest, ErrTypeUserNotFoundException,
+				"User does not exist.")
+			return
+		}
+		if planErr != nil {
+			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+				"failed to generate verification code")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to update user attributes")
+		return
+	}
+
+	for _, c := range changes {
+		if c.verifyCode != "" {
+			slog.Info("AdminUpdateUserAttributes verification code", "pool_id", req.UserPoolID,
+				"username", req.Username, "attribute", c.name, "code", c.verifyCode)
+		}
+	}
+	writeEmpty(w)
+}
+
+// ──── ListUsers ──────────────────────────────────────────────────────────────
+
+const listUsersDefaultLimit = 60
+
+type listUsersRequest struct {
+	UserPoolID      string `json:"UserPoolId"`
+	Filter          string `json:"Filter"`
+	Limit           *int   `json:"Limit"`
+	PaginationToken string `json:"PaginationToken"`
+}
+
+// reUserFilter matches ListUsers' Filter grammar: AttributeName Op "Value",
+// where Op is "=" (exact match) or "^=" (prefix match).
+var reUserFilter = regexp.MustCompile(`^\s*([\w:]+)\s*(\^?=)\s*"(.*)"\s*$`)
+
+// parseUserFilter compiles a ListUsers Filter string into a predicate over UserMetadata.
+// A nil predicate (with nil error) means "match everything" (empty filter).
+func parseUserFilter(filterStr string) (func(*UserMetadata) bool, error) {
+	if filterStr == "" {
+		return nil, nil
+	}
+	m := reUserFilter.FindStringSubmatch(filterStr)
+	if m == nil {
+		return nil, errors.New(
+			`filter must have the form: AttributeName = "Value" or AttributeName ^= "Value"`,
+		)
+	}
+	attrName, op, value := m[1], m[2], m[3]
+
+	var extract func(*UserMetadata) (string, bool)
+	switch attrName {
+	case "username":
+		extract = func(u *UserMetadata) (string, bool) { return u.Username, true }
+	case "sub":
+		extract = func(u *UserMetadata) (string, bool) { return u.Sub, true }
+	case "cognito:user_status":
+		value = strings.ToLower(value)
+		extract = func(u *UserMetadata) (string, bool) { return strings.ToLower(u.Status), true }
+	case "status":
+		extract = func(u *UserMetadata) (string, bool) { return strconv.FormatBool(u.Enabled), true }
+	case "email", "phone_number", "name", "given_name", "family_name", "preferred_username":
+		extract = func(u *UserMetadata) (string, bool) {
+			for _, a := range u.Attributes {
+				if a.Name == attrName {
+					return a.Value, true
+				}
+			}
+			return "", false
+		}
+	default:
+		return nil, fmt.Errorf("unsupported filter attribute: %s", attrName)
+	}
+
+	return func(u *UserMetadata) bool {
+		v, ok := extract(u)
+		if !ok {
+			return false
+		}
+		if op == "^=" {
+			return strings.HasPrefix(v, value)
+		}
+		return v == value
+	}, nil
+}
+
+func (ro *Router) handleListUsers(w http.ResponseWriter, body []byte) {
+	var req listUsersRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"invalid request body",
+		)
+		return
+	}
+	if req.UserPoolID == "" {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"UserPoolId is required",
+		)
+		return
+	}
+
+	if _, err := ro.storage.GetUserPool(req.UserPoolID); err != nil {
+		if errors.Is(err, errUserPoolNotFound) {
+			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException,
+				"User pool not found.")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to get user pool")
+		return
+	}
+
+	limit := listUsersDefaultLimit
+	if req.Limit != nil {
+		limit = *req.Limit
+		if limit < 1 || limit > listUsersDefaultLimit {
+			writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+				"Limit must be between 1 and 60")
+			return
+		}
+	}
+
+	filter, err := parseUserFilter(req.Filter)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException, err.Error())
+		return
+	}
+
+	users, nextToken, err := ro.storage.ListUsers(
+		req.UserPoolID,
+		filter,
+		limit,
+		req.PaginationToken,
+	)
+	if err != nil {
+		if errors.Is(err, errInvalidNextToken) {
+			writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+				"Invalid pagination token.")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to list users")
+		return
+	}
+
+	userResps := make([]userTypeResponse, len(users))
+	for i, u := range users {
+		userResps[i] = newUserTypeResponse(u)
+	}
+
+	resp := map[string]any{"Users": userResps}
+	if nextToken != "" {
+		resp["PaginationToken"] = nextToken
+	}
+	writeJSON(w, http.StatusOK, resp)
 }

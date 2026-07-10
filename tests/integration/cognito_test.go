@@ -24,22 +24,28 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// codeCapture intercepts SignUp confirmation codes from slog output.
-// It acts as a nop handler (no log forwarding) to avoid holding its mutex
-// while calling into log.Logger, which would deadlock with the HTTP server goroutine.
+// codeCapture intercepts SignUp confirmation codes and attribute-verification
+// codes from slog output. It acts as a nop handler (no log forwarding) to
+// avoid holding its mutex while calling into log.Logger, which would deadlock
+// with the HTTP server goroutine.
 type codeCapture struct {
-	mu    sync.Mutex
-	codes map[string]string // username -> confirmation code
+	mu        sync.Mutex
+	codes     map[string]string // username -> confirmation code
+	attrCodes map[string]string // "username|attribute" -> verification code
 }
 
 func newCodeCapture() *codeCapture {
-	return &codeCapture{codes: make(map[string]string)}
+	return &codeCapture{
+		codes:     make(map[string]string),
+		attrCodes: make(map[string]string),
+	}
 }
 
 func (c *codeCapture) Enabled(_ context.Context, _ slog.Level) bool { return true }
 
 func (c *codeCapture) Handle(_ context.Context, r slog.Record) error {
-	if r.Message == "SignUp confirmation code" || r.Message == "ResendConfirmationCode" {
+	switch r.Message {
+	case "SignUp confirmation code", "ResendConfirmationCode":
 		var username, code string
 		r.Attrs(func(a slog.Attr) bool {
 			switch a.Key {
@@ -55,6 +61,26 @@ func (c *codeCapture) Handle(_ context.Context, r slog.Record) error {
 			c.codes[username] = code
 			c.mu.Unlock()
 		}
+	case "GetUserAttributeVerificationCode",
+		"UpdateUserAttributes verification code",
+		"AdminUpdateUserAttributes verification code":
+		var username, attribute, code string
+		r.Attrs(func(a slog.Attr) bool {
+			switch a.Key {
+			case "username":
+				username = a.Value.String()
+			case "attribute":
+				attribute = a.Value.String()
+			case "code":
+				code = a.Value.String()
+			}
+			return true
+		})
+		if username != "" && attribute != "" && code != "" {
+			c.mu.Lock()
+			c.attrCodes[username+"|"+attribute] = code
+			c.mu.Unlock()
+		}
 	}
 	return nil
 }
@@ -66,6 +92,12 @@ func (c *codeCapture) get(username string) string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.codes[username]
+}
+
+func (c *codeCapture) getAttrCode(username, attribute string) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.attrCodes[username+"|"+attribute]
 }
 
 // withCodeCapture installs a slog handler that records SignUp confirmation codes
@@ -1655,5 +1687,403 @@ func TestCognitoIntegration_RefreshTokenExpiry(t *testing.T) {
 		})
 		require.Error(t, err)
 		assert.Equal(t, "NotAuthorizedException", apiErrorCode(err))
+	})
+}
+
+// ── ListUsers ─────────────────────────────────────────────────────────────────
+
+func TestCognitoIntegration_ListUsers(t *testing.T) {
+	clients := newTestClients(t)
+	ctx := context.Background()
+	c := clients.cognito
+	env := newAdminTestEnv(t, c, "listusers-test-pool")
+
+	for _, u := range []struct{ username, email string }{
+		{"alice", "alice@example.com"},
+		{"bob", "bob@example.com"},
+		{"charlie", "charlie@example.com"},
+	} {
+		_, err := c.AdminCreateUser(ctx, &awscognito.AdminCreateUserInput{
+			UserPoolId: aws.String(env.poolID),
+			Username:   aws.String(u.username),
+			UserAttributes: []types.AttributeType{
+				{Name: aws.String("email"), Value: aws.String(u.email)},
+			},
+		})
+		require.NoError(t, err)
+	}
+
+	t.Run("ListAll", func(t *testing.T) {
+		out, err := c.ListUsers(ctx, &awscognito.ListUsersInput{
+			UserPoolId: aws.String(env.poolID),
+		})
+		require.NoError(t, err)
+		require.Len(t, out.Users, 3)
+		assert.Equal(t, "alice", aws.ToString(out.Users[0].Username))
+		assert.True(t, out.Users[0].Enabled)
+	})
+
+	t.Run("Pagination", func(t *testing.T) {
+		out, err := c.ListUsers(ctx, &awscognito.ListUsersInput{
+			UserPoolId: aws.String(env.poolID),
+			Limit:      aws.Int32(2),
+		})
+		require.NoError(t, err)
+		require.Len(t, out.Users, 2)
+		require.NotNil(t, out.PaginationToken)
+
+		out2, err := c.ListUsers(ctx, &awscognito.ListUsersInput{
+			UserPoolId:      aws.String(env.poolID),
+			Limit:           aws.Int32(2),
+			PaginationToken: out.PaginationToken,
+		})
+		require.NoError(t, err)
+		require.Len(t, out2.Users, 1)
+		assert.Equal(t, "charlie", aws.ToString(out2.Users[0].Username))
+	})
+
+	t.Run("FilterByUsername", func(t *testing.T) {
+		out, err := c.ListUsers(ctx, &awscognito.ListUsersInput{
+			UserPoolId: aws.String(env.poolID),
+			Filter:     aws.String(`username = "bob"`),
+		})
+		require.NoError(t, err)
+		require.Len(t, out.Users, 1)
+		assert.Equal(t, "bob", aws.ToString(out.Users[0].Username))
+	})
+
+	t.Run("FilterByEmailPrefix", func(t *testing.T) {
+		out, err := c.ListUsers(ctx, &awscognito.ListUsersInput{
+			UserPoolId: aws.String(env.poolID),
+			Filter:     aws.String(`email ^= "ali"`),
+		})
+		require.NoError(t, err)
+		require.Len(t, out.Users, 1)
+		assert.Equal(t, "alice", aws.ToString(out.Users[0].Username))
+	})
+
+	t.Run("PoolNotFound", func(t *testing.T) {
+		_, err := c.ListUsers(ctx, &awscognito.ListUsersInput{
+			UserPoolId: aws.String("us-east-1_notexist"),
+		})
+		require.Error(t, err)
+		assert.Equal(t, "ResourceNotFoundException", apiErrorCode(err))
+	})
+}
+
+// ── UpdateUserAttributes / DeleteUser / attribute verification ─────────────────
+
+func TestCognitoIntegration_SelfServiceUserManagement(t *testing.T) {
+	cap := withCodeCapture(t)
+	clients := newTestClients(t)
+	ctx := context.Background()
+	c := clients.cognito
+
+	const (
+		username = "selfservice-user"
+		password = "Password1!"
+	)
+	poolID, accessToken := createConfirmedUser(
+		t, ctx, c, cap, "selfservice-pool", "selfservice-client", username, password,
+	)
+
+	t.Run("UpdateUserAttributes_NonVerified", func(t *testing.T) {
+		out, err := c.UpdateUserAttributes(ctx, &awscognito.UpdateUserAttributesInput{
+			AccessToken: aws.String(accessToken),
+			UserAttributes: []types.AttributeType{
+				{Name: aws.String("given_name"), Value: aws.String("Alice")},
+			},
+		})
+		require.NoError(t, err)
+		assert.Empty(t, out.CodeDeliveryDetailsList)
+
+		got, err := c.GetUser(ctx, &awscognito.GetUserInput{AccessToken: aws.String(accessToken)})
+		require.NoError(t, err)
+		var givenName string
+		for _, a := range got.UserAttributes {
+			if aws.ToString(a.Name) == "given_name" {
+				givenName = aws.ToString(a.Value)
+			}
+		}
+		assert.Equal(t, "Alice", givenName)
+	})
+
+	t.Run("UpdateUserAttributes_EmailChange_GeneratesCode", func(t *testing.T) {
+		out, err := c.UpdateUserAttributes(ctx, &awscognito.UpdateUserAttributesInput{
+			AccessToken: aws.String(accessToken),
+			UserAttributes: []types.AttributeType{
+				{Name: aws.String("email"), Value: aws.String("newemail@example.com")},
+			},
+		})
+		require.NoError(t, err)
+		require.Len(t, out.CodeDeliveryDetailsList, 1)
+		assert.Equal(t, "email", aws.ToString(out.CodeDeliveryDetailsList[0].AttributeName))
+	})
+
+	t.Run("VerifyUserAttribute_CompletesVerification", func(t *testing.T) {
+		code := cap.getAttrCode(username, "email")
+		require.NotEmpty(t, code)
+
+		_, err := c.VerifyUserAttribute(ctx, &awscognito.VerifyUserAttributeInput{
+			AccessToken:   aws.String(accessToken),
+			AttributeName: aws.String("email"),
+			Code:          aws.String(code),
+		})
+		require.NoError(t, err)
+
+		out, err := c.AdminGetUser(ctx, &awscognito.AdminGetUserInput{
+			UserPoolId: aws.String(poolID),
+			Username:   aws.String(username),
+		})
+		require.NoError(t, err)
+		var verified string
+		for _, a := range out.UserAttributes {
+			if aws.ToString(a.Name) == "email_verified" {
+				verified = aws.ToString(a.Value)
+			}
+		}
+		assert.Equal(t, "true", verified)
+	})
+
+	t.Run("VerifyUserAttribute_CodeMismatch", func(t *testing.T) {
+		_, err := c.UpdateUserAttributes(ctx, &awscognito.UpdateUserAttributesInput{
+			AccessToken: aws.String(accessToken),
+			UserAttributes: []types.AttributeType{
+				{Name: aws.String("phone_number"), Value: aws.String("+15551234567")},
+			},
+		})
+		require.NoError(t, err)
+
+		_, err = c.VerifyUserAttribute(ctx, &awscognito.VerifyUserAttributeInput{
+			AccessToken:   aws.String(accessToken),
+			AttributeName: aws.String("phone_number"),
+			Code:          aws.String("000000"),
+		})
+		require.Error(t, err)
+		assert.Equal(t, "CodeMismatchException", apiErrorCode(err))
+	})
+
+	t.Run("GetUserAttributeVerificationCode_Resend", func(t *testing.T) {
+		out, err := c.GetUserAttributeVerificationCode(
+			ctx,
+			&awscognito.GetUserAttributeVerificationCodeInput{
+				AccessToken:   aws.String(accessToken),
+				AttributeName: aws.String("phone_number"),
+			},
+		)
+		require.NoError(t, err)
+		require.NotNil(t, out.CodeDeliveryDetails)
+		assert.Equal(t, "phone_number", aws.ToString(out.CodeDeliveryDetails.AttributeName))
+		assert.Equal(t, types.DeliveryMediumTypeSms, out.CodeDeliveryDetails.DeliveryMedium)
+
+		code := cap.getAttrCode(username, "phone_number")
+		require.NotEmpty(t, code)
+
+		_, err = c.VerifyUserAttribute(ctx, &awscognito.VerifyUserAttributeInput{
+			AccessToken:   aws.String(accessToken),
+			AttributeName: aws.String("phone_number"),
+			Code:          aws.String(code),
+		})
+		require.NoError(t, err)
+	})
+
+	t.Run("DeleteUser_RemovesAccountAndRevokesToken", func(t *testing.T) {
+		_, err := c.DeleteUser(ctx, &awscognito.DeleteUserInput{
+			AccessToken: aws.String(accessToken),
+		})
+		require.NoError(t, err)
+
+		_, err = c.AdminGetUser(ctx, &awscognito.AdminGetUserInput{
+			UserPoolId: aws.String(poolID),
+			Username:   aws.String(username),
+		})
+		require.Error(t, err)
+		assert.Equal(t, "UserNotFoundException", apiErrorCode(err))
+
+		_, err = c.GetUser(ctx, &awscognito.GetUserInput{AccessToken: aws.String(accessToken)})
+		require.Error(t, err)
+		assert.Equal(t, "UserNotFoundException", apiErrorCode(err))
+	})
+}
+
+// ── AdminUpdateUserAttributes ────────────────────────────────────────────────
+
+func TestCognitoIntegration_AdminUpdateUserAttributes(t *testing.T) {
+	clients := newTestClients(t)
+	ctx := context.Background()
+	c := clients.cognito
+	env := newAdminTestEnv(t, c, "adminupdateattrs-pool")
+
+	const username = "admin-update-user"
+	_, err := c.AdminCreateUser(ctx, &awscognito.AdminCreateUserInput{
+		UserPoolId: aws.String(env.poolID),
+		Username:   aws.String(username),
+	})
+	require.NoError(t, err)
+
+	t.Run("UpdateAttribute", func(t *testing.T) {
+		_, err := c.AdminUpdateUserAttributes(ctx, &awscognito.AdminUpdateUserAttributesInput{
+			UserPoolId: aws.String(env.poolID),
+			Username:   aws.String(username),
+			UserAttributes: []types.AttributeType{
+				{Name: aws.String("given_name"), Value: aws.String("Bob")},
+			},
+		})
+		require.NoError(t, err)
+
+		out, err := c.AdminGetUser(ctx, &awscognito.AdminGetUserInput{
+			UserPoolId: aws.String(env.poolID),
+			Username:   aws.String(username),
+		})
+		require.NoError(t, err)
+		var givenName string
+		for _, a := range out.UserAttributes {
+			if aws.ToString(a.Name) == "given_name" {
+				givenName = aws.ToString(a.Value)
+			}
+		}
+		assert.Equal(t, "Bob", givenName)
+	})
+
+	t.Run("BypassVerificationWithEmailVerifiedTrue", func(t *testing.T) {
+		_, err := c.AdminUpdateUserAttributes(ctx, &awscognito.AdminUpdateUserAttributesInput{
+			UserPoolId: aws.String(env.poolID),
+			Username:   aws.String(username),
+			UserAttributes: []types.AttributeType{
+				{Name: aws.String("email"), Value: aws.String("bob@example.com")},
+				{Name: aws.String("email_verified"), Value: aws.String("true")},
+			},
+		})
+		require.NoError(t, err)
+
+		out, err := c.AdminGetUser(ctx, &awscognito.AdminGetUserInput{
+			UserPoolId: aws.String(env.poolID),
+			Username:   aws.String(username),
+		})
+		require.NoError(t, err)
+		var email, verified string
+		for _, a := range out.UserAttributes {
+			switch aws.ToString(a.Name) {
+			case "email":
+				email = aws.ToString(a.Value)
+			case "email_verified":
+				verified = aws.ToString(a.Value)
+			}
+		}
+		assert.Equal(t, "bob@example.com", email)
+		assert.Equal(t, "true", verified)
+	})
+
+	t.Run("UserNotFound", func(t *testing.T) {
+		_, err := c.AdminUpdateUserAttributes(ctx, &awscognito.AdminUpdateUserAttributesInput{
+			UserPoolId: aws.String(env.poolID),
+			Username:   aws.String("nonexistent"),
+			UserAttributes: []types.AttributeType{
+				{Name: aws.String("given_name"), Value: aws.String("X")},
+			},
+		})
+		require.Error(t, err)
+		assert.Equal(t, "UserNotFoundException", apiErrorCode(err))
+	})
+}
+
+// ── AdminDisableUser / AdminEnableUser ──────────────────────────────────────
+
+func TestCognitoIntegration_AdminDisableEnableUser(t *testing.T) {
+	cap := withCodeCapture(t)
+	clients := newTestClients(t)
+	ctx := context.Background()
+	c := clients.cognito
+
+	const (
+		username = "disable-user"
+		password = "Password1!"
+	)
+	poolID, accessToken := createConfirmedUser(
+		t, ctx, c, cap, "disable-test-pool", "disable-test-client", username, password,
+	)
+
+	clientOut, err := c.ListUserPoolClients(ctx, &awscognito.ListUserPoolClientsInput{
+		UserPoolId: aws.String(poolID),
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, clientOut.UserPoolClients)
+	clientID := aws.ToString(clientOut.UserPoolClients[0].ClientId)
+
+	t.Run("AdminDisableUser_RevokesSessionAndBlocksSignIn", func(t *testing.T) {
+		_, err := c.GetUser(ctx, &awscognito.GetUserInput{AccessToken: aws.String(accessToken)})
+		require.NoError(t, err, "token must be valid before disabling")
+
+		_, err = c.AdminDisableUser(ctx, &awscognito.AdminDisableUserInput{
+			UserPoolId: aws.String(poolID),
+			Username:   aws.String(username),
+		})
+		require.NoError(t, err)
+
+		out, err := c.AdminGetUser(ctx, &awscognito.AdminGetUserInput{
+			UserPoolId: aws.String(poolID),
+			Username:   aws.String(username),
+		})
+		require.NoError(t, err)
+		assert.False(t, out.Enabled)
+
+		_, err = c.GetUser(ctx, &awscognito.GetUserInput{AccessToken: aws.String(accessToken)})
+		require.Error(t, err, "existing session must be revoked")
+		assert.Equal(t, "NotAuthorizedException", apiErrorCode(err))
+
+		_, err = c.InitiateAuth(ctx, &awscognito.InitiateAuthInput{
+			ClientId: aws.String(clientID),
+			AuthFlow: types.AuthFlowTypeUserPasswordAuth,
+			AuthParameters: map[string]string{
+				"USERNAME": username,
+				"PASSWORD": password,
+			},
+		})
+		require.Error(t, err)
+		assert.Equal(t, "NotAuthorizedException", apiErrorCode(err))
+	})
+
+	t.Run("AdminEnableUser_RestoresSignIn", func(t *testing.T) {
+		_, err := c.AdminEnableUser(ctx, &awscognito.AdminEnableUserInput{
+			UserPoolId: aws.String(poolID),
+			Username:   aws.String(username),
+		})
+		require.NoError(t, err)
+
+		out, err := c.AdminGetUser(ctx, &awscognito.AdminGetUserInput{
+			UserPoolId: aws.String(poolID),
+			Username:   aws.String(username),
+		})
+		require.NoError(t, err)
+		assert.True(t, out.Enabled)
+
+		authOut, err := c.InitiateAuth(ctx, &awscognito.InitiateAuthInput{
+			ClientId: aws.String(clientID),
+			AuthFlow: types.AuthFlowTypeUserPasswordAuth,
+			AuthParameters: map[string]string{
+				"USERNAME": username,
+				"PASSWORD": password,
+			},
+		})
+		require.NoError(t, err)
+		assert.NotEmpty(t, aws.ToString(authOut.AuthenticationResult.AccessToken))
+	})
+
+	t.Run("AdminDisableUser_UserNotFound", func(t *testing.T) {
+		_, err := c.AdminDisableUser(ctx, &awscognito.AdminDisableUserInput{
+			UserPoolId: aws.String(poolID),
+			Username:   aws.String("nonexistent"),
+		})
+		require.Error(t, err)
+		assert.Equal(t, "UserNotFoundException", apiErrorCode(err))
+	})
+
+	t.Run("AdminEnableUser_UserNotFound", func(t *testing.T) {
+		_, err := c.AdminEnableUser(ctx, &awscognito.AdminEnableUserInput{
+			UserPoolId: aws.String(poolID),
+			Username:   aws.String("nonexistent"),
+		})
+		require.Error(t, err)
+		assert.Equal(t, "UserNotFoundException", apiErrorCode(err))
 	})
 }

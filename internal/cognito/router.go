@@ -37,6 +37,12 @@ type store interface {
 	GetUserBySub(poolID, sub string) (*UserMetadata, error)
 	UpdateUser(poolID, username string, fn func(*UserMetadata) error) error
 	DeleteUser(poolID, username string) error
+	ListUsers(
+		poolID string,
+		filter func(*UserMetadata) bool,
+		maxResults int,
+		nextToken string,
+	) ([]*UserMetadata, string, error)
 
 	// RSA key operations
 	GetOrCreatePoolKeys(poolID string) (*poolKeys, *rsa.PrivateKey, error)
@@ -156,6 +162,14 @@ func (ro *Router) serveHTTP(w http.ResponseWriter, r *http.Request, op string) {
 		ro.handleRespondToAuthChallenge(w, body)
 	case "GetUser":
 		ro.handleGetUser(w, body)
+	case "UpdateUserAttributes":
+		ro.handleUpdateUserAttributes(w, body)
+	case "DeleteUser":
+		ro.handleDeleteUser(w, body)
+	case "GetUserAttributeVerificationCode":
+		ro.handleGetUserAttributeVerificationCode(w, body)
+	case "VerifyUserAttribute":
+		ro.handleVerifyUserAttribute(w, body)
 	case "AdminCreateUser":
 		ro.handleAdminCreateUser(w, body)
 	case "AdminGetUser":
@@ -166,6 +180,14 @@ func (ro *Router) serveHTTP(w http.ResponseWriter, r *http.Request, op string) {
 		ro.handleAdminConfirmSignUp(w, body)
 	case "AdminDeleteUser":
 		ro.handleAdminDeleteUser(w, body)
+	case "AdminDisableUser":
+		ro.handleAdminDisableUser(w, body)
+	case "AdminEnableUser":
+		ro.handleAdminEnableUser(w, body)
+	case "AdminUpdateUserAttributes":
+		ro.handleAdminUpdateUserAttributes(w, body)
+	case "ListUsers":
+		ro.handleListUsers(w, body)
 	case "CreateGroup":
 		ro.handleCreateGroup(w, body)
 	case "DeleteGroup":

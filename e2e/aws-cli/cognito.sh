@@ -824,6 +824,351 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# ListUsers
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- ListUsers ---"
+
+LU_USER1="listusers-alice@example.com"
+LU_USER2="listusers-bob@example.com"
+
+$AWS admin-create-user \
+  --user-pool-id "$POOL_ID" \
+  --username "$LU_USER1" \
+  --user-attributes "Name=email,Value=$LU_USER1" >/dev/null 2>&1 || true
+$AWS admin-create-user \
+  --user-pool-id "$POOL_ID" \
+  --username "$LU_USER2" \
+  --user-attributes "Name=email,Value=$LU_USER2" >/dev/null 2>&1 || true
+
+LIST_USERS_JSON=$($AWS list-users --user-pool-id "$POOL_ID" 2>&1)
+if echo "$LIST_USERS_JSON" | grep -q '"Users"'; then
+  ok "ListUsers"
+else
+  fail "ListUsers"
+fi
+if echo "$LIST_USERS_JSON" | grep -q "$LU_USER1"; then
+  ok "ListUsers — created user appears in list"
+else
+  fail "ListUsers — expected user in list"
+fi
+
+LIST_USERS_FILTER_JSON=$($AWS list-users \
+  --user-pool-id "$POOL_ID" \
+  --filter "username = \"$LU_USER1\"" 2>&1)
+if echo "$LIST_USERS_FILTER_JSON" | grep -q "$LU_USER1" \
+    && ! echo "$LIST_USERS_FILTER_JSON" | grep -q "$LU_USER2"; then
+  ok "ListUsers — Filter narrows to matching username"
+else
+  fail "ListUsers — Filter did not narrow results as expected"
+fi
+
+LIST_USERS_LIMIT_JSON=$($AWS list-users --user-pool-id "$POOL_ID" --limit 1 2>&1)
+LIST_USERS_LIMIT_COUNT=$(echo "$LIST_USERS_LIMIT_JSON" | jq -r '.Users | length' 2>/dev/null || echo "")
+if [[ "$LIST_USERS_LIMIT_COUNT" == "1" ]]; then
+  ok "ListUsers — Limit=1 returns exactly one user"
+else
+  fail "ListUsers — expected exactly one user with Limit=1, got ${LIST_USERS_LIMIT_COUNT:-<empty>}"
+fi
+
+# ---------------------------------------------------------------------------
+# Self-service: UpdateUserAttributes, attribute verification, DeleteUser
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- Self-service user management ---"
+
+SS_USER="selfservice-e2e@example.com"
+SS_PASS="Password1!"
+
+SS_SIGNUP_JSON=$($AWS sign-up \
+  --client-id "$CLIENT_ID" \
+  --username "$SS_USER" \
+  --password "$SS_PASS" \
+  --user-attributes "Name=email,Value=$SS_USER" 2>&1)
+if echo "$SS_SIGNUP_JSON" | grep -q '"UserSub"'; then
+  ok "SignUp (for self-service flow)"
+else
+  fail "SignUp (for self-service flow)"
+fi
+
+SS_CODE="${E2E_COGNITO_SS_CODE:-}"
+if [[ -z "$SS_CODE" ]]; then
+  if command -v docker &>/dev/null && docker compose ps --services 2>/dev/null | grep -q .; then
+    SS_CODE=$(docker compose logs 2>/dev/null \
+      | grep 'SignUp confirmation code' \
+      | grep "$SS_USER" \
+      | tail -1 \
+      | grep -oE 'code=[0-9]+' \
+      | cut -d= -f2 || true)
+  fi
+fi
+
+if [[ -n "$SS_CODE" ]]; then
+  run "ConfirmSignUp (self-service)" \
+    $AWS confirm-sign-up \
+      --client-id "$CLIENT_ID" \
+      --username "$SS_USER" \
+      --confirmation-code "$SS_CODE"
+
+  SS_AUTH_JSON=$($AWS initiate-auth \
+    --client-id "$CLIENT_ID" \
+    --auth-flow "USER_PASSWORD_AUTH" \
+    --auth-parameters "USERNAME=$SS_USER,PASSWORD=$SS_PASS" 2>&1)
+  SS_ACCESS_TOKEN=$(echo "$SS_AUTH_JSON" | jq -r '.AuthenticationResult.AccessToken // empty' 2>/dev/null || true)
+
+  if [[ -n "$SS_ACCESS_TOKEN" ]]; then
+    # UpdateUserAttributes: non-verified attribute applies immediately, no code.
+    UUA_JSON=$($AWS update-user-attributes \
+      --access-token "$SS_ACCESS_TOKEN" \
+      --user-attributes "Name=given_name,Value=Alice" 2>&1)
+    if echo "$UUA_JSON" | grep -q '"CodeDeliveryDetailsList": \[\]'; then
+      ok "UpdateUserAttributes — non-verified attribute, empty CodeDeliveryDetailsList"
+    else
+      fail "UpdateUserAttributes — expected empty CodeDeliveryDetailsList: $UUA_JSON"
+    fi
+
+    # UpdateUserAttributes: email change generates a verification code.
+    UUA_EMAIL_JSON=$($AWS update-user-attributes \
+      --access-token "$SS_ACCESS_TOKEN" \
+      --user-attributes "Name=email,Value=newemail-e2e@example.com" 2>&1)
+    if echo "$UUA_EMAIL_JSON" | grep -q '"AttributeName": "email"'; then
+      ok "UpdateUserAttributes — email change returns CodeDeliveryDetails"
+    else
+      fail "UpdateUserAttributes — expected CodeDeliveryDetails for email change"
+    fi
+
+    SS_ATTR_CODE="${E2E_COGNITO_SS_ATTR_CODE:-}"
+    if [[ -z "$SS_ATTR_CODE" ]]; then
+      if command -v docker &>/dev/null && docker compose ps --services 2>/dev/null | grep -q .; then
+        SS_ATTR_CODE=$(docker compose logs 2>/dev/null \
+          | grep 'UpdateUserAttributes verification code' \
+          | grep "$SS_USER" \
+          | tail -1 \
+          | grep -oE 'code=[0-9]+' \
+          | cut -d= -f2 || true)
+      fi
+    fi
+
+    if [[ -n "$SS_ATTR_CODE" ]]; then
+      run "VerifyUserAttribute" \
+        $AWS verify-user-attribute \
+          --access-token "$SS_ACCESS_TOKEN" \
+          --attribute-name email \
+          --code "$SS_ATTR_CODE"
+
+      VUA_MISMATCH_JSON=$($AWS verify-user-attribute \
+        --access-token "$SS_ACCESS_TOKEN" \
+        --attribute-name email \
+        --code "000000" 2>&1) || true
+      if echo "$VUA_MISMATCH_JSON" | grep -qi 'CodeMismatchException'; then
+        ok "VerifyUserAttribute — CodeMismatchException for stale code after verification"
+      else
+        fail "VerifyUserAttribute — expected CodeMismatchException for stale code"
+      fi
+    else
+      skip "VerifyUserAttribute — no verification code available"
+      echo "  Hint: set E2E_COGNITO_SS_ATTR_CODE=<code> from kumolo logs, or use Docker Compose"
+    fi
+
+    # GetUserAttributeVerificationCode: request a fresh code independently.
+    GUAVC_JSON=$($AWS get-user-attribute-verification-code \
+      --access-token "$SS_ACCESS_TOKEN" \
+      --attribute-name given_name 2>&1) || true
+    if echo "$GUAVC_JSON" | grep -qi 'InvalidParameterException'; then
+      ok "GetUserAttributeVerificationCode — InvalidParameterException for unsupported attribute"
+    else
+      fail "GetUserAttributeVerificationCode — expected InvalidParameterException for given_name"
+    fi
+
+    # DeleteUser: self-service account deletion.
+    run "DeleteUser" \
+      $AWS delete-user --access-token "$SS_ACCESS_TOKEN"
+
+    DELETED_SS_JSON=$($AWS admin-get-user \
+      --user-pool-id "$POOL_ID" \
+      --username "$SS_USER" 2>&1) || true
+    if echo "$DELETED_SS_JSON" | grep -qi 'UserNotFoundException'; then
+      ok "AdminGetUser — UserNotFoundException after DeleteUser"
+    else
+      fail "AdminGetUser — expected UserNotFoundException after DeleteUser"
+    fi
+
+    DELETED_SS_TOKEN_JSON=$($AWS get-user --access-token "$SS_ACCESS_TOKEN" 2>&1) || true
+    if echo "$DELETED_SS_TOKEN_JSON" | grep -qi 'UserNotFoundException'; then
+      ok "GetUser — UserNotFoundException for deleted user's access token"
+    else
+      fail "GetUser — expected UserNotFoundException for deleted user's access token"
+    fi
+  else
+    skip "Self-service attribute/delete tests — could not obtain access token"
+  fi
+else
+  skip "Self-service attribute/delete tests — no confirmation code available"
+  echo "  Hint: set E2E_COGNITO_SS_CODE=<code> from kumolo logs, or use Docker Compose"
+fi
+
+# ---------------------------------------------------------------------------
+# AdminUpdateUserAttributes
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- AdminUpdateUserAttributes ---"
+
+AUUA_USER="admin-update-attrs-e2e@example.com"
+$AWS admin-create-user \
+  --user-pool-id "$POOL_ID" \
+  --username "$AUUA_USER" >/dev/null 2>&1 || true
+
+run "AdminUpdateUserAttributes" \
+  $AWS admin-update-user-attributes \
+    --user-pool-id "$POOL_ID" \
+    --username "$AUUA_USER" \
+    --user-attributes "Name=given_name,Value=Bob"
+
+AUUA_GET_JSON=$($AWS admin-get-user \
+  --user-pool-id "$POOL_ID" \
+  --username "$AUUA_USER" 2>&1)
+if echo "$AUUA_GET_JSON" | grep -q '"Name": "given_name"' \
+    && echo "$AUUA_GET_JSON" | grep -q '"Value": "Bob"'; then
+  ok "AdminUpdateUserAttributes — given_name updated"
+else
+  fail "AdminUpdateUserAttributes — expected given_name=Bob"
+fi
+
+# Admin bypass: email_verified=true skips the verification-code step.
+run "AdminUpdateUserAttributes (email + bypass)" \
+  $AWS admin-update-user-attributes \
+    --user-pool-id "$POOL_ID" \
+    --username "$AUUA_USER" \
+    --user-attributes "Name=email,Value=bob-e2e@example.com" "Name=email_verified,Value=true"
+
+AUUA_GET2_JSON=$($AWS admin-get-user \
+  --user-pool-id "$POOL_ID" \
+  --username "$AUUA_USER" 2>&1)
+if echo "$AUUA_GET2_JSON" | grep -A1 '"Name": "email_verified"' | grep -q '"Value": "true"'; then
+  ok "AdminUpdateUserAttributes — email_verified bypass set to true"
+else
+  fail "AdminUpdateUserAttributes — expected email_verified=true after bypass"
+fi
+
+AUUA_NF_JSON=$($AWS admin-update-user-attributes \
+  --user-pool-id "$POOL_ID" \
+  --username "no-such-user-e2e@example.com" \
+  --user-attributes "Name=given_name,Value=X" 2>&1) || true
+if echo "$AUUA_NF_JSON" | grep -qi 'UserNotFoundException'; then
+  ok "AdminUpdateUserAttributes — UserNotFoundException for unknown user"
+else
+  fail "AdminUpdateUserAttributes — expected UserNotFoundException"
+fi
+
+# ---------------------------------------------------------------------------
+# AdminDisableUser / AdminEnableUser
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- AdminDisableUser / AdminEnableUser ---"
+
+DIS_USER="disable-e2e@example.com"
+DIS_PASS="Password1!"
+
+DIS_SIGNUP_JSON=$($AWS sign-up \
+  --client-id "$CLIENT_ID" \
+  --username "$DIS_USER" \
+  --password "$DIS_PASS" \
+  --user-attributes "Name=email,Value=$DIS_USER" 2>&1)
+if echo "$DIS_SIGNUP_JSON" | grep -q '"UserSub"'; then
+  ok "SignUp (for AdminDisableUser flow)"
+else
+  fail "SignUp (for AdminDisableUser flow)"
+fi
+
+DIS_CODE="${E2E_COGNITO_DIS_CODE:-}"
+if [[ -z "$DIS_CODE" ]]; then
+  if command -v docker &>/dev/null && docker compose ps --services 2>/dev/null | grep -q .; then
+    DIS_CODE=$(docker compose logs 2>/dev/null \
+      | grep 'SignUp confirmation code' \
+      | grep "$DIS_USER" \
+      | tail -1 \
+      | grep -oE 'code=[0-9]+' \
+      | cut -d= -f2 || true)
+  fi
+fi
+
+if [[ -n "$DIS_CODE" ]]; then
+  run "ConfirmSignUp (for AdminDisableUser flow)" \
+    $AWS confirm-sign-up \
+      --client-id "$CLIENT_ID" \
+      --username "$DIS_USER" \
+      --confirmation-code "$DIS_CODE"
+
+  DIS_AUTH_JSON=$($AWS initiate-auth \
+    --client-id "$CLIENT_ID" \
+    --auth-flow "USER_PASSWORD_AUTH" \
+    --auth-parameters "USERNAME=$DIS_USER,PASSWORD=$DIS_PASS" 2>&1)
+  DIS_ACCESS_TOKEN=$(echo "$DIS_AUTH_JSON" | jq -r '.AuthenticationResult.AccessToken // empty' 2>/dev/null || true)
+
+  if [[ -n "$DIS_ACCESS_TOKEN" ]]; then
+    run "AdminDisableUser" \
+      $AWS admin-disable-user \
+        --user-pool-id "$POOL_ID" \
+        --username "$DIS_USER"
+
+    DIS_GET_JSON=$($AWS admin-get-user \
+      --user-pool-id "$POOL_ID" \
+      --username "$DIS_USER" 2>&1)
+    if echo "$DIS_GET_JSON" | grep -q '"Enabled": false'; then
+      ok "AdminGetUser — Enabled is false after AdminDisableUser"
+    else
+      fail "AdminGetUser — expected Enabled=false after AdminDisableUser"
+    fi
+
+    DIS_TOKEN_JSON=$($AWS get-user --access-token "$DIS_ACCESS_TOKEN" 2>&1) || true
+    if echo "$DIS_TOKEN_JSON" | grep -qi 'NotAuthorizedException'; then
+      ok "AdminDisableUser — existing access token revoked"
+    else
+      fail "AdminDisableUser — expected existing access token to be revoked"
+    fi
+
+    DIS_SIGNIN_JSON=$($AWS initiate-auth \
+      --client-id "$CLIENT_ID" \
+      --auth-flow "USER_PASSWORD_AUTH" \
+      --auth-parameters "USERNAME=$DIS_USER,PASSWORD=$DIS_PASS" 2>&1) || true
+    if echo "$DIS_SIGNIN_JSON" | grep -qi 'NotAuthorizedException'; then
+      ok "AdminDisableUser — sign-in blocked"
+    else
+      fail "AdminDisableUser — expected sign-in to be blocked"
+    fi
+
+    run "AdminEnableUser" \
+      $AWS admin-enable-user \
+        --user-pool-id "$POOL_ID" \
+        --username "$DIS_USER"
+
+    EN_GET_JSON=$($AWS admin-get-user \
+      --user-pool-id "$POOL_ID" \
+      --username "$DIS_USER" 2>&1)
+    if echo "$EN_GET_JSON" | grep -q '"Enabled": true'; then
+      ok "AdminGetUser — Enabled is true after AdminEnableUser"
+    else
+      fail "AdminGetUser — expected Enabled=true after AdminEnableUser"
+    fi
+
+    EN_SIGNIN_JSON=$($AWS initiate-auth \
+      --client-id "$CLIENT_ID" \
+      --auth-flow "USER_PASSWORD_AUTH" \
+      --auth-parameters "USERNAME=$DIS_USER,PASSWORD=$DIS_PASS" 2>&1)
+    if echo "$EN_SIGNIN_JSON" | grep -q '"AccessToken"'; then
+      ok "AdminEnableUser — sign-in restored"
+    else
+      fail "AdminEnableUser — expected sign-in to succeed after re-enabling"
+    fi
+  else
+    skip "AdminDisableUser / AdminEnableUser — could not obtain access token"
+  fi
+else
+  skip "AdminDisableUser / AdminEnableUser — no confirmation code available"
+  echo "  Hint: set E2E_COGNITO_DIS_CODE=<code> from kumolo logs, or use Docker Compose"
+fi
+
+# ---------------------------------------------------------------------------
 # Cleanup
 # ---------------------------------------------------------------------------
 # Only clear CLIENT_ID / POOL_ID after a successful delete so the EXIT-trap

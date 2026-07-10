@@ -97,6 +97,7 @@ func insertFCPUser(
 		Username:         username,
 		Sub:              sub,
 		Status:           userStatusForceChangePasswd,
+		Enabled:          true,
 		PasswordHash:     string(hash),
 		Attributes:       nil,
 		ConfirmationCode: "",
@@ -397,6 +398,20 @@ func TestInitiateAuth_UnconfirmedUser(t *testing.T) {
 	assertErrType(t, w, ErrTypeUserNotConfirmedException)
 }
 
+func TestInitiateAuth_DisabledUser(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID, clientID := setupPool(t, ro)
+	signUpUser(t, ro, clientID, "alice", "Password123!")
+	confirmUser(t, ro, clientID, "alice")
+
+	body, _ := json.Marshal(map[string]any{"UserPoolId": poolID, "Username": "alice"})
+	require.Equal(t, http.StatusOK, doOp(t, ro, "AdminDisableUser", string(body)).Code)
+
+	w := doInitAuth(t, ro, clientID, "alice", "Password123!")
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeNotAuthorizedException)
+}
+
 func TestInitiateAuth_UserNotFound(t *testing.T) {
 	ro := newTestRouter(t)
 	_, clientID := setupPool(t, ro)
@@ -490,7 +505,7 @@ func TestInitiateAuth_ForceChangePassword_ReturnsChallenge(t *testing.T) {
 func TestInitiateAuth_GetPoolKeysError(t *testing.T) {
 	hash, _ := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.DefaultCost)
 	confirmedUser := &UserMetadata{
-		Username: "u", Sub: "sub-u", Status: userStatusConfirmed,
+		Username: "u", Sub: "sub-u", Status: userStatusConfirmed, Enabled: true,
 		PasswordHash: string(hash), Attributes: nil,
 	}
 	ro := &Router{storage: &mockStore{
@@ -567,6 +582,37 @@ func TestInitiateAuth_RefreshTokenAuth_Success(t *testing.T) {
 	assert.NotEmpty(t, result2["IdToken"])
 	_, hasRefresh := result2["RefreshToken"]
 	assert.False(t, hasRefresh, "refresh token flow must not issue a new refresh token")
+}
+
+// TestInitiateAuth_RefreshTokenAuth_DisabledUser uses a mockStore because
+// AdminDisableUser also deletes refresh tokens outright — a real disabled
+// user's refresh token would already be gone, masking the Enabled check this
+// test targets. A stubbed store keeps the token "valid" so the disabled-user
+// gate itself is exercised.
+func TestInitiateAuth_RefreshTokenAuth_DisabledUser(t *testing.T) {
+	poolID, clientID := "us-east-1_TestPool", "client-1"
+	user := &UserMetadata{Username: "alice", Sub: "sub-alice", Enabled: false}
+
+	ro := &Router{storage: &mockStore{
+		getPoolForClient: func(string) (string, error) { return poolID, nil },
+		getRefreshFn: func(string, string) (*refreshTokenData, error) {
+			return &refreshTokenData{
+				Token: "rt", PoolID: poolID, ClientID: clientID, Sub: user.Sub,
+			}, nil
+		},
+		getUserBySubFn: func(string, string) (*UserMetadata, error) { return user, nil },
+	}}
+
+	body, _ := json.Marshal(map[string]any{
+		"ClientId": clientID,
+		"AuthFlow": "REFRESH_TOKEN_AUTH",
+		"AuthParameters": map[string]string{
+			"REFRESH_TOKEN": "rt",
+		},
+	})
+	w := doOp(t, ro, "InitiateAuth", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeNotAuthorizedException)
 }
 
 func TestInitiateAuth_RefreshToken_AliasFlow(t *testing.T) {
@@ -1001,7 +1047,7 @@ func TestWriteAuthResult_CreateRefreshTokenError(t *testing.T) {
 
 	hash, _ := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.DefaultCost)
 	confirmedUser := &UserMetadata{
-		Username: "u", Sub: "sub-u", Status: userStatusConfirmed,
+		Username: "u", Sub: "sub-u", Status: userStatusConfirmed, Enabled: true,
 		PasswordHash: string(hash),
 	}
 	ro := &Router{storage: &mockStore{
@@ -1029,7 +1075,7 @@ func TestWriteAuthResult_GetUserPoolClientError_ReturnsInternalError(t *testing.
 	hash, err := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.DefaultCost)
 	require.NoError(t, err)
 	confirmedUser := &UserMetadata{
-		Username: "u", Sub: "sub-u", Status: userStatusConfirmed,
+		Username: "u", Sub: "sub-u", Status: userStatusConfirmed, Enabled: true,
 		PasswordHash: string(hash),
 	}
 	ro := &Router{storage: &mockStore{
@@ -1113,7 +1159,7 @@ func TestInitiateAuth_RefreshToken_NoExpiresAt_NotRejected(t *testing.T) {
 		IssuedAt: nowUnix() - float64(31)*secondsPerDay,
 		// ExpiresAt == 0: legacy token without expiry must not be rejected
 	}
-	user := &UserMetadata{Username: "u", Sub: "sub-u", Status: userStatusConfirmed}
+	user := &UserMetadata{Username: "u", Sub: "sub-u", Status: userStatusConfirmed, Enabled: true}
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
 	keyID, err := generateTokenID()
@@ -1164,7 +1210,7 @@ func TestInitiateAuth_RefreshToken_GetOrCreateKeysError(t *testing.T) {
 	rt := &refreshTokenData{
 		Token: "tok", PoolID: "pool-1", ClientID: "c", Username: "u", Sub: "sub-u",
 	}
-	user := &UserMetadata{Username: "u", Sub: "sub-u", Status: userStatusConfirmed}
+	user := &UserMetadata{Username: "u", Sub: "sub-u", Status: userStatusConfirmed, Enabled: true}
 	ro := &Router{storage: &mockStore{
 		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
 		getRefreshFn:     func(string, string) (*refreshTokenData, error) { return rt, nil },

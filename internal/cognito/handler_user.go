@@ -2,8 +2,12 @@ package cognito
 
 import (
 	"crypto/rsa"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"time"
@@ -192,6 +196,240 @@ func (ro *Router) checkTokenNotRevoked(w http.ResponseWriter, poolID, jti, origi
 	return true
 }
 
+// ──── GetUserAttributeVerificationCode ───────────────────────────────────────
+
+// verifiableAttr reports whether attrName is one kumolo tracks a "_verified"
+// companion attribute and pending-code slot for.
+func verifiableAttr(attrName string) bool {
+	return attrName == attrEmail || attrName == attrPhoneNumber
+}
+
+type getUserAttributeVerificationCodeRequest struct {
+	AccessToken   string `json:"AccessToken"`
+	AttributeName string `json:"AttributeName"`
+}
+
+func (ro *Router) handleGetUserAttributeVerificationCode(w http.ResponseWriter, body []byte) {
+	var req getUserAttributeVerificationCodeRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"invalid request body")
+		return
+	}
+	if req.AccessToken == "" {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"AccessToken is required")
+		return
+	}
+	if !verifiableAttr(req.AttributeName) {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"AttributeName must be email or phone_number")
+		return
+	}
+
+	poolID, ok := poolIDFromToken(w, req.AccessToken)
+	if !ok {
+		return
+	}
+	privateKey, ok := ro.poolKey(w, poolID)
+	if !ok {
+		return
+	}
+	sub, jti, originJTI, _, ok := validateAccessJWT(w, req.AccessToken, &privateKey.PublicKey)
+	if !ok {
+		return
+	}
+	if ok2 := ro.checkTokenNotRevoked(w, poolID, jti, originJTI); !ok2 {
+		return
+	}
+	user, ok := ro.lookupUser(w, poolID, sub)
+	if !ok {
+		return
+	}
+
+	value, has := getAttr(user.Attributes, req.AttributeName)
+	if !has || value == "" {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			fmt.Sprintf("user has no value set for attribute %q", req.AttributeName))
+		return
+	}
+
+	codeR := ro.codeReader
+	if codeR == nil {
+		codeR = randReader
+	}
+	code, err := generateConfirmationCodeFrom(codeR)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to generate verification code")
+		return
+	}
+
+	updateErr := ro.storage.UpdateUser(poolID, user.Username, func(u *UserMetadata) error {
+		if u.VerificationCodes == nil {
+			u.VerificationCodes = map[string]string{}
+		}
+		u.VerificationCodes[req.AttributeName] = code
+		return nil
+	})
+	if updateErr != nil {
+		if errors.Is(updateErr, errUserNotFound) {
+			writeError(w, http.StatusBadRequest, ErrTypeUserNotFoundException,
+				"User does not exist.")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to store verification code")
+		return
+	}
+
+	slog.Info("GetUserAttributeVerificationCode", "pool_id", poolID, "username", user.Username,
+		"attribute", req.AttributeName, "code", code)
+
+	medium, dest := deliveryEmail, maskEmail(value)
+	if req.AttributeName == attrPhoneNumber {
+		medium, dest = deliverySMS, maskPhone(value)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"CodeDeliveryDetails": codeDeliveryDetails{
+			AttributeName:  req.AttributeName,
+			DeliveryMedium: medium,
+			Destination:    dest,
+		},
+	})
+}
+
+// ──── VerifyUserAttribute ────────────────────────────────────────────────────
+
+type verifyUserAttributeRequest struct {
+	AccessToken   string `json:"AccessToken"`
+	AttributeName string `json:"AttributeName"`
+	Code          string `json:"Code"`
+}
+
+func (ro *Router) handleVerifyUserAttribute(w http.ResponseWriter, body []byte) {
+	var req verifyUserAttributeRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"invalid request body")
+		return
+	}
+	if req.AccessToken == "" {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"AccessToken is required")
+		return
+	}
+	if !verifiableAttr(req.AttributeName) {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"AttributeName must be email or phone_number")
+		return
+	}
+	if req.Code == "" {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"Code is required")
+		return
+	}
+
+	poolID, ok := poolIDFromToken(w, req.AccessToken)
+	if !ok {
+		return
+	}
+	privateKey, ok := ro.poolKey(w, poolID)
+	if !ok {
+		return
+	}
+	sub, jti, originJTI, _, ok := validateAccessJWT(w, req.AccessToken, &privateKey.PublicKey)
+	if !ok {
+		return
+	}
+	if ok2 := ro.checkTokenNotRevoked(w, poolID, jti, originJTI); !ok2 {
+		return
+	}
+	user, ok := ro.lookupUser(w, poolID, sub)
+	if !ok {
+		return
+	}
+
+	err := ro.storage.UpdateUser(poolID, user.Username, func(u *UserMetadata) error {
+		stored := u.VerificationCodes[req.AttributeName]
+		if subtle.ConstantTimeCompare([]byte(req.Code), []byte(stored)) != 1 {
+			return errCodeMismatch
+		}
+		u.Attributes = setAttr(u.Attributes, req.AttributeName+"_verified", "true")
+		delete(u.VerificationCodes, req.AttributeName)
+		return nil
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, errUserNotFound):
+			writeError(w, http.StatusBadRequest, ErrTypeUserNotFoundException,
+				"User does not exist.")
+		case errors.Is(err, errCodeMismatch):
+			writeError(w, http.StatusBadRequest, ErrTypeCodeMismatchException,
+				"Invalid verification code provided, please try again.")
+		default:
+			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+				"failed to verify attribute")
+		}
+		return
+	}
+
+	writeEmpty(w)
+}
+
+// ──── DeleteUser ────────────────────────────────────────────────────────────
+
+type deleteUserRequest struct {
+	AccessToken string `json:"AccessToken"`
+}
+
+func (ro *Router) handleDeleteUser(w http.ResponseWriter, body []byte) {
+	var req deleteUserRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"invalid request body")
+		return
+	}
+	if req.AccessToken == "" {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"AccessToken is required")
+		return
+	}
+
+	poolID, ok := poolIDFromToken(w, req.AccessToken)
+	if !ok {
+		return
+	}
+	privateKey, ok := ro.poolKey(w, poolID)
+	if !ok {
+		return
+	}
+	sub, jti, originJTI, _, ok := validateAccessJWT(w, req.AccessToken, &privateKey.PublicKey)
+	if !ok {
+		return
+	}
+	if ok2 := ro.checkTokenNotRevoked(w, poolID, jti, originJTI); !ok2 {
+		return
+	}
+	user, ok := ro.lookupUser(w, poolID, sub)
+	if !ok {
+		return
+	}
+
+	if err := ro.storage.DeleteUser(poolID, user.Username); err != nil {
+		if errors.Is(err, errUserNotFound) {
+			writeError(w, http.StatusBadRequest, ErrTypeUserNotFoundException,
+				"User does not exist.")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to delete user")
+		return
+	}
+
+	writeEmpty(w)
+}
+
 // ──── GlobalSignOut ─────────────────────────────────────────────────────────
 
 type globalSignOutRequest struct {
@@ -253,6 +491,218 @@ func (ro *Router) handleGlobalSignOut(w http.ResponseWriter, body []byte) {
 	}
 
 	writeEmpty(w)
+}
+
+// ──── UpdateUserAttributes ───────────────────────────────────────────────────
+
+type updateUserAttributesRequest struct {
+	AccessToken    string          `json:"AccessToken"`
+	UserAttributes []AttributeType `json:"UserAttributes"`
+}
+
+func (ro *Router) handleUpdateUserAttributes(w http.ResponseWriter, body []byte) {
+	var req updateUserAttributesRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"invalid request body")
+		return
+	}
+	if req.AccessToken == "" {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"AccessToken is required")
+		return
+	}
+	if len(req.UserAttributes) == 0 {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"UserAttributes is required")
+		return
+	}
+	for _, attr := range req.UserAttributes {
+		if attr.Name == "sub" {
+			writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+				"Attribute modifications are not allowed for sub")
+			return
+		}
+	}
+
+	poolID, ok := poolIDFromToken(w, req.AccessToken)
+	if !ok {
+		return
+	}
+	privateKey, ok := ro.poolKey(w, poolID)
+	if !ok {
+		return
+	}
+	sub, jti, originJTI, _, ok := validateAccessJWT(w, req.AccessToken, &privateKey.PublicKey)
+	if !ok {
+		return
+	}
+	if ok2 := ro.checkTokenNotRevoked(w, poolID, jti, originJTI); !ok2 {
+		return
+	}
+	user, ok := ro.lookupUser(w, poolID, sub)
+	if !ok {
+		return
+	}
+
+	codeR := ro.codeReader
+	if codeR == nil {
+		codeR = randReader
+	}
+
+	changes, deliveries, err := planAttributeChanges(codeR, user.Attributes, req.UserAttributes)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to generate verification code")
+		return
+	}
+
+	updateErr := ro.storage.UpdateUser(poolID, user.Username, func(u *UserMetadata) error {
+		applyAttributeChanges(u, changes)
+		return nil
+	})
+	if updateErr != nil {
+		if errors.Is(updateErr, errUserNotFound) {
+			writeError(w, http.StatusBadRequest, ErrTypeUserNotFoundException,
+				"User does not exist.")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to update user attributes")
+		return
+	}
+
+	for _, c := range changes {
+		if c.verifyCode != "" {
+			slog.Info("UpdateUserAttributes verification code", "pool_id", poolID,
+				"username", user.Username, "attribute", c.name, "code", c.verifyCode)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"CodeDeliveryDetailsList": deliveries})
+}
+
+// attrChange describes one attribute update or deletion to apply to a user.
+type attrChange struct {
+	name          string
+	value         string // ignored when delete or clearCodeOnly is true
+	delete        bool
+	verifyCode    string // non-empty when this change also resets verification for name
+	clearCode     bool   // true when applying value should also drop a pending code for name
+	clearCodeOnly bool   // true when only a pending code should be dropped (no attribute touched)
+}
+
+// planAttributeChanges computes the attribute mutations and verification-code
+// deliveries for an UpdateUserAttributes request, without mutating any state.
+// Verification codes are generated here (fallible) so the storage mutation
+// closure passed to UpdateUser stays infallible.
+func planAttributeChanges(
+	codeR io.Reader,
+	current []AttributeType,
+	requested []AttributeType,
+) ([]attrChange, []codeDeliveryDetails, error) {
+	var changes []attrChange
+	var deliveries []codeDeliveryDetails
+
+	for _, attr := range requested {
+		if attr.Value == "" {
+			changes = append(changes, attrChange{name: attr.Name, delete: true})
+			continue
+		}
+
+		if attr.Name != attrEmail && attr.Name != attrPhoneNumber {
+			changes = append(changes, attrChange{name: attr.Name, value: attr.Value})
+			continue
+		}
+
+		oldValue, _ := getAttr(current, attr.Name)
+		if oldValue == attr.Value {
+			changes = append(changes, attrChange{name: attr.Name, value: attr.Value})
+			continue
+		}
+
+		code, err := generateConfirmationCodeFrom(codeR)
+		if err != nil {
+			return nil, nil, fmt.Errorf("generate verification code: %w", err)
+		}
+		changes = append(changes, attrChange{name: attr.Name, value: attr.Value, verifyCode: code})
+
+		medium, dest := deliveryEmail, maskEmail(attr.Value)
+		if attr.Name == attrPhoneNumber {
+			medium, dest = deliverySMS, maskPhone(attr.Value)
+		}
+		deliveries = append(deliveries, codeDeliveryDetails{
+			AttributeName:  attr.Name,
+			DeliveryMedium: medium,
+			Destination:    dest,
+		})
+	}
+
+	if deliveries == nil {
+		deliveries = []codeDeliveryDetails{}
+	}
+	return changes, deliveries, nil
+}
+
+// applyAttributeChanges mutates u according to changes. It must not fail.
+func applyAttributeChanges(u *UserMetadata, changes []attrChange) {
+	for _, c := range changes {
+		if c.delete {
+			u.Attributes = deleteAttr(u.Attributes, c.name)
+			if c.name == attrEmail || c.name == attrPhoneNumber {
+				u.Attributes = deleteAttr(u.Attributes, c.name+"_verified")
+				delete(u.VerificationCodes, c.name)
+			}
+			continue
+		}
+		if c.clearCodeOnly {
+			delete(u.VerificationCodes, c.name)
+			continue
+		}
+
+		u.Attributes = setAttr(u.Attributes, c.name, c.value)
+		switch {
+		case c.verifyCode != "":
+			u.Attributes = setAttr(u.Attributes, c.name+"_verified", "false")
+			if u.VerificationCodes == nil {
+				u.VerificationCodes = map[string]string{}
+			}
+			u.VerificationCodes[c.name] = c.verifyCode
+		case c.clearCode:
+			delete(u.VerificationCodes, c.name)
+		}
+	}
+}
+
+// getAttr returns the value of the named attribute, if present.
+func getAttr(attrs []AttributeType, name string) (string, bool) {
+	for _, a := range attrs {
+		if a.Name == name {
+			return a.Value, true
+		}
+	}
+	return "", false
+}
+
+// setAttr upserts name=value into attrs, replacing any existing entry.
+func setAttr(attrs []AttributeType, name, value string) []AttributeType {
+	for i, a := range attrs {
+		if a.Name == name {
+			attrs[i].Value = value
+			return attrs
+		}
+	}
+	return append(attrs, AttributeType{Name: name, Value: value})
+}
+
+// deleteAttr removes the named attribute from attrs, if present.
+func deleteAttr(attrs []AttributeType, name string) []AttributeType {
+	out := attrs[:0]
+	for _, a := range attrs {
+		if a.Name != name {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 // prependSub ensures sub is always the first element of attrs.
