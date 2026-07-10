@@ -949,6 +949,103 @@ func TestUpdateUserAttributes_InvalidToken(t *testing.T) {
 	assertErrType(t, w, ErrTypeNotAuthorizedException)
 }
 
+func TestUpdateUserAttributes_KeysStorageError(t *testing.T) {
+	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	poolID := "us-east-1_FakePool1"
+	now := time.Now().Unix()
+	token, err := buildJWT(privKey, "kid", map[string]any{
+		"sub": "some-sub", "iss": issuerURL(poolID), "token_use": "access",
+		"exp": now + 3600, "iat": now,
+	})
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return nil, nil, errors.New("storage failure")
+		},
+	}}
+	w := doUpdateUserAttributes(t, ro, token, []map[string]string{
+		{"Name": "given_name", "Value": "A"},
+	})
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestUpdateUserAttributes_WrongTokenUse(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	signUpUser(t, ro, clientID, "alice", "Password123!")
+	confirmUser(t, ro, clientID, "alice")
+
+	poolID, err := ro.storage.GetPoolIDForClient(clientID)
+	require.NoError(t, err)
+	keys, privateKey, err := ro.storage.GetOrCreatePoolKeys(poolID)
+	require.NoError(t, err)
+	user, err := ro.storage.GetUser(poolID, "alice")
+	require.NoError(t, err)
+
+	now := time.Now().Unix()
+	token, err := buildJWT(privateKey, keys.KeyID, map[string]any{
+		"sub": user.Sub, "iss": issuerURL(poolID), "token_use": "id",
+		"exp": now + 3600, "iat": now,
+	})
+	require.NoError(t, err)
+
+	w := doUpdateUserAttributes(t, ro, token, []map[string]string{
+		{"Name": "given_name", "Value": "A"},
+	})
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeNotAuthorizedException)
+}
+
+func TestUpdateUserAttributes_CheckTokenRevokedStorageError(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	poolID := "us-east-1_TestPool"
+	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
+	token, _, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil, "")
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: "kid"}, key, nil
+		},
+		isRevokedFn: func(string, string) (bool, error) {
+			return false, errors.New("disk error")
+		},
+	}}
+	w := doUpdateUserAttributes(t, ro, token, []map[string]string{
+		{"Name": "given_name", "Value": "A"},
+	})
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestUpdateUserAttributes_UserNotFound(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+
+	poolID, err := ro.storage.GetPoolIDForClient(clientID)
+	require.NoError(t, err)
+	keys, privateKey, err := ro.storage.GetOrCreatePoolKeys(poolID)
+	require.NoError(t, err)
+
+	now := time.Now().Unix()
+	token, err := buildJWT(privateKey, keys.KeyID, map[string]any{
+		"sub": "00000000-0000-0000-0000-000000000000", "iss": issuerURL(poolID),
+		"token_use": "access", "exp": now + 3600, "iat": now,
+		"jti": "some-jti-user-not-found", "origin_jti": "some-origin-jti",
+	})
+	require.NoError(t, err)
+
+	w := doUpdateUserAttributes(t, ro, token, []map[string]string{
+		{"Name": "given_name", "Value": "A"},
+	})
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeUserNotFoundException)
+}
+
 func TestUpdateUserAttributes_CodeGenerationError(t *testing.T) {
 	ro := newTestRouter(t)
 	_, clientID := setupPool(t, ro)
@@ -1095,6 +1192,95 @@ func TestGetUserAttributeVerificationCode_InvalidToken(t *testing.T) {
 	w := doGetVerificationCode(t, ro, "not-a-jwt", "email")
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assertErrType(t, w, ErrTypeNotAuthorizedException)
+}
+
+func TestGetUserAttributeVerificationCode_KeysStorageError(t *testing.T) {
+	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	poolID := "us-east-1_FakePool1"
+	now := time.Now().Unix()
+	token, err := buildJWT(privKey, "kid", map[string]any{
+		"sub": "some-sub", "iss": issuerURL(poolID), "token_use": "access",
+		"exp": now + 3600, "iat": now,
+	})
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return nil, nil, errors.New("storage failure")
+		},
+	}}
+	w := doGetVerificationCode(t, ro, token, "email")
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestGetUserAttributeVerificationCode_WrongTokenUse(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	signUpUser(t, ro, clientID, "alice", "Password123!")
+	confirmUser(t, ro, clientID, "alice")
+
+	poolID, err := ro.storage.GetPoolIDForClient(clientID)
+	require.NoError(t, err)
+	keys, privateKey, err := ro.storage.GetOrCreatePoolKeys(poolID)
+	require.NoError(t, err)
+	user, err := ro.storage.GetUser(poolID, "alice")
+	require.NoError(t, err)
+
+	now := time.Now().Unix()
+	token, err := buildJWT(privateKey, keys.KeyID, map[string]any{
+		"sub": user.Sub, "iss": issuerURL(poolID), "token_use": "id",
+		"exp": now + 3600, "iat": now,
+	})
+	require.NoError(t, err)
+
+	w := doGetVerificationCode(t, ro, token, "email")
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeNotAuthorizedException)
+}
+
+func TestGetUserAttributeVerificationCode_CheckTokenRevokedStorageError(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	poolID := "us-east-1_TestPool"
+	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
+	token, _, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil, "")
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: "kid"}, key, nil
+		},
+		isRevokedFn: func(string, string) (bool, error) {
+			return false, errors.New("disk error")
+		},
+	}}
+	w := doGetVerificationCode(t, ro, token, "email")
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestGetUserAttributeVerificationCode_UserNotFound(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+
+	poolID, err := ro.storage.GetPoolIDForClient(clientID)
+	require.NoError(t, err)
+	keys, privateKey, err := ro.storage.GetOrCreatePoolKeys(poolID)
+	require.NoError(t, err)
+
+	now := time.Now().Unix()
+	token, err := buildJWT(privateKey, keys.KeyID, map[string]any{
+		"sub": "00000000-0000-0000-0000-000000000000", "iss": issuerURL(poolID),
+		"token_use": "access", "exp": now + 3600, "iat": now,
+		"jti": "some-jti-user-not-found", "origin_jti": "some-origin-jti",
+	})
+	require.NoError(t, err)
+
+	w := doGetVerificationCode(t, ro, token, "email")
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeUserNotFoundException)
 }
 
 func TestGetUserAttributeVerificationCode_CodeGenerationError(t *testing.T) {
@@ -1250,6 +1436,95 @@ func TestVerifyUserAttribute_InvalidToken(t *testing.T) {
 	assertErrType(t, w, ErrTypeNotAuthorizedException)
 }
 
+func TestVerifyUserAttribute_KeysStorageError(t *testing.T) {
+	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	poolID := "us-east-1_FakePool1"
+	now := time.Now().Unix()
+	token, err := buildJWT(privKey, "kid", map[string]any{
+		"sub": "some-sub", "iss": issuerURL(poolID), "token_use": "access",
+		"exp": now + 3600, "iat": now,
+	})
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return nil, nil, errors.New("storage failure")
+		},
+	}}
+	w := doVerifyUserAttribute(t, ro, token, "email", "123456")
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestVerifyUserAttribute_WrongTokenUse(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	signUpUser(t, ro, clientID, "alice", "Password123!")
+	confirmUser(t, ro, clientID, "alice")
+
+	poolID, err := ro.storage.GetPoolIDForClient(clientID)
+	require.NoError(t, err)
+	keys, privateKey, err := ro.storage.GetOrCreatePoolKeys(poolID)
+	require.NoError(t, err)
+	user, err := ro.storage.GetUser(poolID, "alice")
+	require.NoError(t, err)
+
+	now := time.Now().Unix()
+	token, err := buildJWT(privateKey, keys.KeyID, map[string]any{
+		"sub": user.Sub, "iss": issuerURL(poolID), "token_use": "id",
+		"exp": now + 3600, "iat": now,
+	})
+	require.NoError(t, err)
+
+	w := doVerifyUserAttribute(t, ro, token, "email", "123456")
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeNotAuthorizedException)
+}
+
+func TestVerifyUserAttribute_CheckTokenRevokedStorageError(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	poolID := "us-east-1_TestPool"
+	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
+	token, _, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil, "")
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: "kid"}, key, nil
+		},
+		isRevokedFn: func(string, string) (bool, error) {
+			return false, errors.New("disk error")
+		},
+	}}
+	w := doVerifyUserAttribute(t, ro, token, "email", "123456")
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestVerifyUserAttribute_UserNotFound(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+
+	poolID, err := ro.storage.GetPoolIDForClient(clientID)
+	require.NoError(t, err)
+	keys, privateKey, err := ro.storage.GetOrCreatePoolKeys(poolID)
+	require.NoError(t, err)
+
+	now := time.Now().Unix()
+	token, err := buildJWT(privateKey, keys.KeyID, map[string]any{
+		"sub": "00000000-0000-0000-0000-000000000000", "iss": issuerURL(poolID),
+		"token_use": "access", "exp": now + 3600, "iat": now,
+		"jti": "some-jti-user-not-found", "origin_jti": "some-origin-jti",
+	})
+	require.NoError(t, err)
+
+	w := doVerifyUserAttribute(t, ro, token, "email", "123456")
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeUserNotFoundException)
+}
+
 func TestVerifyUserAttribute_StorageError(t *testing.T) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
@@ -1342,6 +1617,74 @@ func TestDeleteUser_InvalidToken(t *testing.T) {
 	w := doDeleteUser(t, ro, "not-a-jwt")
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assertErrType(t, w, ErrTypeNotAuthorizedException)
+}
+
+func TestDeleteUser_KeysStorageError(t *testing.T) {
+	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	poolID := "us-east-1_FakePool1"
+	now := time.Now().Unix()
+	token, err := buildJWT(privKey, "kid", map[string]any{
+		"sub": "some-sub", "iss": issuerURL(poolID), "token_use": "access",
+		"exp": now + 3600, "iat": now,
+	})
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return nil, nil, errors.New("storage failure")
+		},
+	}}
+	w := doDeleteUser(t, ro, token)
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestDeleteUser_WrongTokenUse(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	signUpUser(t, ro, clientID, "alice", "Password123!")
+	confirmUser(t, ro, clientID, "alice")
+
+	poolID, err := ro.storage.GetPoolIDForClient(clientID)
+	require.NoError(t, err)
+	keys, privateKey, err := ro.storage.GetOrCreatePoolKeys(poolID)
+	require.NoError(t, err)
+	user, err := ro.storage.GetUser(poolID, "alice")
+	require.NoError(t, err)
+
+	now := time.Now().Unix()
+	token, err := buildJWT(privateKey, keys.KeyID, map[string]any{
+		"sub": user.Sub, "iss": issuerURL(poolID), "token_use": "id",
+		"exp": now + 3600, "iat": now,
+	})
+	require.NoError(t, err)
+
+	w := doDeleteUser(t, ro, token)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeNotAuthorizedException)
+}
+
+func TestDeleteUser_UserNotFound(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+
+	poolID, err := ro.storage.GetPoolIDForClient(clientID)
+	require.NoError(t, err)
+	keys, privateKey, err := ro.storage.GetOrCreatePoolKeys(poolID)
+	require.NoError(t, err)
+
+	now := time.Now().Unix()
+	token, err := buildJWT(privateKey, keys.KeyID, map[string]any{
+		"sub": "00000000-0000-0000-0000-000000000000", "iss": issuerURL(poolID),
+		"token_use": "access", "exp": now + 3600, "iat": now,
+		"jti": "some-jti-user-not-found", "origin_jti": "some-origin-jti",
+	})
+	require.NoError(t, err)
+
+	w := doDeleteUser(t, ro, token)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeUserNotFoundException)
 }
 
 func TestDeleteUser_RevokedToken(t *testing.T) {

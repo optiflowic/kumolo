@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -392,6 +393,31 @@ func TestStorageListUsers_ListDirError(t *testing.T) {
 	_, _, err := s.ListUsers(poolID, nil, 60, "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "list users dir")
+}
+
+func TestStorageListUsers_SkipsDirEntry(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	require.NoError(t, s.CreateUser(poolID,
+		&UserMetadata{Username: "alice", Sub: "sub-alice", Status: userStatusConfirmed},
+	))
+
+	realListDir := s.listDirFn
+	s.listDirFn = func(name string) ([]os.DirEntry, error) {
+		entries, err := realListDir(name)
+		if err != nil {
+			return nil, err
+		}
+		if filepath.Base(name) == "users" {
+			return append([]os.DirEntry{fakeDirEntryDir("subdir")}, entries...), nil
+		}
+		return entries, nil
+	}
+
+	users, _, err := s.ListUsers(poolID, nil, 60, "")
+	require.NoError(t, err)
+	require.Len(t, users, 1)
+	assert.Equal(t, "alice", users[0].Username)
 }
 
 func TestStorageListUsers_CorruptedUserFileSkipped(t *testing.T) {

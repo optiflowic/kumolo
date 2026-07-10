@@ -825,6 +825,13 @@ func TestListUsers_ValidationErrors(t *testing.T) {
 	}
 }
 
+func TestListUsers_InvalidJSON(t *testing.T) {
+	ro := newTestRouter(t)
+	w := doOp(t, ro, "ListUsers", `not json`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeInvalidParameterException)
+}
+
 func TestListUsers_InvalidPaginationToken(t *testing.T) {
 	ro := newTestRouter(t)
 	poolID := createPool(t, ro, "test-pool")
@@ -914,6 +921,29 @@ func TestAdminUpdateUserAttributes_EmailChange_GeneratesCode(t *testing.T) {
 	verified, _ := getAttr(u.Attributes, "email_verified")
 	assert.Equal(t, "false", verified)
 	require.NotEmpty(t, u.VerificationCodes["email"])
+}
+
+func TestAdminUpdateUserAttributes_EmailSameValue_NoCode(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "test-pool")
+	body, _ := json.Marshal(map[string]any{
+		"UserPoolId":     poolID,
+		"Username":       "alice",
+		"UserAttributes": []map[string]string{{"Name": "email", "Value": "alice@example.com"}},
+	})
+	require.Equal(t, http.StatusOK, doOp(t, ro, "AdminCreateUser", string(body)).Code)
+
+	w := doAdminUpdateUserAttributes(t, ro, poolID, "alice", []map[string]string{
+		{"Name": "email", "Value": "alice@example.com"},
+	})
+	require.Equal(t, http.StatusOK, w.Code)
+
+	u, err := ro.storage.GetUser(poolID, "alice")
+	require.NoError(t, err)
+	_, hasVerifiedAttr := getAttr(u.Attributes, "email_verified")
+	assert.False(t, hasVerifiedAttr)
+	_, hasCode := u.VerificationCodes["email"]
+	assert.False(t, hasCode)
 }
 
 func TestAdminUpdateUserAttributes_BypassWithEmailVerifiedTrue(t *testing.T) {
