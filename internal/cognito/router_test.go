@@ -16,6 +16,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // failWriter is an http.ResponseWriter whose Write always returns an error.
@@ -34,10 +35,10 @@ func (f *failWriteCloser) Close() error              { return nil }
 
 func newTestRouter(t *testing.T) *Router {
 	t.Helper()
-	storage, err := NewStorage(t.TempDir())
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = storage.Close() })
-	return NewRouter(storage)
+	storage := newTestStorage(t)
+	ro := NewRouter(storage)
+	ro.bcryptCost = bcrypt.MinCost
+	return ro
 }
 
 func TestRouter_UnknownOperation(t *testing.T) {

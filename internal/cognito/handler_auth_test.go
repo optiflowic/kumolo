@@ -90,7 +90,7 @@ func insertFCPUser(
 	poolID, username, sub, tempPassword string,
 ) {
 	t.Helper()
-	hash, err := bcrypt.GenerateFromPassword([]byte(tempPassword), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(tempPassword), bcrypt.MinCost)
 	require.NoError(t, err)
 	ts := nowUnix()
 	user := &UserMetadata{
@@ -503,7 +503,7 @@ func TestInitiateAuth_ForceChangePassword_ReturnsChallenge(t *testing.T) {
 }
 
 func TestInitiateAuth_GetPoolKeysError(t *testing.T) {
-	hash, _ := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.DefaultCost)
+	hash, _ := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.MinCost)
 	confirmedUser := &UserMetadata{
 		Username: "u", Sub: "sub-u", Status: userStatusConfirmed, Enabled: true,
 		PasswordHash: string(hash), Attributes: nil,
@@ -1041,11 +1041,11 @@ func TestResendDeliveryDetails_EmailWinsOverPhone(t *testing.T) {
 // ── writeAuthResult error paths ───────────────────────────────────────────────
 
 func TestWriteAuthResult_CreateRefreshTokenError(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
 	keyID, _ := generateTokenID()
 
-	hash, _ := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.DefaultCost)
+	hash, _ := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.MinCost)
 	confirmedUser := &UserMetadata{
 		Username: "u", Sub: "sub-u", Status: userStatusConfirmed, Enabled: true,
 		PasswordHash: string(hash),
@@ -1067,12 +1067,12 @@ func TestWriteAuthResult_CreateRefreshTokenError(t *testing.T) {
 }
 
 func TestWriteAuthResult_GetUserPoolClientError_ReturnsInternalError(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
 	keyID, err := generateTokenID()
 	require.NoError(t, err)
 
-	hash, err := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.MinCost)
 	require.NoError(t, err)
 	confirmedUser := &UserMetadata{
 		Username: "u", Sub: "sub-u", Status: userStatusConfirmed, Enabled: true,
@@ -1160,7 +1160,7 @@ func TestInitiateAuth_RefreshToken_NoExpiresAt_NotRejected(t *testing.T) {
 		// ExpiresAt == 0: legacy token without expiry must not be rejected
 	}
 	user := &UserMetadata{Username: "u", Sub: "sub-u", Status: userStatusConfirmed, Enabled: true}
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
 	keyID, err := generateTokenID()
 	require.NoError(t, err)
@@ -1277,7 +1277,7 @@ func TestRespondToAuthChallenge_WrongSessionPool(t *testing.T) {
 }
 
 func TestRespondToAuthChallenge_UpdateUserNotFound(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
 	keyID, _ := generateTokenID()
 
@@ -1302,7 +1302,7 @@ func TestRespondToAuthChallenge_UpdateUserNotFound(t *testing.T) {
 }
 
 func TestRespondToAuthChallenge_UpdateUserStorageError(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
 	keyID, _ := generateTokenID()
 
@@ -1350,7 +1350,7 @@ func TestJWKS_GetOrCreateKeysError(t *testing.T) {
 }
 
 func TestJWKS_EncodeError(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
 	ro := &Router{storage: &mockStore{
 		getOrCreateKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
@@ -1404,7 +1404,7 @@ func TestRespondToAuthChallenge_InvalidBody(t *testing.T) {
 // ── handleNewPasswordRequired: wrong challenge claim ──────────────────────────
 
 func TestRespondToAuthChallenge_WrongChallengeName(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
 	keyID, _ := generateTokenID()
 
@@ -1430,7 +1430,7 @@ func TestRespondToAuthChallenge_WrongChallengeName(t *testing.T) {
 // ── handleNewPasswordRequired: errWrongChallengeStatus ────────────────────────
 
 func TestRespondToAuthChallenge_WrongChallengeStatus(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
 	keyID, _ := generateTokenID()
 

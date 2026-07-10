@@ -1,6 +1,8 @@
 package cognito
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
 	"errors"
 	"io"
 	"os"
@@ -16,7 +18,18 @@ func newTestStorage(t *testing.T) *Storage {
 	s, err := NewStorage(t.TempDir())
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = s.Close() })
+	s.generateKeyFn = testGenerateRSAKey
 	return s
+}
+
+// testGenerateRSAKey substitutes for the real (slow) RSA-2048 generation in
+// tests: a smaller key still produces a valid, distinct-per-pool RSA
+// signature for RS256 JWTs, but generates far faster than 2048 bits. Pool
+// keys must stay distinct across pools (see TestRespondToAuthChallenge_WrongSessionPool,
+// which relies on cross-pool signature verification failing), so unlike
+// bcrypt cost this can't be reduced to a single shared/cached key.
+func testGenerateRSAKey() (*rsa.PrivateKey, error) {
+	return rsa.GenerateKey(rand.Reader, 1024)
 }
 
 func setupStoragePool(t *testing.T, s *Storage) string {

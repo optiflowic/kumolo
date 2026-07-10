@@ -306,7 +306,7 @@ func TestGetUser_UserNotFound(t *testing.T) {
 }
 
 func TestGetUser_UnknownPool(t *testing.T) {
-	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	privKey, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
 
 	poolID := "us-east-1_Unknown"
@@ -335,7 +335,7 @@ func TestGetUser_UnknownPool(t *testing.T) {
 }
 
 func TestGetUser_KeysStorageError(t *testing.T) {
-	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	privKey, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
 
 	poolID := "us-east-1_FakePool1"
@@ -363,7 +363,7 @@ func TestGetUser_KeysStorageError(t *testing.T) {
 }
 
 func TestGetUser_GetUserBySubStorageError(t *testing.T) {
-	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	privKey, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
 
 	poolID := "us-east-1_FakePool2"
@@ -530,7 +530,7 @@ func TestGlobalSignOut_InvalidToken(t *testing.T) {
 }
 
 func TestGlobalSignOut_PoolKeyError(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
@@ -549,9 +549,9 @@ func TestGlobalSignOut_PoolKeyError(t *testing.T) {
 }
 
 func TestGlobalSignOut_WrongKeySignature(t *testing.T) {
-	key1, err := rsa.GenerateKey(rand.Reader, 2048)
+	key1, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
-	key2, err := rsa.GenerateKey(rand.Reader, 2048)
+	key2, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
@@ -570,7 +570,7 @@ func TestGlobalSignOut_WrongKeySignature(t *testing.T) {
 }
 
 func TestGlobalSignOut_RevokeAccessTokenStorageError(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
@@ -593,7 +593,7 @@ func TestGlobalSignOut_RevokeAccessTokenStorageError(t *testing.T) {
 }
 
 func TestGetUser_TokenWithoutOriginJTI(t *testing.T) {
-	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	privKey, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
 	poolID := "us-east-1_TestPool"
 	keyID := "kid"
@@ -626,7 +626,7 @@ func TestGetUser_TokenWithoutOriginJTI(t *testing.T) {
 }
 
 func TestGetUser_CheckTokenRevokedStorageError(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
@@ -710,7 +710,7 @@ func TestGlobalSignOut_NewTokenValidAfterSignOut(t *testing.T) {
 }
 
 func TestGlobalSignOut_RevokeTokenFamiliesStorageError(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
@@ -730,7 +730,7 @@ func TestGlobalSignOut_RevokeTokenFamiliesStorageError(t *testing.T) {
 }
 
 func TestGlobalSignOut_DeleteRefreshTokensStorageError(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
@@ -950,7 +950,7 @@ func TestUpdateUserAttributes_InvalidToken(t *testing.T) {
 }
 
 func TestUpdateUserAttributes_KeysStorageError(t *testing.T) {
-	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	privKey, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
 	poolID := "us-east-1_FakePool1"
 	now := time.Now().Unix()
@@ -1000,7 +1000,7 @@ func TestUpdateUserAttributes_WrongTokenUse(t *testing.T) {
 }
 
 func TestUpdateUserAttributes_CheckTokenRevokedStorageError(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
@@ -1060,7 +1060,7 @@ func TestUpdateUserAttributes_CodeGenerationError(t *testing.T) {
 }
 
 func TestUpdateUserAttributes_StorageUpdateError(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
@@ -1195,7 +1195,7 @@ func TestGetUserAttributeVerificationCode_InvalidToken(t *testing.T) {
 }
 
 func TestGetUserAttributeVerificationCode_KeysStorageError(t *testing.T) {
-	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	privKey, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
 	poolID := "us-east-1_FakePool1"
 	now := time.Now().Unix()
@@ -1241,7 +1241,7 @@ func TestGetUserAttributeVerificationCode_WrongTokenUse(t *testing.T) {
 }
 
 func TestGetUserAttributeVerificationCode_CheckTokenRevokedStorageError(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
@@ -1295,7 +1295,7 @@ func TestGetUserAttributeVerificationCode_CodeGenerationError(t *testing.T) {
 }
 
 func TestGetUserAttributeVerificationCode_UpdateUserStorageError(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{
@@ -1318,7 +1318,7 @@ func TestGetUserAttributeVerificationCode_UpdateUserStorageError(t *testing.T) {
 }
 
 func TestGetUserAttributeVerificationCode_UserNotFoundOnUpdate(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{
@@ -1437,7 +1437,7 @@ func TestVerifyUserAttribute_InvalidToken(t *testing.T) {
 }
 
 func TestVerifyUserAttribute_KeysStorageError(t *testing.T) {
-	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	privKey, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
 	poolID := "us-east-1_FakePool1"
 	now := time.Now().Unix()
@@ -1483,7 +1483,7 @@ func TestVerifyUserAttribute_WrongTokenUse(t *testing.T) {
 }
 
 func TestVerifyUserAttribute_CheckTokenRevokedStorageError(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
@@ -1526,7 +1526,7 @@ func TestVerifyUserAttribute_UserNotFound(t *testing.T) {
 }
 
 func TestVerifyUserAttribute_StorageError(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
@@ -1546,7 +1546,7 @@ func TestVerifyUserAttribute_StorageError(t *testing.T) {
 }
 
 func TestVerifyUserAttribute_UserNotFoundOnUpdate(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
@@ -1620,7 +1620,7 @@ func TestDeleteUser_InvalidToken(t *testing.T) {
 }
 
 func TestDeleteUser_KeysStorageError(t *testing.T) {
-	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	privKey, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
 	poolID := "us-east-1_FakePool1"
 	now := time.Now().Unix()
@@ -1701,7 +1701,7 @@ func TestDeleteUser_RevokedToken(t *testing.T) {
 }
 
 func TestDeleteUser_StorageError(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
@@ -1723,7 +1723,7 @@ func TestDeleteUser_StorageError(t *testing.T) {
 }
 
 func TestDeleteUser_UserNotFoundOnDelete(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
@@ -1745,7 +1745,7 @@ func TestDeleteUser_UserNotFoundOnDelete(t *testing.T) {
 }
 
 func TestUpdateUserAttributes_UserNotFoundOnUpdate(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
