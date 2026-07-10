@@ -130,6 +130,9 @@ func (s *Storage) DeleteUserPool(poolID string) error {
 	if err := s.deleteFlatDirLocked(filepath.Join("pools", poolID, "refresh_tokens")); err != nil {
 		return fmt.Errorf("delete refresh_tokens dir: %w", err)
 	}
+	if err := s.deleteFlatDirLocked(filepath.Join("pools", poolID, "revoked_jtis")); err != nil {
+		return fmt.Errorf("delete revoked_jtis dir: %w", err)
+	}
 	if err := s.deleteFlatDirLocked(filepath.Join("pools", poolID, "groups")); err != nil {
 		return fmt.Errorf("delete groups dir: %w", err)
 	}

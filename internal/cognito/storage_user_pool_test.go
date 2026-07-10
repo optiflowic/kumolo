@@ -21,6 +21,7 @@ func TestDeleteUserPool_DirErrors(t *testing.T) {
 		{"users", "delete users dir"},
 		{"user_index", "delete user_index dir"},
 		{"refresh_tokens", "delete refresh_tokens dir"},
+		{"revoked_jtis", "delete revoked_jtis dir"},
 	}
 	for _, tc := range tests {
 		tc := tc
@@ -77,6 +78,22 @@ func TestDeleteUserPool_RemovePoolDirError(t *testing.T) {
 	err := s.DeleteUserPool(poolID)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "remove pool dir")
+}
+
+// TestDeleteUserPool_WithRevokedJTIs is a regression test: DeleteUserPool must
+// succeed for a pool that has revoked at least one access token. Before
+// revoked_jtis was added to the cleanup list, the leftover directory made
+// "pools/{poolID}" non-empty, so the final os.Remove failed with
+// InternalErrorException on every pool that ever called RevokeToken/GlobalSignOut.
+func TestDeleteUserPool_WithRevokedJTIs(t *testing.T) {
+	s := newTestStorage(t)
+	poolID := setupStoragePool(t, s)
+	require.NoError(t, s.RevokeAccessToken(poolID, "some-jti", nowUnix()+3600))
+
+	require.NoError(t, s.DeleteUserPool(poolID))
+
+	_, err := s.GetUserPool(poolID)
+	require.ErrorIs(t, err, errUserPoolNotFound)
 }
 
 // ── deleteFlatDirLocked ───────────────────────────────────────────────────────
