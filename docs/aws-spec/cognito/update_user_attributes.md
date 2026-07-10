@@ -58,7 +58,7 @@ HTTP 200:
 |-----------------------------|------|---------|
 | InvalidParameterException   | 400  | missing `AccessToken`/`UserAttributes`, attempt to modify `sub` |
 | NotAuthorizedException      | 400  | invalid/expired/revoked access token, wrong `token_use` |
-| UserNotFoundException       | 400  | token's `sub` has no matching user (unreachable via normal flow — token issuance implies the user existed) |
+| UserNotFoundException       | 400  | token's `sub` has no matching user (e.g. the user was deleted after the token was issued) |
 | InternalErrorException      | 500  | storage failure |
 
 ## kumolo deviations

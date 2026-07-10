@@ -21,10 +21,13 @@ all refresh tokens are deleted (`DeleteRefreshTokensBySub`) — the same
 mechanism `GlobalSignOut` uses. Matches AWS: "revokes all access tokens for
 the user."
 
-A disabled user can't sign in: `InitiateAuth` (`USER_PASSWORD_AUTH` and
-`REFRESH_TOKEN_AUTH`) reject with `NotAuthorizedException` / `"User is disabled."`
-before any other check. The user still appears in `ListUsers`/`AdminGetUser`
-results with `Enabled: false`, matching AWS.
+A disabled user can't sign in: `InitiateAuth` rejects with
+`NotAuthorizedException` / `"User is disabled."`. For `USER_PASSWORD_AUTH` this
+check runs before any other check past user existence. For `REFRESH_TOKEN_AUTH`
+it runs after the refresh token lookup, `ClientId` match, and expiry check —
+though in practice `AdminDisableUser` deletes the user's refresh tokens outright,
+so this path is rarely reached. The user still appears in `ListUsers`/
+`AdminGetUser` results with `Enabled: false`, matching AWS.
 
 ## Response
 
