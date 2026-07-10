@@ -23,10 +23,12 @@
 - `Op`: `=` (exact match) or `^=` (prefix match).
 - Only one attribute per filter (matches AWS: server-side filter is single-attribute).
 - Searchable attributes: `username` (case-sensitive), `sub`, `cognito:user_status` (case-insensitive,
-  compares against `UserStatus`), `status` (compares against `Enabled`, values `"true"`/`"false"`),
-  and `email`, `phone_number`, `name`, `given_name`, `family_name`, `preferred_username`
-  (matched case-sensitively against `UserMetadata.Attributes`). Any other attribute name —
-  including custom attributes — is rejected with `InvalidParameterException`.
+  compares against `UserStatus`), `status` (compares against `Enabled`, values `"true"`/`"false"`
+  — no official AWS example documents this filter's literal value format, but kumolo follows the
+  same `"true"`/`"false"` String convention Cognito uses for every other Boolean-typed attribute,
+  e.g. `email_verified`/`phone_number_verified`), and `email`, `phone_number`, `name`, `given_name`,
+  `family_name`, `preferred_username` (matched case-sensitively against `UserMetadata.Attributes`).
+  Any other attribute name — including custom attributes — is rejected with `InvalidParameterException`.
 - No escape-sequence handling for embedded quotes in the value (kumolo deviation — AWS requires
   backslash-escaping embedded quotes; kumolo's parser does not need it since filter values in
   practice don't contain `"`).
