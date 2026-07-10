@@ -1041,8 +1041,7 @@ func TestResendDeliveryDetails_EmailWinsOverPhone(t *testing.T) {
 // ── writeAuthResult error paths ───────────────────────────────────────────────
 
 func TestWriteAuthResult_CreateRefreshTokenError(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 1024)
-	require.NoError(t, err)
+	key := testRSAKey(t)
 	keyID, _ := generateTokenID()
 
 	hash, _ := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.MinCost)
@@ -1067,8 +1066,7 @@ func TestWriteAuthResult_CreateRefreshTokenError(t *testing.T) {
 }
 
 func TestWriteAuthResult_GetUserPoolClientError_ReturnsInternalError(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 1024)
-	require.NoError(t, err)
+	key := testRSAKey(t)
 	keyID, err := generateTokenID()
 	require.NoError(t, err)
 
@@ -1160,8 +1158,7 @@ func TestInitiateAuth_RefreshToken_NoExpiresAt_NotRejected(t *testing.T) {
 		// ExpiresAt == 0: legacy token without expiry must not be rejected
 	}
 	user := &UserMetadata{Username: "u", Sub: "sub-u", Status: userStatusConfirmed, Enabled: true}
-	key, err := rsa.GenerateKey(rand.Reader, 1024)
-	require.NoError(t, err)
+	key := testRSAKey(t)
 	keyID, err := generateTokenID()
 	require.NoError(t, err)
 	ro := &Router{storage: &mockStore{
@@ -1277,8 +1274,7 @@ func TestRespondToAuthChallenge_WrongSessionPool(t *testing.T) {
 }
 
 func TestRespondToAuthChallenge_UpdateUserNotFound(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 1024)
-	require.NoError(t, err)
+	key := testRSAKey(t)
 	keyID, _ := generateTokenID()
 
 	// Build a valid session token.
@@ -1302,8 +1298,7 @@ func TestRespondToAuthChallenge_UpdateUserNotFound(t *testing.T) {
 }
 
 func TestRespondToAuthChallenge_UpdateUserStorageError(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 1024)
-	require.NoError(t, err)
+	key := testRSAKey(t)
 	keyID, _ := generateTokenID()
 
 	session, err := buildSessionToken(key, keyID, "pool-1", "u", "NEW_PASSWORD_REQUIRED")
@@ -1350,8 +1345,7 @@ func TestJWKS_GetOrCreateKeysError(t *testing.T) {
 }
 
 func TestJWKS_EncodeError(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 1024)
-	require.NoError(t, err)
+	key := testRSAKey(t)
 	ro := &Router{storage: &mockStore{
 		getOrCreateKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
 			return &poolKeys{KeyID: "test-kid"}, key, nil
@@ -1404,8 +1398,7 @@ func TestRespondToAuthChallenge_InvalidBody(t *testing.T) {
 // ── handleNewPasswordRequired: wrong challenge claim ──────────────────────────
 
 func TestRespondToAuthChallenge_WrongChallengeName(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 1024)
-	require.NoError(t, err)
+	key := testRSAKey(t)
 	keyID, _ := generateTokenID()
 
 	// Build a session token with a different challenge name.
@@ -1430,8 +1423,7 @@ func TestRespondToAuthChallenge_WrongChallengeName(t *testing.T) {
 // ── handleNewPasswordRequired: errWrongChallengeStatus ────────────────────────
 
 func TestRespondToAuthChallenge_WrongChallengeStatus(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 1024)
-	require.NoError(t, err)
+	key := testRSAKey(t)
 	keyID, _ := generateTokenID()
 
 	session, err := buildSessionToken(key, keyID, "pool-1", "u", "NEW_PASSWORD_REQUIRED")

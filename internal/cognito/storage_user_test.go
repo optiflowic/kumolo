@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -22,14 +24,49 @@ func newTestStorage(t *testing.T) *Storage {
 	return s
 }
 
-// testGenerateRSAKey substitutes for the real (slow) RSA-2048 generation in
-// tests: a smaller key still produces a valid, distinct-per-pool RSA
-// signature for RS256 JWTs, but generates far faster than 2048 bits. Pool
-// keys must stay distinct across pools (see TestRespondToAuthChallenge_WrongSessionPool,
-// which relies on cross-pool signature verification failing), so unlike
-// bcrypt cost this can't be reduced to a single shared/cached key.
+// testRSAKeyPool lazily generates a small set of real RSA-2048 keys once per
+// test binary run (gosec G403 requires at least 2048 bits, even in test code,
+// so key *size* can't be reduced to speed up tests). Repeated RSA-2048
+// generation is the dominant cost across this package's tests; a shared,
+// round-robin pool amortizes that cost across hundreds of tests instead of
+// paying it on every call.
+var testRSAKeyPool = sync.OnceValue(func() []*rsa.PrivateKey {
+	const poolSize = 4
+	keys := make([]*rsa.PrivateKey, poolSize)
+	for i := range keys {
+		k, err := rsa.GenerateKey(rand.Reader, rsaKeyBits)
+		if err != nil {
+			panic(err)
+		}
+		keys[i] = k
+	}
+	return keys
+})
+
+var testRSAKeyIdx atomic.Uint32
+
+// nextTestRSAKey returns a key from the shared pool, cycling round-robin so
+// consecutive calls always return different keys. Some tests rely on two
+// pools (or two otherwise-related keys) having distinct RSA keys — e.g.
+// TestRespondToAuthChallenge_WrongSessionPool checks that a session token
+// signed by one pool's key fails verification against another pool's key —
+// round-robin over a pool of >1 keys preserves that for any two calls in
+// immediate succession.
+func nextTestRSAKey() *rsa.PrivateKey {
+	keys := testRSAKeyPool()
+	idx := testRSAKeyIdx.Add(1) - 1
+	return keys[int(idx)%len(keys)]
+}
+
 func testGenerateRSAKey() (*rsa.PrivateKey, error) {
-	return rsa.GenerateKey(rand.Reader, 1024)
+	return nextTestRSAKey(), nil
+}
+
+// testRSAKey returns a key from the shared test RSA key pool (see
+// nextTestRSAKey) for use in ad-hoc test fixtures that build their own JWTs.
+func testRSAKey(t *testing.T) *rsa.PrivateKey {
+	t.Helper()
+	return nextTestRSAKey()
 }
 
 func setupStoragePool(t *testing.T, s *Storage) string {
