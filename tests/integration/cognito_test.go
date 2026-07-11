@@ -194,6 +194,38 @@ func TestCognitoIntegration_UserPool(t *testing.T) {
 		assert.Equal(t, "ResourceNotFoundException", apiErrorCode(err))
 	})
 
+	t.Run("DeleteUserPool_DeletionProtectionActive", func(t *testing.T) {
+		created, err := c.CreateUserPool(ctx, &awscognito.CreateUserPoolInput{
+			PoolName:           aws.String("protected-pool"),
+			DeletionProtection: types.DeletionProtectionTypeActive,
+		})
+		require.NoError(t, err)
+		poolID := aws.ToString(created.UserPool.Id)
+
+		_, err = c.DeleteUserPool(ctx, &awscognito.DeleteUserPoolInput{
+			UserPoolId: aws.String(poolID),
+		})
+		require.Error(t, err)
+		assert.Equal(t, "InvalidParameterException", apiErrorCode(err))
+
+		out, err := c.DescribeUserPool(ctx, &awscognito.DescribeUserPoolInput{
+			UserPoolId: aws.String(poolID),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, poolID, aws.ToString(out.UserPool.Id))
+
+		_, err = c.UpdateUserPool(ctx, &awscognito.UpdateUserPoolInput{
+			UserPoolId:         aws.String(poolID),
+			DeletionProtection: types.DeletionProtectionTypeInactive,
+		})
+		require.NoError(t, err)
+
+		_, err = c.DeleteUserPool(ctx, &awscognito.DeleteUserPoolInput{
+			UserPoolId: aws.String(poolID),
+		})
+		require.NoError(t, err)
+	})
+
 	t.Run("GetUserPoolMfaConfig", func(t *testing.T) {
 		created, err := c.CreateUserPool(ctx, &awscognito.CreateUserPoolInput{
 			PoolName: aws.String("mfa-config-pool"),
