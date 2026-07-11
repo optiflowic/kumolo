@@ -59,7 +59,9 @@ e2e-terraform:
 	  rm -f terraform.tfstate terraform.tfstate.backup .terraform.tfstate.lock.info && \
 	  { [ -d .terraform ] || terraform init -input=false; } && \
 	  terraform apply -auto-approve && \
+	  # second apply: toggle enabled/given_name to exercise AdminUpdateUserAttributes/AdminEnableUser/AdminDisableUser \
 	  terraform apply -auto-approve -var="admin_user_enabled=false" -var="admin_given_name=Updated" && \
+	  # third apply: revert to defaults before destroy \
 	  terraform apply -auto-approve && \
 	  terraform destroy -auto-approve
 
