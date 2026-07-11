@@ -650,3 +650,28 @@ func TestChangePassword_UpdateUserStorageError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 	assertErrType(t, w, ErrTypeInternalErrorException)
 }
+
+// TestChangePassword_UpdateUserNotFound covers the TOCTOU race where lookupUser
+// (keyed by sub) succeeds but UpdateUser (keyed by username) no longer finds the
+// user, e.g. because it was deleted in between.
+func TestChangePassword_UpdateUserNotFound(t *testing.T) {
+	key := testRSAKey(t)
+	poolID := "us-east-1_TestPool"
+	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
+	token, _, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil, "")
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: "kid"}, key, nil
+		},
+		getUserBySubFn: func(string, string) (*UserMetadata, error) { return user, nil },
+		updateUserErr:  errUserNotFound,
+	}}
+	body, _ := json.Marshal(map[string]string{
+		"AccessToken": token, "ProposedPassword": "NewPassword456!",
+	})
+	w := doOp(t, ro, "ChangePassword", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeUserNotFoundException)
+}
