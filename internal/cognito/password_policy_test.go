@@ -75,7 +75,7 @@ func TestValidatePassword(t *testing.T) {
 			wantOK:   false,
 			wantMsg:  "Password did not conform with policy: Password not long enough",
 		},
-		{
+		{ //nolint:gosec // G101 false positive: test fixture, not a credential
 			name:   "minimum length counted by runes not bytes",
 			policy: fullPolicy,
 			// 5 runes / 15 UTF-8 bytes: below the 8-rune minimum despite exceeding 8 bytes.
