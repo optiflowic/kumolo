@@ -73,6 +73,14 @@ output "cognito_admin_user_status" {
   value = aws_cognito_user.admin.status
 }
 
+output "cognito_admin_user_enabled" {
+  value = aws_cognito_user.admin.enabled
+}
+
+output "cognito_admin_user_given_name" {
+  value = aws_cognito_user.admin.attributes["given_name"]
+}
+
 output "cognito_group_admins" {
   value = aws_cognito_user_group.admins.name
 }

@@ -24,8 +24,11 @@ resource "aws_cognito_user" "admin" {
   temporary_password = "TempPass1!"
   message_action     = "SUPPRESS"
 
+  enabled = var.admin_user_enabled
+
   attributes = {
-    email = "tf-admin@example.com"
+    email      = "tf-admin@example.com"
+    given_name = var.admin_given_name
   }
 }
 

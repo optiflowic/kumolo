@@ -53,11 +53,16 @@ e2e:
 	./e2e/aws-cli/sts.sh
 	./e2e/aws-cli/cognito.sh
 
+# e2e-terraform applies three times: initial create, then a toggle of
+# admin_user_enabled/admin_given_name to exercise AdminUpdateUserAttributes/
+# AdminEnableUser/AdminDisableUser, then a revert to defaults before destroy.
 e2e-terraform:
 	./e2e/terraform/cleanup.sh
 	cd e2e/terraform && \
 	  rm -f terraform.tfstate terraform.tfstate.backup .terraform.tfstate.lock.info && \
 	  { [ -d .terraform ] || terraform init -input=false; } && \
+	  terraform apply -auto-approve && \
+	  terraform apply -auto-approve -var="admin_user_enabled=false" -var="admin_given_name=Updated" && \
 	  terraform apply -auto-approve && \
 	  terraform destroy -auto-approve
 
