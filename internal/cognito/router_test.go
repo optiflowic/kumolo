@@ -41,6 +41,12 @@ func newTestRouter(t *testing.T) *Router {
 	return ro
 }
 
+func TestNewRouter_DefaultBcryptCost(t *testing.T) {
+	storage := newTestStorage(t)
+	ro := NewRouter(storage)
+	assert.Equal(t, bcrypt.DefaultCost, ro.bcryptCost)
+}
+
 func TestRouter_UnknownOperation(t *testing.T) {
 	tests := []struct {
 		name   string
