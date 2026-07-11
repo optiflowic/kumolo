@@ -75,6 +75,14 @@ func TestValidatePassword(t *testing.T) {
 			wantOK:   false,
 			wantMsg:  "Password did not conform with policy: Password not long enough",
 		},
+		{
+			name:   "minimum length counted by runes not bytes",
+			policy: fullPolicy,
+			// 5 runes / 15 UTF-8 bytes: below the 8-rune minimum despite exceeding 8 bytes.
+			password: "パスワード",
+			wantOK:   false,
+			wantMsg:  "Password did not conform with policy: Password not long enough",
+		},
 	}
 
 	for _, tt := range tests {
@@ -111,11 +119,12 @@ func TestPasswordPolicyFromPool(t *testing.T) {
 			),
 		}
 		want := passwordPolicy{
-			MinimumLength:    12,
-			RequireUppercase: false,
-			RequireLowercase: true,
-			RequireNumbers:   false,
-			RequireSymbols:   false,
+			MinimumLength:                 12,
+			RequireUppercase:              false,
+			RequireLowercase:              true,
+			RequireNumbers:                false,
+			RequireSymbols:                false,
+			TemporaryPasswordValidityDays: 7, // omitted from Policies, inherits default
 		}
 		assert.Equal(t, want, passwordPolicyFromPool(meta))
 	})
@@ -126,8 +135,26 @@ func TestPasswordPolicyFromPool(t *testing.T) {
 				`{"PasswordPolicy":{"MinimumLength":0,"RequireSymbols":true}}`,
 			),
 		}
-		got := passwordPolicyFromPool(meta)
-		assert.Equal(t, minPasswordLen, got.MinimumLength)
-		assert.True(t, got.RequireSymbols)
+		want := defaultPasswordPolicy()
+		assert.Equal(t, want, passwordPolicyFromPool(meta))
+	})
+
+	t.Run("Policies present without PasswordPolicy key falls back to default", func(t *testing.T) {
+		meta := &UserPoolMetadata{Policies: json.RawMessage(`{}`)}
+		assert.Equal(t, defaultPasswordPolicy(), passwordPolicyFromPool(meta))
+	})
+
+	t.Run("Policies present with unrelated fields only falls back to default", func(t *testing.T) {
+		meta := &UserPoolMetadata{Policies: json.RawMessage(`{"PasswordHistorySize":4}`)}
+		assert.Equal(t, defaultPasswordPolicy(), passwordPolicyFromPool(meta))
+	})
+
+	t.Run("partial PasswordPolicy inherits default for omitted fields", func(t *testing.T) {
+		meta := &UserPoolMetadata{
+			Policies: json.RawMessage(`{"PasswordPolicy":{"RequireSymbols":false}}`),
+		}
+		want := defaultPasswordPolicy()
+		want.RequireSymbols = false
+		assert.Equal(t, want, passwordPolicyFromPool(meta))
 	})
 }

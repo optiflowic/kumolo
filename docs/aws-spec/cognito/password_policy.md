@@ -20,7 +20,7 @@ accepts a plaintext password:
 
 | Field | Type | Default when pool's Policies is unset | Enforcement |
 |-------|------|------------------------------------|-------------|
-| MinimumLength | int (6-99) | 8 | `len(password) < MinimumLength` |
+| MinimumLength | int (6-99) | 8 | `utf8.RuneCountInString(password) < MinimumLength` (character count, not bytes) |
 | RequireUppercase | bool | true | at least one Unicode uppercase rune |
 | RequireLowercase | bool | true | at least one Unicode lowercase rune |
 | RequireNumbers | bool | true | at least one Unicode digit rune |
@@ -57,8 +57,10 @@ if a consuming test asserts on exact message text.
 ## Implementation
 
 - `internal/cognito/password_policy.go`: `passwordPolicyFromPool` reads the pool's stored `Policies` JSON
-  blob and extracts `PasswordPolicy`, falling back to the AWS default policy (all complexity flags `true`,
-  `MinimumLength=8`) when `Policies` is absent, malformed, or `MinimumLength` is unset/non-positive.
+  blob and overlays present `PasswordPolicy` fields onto the AWS default policy (all complexity flags
+  `true`, `MinimumLength=8`). Fields omitted from the blob — including the whole `Policies` blob being
+  absent or malformed — inherit the default rather than being zeroed out; `MinimumLength` additionally
+  falls back to the default when present but non-positive.
 - `validatePassword(policy, password)` returns the formatted message and `ok=false` on the first violated
   rule.
 
