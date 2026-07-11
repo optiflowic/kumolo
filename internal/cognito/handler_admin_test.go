@@ -106,6 +106,16 @@ func TestAdminCreateUser_ValidationErrors(t *testing.T) {
 			wantType: ErrTypeInvalidPasswordException,
 		},
 		{
+			name: "password missing complexity",
+			body: map[string]any{
+				"UserPoolId":        poolID,
+				"Username":          "u",
+				"TemporaryPassword": "alllowercase1",
+			},
+			wantCode: http.StatusBadRequest,
+			wantType: ErrTypeInvalidPasswordException,
+		},
+		{
 			name:     "pool not found",
 			body:     map[string]any{"UserPoolId": "us-east-1_UNKNOWN", "Username": "u"},
 			wantCode: http.StatusBadRequest,
@@ -334,6 +344,15 @@ func TestAdminSetUserPassword_ValidationErrors(t *testing.T) {
 				"UserPoolId": poolID,
 				"Username":   "carol",
 				"Password":   "short",
+			},
+			wantType: ErrTypeInvalidPasswordException,
+		},
+		{
+			name: "password missing complexity",
+			body: map[string]any{
+				"UserPoolId": poolID,
+				"Username":   "carol",
+				"Password":   "alllowercase1",
 			},
 			wantType: ErrTypeInvalidPasswordException,
 		},

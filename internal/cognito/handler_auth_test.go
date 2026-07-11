@@ -182,6 +182,30 @@ func TestSignUp_ShortPassword(t *testing.T) {
 	assertErrType(t, w, ErrTypeInvalidPasswordException)
 }
 
+func TestSignUp_PasswordMissingComplexity(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	body, _ := json.Marshal(map[string]string{
+		"ClientId": clientID, "Username": "alice", "Password": "alllowercase1",
+	})
+	w := doOp(t, ro, "SignUp", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeInvalidPasswordException)
+}
+
+func TestSignUp_GetUserPoolStorageError(t *testing.T) {
+	ro := &Router{storage: &mockStore{
+		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
+		getErr:           errors.New("storage error"),
+	}}
+	body, _ := json.Marshal(map[string]string{
+		"ClientId": "c", "Username": "alice", "Password": "Password123!",
+	})
+	w := doOp(t, ro, "SignUp", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
 func TestSignUp_EmptyPassword(t *testing.T) {
 	ro := newTestRouter(t)
 	_, clientID := setupPool(t, ro)
@@ -822,6 +846,51 @@ func TestRespondToAuthChallenge_ShortNewPassword(t *testing.T) {
 	w2 := doOp(t, ro, "RespondToAuthChallenge", string(body))
 	assert.Equal(t, http.StatusBadRequest, w2.Code)
 	assertErrType(t, w2, ErrTypeInvalidPasswordException)
+}
+
+func TestRespondToAuthChallenge_NewPasswordMissingComplexity(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID, clientID := setupPool(t, ro)
+	storage := ro.storage.(*Storage)
+
+	insertFCPUser(t, storage, poolID, "eve", "eve-sub", "TempPass123!")
+
+	w := doInitAuth(t, ro, clientID, "eve", "TempPass123!")
+	require.Equal(t, http.StatusOK, w.Code)
+	var initResp map[string]any
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&initResp))
+	session := initResp["Session"].(string)
+
+	body, _ := json.Marshal(map[string]any{
+		"ClientId": clientID, "ChallengeName": "NEW_PASSWORD_REQUIRED", "Session": session,
+		"ChallengeResponses": map[string]string{"USERNAME": "eve", "NEW_PASSWORD": "alllowercase1"},
+	})
+	w2 := doOp(t, ro, "RespondToAuthChallenge", string(body))
+	assert.Equal(t, http.StatusBadRequest, w2.Code)
+	assertErrType(t, w2, ErrTypeInvalidPasswordException)
+}
+
+func TestRespondToAuthChallenge_NewPasswordRequired_GetUserPoolStorageError(t *testing.T) {
+	key := testRSAKey(t)
+	keyID, _ := generateTokenID()
+
+	session, err := buildSessionToken(key, keyID, "pool-1", "u", "NEW_PASSWORD_REQUIRED")
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
+		getOrCreateKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: keyID}, key, nil
+		},
+		getErr: errors.New("storage error"),
+	}}
+	body, _ := json.Marshal(map[string]any{
+		"ClientId": "c", "ChallengeName": "NEW_PASSWORD_REQUIRED", "Session": session,
+		"ChallengeResponses": map[string]string{"USERNAME": "u", "NEW_PASSWORD": "NewPass123!"},
+	})
+	w := doOp(t, ro, "RespondToAuthChallenge", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
 }
 
 func TestRespondToAuthChallenge_MissingNewPassword(t *testing.T) {

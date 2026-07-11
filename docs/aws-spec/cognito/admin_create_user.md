@@ -3,7 +3,7 @@
 - **URL**: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_AdminCreateUser.html
 - **Target**: `AWSCognitoIdentityProviderService.AdminCreateUser`
 - **SDK**: `cognitoidentityprovider.AdminCreateUserInput` / `AdminCreateUserOutput`
-- **Last verified**: 2026-06-25
+- **Last verified**: 2026-07-11
 
 ## Request
 
@@ -54,7 +54,7 @@ HTTP 200 + `{"User": UserType}`
 |-----------------------------|------|---------|
 | ResourceNotFoundException   | 400  | pool not found |
 | UsernameExistsException     | 400  | username already taken |
-| InvalidPasswordException    | 400  | password fails policy (min length) |
+| InvalidPasswordException    | 400  | password fails pool's password policy |
 | InvalidParameterException   | 400  | missing required field |
 | InternalErrorException      | 500  | storage failure |
 
@@ -66,7 +66,7 @@ HTTP 200 + `{"User": UserType}`
 
 ## kumolo deviations
 
-- Password policy check: only minimum length (8 chars); complexity rules not enforced.
+- Password policy enforcement: see `docs/aws-spec/cognito/password_policy.md`.
 - `MessageAction=RESEND`: user must already exist; kumolo returns the existing user without resending any message.
 - `ForceAliasCreation` and `DesiredDeliveryMediums` are accepted but ignored.
 - `TemporaryPassword` omitted: user status is set to `CONFIRMED` (AWS sets `FORCE_CHANGE_PASSWORD`). Passwordless auth is not implemented; CONFIRMED is used as a pragmatic default.

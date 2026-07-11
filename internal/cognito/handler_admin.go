@@ -75,13 +75,8 @@ func (ro *Router) handleAdminCreateUser(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
-	if req.TemporaryPassword != "" && len(req.TemporaryPassword) < minPasswordLen {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidPasswordException,
-			fmt.Sprintf("Password must be at least %d characters", minPasswordLen))
-		return
-	}
-
-	if _, err := ro.storage.GetUserPool(req.UserPoolID); err != nil {
+	pool, err := ro.storage.GetUserPool(req.UserPoolID)
+	if err != nil {
 		if errors.Is(err, errUserPoolNotFound) {
 			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException,
 				"User pool not found.")
@@ -90,6 +85,13 @@ func (ro *Router) handleAdminCreateUser(w http.ResponseWriter, body []byte) {
 		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
 			"failed to get user pool")
 		return
+	}
+
+	if req.TemporaryPassword != "" {
+		if msg, ok := validatePassword(passwordPolicyFromPool(pool), req.TemporaryPassword); !ok {
+			writeError(w, http.StatusBadRequest, ErrTypeInvalidPasswordException, msg)
+			return
+		}
 	}
 
 	if req.MessageAction == "RESEND" {
@@ -290,13 +292,8 @@ func (ro *Router) handleAdminSetUserPassword(w http.ResponseWriter, body []byte)
 		)
 		return
 	}
-	if len(req.Password) < minPasswordLen {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidPasswordException,
-			fmt.Sprintf("Password must be at least %d characters", minPasswordLen))
-		return
-	}
-
-	if _, err := ro.storage.GetUserPool(req.UserPoolID); err != nil {
+	pool, err := ro.storage.GetUserPool(req.UserPoolID)
+	if err != nil {
 		if errors.Is(err, errUserPoolNotFound) {
 			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException,
 				"User pool not found.")
@@ -304,6 +301,10 @@ func (ro *Router) handleAdminSetUserPassword(w http.ResponseWriter, body []byte)
 		}
 		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
 			"failed to get user pool")
+		return
+	}
+	if msg, ok := validatePassword(passwordPolicyFromPool(pool), req.Password); !ok {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidPasswordException, msg)
 		return
 	}
 

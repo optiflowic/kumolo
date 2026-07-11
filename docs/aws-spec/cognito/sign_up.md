@@ -2,7 +2,7 @@
 
 URL: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_SignUp.html
 SDK: `cognitoidentityprovider.SignUpInput` / `cognitoidentityprovider.SignUpOutput`
-Last verified: 2026-06-23
+Last verified: 2026-07-11
 
 ## Request Parameters
 
@@ -54,5 +54,5 @@ Last verified: 2026-06-23
 
 - Confirmation code is a random 6-digit number logged at INFO level on the server — no email/SMS delivery.
 - SecretHash, ValidationData, ClientMetadata, AnalyticsMetadata, UserContextData are accepted but ignored.
-- No password policy enforcement beyond minimum length (8 chars).
+- Password policy enforcement: see `docs/aws-spec/cognito/password_policy.md`.
 - Usernames are treated as case-insensitive: `"Alice"` and `"alice"` map to the same user. On real AWS the default pool configuration is case-sensitive.
