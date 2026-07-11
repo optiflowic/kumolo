@@ -15,6 +15,8 @@ accepts a plaintext password:
 - `AdminCreateUser` (`TemporaryPassword`, only validated when non-empty)
 - `AdminSetUserPassword` (`Password`)
 - `RespondToAuthChallenge` `NEW_PASSWORD_REQUIRED` (`NEW_PASSWORD`)
+- `ConfirmForgotPassword` (`Password`)
+- `ChangePassword` (`ProposedPassword`)
 
 ## Fields enforced
 
