@@ -49,6 +49,11 @@ where `{reason}` is one of:
 - `Password must have numeric characters`
 - `Password must have symbol characters`
 
+The AWS API reference documents only that `InvalidPasswordException` carries a `message` field; it does
+not specify exact wording. The strings above are kumolo's best-effort reproduction based on observed real
+AWS error output, not a documented contract — treat as lower-confidence and re-verify against a live pool
+if a consuming test asserts on exact message text.
+
 ## Implementation
 
 - `internal/cognito/password_policy.go`: `passwordPolicyFromPool` reads the pool's stored `Policies` JSON

@@ -7,11 +7,12 @@ import (
 
 // passwordPolicy mirrors the subset of PasswordPolicyType that kumolo enforces.
 type passwordPolicy struct {
-	MinimumLength    int  `json:"MinimumLength"`
-	RequireUppercase bool `json:"RequireUppercase"`
-	RequireLowercase bool `json:"RequireLowercase"`
-	RequireNumbers   bool `json:"RequireNumbers"`
-	RequireSymbols   bool `json:"RequireSymbols"`
+	MinimumLength                 int  `json:"MinimumLength"`
+	RequireUppercase              bool `json:"RequireUppercase"`
+	RequireLowercase              bool `json:"RequireLowercase"`
+	RequireNumbers                bool `json:"RequireNumbers"`
+	RequireSymbols                bool `json:"RequireSymbols"`
+	TemporaryPasswordValidityDays int  `json:"TemporaryPasswordValidityDays"`
 }
 
 type policiesType struct {
@@ -19,13 +20,16 @@ type policiesType struct {
 }
 
 // defaultPasswordPolicy matches AWS's default PasswordPolicy for a new user pool.
+// This is the single source of truth for both DescribeUserPool's echoed Policies
+// (see defaultPolicies in handler_user_pool.go) and password validation.
 func defaultPasswordPolicy() passwordPolicy {
 	return passwordPolicy{
-		MinimumLength:    minPasswordLen,
-		RequireUppercase: true,
-		RequireLowercase: true,
-		RequireNumbers:   true,
-		RequireSymbols:   true,
+		MinimumLength:                 minPasswordLen,
+		RequireUppercase:              true,
+		RequireLowercase:              true,
+		RequireNumbers:                true,
+		RequireSymbols:                true,
+		TemporaryPasswordValidityDays: 7,
 	}
 }
 
