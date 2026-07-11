@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 // store is the storage interface for non-group operations used by Router.
@@ -93,10 +95,16 @@ type Router struct {
 	storage    store
 	groups     groupStore
 	codeReader io.Reader // injectable for testing; defaults to crypto/rand.Reader
+	bcryptCost int       // injectable for testing; defaults to bcrypt.DefaultCost
 }
 
 func NewRouter(storage *Storage) *Router {
-	return &Router{storage: storage, groups: storage, codeReader: randReader}
+	return &Router{
+		storage:    storage,
+		groups:     storage,
+		codeReader: randReader,
+		bcryptCost: bcrypt.DefaultCost,
+	}
 }
 
 func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {

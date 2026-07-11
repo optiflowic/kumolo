@@ -121,7 +121,7 @@ func (ro *Router) handleAdminCreateUser(w http.ResponseWriter, body []byte) {
 	var passwordHash string
 	status := userStatusConfirmed
 	if req.TemporaryPassword != "" {
-		hash, herr := bcrypt.GenerateFromPassword([]byte(req.TemporaryPassword), bcrypt.DefaultCost)
+		hash, herr := bcrypt.GenerateFromPassword([]byte(req.TemporaryPassword), ro.bcryptCost)
 		if herr != nil {
 			// untestable: bcrypt.GenerateFromPassword only fails on invalid cost or OOM
 			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
@@ -307,7 +307,7 @@ func (ro *Router) handleAdminSetUserPassword(w http.ResponseWriter, body []byte)
 		return
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), ro.bcryptCost)
 	if err != nil {
 		// untestable: bcrypt.GenerateFromPassword only fails on invalid cost or OOM
 		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,

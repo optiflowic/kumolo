@@ -138,7 +138,7 @@ func (ro *Router) handleSignUp(w http.ResponseWriter, body []byte) {
 
 	var passwordHash string
 	if req.Password != "" {
-		hash, herr := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+		hash, herr := bcrypt.GenerateFromPassword([]byte(req.Password), ro.bcryptCost)
 		if herr != nil {
 			// untestable: bcrypt.GenerateFromPassword only fails on invalid cost (fixed) or OOM
 			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
@@ -743,7 +743,7 @@ func (ro *Router) handleNewPasswordRequired(
 		if u.Status != userStatusForceChangePasswd {
 			return errWrongChallengeStatus
 		}
-		hash, herr := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+		hash, herr := bcrypt.GenerateFromPassword([]byte(newPassword), ro.bcryptCost)
 		if herr != nil {
 			// untestable: bcrypt.GenerateFromPassword only fails on invalid cost (fixed) or OOM
 			return fmt.Errorf("hash password: %w", herr)

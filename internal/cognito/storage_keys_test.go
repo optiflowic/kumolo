@@ -11,6 +11,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// ── generateRSAKey ────────────────────────────────────────────────────────────
+
+// TestGenerateRSAKey exercises the real (production) key generator directly:
+// newTestStorage overrides Storage.generateKeyFn with a pooled test key for
+// speed, so no other test in this package reaches generateRSAKey itself.
+func TestGenerateRSAKey(t *testing.T) {
+	key, err := generateRSAKey()
+	require.NoError(t, err)
+	require.NotNil(t, key)
+	assert.Equal(t, rsaKeyBits, key.N.BitLen())
+}
+
 // ── rsaKeyFromPEM ─────────────────────────────────────────────────────────────
 
 func TestRsaKeyFromPEM_EmptyPEM(t *testing.T) {

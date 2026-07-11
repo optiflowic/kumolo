@@ -17,8 +17,7 @@ import (
 
 func genTestKey(t *testing.T) (*rsa.PrivateKey, string) {
 	t.Helper()
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	require.NoError(t, err)
+	key := testRSAKey(t)
 	keyID, err := generateTokenID()
 	require.NoError(t, err)
 	return key, keyID
@@ -95,8 +94,7 @@ func TestVerifyJWT_InvalidSignature(t *testing.T) {
 	token, err := buildJWT(key, keyID, map[string]any{"sub": "x"})
 	require.NoError(t, err)
 
-	otherKey, err := rsa.GenerateKey(rand.Reader, 2048)
-	require.NoError(t, err)
+	otherKey := testRSAKey(t)
 
 	_, err = verifyJWT(token, &otherKey.PublicKey)
 	require.Error(t, err)
@@ -312,8 +310,7 @@ func TestParseSessionToken_InvalidSignature(t *testing.T) {
 	token, err := buildSessionToken(key, keyID, "p", "u", "NEW_PASSWORD_REQUIRED")
 	require.NoError(t, err)
 
-	otherKey, err := rsa.GenerateKey(rand.Reader, 2048)
-	require.NoError(t, err)
+	otherKey := testRSAKey(t)
 
 	_, err = parseSessionToken(token, &otherKey.PublicKey)
 	require.Error(t, err)
