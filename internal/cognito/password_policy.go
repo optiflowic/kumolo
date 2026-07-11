@@ -86,6 +86,11 @@ func passwordPolicyFromPool(meta *UserPoolMetadata) passwordPolicy {
 	return policy
 }
 
+// bcryptMaxPasswordBytes is bcrypt's hard input cap (golang.org/x/crypto/bcrypt
+// rejects longer inputs with an error); validatePassword enforces this so
+// password-policy checks never accept a password that hashing would reject.
+const bcryptMaxPasswordBytes = 72
+
 // validatePassword checks password against policy, returning the
 // AWS-formatted InvalidPasswordException message and ok=false on the first
 // violated rule, or ok=true when the password satisfies every rule.

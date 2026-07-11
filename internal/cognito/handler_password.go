@@ -12,11 +12,6 @@ import (
 
 var errPreviousPassword = errors.New("previous password required or incorrect")
 
-// bcryptMaxPasswordBytes is bcrypt's hard input cap (golang.org/x/crypto/bcrypt
-// rejects longer inputs with an error); validatePassword enforces this so
-// password-policy checks never accept a password that hashing would reject.
-const bcryptMaxPasswordBytes = 72
-
 // hashPassword bcrypt-hashes password at the given cost.
 func hashPassword(password string, cost int) (string, error) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), cost)

@@ -37,15 +37,17 @@ kumolo checks rules in this order and returns on the first violation (matches ob
 reporting a single failing rule per response):
 
 1. MinimumLength
-2. RequireUppercase
-3. RequireLowercase
-4. RequireNumbers
-5. RequireSymbols
+2. MaximumLength (72 bytes, kumolo-specific bcrypt limit — see Deviations)
+3. RequireUppercase
+4. RequireLowercase
+5. RequireNumbers
+6. RequireSymbols
 
 `InvalidPasswordException` (HTTP 400) message format: `Password did not conform with policy: {reason}`,
 where `{reason}` is one of:
 
 - `Password not long enough`
+- `Password too long`
 - `Password must have uppercase characters`
 - `Password must have lowercase characters`
 - `Password must have numeric characters`
