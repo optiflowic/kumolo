@@ -34,8 +34,8 @@ HTTP 200 with an empty body: `{}`.
 
 | Error type                | HTTP | Trigger |
 |----------------------------|------|---------|
-| InvalidParameterException  | 400  | missing `AccessToken`/`ProposedPassword`, or missing `PreviousPassword` when the user has a password |
-| NotAuthorizedException     | 400  | invalid/expired/revoked access token, wrong `token_use`, or `PreviousPassword` mismatch |
+| InvalidParameterException  | 400  | missing `AccessToken`/`ProposedPassword` |
+| NotAuthorizedException     | 400  | invalid/expired/revoked access token, wrong `token_use`, missing `PreviousPassword` when the user has a password, or `PreviousPassword` mismatch |
 | UserNotFoundException      | 400  | token's `sub` has no matching user |
 | InvalidPasswordException   | 400  | `ProposedPassword` fails the pool's password policy |
 | InternalErrorException     | 500  | storage failure |

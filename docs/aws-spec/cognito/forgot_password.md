@@ -28,8 +28,9 @@
   (matches AWS's documented "If neither a verified phone number nor a verified email exists"
   behavior). Email takes precedence over phone when both are verified.
 - Generates a random 6-digit code (same generator as `SignUp`/`ConfirmSignUp`), stores it on
-  the user record, and logs it at Info level (`pool_id`, `username`, `code`) — kumolo has no
-  real email/SMS delivery.
+  the user record, and logs `pool_id`/`username` at Info level plus `code` at Debug level
+  (same split as `ResendConfirmationCode`) — kumolo has no real email/SMS delivery, so the
+  code must be recoverable locally without exposing it in default-level application logs.
 - The code is independent of, and does not overwrite, `SignUp`'s `ConfirmationCode` or
   `GetUserAttributeVerificationCode`'s per-attribute verification codes.
 

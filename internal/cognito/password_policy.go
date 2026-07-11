@@ -97,6 +97,8 @@ func validatePassword(policy passwordPolicy, password string) (message string, o
 	switch {
 	case utf8.RuneCountInString(password) < minLen:
 		return "Password did not conform with policy: Password not long enough", false
+	case utf8.RuneCountInString(password) > maxPasswordLen:
+		return "Password did not conform with policy: Password too long", false
 	case policy.RequireUppercase && !containsRune(password, unicode.IsUpper):
 		return "Password did not conform with policy: Password must have uppercase characters", false
 	case policy.RequireLowercase && !containsRune(password, unicode.IsLower):

@@ -12,6 +12,15 @@ import (
 
 var errPreviousPassword = errors.New("previous password required or incorrect")
 
+// hashPassword bcrypt-hashes password at the given cost.
+func hashPassword(password string, cost int) (string, error) {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), cost)
+	if err != nil {
+		return "", err
+	}
+	return string(hash), nil
+}
+
 // ──── ForgotPassword ──────────────────────────────────────────────────────────
 
 type forgotPasswordRequest struct {
@@ -122,7 +131,8 @@ func (ro *Router) handleForgotPassword(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	slog.Info("ForgotPassword", "pool_id", poolID, "username", user.Username, "code", code)
+	slog.Info("ForgotPassword", "pool_id", poolID, "username", user.Username)
+	slog.Debug("ForgotPassword", "pool_id", poolID, "username", user.Username, "code", code)
 
 	writeJSON(w, http.StatusOK, forgotPasswordResponse{CodeDeliveryDetails: delivery})
 }
@@ -197,12 +207,11 @@ func (ro *Router) handleConfirmForgotPassword(w http.ResponseWriter, body []byte
 		) != 1 {
 			return errCodeMismatch
 		}
-		hash, herr := bcrypt.GenerateFromPassword([]byte(req.Password), ro.bcryptCost)
+		hash, herr := hashPassword(req.Password, ro.bcryptCost)
 		if herr != nil {
-			// untestable: bcrypt.GenerateFromPassword only fails on invalid cost (fixed) or OOM
 			return herr
 		}
-		u.PasswordHash = string(hash)
+		u.PasswordHash = hash
 		u.PasswordResetCode = ""
 		return nil
 	})
@@ -295,12 +304,11 @@ func (ro *Router) handleChangePassword(w http.ResponseWriter, body []byte) {
 				return errPreviousPassword
 			}
 		}
-		hash, herr := bcrypt.GenerateFromPassword([]byte(req.ProposedPassword), ro.bcryptCost)
+		hash, herr := hashPassword(req.ProposedPassword, ro.bcryptCost)
 		if herr != nil {
-			// untestable: bcrypt.GenerateFromPassword only fails on invalid cost (fixed) or OOM
 			return herr
 		}
-		u.PasswordHash = string(hash)
+		u.PasswordHash = hash
 		return nil
 	})
 	if updateErr != nil {
