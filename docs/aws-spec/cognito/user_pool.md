@@ -2,7 +2,7 @@
 
 URL: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/
 SDK: github.com/aws/aws-sdk-go-v2/service/cognitoidentityprovider
-Last verified: 2026-07-11
+Last verified: 2026-07-12
 
 ## Operations
 
@@ -49,8 +49,8 @@ kumolo generates: `us-east-1_` + 9 random alphanumeric chars (A-Z, a-z, 0-9).
 
 - Required: `UserPoolId`
 - Returns: `{}` HTTP 200
-- kumolo deviation: DeletionProtection is NOT enforced (always allows deletion for test ergonomics)
-- Errors: ResourceNotFoundException (400), InvalidParameterException (400), InternalErrorException (500)
+- Rejects deletion with InvalidParameterException when the pool's `DeletionProtection` is `"ACTIVE"`; caller must first `UpdateUserPool` it to `"INACTIVE"`
+- Errors: ResourceNotFoundException (400), InvalidParameterException (400 — missing `UserPoolId` or `DeletionProtection` is `"ACTIVE"`), InternalErrorException (500)
 
 ## ListUserPools
 
@@ -89,7 +89,6 @@ kumolo generates: `us-east-1_` + 9 random alphanumeric chars (A-Z, a-z, 0-9).
 ## kumolo Deviations
 
 - Fixed region: `us-east-1`, fixed account: `000000000000`
-- `DeletionProtection` is stored but NOT enforced at delete time (always allows deletion for local testing ergonomics)
 - No SMS/email delivery; no Lambda trigger invocation
 - `EstimatedNumberOfUsers` always returns 0 (user counting not yet implemented)
 - `Policies.PasswordPolicy` enforcement: see `docs/aws-spec/cognito/password_policy.md`

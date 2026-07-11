@@ -203,7 +203,10 @@ type mockStore struct {
 
 func (m *mockStore) CreateUserPool(*UserPoolMetadata) error { return m.createErr }
 func (m *mockStore) GetUserPool(string) (*UserPoolMetadata, error) {
-	return nil, m.getErr
+	if m.getErr != nil {
+		return nil, m.getErr
+	}
+	return &UserPoolMetadata{}, nil
 }
 func (m *mockStore) UpdateUserPool(_ string, _ func(*UserPoolMetadata) error) error {
 	return m.updateErr
