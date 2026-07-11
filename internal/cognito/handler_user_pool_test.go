@@ -380,6 +380,17 @@ func TestDeleteUserPool_NotFound(t *testing.T) {
 	assert.Equal(t, ErrTypeResourceNotFoundException, resp.Type)
 }
 
+func TestDeleteUserPool_NotFoundBetweenGetAndDelete(t *testing.T) {
+	store := mockStore{deleteErr: errUserPoolNotFound}
+	ro := &Router{storage: &store}
+	w := doOp(t, ro, "DeleteUserPool", `{"UserPoolId":"us-east-1_Test12345"}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	var resp errResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, ErrTypeResourceNotFoundException, resp.Type)
+}
+
 func TestDeleteUserPool_MissingID(t *testing.T) {
 	ro := newTestRouter(t)
 	w := doOp(t, ro, "DeleteUserPool", `{}`)
@@ -656,6 +667,12 @@ func TestStorageErrors(t *testing.T) {
 			store: mockStore{updateErr: storageErr},
 			op:    "UpdateUserPool",
 			body:  `{"UserPoolId":"us-east-1_Test12345","PoolName":"x"}`,
+		},
+		{
+			name:  "DeleteUserPool_GetUserPool",
+			store: mockStore{getErr: storageErr},
+			op:    "DeleteUserPool",
+			body:  `{"UserPoolId":"us-east-1_Test12345"}`,
 		},
 		{
 			name:  "DeleteUserPool",

@@ -12,6 +12,12 @@ import (
 
 // ── DeleteUserPool error paths ────────────────────────────────────────────────
 
+func TestDeleteUserPool_PoolNotFound(t *testing.T) {
+	s := newTestStorage(t)
+	err := s.DeleteUserPool("us-east-1_DoesNotExist")
+	require.ErrorIs(t, err, errUserPoolNotFound)
+}
+
 func TestDeleteUserPool_DirErrors(t *testing.T) {
 	tests := []struct {
 		subdir string
