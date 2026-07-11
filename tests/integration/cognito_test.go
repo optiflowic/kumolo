@@ -2087,3 +2087,180 @@ func TestCognitoIntegration_AdminDisableEnableUser(t *testing.T) {
 		assert.Equal(t, "UserNotFoundException", apiErrorCode(err))
 	})
 }
+
+// ── PasswordPolicy complexity enforcement ───────────────────────────────────
+
+// newPasswordPolicyTestEnv creates a pool with the given password policy — nil
+// leaves the pool's Policies unset, exercising kumolo's built-in default — and
+// a client for it.
+func newPasswordPolicyTestEnv(
+	t *testing.T, c *awscognito.Client, name string, policy *types.PasswordPolicyType,
+) adminTestEnv {
+	t.Helper()
+	ctx := context.Background()
+	input := &awscognito.CreateUserPoolInput{PoolName: aws.String(name)}
+	if policy != nil {
+		input.Policies = &types.UserPoolPolicyType{PasswordPolicy: policy}
+	}
+	pool, err := c.CreateUserPool(ctx, input)
+	require.NoError(t, err)
+	poolID := aws.ToString(pool.UserPool.Id)
+
+	cl, err := c.CreateUserPoolClient(ctx, &awscognito.CreateUserPoolClientInput{
+		UserPoolId: aws.String(poolID),
+		ClientName: aws.String(name + "-client"),
+	})
+	require.NoError(t, err)
+	return adminTestEnv{poolID: poolID, clientID: aws.ToString(cl.UserPoolClient.ClientId)}
+}
+
+// TestCognitoIntegration_PasswordPolicy drives PasswordPolicy complexity
+// enforcement through the real SDK across SignUp, AdminCreateUser, and
+// AdminSetUserPassword, covering the built-in default policy, a fully custom
+// policy, and a policy that only overrides a subset of fields.
+func TestCognitoIntegration_PasswordPolicy(t *testing.T) {
+	clients := newTestClients(t)
+	ctx := context.Background()
+	c := clients.cognito
+
+	t.Run("SignUp_DefaultPolicy_RejectsWeakPassword", func(t *testing.T) {
+		env := newPasswordPolicyTestEnv(t, c, "pwpolicy-default-pool", nil)
+
+		_, err := c.SignUp(ctx, &awscognito.SignUpInput{
+			ClientId: aws.String(env.clientID),
+			Username: aws.String("weak-pw-user"),
+			Password: aws.String("alllowercase1"), // missing uppercase and symbol
+		})
+		require.Error(t, err)
+		assert.Equal(t, "InvalidPasswordException", apiErrorCode(err))
+
+		_, err = c.SignUp(ctx, &awscognito.SignUpInput{
+			ClientId: aws.String(env.clientID),
+			Username: aws.String("strong-pw-user"),
+			Password: aws.String("Valid1Pass!"),
+		})
+		require.NoError(t, err)
+	})
+
+	t.Run("SignUp_DefaultPolicy_MinimumLengthCountsRunesNotBytes", func(t *testing.T) {
+		env := newPasswordPolicyTestEnv(t, c, "pwpolicy-multibyte-pool", nil)
+
+		// 6 runes / 10 UTF-8 bytes: satisfies every category (upper/lower/number/
+		// symbol) and clears the 8-byte mark, so a byte-counting implementation
+		// would wrongly accept it. It is still short of the 8-rune default
+		// minimum length, so it must be rejected once length is counted in runes.
+		_, err := c.SignUp(ctx, &awscognito.SignUpInput{
+			ClientId: aws.String(env.clientID),
+			Username: aws.String("multibyte-pw-user"),
+			Password: aws.String("Aa1!アイ"),
+		})
+		require.Error(t, err)
+		assert.Equal(t, "InvalidPasswordException", apiErrorCode(err))
+	})
+
+	// Note: the SDK's JSON serializer only emits RequireUppercase / RequireLowercase
+	// / RequireNumbers / RequireSymbols when they are true — a false value is
+	// indistinguishable from an omitted field on the wire (see
+	// serializeDocumentPasswordPolicyType in the SDK). So "explicit false"
+	// scenarios can't be driven through this client; they're covered by
+	// unit tests (internal/cognito/password_policy_test.go) and by
+	// e2e/aws-cli/cognito.sh, which sends raw JSON and isn't subject to this
+	// limitation.
+	t.Run("SignUp_CustomPolicy_OnlyMinimumLengthOverridden", func(t *testing.T) {
+		// This pool's Policies blob carries only MinimumLength; every
+		// RequireX field must still inherit the built-in default (true).
+		env := newPasswordPolicyTestEnv(t, c, "pwpolicy-custom-pool", &types.PasswordPolicyType{
+			MinimumLength: aws.Int32(14),
+		})
+
+		// Satisfies every default category requirement but is short of the
+		// pool's custom 14-character minimum.
+		_, err := c.SignUp(ctx, &awscognito.SignUpInput{
+			ClientId: aws.String(env.clientID),
+			Username: aws.String("custom-short-user"),
+			Password: aws.String("Sh0rter1!"),
+		})
+		require.Error(t, err)
+		assert.Equal(t, "InvalidPasswordException", apiErrorCode(err))
+
+		// Long enough, but missing a symbol — the default RequireSymbols=true
+		// must still apply even though this pool only overrode MinimumLength.
+		_, err = c.SignUp(ctx, &awscognito.SignUpInput{
+			ClientId: aws.String(env.clientID),
+			Username: aws.String("custom-nosymbol-user"),
+			Password: aws.String("LongEnough1234"),
+		})
+		require.Error(t, err)
+		assert.Equal(t, "InvalidPasswordException", apiErrorCode(err))
+
+		_, err = c.SignUp(ctx, &awscognito.SignUpInput{
+			ClientId: aws.String(env.clientID),
+			Username: aws.String("custom-ok-user"),
+			Password: aws.String("LongEnough1234!"),
+		})
+		require.NoError(t, err)
+	})
+
+	t.Run("AdminCreateUser_CustomPolicy_RejectsWeakTemporaryPassword", func(t *testing.T) {
+		env := newPasswordPolicyTestEnv(
+			t,
+			c,
+			"pwpolicy-admin-create-pool",
+			&types.PasswordPolicyType{
+				MinimumLength:    aws.Int32(10),
+				RequireUppercase: true,
+				RequireLowercase: true,
+				RequireNumbers:   true,
+				RequireSymbols:   true,
+			},
+		)
+
+		_, err := c.AdminCreateUser(ctx, &awscognito.AdminCreateUserInput{
+			UserPoolId:        aws.String(env.poolID),
+			Username:          aws.String("admin-weak-temp-user"),
+			TemporaryPassword: aws.String("Sh0rt!"),
+		})
+		require.Error(t, err)
+		assert.Equal(t, "InvalidPasswordException", apiErrorCode(err))
+
+		out, err := c.AdminCreateUser(ctx, &awscognito.AdminCreateUserInput{
+			UserPoolId:        aws.String(env.poolID),
+			Username:          aws.String("admin-strong-temp-user"),
+			TemporaryPassword: aws.String("LongEnough1!"),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, types.UserStatusTypeForceChangePassword, out.User.UserStatus)
+	})
+
+	t.Run("AdminSetUserPassword_CustomPolicy_RejectsWeakPassword", func(t *testing.T) {
+		env := newPasswordPolicyTestEnv(t, c, "pwpolicy-admin-set-pool", &types.PasswordPolicyType{
+			MinimumLength:    aws.Int32(10),
+			RequireUppercase: true,
+			RequireLowercase: true,
+			RequireNumbers:   true,
+			RequireSymbols:   true,
+		})
+		_, err := c.AdminCreateUser(ctx, &awscognito.AdminCreateUserInput{
+			UserPoolId: aws.String(env.poolID),
+			Username:   aws.String("admin-set-pw-user"),
+		})
+		require.NoError(t, err)
+
+		_, err = c.AdminSetUserPassword(ctx, &awscognito.AdminSetUserPasswordInput{
+			UserPoolId: aws.String(env.poolID),
+			Username:   aws.String("admin-set-pw-user"),
+			Password:   aws.String("weak"),
+			Permanent:  true,
+		})
+		require.Error(t, err)
+		assert.Equal(t, "InvalidPasswordException", apiErrorCode(err))
+
+		_, err = c.AdminSetUserPassword(ctx, &awscognito.AdminSetUserPasswordInput{
+			UserPoolId: aws.String(env.poolID),
+			Username:   aws.String("admin-set-pw-user"),
+			Password:   aws.String("LongEnough1!"),
+			Permanent:  true,
+		})
+		require.NoError(t, err)
+	})
+}

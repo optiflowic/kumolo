@@ -461,6 +461,77 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# PasswordPolicy complexity enforcement
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- PasswordPolicy complexity enforcement ---"
+
+# Uses a dedicated pool/client so custom Policies don't affect the shared
+# $POOL_ID used by the rest of this script. Unlike the Go SDK (which never
+# serializes RequireX=false — see tests/integration/cognito_test.go), the CLI
+# sends whatever JSON is given verbatim, so this is the only e2e path that can
+# exercise an explicit "false" override alongside omitted fields.
+PW_POOL_JSON=$($AWS create-user-pool --pool-name "e2e-pwpolicy-pool" \
+  --policies '{"PasswordPolicy":{"MinimumLength":10,"RequireSymbols":false}}' 2>&1)
+PW_POOL_ID=$(echo "$PW_POOL_JSON" | jq -r '.UserPool.Id // empty' 2>/dev/null || true)
+if [[ -n "$PW_POOL_ID" ]]; then
+  ok "CreateUserPool (custom PasswordPolicy: MinimumLength=10, RequireSymbols=false)"
+else
+  fail "CreateUserPool (custom PasswordPolicy)"
+fi
+
+PW_CLIENT_JSON=$($AWS create-user-pool-client \
+  --user-pool-id "$PW_POOL_ID" \
+  --client-name "e2e-pwpolicy-client" 2>&1)
+PW_CLIENT_ID=$(echo "$PW_CLIENT_JSON" | jq -r '.UserPoolClient.ClientId // empty' 2>/dev/null || true)
+
+if [[ -n "$PW_POOL_ID" && -n "$PW_CLIENT_ID" ]]; then
+  # RequireSymbols is explicitly disabled, but RequireUppercase/Lowercase/Numbers
+  # were omitted from the policy and must still fall back to the built-in
+  # default (true) rather than being treated as disabled too.
+  PW_NOUPPER_JSON=$($AWS sign-up \
+    --client-id "$PW_CLIENT_ID" \
+    --username "pwpolicy-noupper-user" \
+    --password "lowercase123" 2>&1) || true
+  if echo "$PW_NOUPPER_JSON" | grep -qi 'InvalidPasswordException'; then
+    ok "SignUp — omitted RequireUppercase still enforced (defaults to true)"
+  else
+    fail "SignUp — expected InvalidPasswordException for missing uppercase"
+  fi
+
+  # Satisfies uppercase/lowercase/number but has no symbol — must be accepted
+  # since RequireSymbols=false was explicitly set on this pool.
+  PW_NOSYMBOL_JSON=$($AWS sign-up \
+    --client-id "$PW_CLIENT_ID" \
+    --username "pwpolicy-nosymbol-user" \
+    --password "Lowercase123" 2>&1)
+  if echo "$PW_NOSYMBOL_JSON" | grep -q '"UserSub"'; then
+    ok "SignUp — explicit RequireSymbols=false honored"
+  else
+    fail "SignUp — expected explicit RequireSymbols=false to allow a symbol-less password"
+  fi
+
+  # Satisfies every category but is under the custom MinimumLength=10.
+  PW_SHORT_JSON=$($AWS sign-up \
+    --client-id "$PW_CLIENT_ID" \
+    --username "pwpolicy-short-user" \
+    --password "Short1" 2>&1) || true
+  if echo "$PW_SHORT_JSON" | grep -qi 'InvalidPasswordException'; then
+    ok "SignUp — custom MinimumLength=10 enforced"
+  else
+    fail "SignUp — expected InvalidPasswordException for password shorter than 10"
+  fi
+
+  $AWS delete-user-pool-client \
+    --user-pool-id "$PW_POOL_ID" \
+    --client-id "$PW_CLIENT_ID" >/dev/null 2>&1 || true
+else
+  skip "PasswordPolicy enforcement checks — pool/client not available"
+fi
+
+$AWS delete-user-pool --user-pool-id "$PW_POOL_ID" >/dev/null 2>&1 || true
+
+# ---------------------------------------------------------------------------
 # Group management
 # ---------------------------------------------------------------------------
 echo ""

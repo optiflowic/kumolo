@@ -3,12 +3,15 @@ resource "aws_cognito_user_pool" "main" {
 
   mfa_configuration = "OFF"
 
+  # Note: the AWS provider's underlying SDK only transmits require_* fields
+  # when true (a false value is indistinguishable from an omitted field on
+  # the wire — confirmed against real AWS behavior, not kumolo-specific), so
+  # require_*=false here would have no effect. minimum_length is the only
+  # PasswordPolicy field this resource can meaningfully override; the
+  # RequireUppercase/Lowercase/Numbers/Symbols complexity defaults (all true)
+  # still apply regardless of this block's require_* settings.
   password_policy {
-    minimum_length    = 8
-    require_lowercase = false
-    require_numbers   = false
-    require_symbols   = false
-    require_uppercase = false
+    minimum_length = 12
   }
 
   tags = {
@@ -21,7 +24,12 @@ resource "aws_cognito_user" "admin" {
   user_pool_id = aws_cognito_user_pool.main.id
   username     = "tf-admin@example.com"
 
-  temporary_password = "TempPass1!"
+  # Satisfies both the pool's custom 12-character minimum_length and the
+  # default complexity requirements (upper/lower/number/symbol) that still
+  # apply because require_*=false can't be transmitted (see password_policy
+  # above). This exercises passwordPolicyFromPool's merge of an explicit
+  # MinimumLength override with the inherited default complexity flags.
+  temporary_password = "TempPass123!"
   message_action     = "SUPPRESS"
 
   enabled = var.admin_user_enabled
