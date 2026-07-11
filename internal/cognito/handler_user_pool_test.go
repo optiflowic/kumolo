@@ -751,7 +751,12 @@ func TestSetUserPoolMfaConfig_NoMfaConfigurationKeepsExisting(t *testing.T) {
 		MfaConfiguration string `json:"MfaConfiguration"`
 	}
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
-	assert.Equal(t, "OFF", resp.MfaConfiguration, "unset MfaConfiguration must not overwrite the stored value")
+	assert.Equal(
+		t,
+		"OFF",
+		resp.MfaConfiguration,
+		"unset MfaConfiguration must not overwrite the stored value",
+	)
 }
 
 func TestSetUserPoolMfaConfig_Errors(t *testing.T) {
