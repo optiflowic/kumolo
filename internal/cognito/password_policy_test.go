@@ -2,6 +2,7 @@ package cognito
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -82,6 +83,13 @@ func TestValidatePassword(t *testing.T) {
 			password: "パスワード",
 			wantOK:   false,
 			wantMsg:  "Password did not conform with policy: Password not long enough",
+		},
+		{ //nolint:gosec // G101 false positive: test fixture, not a credential
+			name:     "exceeds maximum length",
+			policy:   fullPolicy,
+			password: "Aa1!" + strings.Repeat("x", maxPasswordLen),
+			wantOK:   false,
+			wantMsg:  "Password did not conform with policy: Password too long",
 		},
 	}
 

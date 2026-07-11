@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // verifyAttr marks attrName as verified for username, bypassing the code flow.
@@ -421,6 +422,28 @@ func TestConfirmForgotPassword_UpdateUserStorageError(t *testing.T) {
 	assertErrType(t, w, ErrTypeInternalErrorException)
 }
 
+// TestConfirmForgotPassword_HashError covers hashPassword's error path via an
+// invalid bcrypt cost (injectable through Router.bcryptCost).
+func TestConfirmForgotPassword_HashError(t *testing.T) {
+	ro := &Router{
+		bcryptCost: bcrypt.MaxCost + 1,
+		storage: &mockStore{
+			getPoolForClient: func(string) (string, error) { return "pool-1", nil },
+			updateUserFn: func(_, _ string, fn func(*UserMetadata) error) error {
+				u := &UserMetadata{Status: userStatusConfirmed, PasswordResetCode: "123456"}
+				return fn(u)
+			},
+		},
+	}
+	body, _ := json.Marshal(map[string]string{
+		"ClientId": "c", "Username": "alice",
+		"ConfirmationCode": "123456", "Password": "NewPassword456!",
+	})
+	w := doOp(t, ro, "ConfirmForgotPassword", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
 // ── ChangePassword ───────────────────────────────────────────────────────────
 
 func TestChangePassword_Success(t *testing.T) {
@@ -488,6 +511,33 @@ func TestChangePassword_MissingPreviousPassword(t *testing.T) {
 	w := doOp(t, ro, "ChangePassword", string(body))
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assertErrType(t, w, ErrTypeNotAuthorizedException)
+}
+
+// TestChangePassword_PasswordlessUser_Success covers a user created via
+// AdminCreateUser without a TemporaryPassword (empty PasswordHash): ChangePassword
+// must succeed without a PreviousPassword, and the new password must authenticate.
+func TestChangePassword_PasswordlessUser_Success(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID, clientID := setupPool(t, ro)
+	createAdminUser(t, ro, poolID, "alice")
+
+	user, err := ro.storage.GetUser(poolID, "alice")
+	require.NoError(t, err)
+	require.Empty(t, user.PasswordHash)
+
+	keys, privateKey, err := ro.storage.GetOrCreatePoolKeys(poolID)
+	require.NoError(t, err)
+	token, _, _, _, _, err := issueTokens(privateKey, keys.KeyID, poolID, clientID, user, nil, "")
+	require.NoError(t, err)
+
+	body, _ := json.Marshal(map[string]string{
+		"AccessToken": token, "ProposedPassword": "NewPassword456!",
+	})
+	w := doOp(t, ro, "ChangePassword", string(body))
+	require.Equal(t, http.StatusOK, w.Code, "changePassword failed: %s", w.Body.String())
+
+	newW := doInitAuth(t, ro, clientID, "alice", "NewPassword456!")
+	assert.Equal(t, http.StatusOK, newW.Code)
 }
 
 func TestChangePassword_WrongPreviousPassword(t *testing.T) {
@@ -674,4 +724,33 @@ func TestChangePassword_UpdateUserNotFound(t *testing.T) {
 	w := doOp(t, ro, "ChangePassword", string(body))
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assertErrType(t, w, ErrTypeUserNotFoundException)
+}
+
+// TestChangePassword_HashError covers hashPassword's error path via an invalid
+// bcrypt cost (injectable through Router.bcryptCost).
+func TestChangePassword_HashError(t *testing.T) {
+	key := testRSAKey(t)
+	poolID := "us-east-1_TestPool"
+	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
+	token, _, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil, "")
+	require.NoError(t, err)
+
+	ro := &Router{
+		bcryptCost: bcrypt.MaxCost + 1,
+		storage: &mockStore{
+			getPoolKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+				return &poolKeys{KeyID: "kid"}, key, nil
+			},
+			getUserBySubFn: func(string, string) (*UserMetadata, error) { return user, nil },
+			updateUserFn: func(_, _ string, fn func(*UserMetadata) error) error {
+				return fn(user)
+			},
+		},
+	}
+	body, _ := json.Marshal(map[string]string{
+		"AccessToken": token, "ProposedPassword": "NewPassword456!",
+	})
+	w := doOp(t, ro, "ChangePassword", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
 }
