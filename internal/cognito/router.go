@@ -148,6 +148,8 @@ func (ro *Router) serveHTTP(w http.ResponseWriter, r *http.Request, op string) {
 		ro.handleListUserPools(w, body)
 	case "GetUserPoolMfaConfig":
 		ro.handleGetUserPoolMfaConfig(w, body)
+	case "SetUserPoolMfaConfig":
+		ro.handleSetUserPoolMfaConfig(w, body)
 	case "CreateUserPoolClient":
 		ro.handleCreateUserPoolClient(w, body)
 	case "DescribeUserPoolClient":
