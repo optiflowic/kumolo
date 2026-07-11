@@ -496,6 +496,66 @@ func (ro *Router) handleGetUserPoolMfaConfig(w http.ResponseWriter, body []byte)
 	})
 }
 
+func (ro *Router) handleSetUserPoolMfaConfig(w http.ResponseWriter, body []byte) {
+	var req struct {
+		UserPoolId       string `json:"UserPoolId"`
+		MfaConfiguration string `json:"MfaConfiguration"`
+		// SoftwareTokenMfaConfiguration, SmsMfaConfiguration, EmailMfaConfiguration, and
+		// WebAuthnConfiguration are accepted by real AWS but not persisted by kumolo — see
+		// docs/aws-spec/cognito/set_user_pool_mfa_config.md.
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"invalid request body",
+		)
+		return
+	}
+	if req.UserPoolId == "" {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"UserPoolId is required",
+		)
+		return
+	}
+
+	var mfaConfiguration string
+	err := ro.storage.UpdateUserPool(req.UserPoolId, func(meta *UserPoolMetadata) error {
+		if req.MfaConfiguration != "" {
+			meta.MfaConfiguration = req.MfaConfiguration
+		}
+		mfaConfiguration = meta.MfaConfiguration
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, errUserPoolNotFound) {
+			writeError(
+				w,
+				http.StatusBadRequest,
+				ErrTypeResourceNotFoundException,
+				"User pool not found.",
+			)
+			return
+		}
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			ErrTypeInternalErrorException,
+			"failed to update user pool",
+		)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"MfaConfiguration":              mfaConfiguration,
+		"SoftwareTokenMfaConfiguration": map[string]any{"Enabled": false},
+	})
+}
+
 func (ro *Router) handleDeleteUserPool(w http.ResponseWriter, body []byte) {
 	var req struct {
 		UserPoolId string `json:"UserPoolId"`
