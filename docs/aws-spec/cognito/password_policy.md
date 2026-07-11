@@ -76,5 +76,6 @@ if a consuming test asserts on exact message text.
 - Maximum length is enforced at 72 bytes, not AWS's documented 256 characters. kumolo hashes passwords with
   bcrypt (`golang.org/x/crypto/bcrypt`), which errors on inputs over 72 bytes; `validatePassword` rejects
   such passwords up front as `InvalidPasswordException` rather than letting a policy-valid password fail
-  hashing later as `InternalErrorException`. A password between 73 and 256 bytes that real AWS would accept
-  is therefore rejected by kumolo.
+  hashing later as `InternalErrorException`. A password over 72 bytes that is still within AWS's
+  256-character limit — which a multi-byte (e.g. non-ASCII) password can reach well under 256 bytes — is
+  therefore rejected by kumolo even though real AWS would accept it.
