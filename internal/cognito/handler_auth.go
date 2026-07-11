@@ -99,11 +99,6 @@ func (ro *Router) handleSignUp(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
-	if len(req.Password) < minPasswordLen {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidPasswordException,
-			fmt.Sprintf("Password must be at least %d characters", minPasswordLen))
-		return
-	}
 
 	poolID, err := ro.storage.GetPoolIDForClient(req.ClientID)
 	if err != nil {
@@ -114,6 +109,17 @@ func (ro *Router) handleSignUp(w http.ResponseWriter, body []byte) {
 		}
 		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
 			"failed to resolve client")
+		return
+	}
+
+	pool, err := ro.storage.GetUserPool(poolID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to get user pool")
+		return
+	}
+	if msg, ok := validatePassword(passwordPolicyFromPool(pool), req.Password); !ok {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidPasswordException, msg)
 		return
 	}
 
@@ -732,9 +738,14 @@ func (ro *Router) handleNewPasswordRequired(
 			"NEW_PASSWORD is required in ChallengeResponses")
 		return
 	}
-	if len(newPassword) < minPasswordLen {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidPasswordException,
-			fmt.Sprintf("Password must be at least %d characters", minPasswordLen))
+	pool, err := ro.storage.GetUserPool(poolID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to get user pool")
+		return
+	}
+	if msg, ok := validatePassword(passwordPolicyFromPool(pool), newPassword); !ok {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidPasswordException, msg)
 		return
 	}
 

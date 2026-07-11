@@ -2,7 +2,7 @@
 
 URL: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/
 SDK: github.com/aws/aws-sdk-go-v2/service/cognitoidentityprovider
-Last verified: 2026-06-22
+Last verified: 2026-07-11
 
 ## Operations
 
@@ -92,3 +92,4 @@ kumolo generates: `us-east-1_` + 9 random alphanumeric chars (A-Z, a-z, 0-9).
 - `DeletionProtection` is stored but NOT enforced at delete time (always allows deletion for local testing ergonomics)
 - No SMS/email delivery; no Lambda trigger invocation
 - `EstimatedNumberOfUsers` always returns 0 (user counting not yet implemented)
+- `Policies.PasswordPolicy` enforcement: see `docs/aws-spec/cognito/password_policy.md`

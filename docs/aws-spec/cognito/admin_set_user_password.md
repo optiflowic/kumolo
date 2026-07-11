@@ -3,7 +3,7 @@
 - **URL**: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_AdminSetUserPassword.html
 - **Target**: `AWSCognitoIdentityProviderService.AdminSetUserPassword`
 - **SDK**: `cognitoidentityprovider.AdminSetUserPasswordInput` / `AdminSetUserPasswordOutput`
-- **Last verified**: 2026-06-25
+- **Last verified**: 2026-07-11
 
 ## Request
 
@@ -30,11 +30,11 @@ HTTP 200 + empty body `{}`
 |---------------------------|------|---------|
 | ResourceNotFoundException | 400  | pool not found |
 | UserNotFoundException     | 400  | username not found |
-| InvalidPasswordException  | 400  | password fails minimum length policy |
+| InvalidPasswordException  | 400  | password fails pool's password policy |
 | InvalidParameterException | 400  | missing required field |
 | InternalErrorException    | 500  | storage failure |
 
 ## kumolo deviations
 
 - `PasswordHistoryPolicyViolationException` not implemented (no history tracking).
-- Password policy: only minimum length checked, complexity rules not enforced.
+- Password policy enforcement: see `docs/aws-spec/cognito/password_policy.md`.

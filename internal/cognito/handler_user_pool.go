@@ -131,9 +131,12 @@ func defaultStr(v, fallback string) string {
 }
 
 func defaultPolicies() json.RawMessage {
-	return json.RawMessage(
-		`{"PasswordPolicy":{"MinimumLength":8,"RequireUppercase":true,"RequireLowercase":true,"RequireNumbers":true,"RequireSymbols":true,"TemporaryPasswordValidityDays":7}}`,
-	)
+	data, err := json.Marshal(policiesType{PasswordPolicy: defaultPasswordPolicy()})
+	if err != nil {
+		// unreachable: policiesType contains only primitive fields, always marshals
+		return json.RawMessage(`{}`)
+	}
+	return json.RawMessage(data)
 }
 
 func defaultAdminCreateUserConfig() json.RawMessage {

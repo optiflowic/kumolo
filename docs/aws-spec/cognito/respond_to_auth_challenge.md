@@ -2,7 +2,7 @@
 
 URL: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_RespondToAuthChallenge.html
 SDK: `cognitoidentityprovider.RespondToAuthChallengeInput` / `cognitoidentityprovider.RespondToAuthChallengeOutput`
-Last verified: 2026-06-23
+Last verified: 2026-07-11
 
 ## Request Parameters
 
@@ -79,6 +79,6 @@ kumolo validates that:
 
 - Only NEW_PASSWORD_REQUIRED challenge is supported.
 - Session is a kumolo-specific signed JWT (not the AWS opaque session token format).
-- Password policy enforcement: minimum 8 characters only.
+- Password policy enforcement: see `docs/aws-spec/cognito/password_policy.md`.
 - SecretHash, ClientMetadata, AnalyticsMetadata, UserContextData are accepted but ignored.
 - `USERNAME` in ChallengeResponses is optional: if absent, the username is taken from the `username` claim in the Session JWT. On real AWS, USERNAME is required.
