@@ -18,7 +18,6 @@ import (
 
 const (
 	minPasswordLen = 8
-	maxPasswordLen = 256
 
 	userStatusUnconfirmed       = "UNCONFIRMED"
 	userStatusConfirmed         = "CONFIRMED"

@@ -71,3 +71,8 @@ if a consuming test asserts on exact message text.
 - No `PasswordHistorySize` enforcement (no password history tracking).
 - Symbol detection is a general "not letter/digit/whitespace" Unicode check rather than AWS's documented
   allowed-symbol character set.
+- Maximum length is enforced at 72 bytes, not AWS's documented 256 characters. kumolo hashes passwords with
+  bcrypt (`golang.org/x/crypto/bcrypt`), which errors on inputs over 72 bytes; `validatePassword` rejects
+  such passwords up front as `InvalidPasswordException` rather than letting a policy-valid password fail
+  hashing later as `InternalErrorException`. A password between 73 and 256 bytes that real AWS would accept
+  is therefore rejected by kumolo.

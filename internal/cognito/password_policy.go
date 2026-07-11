@@ -97,7 +97,11 @@ func validatePassword(policy passwordPolicy, password string) (message string, o
 	switch {
 	case utf8.RuneCountInString(password) < minLen:
 		return "Password did not conform with policy: Password not long enough", false
-	case utf8.RuneCountInString(password) > maxPasswordLen:
+	// Real AWS allows up to 256 characters, but kumolo hashes passwords with
+	// bcrypt, which silently caps input at 72 bytes; enforcing that limit here
+	// keeps rejection consistent (InvalidPasswordException) instead of letting
+	// policy-valid passwords fail hashing later with InternalErrorException.
+	case len(password) > bcryptMaxPasswordBytes:
 		return "Password did not conform with policy: Password too long", false
 	case policy.RequireUppercase && !containsRune(password, unicode.IsUpper):
 		return "Password did not conform with policy: Password must have uppercase characters", false
