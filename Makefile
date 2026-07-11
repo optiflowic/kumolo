@@ -59,6 +59,8 @@ e2e-terraform:
 	  rm -f terraform.tfstate terraform.tfstate.backup .terraform.tfstate.lock.info && \
 	  { [ -d .terraform ] || terraform init -input=false; } && \
 	  terraform apply -auto-approve && \
+	  terraform apply -auto-approve -var="admin_user_enabled=false" -var="admin_given_name=Updated" && \
+	  terraform apply -auto-approve && \
 	  terraform destroy -auto-approve
 
 verify:
