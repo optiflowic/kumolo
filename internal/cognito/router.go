@@ -166,6 +166,12 @@ func (ro *Router) serveHTTP(w http.ResponseWriter, r *http.Request, op string) {
 		ro.handleConfirmSignUp(w, body)
 	case "ResendConfirmationCode":
 		ro.handleResendConfirmationCode(w, body)
+	case "ForgotPassword":
+		ro.handleForgotPassword(w, body)
+	case "ConfirmForgotPassword":
+		ro.handleConfirmForgotPassword(w, body)
+	case "ChangePassword":
+		ro.handleChangePassword(w, body)
 	case "InitiateAuth":
 		ro.handleInitiateAuth(w, body)
 	case "RespondToAuthChallenge":

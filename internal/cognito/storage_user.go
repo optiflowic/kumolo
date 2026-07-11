@@ -34,8 +34,11 @@ type UserMetadata struct {
 	// attribute name (e.g. "email", "phone_number"), set by UpdateUserAttributes
 	// / GetUserAttributeVerificationCode and consumed by VerifyUserAttribute.
 	VerificationCodes map[string]string `json:"VerificationCodes,omitempty"`
-	CreatedAt         float64           `json:"CreatedAt"`
-	UpdatedAt         float64           `json:"UpdatedAt"`
+	// PasswordResetCode holds the pending code set by ForgotPassword and consumed
+	// by ConfirmForgotPassword. Independent of ConfirmationCode/VerificationCodes.
+	PasswordResetCode string  `json:"PasswordResetCode,omitempty"`
+	CreatedAt         float64 `json:"CreatedAt"`
+	UpdatedAt         float64 `json:"UpdatedAt"`
 }
 
 type userIndexEntry struct {
