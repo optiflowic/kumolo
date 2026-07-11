@@ -15,6 +15,8 @@ accepts a plaintext password:
 - `AdminCreateUser` (`TemporaryPassword`, only validated when non-empty)
 - `AdminSetUserPassword` (`Password`)
 - `RespondToAuthChallenge` `NEW_PASSWORD_REQUIRED` (`NEW_PASSWORD`)
+- `ConfirmForgotPassword` (`Password`)
+- `ChangePassword` (`ProposedPassword`)
 
 ## Fields enforced
 
@@ -35,15 +37,17 @@ kumolo checks rules in this order and returns on the first violation (matches ob
 reporting a single failing rule per response):
 
 1. MinimumLength
-2. RequireUppercase
-3. RequireLowercase
-4. RequireNumbers
-5. RequireSymbols
+2. MaximumLength (72 bytes, kumolo-specific bcrypt limit — see Deviations)
+3. RequireUppercase
+4. RequireLowercase
+5. RequireNumbers
+6. RequireSymbols
 
 `InvalidPasswordException` (HTTP 400) message format: `Password did not conform with policy: {reason}`,
 where `{reason}` is one of:
 
 - `Password not long enough`
+- `Password too long`
 - `Password must have uppercase characters`
 - `Password must have lowercase characters`
 - `Password must have numeric characters`
@@ -69,3 +73,9 @@ if a consuming test asserts on exact message text.
 - No `PasswordHistorySize` enforcement (no password history tracking).
 - Symbol detection is a general "not letter/digit/whitespace" Unicode check rather than AWS's documented
   allowed-symbol character set.
+- Maximum length is enforced at 72 bytes, not AWS's documented 256 characters. kumolo hashes passwords with
+  bcrypt (`golang.org/x/crypto/bcrypt`), which errors on inputs over 72 bytes; `validatePassword` rejects
+  such passwords up front as `InvalidPasswordException` rather than letting a policy-valid password fail
+  hashing later as `InternalErrorException`. A password over 72 bytes that is still within AWS's
+  256-character limit — which a multi-byte (e.g. non-ASCII) password can reach well under 256 bytes — is
+  therefore rejected by kumolo even though real AWS would accept it.

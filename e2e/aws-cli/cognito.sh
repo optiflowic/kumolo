@@ -1240,6 +1240,163 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Password Management: ForgotPassword, ConfirmForgotPassword, ChangePassword
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- Password Management ---"
+
+PW_USER="pwmgmt-e2e@example.com"
+PW_PASS="Password1!"
+
+PW_SIGNUP_JSON=$($AWS sign-up \
+  --client-id "$CLIENT_ID" \
+  --username "$PW_USER" \
+  --password "$PW_PASS" \
+  --user-attributes "Name=email,Value=$PW_USER" 2>&1)
+if echo "$PW_SIGNUP_JSON" | grep -q '"UserSub"'; then
+  ok "SignUp (for password management)"
+else
+  fail "SignUp (for password management)"
+fi
+
+PW_CODE="${E2E_COGNITO_PW_CODE:-}"
+if [[ -z "$PW_CODE" ]]; then
+  if command -v docker &>/dev/null && docker compose ps --services 2>/dev/null | grep -q .; then
+    PW_CODE=$(docker compose logs 2>/dev/null \
+      | grep 'SignUp confirmation code' \
+      | grep "$PW_USER" \
+      | tail -1 \
+      | grep -oE 'code=[0-9]+' \
+      | cut -d= -f2 || true)
+  fi
+fi
+
+if [[ -n "$PW_CODE" ]]; then
+  run "ConfirmSignUp (for password management)" \
+    $AWS confirm-sign-up \
+      --client-id "$CLIENT_ID" \
+      --username "$PW_USER" \
+      --confirmation-code "$PW_CODE"
+
+  # ForgotPassword requires a verified contact attribute; AdminUpdateUserAttributes
+  # with email_verified=true bypasses the normal VerifyUserAttribute code flow.
+  run "AdminUpdateUserAttributes (mark email verified)" \
+    $AWS admin-update-user-attributes \
+      --user-pool-id "$POOL_ID" \
+      --username "$PW_USER" \
+      --user-attributes "Name=email,Value=$PW_USER" "Name=email_verified,Value=true"
+
+  # Error: no verified contact attribute.
+  NOVERIFIED_JSON=$($AWS forgot-password \
+    --client-id "$CLIENT_ID" \
+    --username "no-such-user-forgot@example.com" 2>&1) || true
+  if echo "$NOVERIFIED_JSON" | grep -qi 'UserNotFoundException'; then
+    ok "ForgotPassword — UserNotFoundException for unknown user"
+  else
+    fail "ForgotPassword — expected UserNotFoundException for unknown user"
+  fi
+
+  FP_JSON=$($AWS forgot-password \
+    --client-id "$CLIENT_ID" \
+    --username "$PW_USER" 2>&1)
+  if echo "$FP_JSON" | grep -q '"AttributeName": "email"'; then
+    ok "ForgotPassword"
+  else
+    fail "ForgotPassword"
+  fi
+
+  FP_CODE="${E2E_COGNITO_FP_CODE:-}"
+  if [[ -z "$FP_CODE" ]]; then
+    if command -v docker &>/dev/null && docker compose ps --services 2>/dev/null | grep -q .; then
+      FP_CODE=$(docker compose logs 2>/dev/null \
+        | grep 'ForgotPassword' \
+        | grep "$PW_USER" \
+        | tail -1 \
+        | grep -oE 'code=[0-9]+' \
+        | cut -d= -f2 || true)
+    fi
+  fi
+
+  if [[ -n "$FP_CODE" ]]; then
+    CFP_MISMATCH_JSON=$($AWS confirm-forgot-password \
+      --client-id "$CLIENT_ID" \
+      --username "$PW_USER" \
+      --confirmation-code "000000" \
+      --password "NewPassword1!" 2>&1) || true
+    if echo "$CFP_MISMATCH_JSON" | grep -qi 'CodeMismatchException'; then
+      ok "ConfirmForgotPassword — CodeMismatchException for wrong code"
+    else
+      fail "ConfirmForgotPassword — expected CodeMismatchException for wrong code"
+    fi
+
+    run "ConfirmForgotPassword" \
+      $AWS confirm-forgot-password \
+        --client-id "$CLIENT_ID" \
+        --username "$PW_USER" \
+        --confirmation-code "$FP_CODE" \
+        --password "NewPassword1!"
+
+    NEWPW_AUTH_JSON=$($AWS initiate-auth \
+      --client-id "$CLIENT_ID" \
+      --auth-flow "USER_PASSWORD_AUTH" \
+      --auth-parameters "USERNAME=$PW_USER,PASSWORD=NewPassword1!" 2>&1)
+    if echo "$NEWPW_AUTH_JSON" | grep -q '"AccessToken"'; then
+      ok "InitiateAuth — sign-in with new password after ConfirmForgotPassword"
+    else
+      fail "InitiateAuth — expected sign-in with new password after ConfirmForgotPassword"
+    fi
+
+    OLDPW_AUTH_JSON=$($AWS initiate-auth \
+      --client-id "$CLIENT_ID" \
+      --auth-flow "USER_PASSWORD_AUTH" \
+      --auth-parameters "USERNAME=$PW_USER,PASSWORD=$PW_PASS" 2>&1) || true
+    if echo "$OLDPW_AUTH_JSON" | grep -qi 'NotAuthorizedException'; then
+      ok "InitiateAuth — old password rejected after ConfirmForgotPassword"
+    else
+      fail "InitiateAuth — expected old password to be rejected after ConfirmForgotPassword"
+    fi
+
+    # ChangePassword: authenticated password change.
+    CP_ACCESS_TOKEN=$(echo "$NEWPW_AUTH_JSON" | jq -r '.AuthenticationResult.AccessToken // empty' 2>/dev/null || true)
+    if [[ -n "$CP_ACCESS_TOKEN" ]]; then
+      CP_WRONG_JSON=$($AWS change-password \
+        --access-token "$CP_ACCESS_TOKEN" \
+        --previous-password "WrongPassword1!" \
+        --proposed-password "ChangedPassword1!" 2>&1) || true
+      if echo "$CP_WRONG_JSON" | grep -qi 'NotAuthorizedException'; then
+        ok "ChangePassword — NotAuthorizedException for wrong previous password"
+      else
+        fail "ChangePassword — expected NotAuthorizedException for wrong previous password"
+      fi
+
+      run "ChangePassword" \
+        $AWS change-password \
+          --access-token "$CP_ACCESS_TOKEN" \
+          --previous-password "NewPassword1!" \
+          --proposed-password "ChangedPassword1!"
+
+      CHANGED_AUTH_JSON=$($AWS initiate-auth \
+        --client-id "$CLIENT_ID" \
+        --auth-flow "USER_PASSWORD_AUTH" \
+        --auth-parameters "USERNAME=$PW_USER,PASSWORD=ChangedPassword1!" 2>&1)
+      if echo "$CHANGED_AUTH_JSON" | grep -q '"AccessToken"'; then
+        ok "InitiateAuth — sign-in with changed password after ChangePassword"
+      else
+        fail "InitiateAuth — expected sign-in with changed password after ChangePassword"
+      fi
+    else
+      skip "ChangePassword — could not obtain access token"
+    fi
+  else
+    skip "ConfirmForgotPassword / ChangePassword — no reset code available"
+    echo "  Hint: set E2E_COGNITO_FP_CODE=<code> from kumolo logs, or use Docker Compose"
+  fi
+else
+  skip "Password management tests — no confirmation code available"
+  echo "  Hint: set E2E_COGNITO_PW_CODE=<code> from kumolo logs, or use Docker Compose"
+fi
+
+# ---------------------------------------------------------------------------
 # Cleanup
 # ---------------------------------------------------------------------------
 # Only clear CLIENT_ID / POOL_ID after a successful delete so the EXIT-trap

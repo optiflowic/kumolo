@@ -45,7 +45,7 @@ func (c *codeCapture) Enabled(_ context.Context, _ slog.Level) bool { return tru
 
 func (c *codeCapture) Handle(_ context.Context, r slog.Record) error {
 	switch r.Message {
-	case "SignUp confirmation code", "ResendConfirmationCode":
+	case "SignUp confirmation code", "ResendConfirmationCode", "ForgotPassword":
 		var username, code string
 		r.Attrs(func(a slog.Attr) bool {
 			switch a.Key {
@@ -2262,5 +2262,225 @@ func TestCognitoIntegration_PasswordPolicy(t *testing.T) {
 			Permanent:  true,
 		})
 		require.NoError(t, err)
+	})
+}
+
+// ── Password Management (ForgotPassword / ConfirmForgotPassword / ChangePassword) ──
+
+func TestCognitoIntegration_PasswordManagement(t *testing.T) {
+	cap := withCodeCapture(t)
+	clients := newTestClients(t)
+	ctx := context.Background()
+	c := clients.cognito
+
+	t.Run("ForgotPassword_ConfirmForgotPassword_Success", func(t *testing.T) {
+		const (
+			username = "forgotpw-user"
+			password = "Password1!"
+		)
+		poolID, _ := createConfirmedUser(
+			t, ctx, c, cap, "forgotpw-pool", "forgotpw-client", username, password,
+		)
+		clientOut, err := c.ListUserPoolClients(ctx, &awscognito.ListUserPoolClientsInput{
+			UserPoolId: aws.String(poolID),
+		})
+		require.NoError(t, err)
+		require.Len(t, clientOut.UserPoolClients, 1)
+		clientID := aws.ToString(clientOut.UserPoolClients[0].ClientId)
+
+		_, err = c.AdminUpdateUserAttributes(ctx, &awscognito.AdminUpdateUserAttributesInput{
+			UserPoolId: aws.String(poolID),
+			Username:   aws.String(username),
+			UserAttributes: []types.AttributeType{
+				{Name: aws.String("email"), Value: aws.String("forgotpw@example.com")},
+				{Name: aws.String("email_verified"), Value: aws.String("true")},
+			},
+		})
+		require.NoError(t, err)
+
+		fpOut, err := c.ForgotPassword(ctx, &awscognito.ForgotPasswordInput{
+			ClientId: aws.String(clientID),
+			Username: aws.String(username),
+		})
+		require.NoError(t, err)
+		require.NotNil(t, fpOut.CodeDeliveryDetails)
+		assert.Equal(t, "email", aws.ToString(fpOut.CodeDeliveryDetails.AttributeName))
+
+		code := cap.get(username)
+		require.NotEmpty(t, code)
+
+		_, err = c.ConfirmForgotPassword(ctx, &awscognito.ConfirmForgotPasswordInput{
+			ClientId:         aws.String(clientID),
+			Username:         aws.String(username),
+			ConfirmationCode: aws.String(code),
+			Password:         aws.String("NewPassword1!"),
+		})
+		require.NoError(t, err)
+
+		_, err = c.InitiateAuth(ctx, &awscognito.InitiateAuthInput{
+			ClientId: aws.String(clientID),
+			AuthFlow: types.AuthFlowTypeUserPasswordAuth,
+			AuthParameters: map[string]string{
+				"USERNAME": username,
+				"PASSWORD": "NewPassword1!",
+			},
+		})
+		require.NoError(t, err)
+
+		_, err = c.InitiateAuth(ctx, &awscognito.InitiateAuthInput{
+			ClientId: aws.String(clientID),
+			AuthFlow: types.AuthFlowTypeUserPasswordAuth,
+			AuthParameters: map[string]string{
+				"USERNAME": username,
+				"PASSWORD": password,
+			},
+		})
+		require.Error(t, err)
+		assert.Equal(t, "NotAuthorizedException", apiErrorCode(err))
+	})
+
+	t.Run("ForgotPassword_NoVerifiedContact_InvalidParameterException", func(t *testing.T) {
+		const (
+			username = "forgotpw-noverified-user"
+			password = "Password1!"
+		)
+		poolID, _ := createConfirmedUser(
+			t, ctx, c, cap, "forgotpw-noverified-pool", "forgotpw-noverified-client",
+			username, password,
+		)
+		clientOut, err := c.ListUserPoolClients(ctx, &awscognito.ListUserPoolClientsInput{
+			UserPoolId: aws.String(poolID),
+		})
+		require.NoError(t, err)
+		clientID := aws.ToString(clientOut.UserPoolClients[0].ClientId)
+
+		// The user was created via SignUp with no attributes, so it has no
+		// verified email or phone_number for the reset code to be sent to.
+		_, err = c.ForgotPassword(ctx, &awscognito.ForgotPasswordInput{
+			ClientId: aws.String(clientID),
+			Username: aws.String(username),
+		})
+		require.Error(t, err)
+		assert.Equal(t, "InvalidParameterException", apiErrorCode(err))
+	})
+
+	t.Run("ConfirmForgotPassword_CodeMismatch", func(t *testing.T) {
+		const (
+			username = "forgotpw-mismatch-user"
+			password = "Password1!"
+		)
+		poolID, _ := createConfirmedUser(
+			t, ctx, c, cap, "forgotpw-mismatch-pool", "forgotpw-mismatch-client",
+			username, password,
+		)
+		clientOut, err := c.ListUserPoolClients(ctx, &awscognito.ListUserPoolClientsInput{
+			UserPoolId: aws.String(poolID),
+		})
+		require.NoError(t, err)
+		clientID := aws.ToString(clientOut.UserPoolClients[0].ClientId)
+
+		_, err = c.AdminUpdateUserAttributes(ctx, &awscognito.AdminUpdateUserAttributesInput{
+			UserPoolId: aws.String(poolID),
+			Username:   aws.String(username),
+			UserAttributes: []types.AttributeType{
+				{Name: aws.String("email"), Value: aws.String("forgotpw-mismatch@example.com")},
+				{Name: aws.String("email_verified"), Value: aws.String("true")},
+			},
+		})
+		require.NoError(t, err)
+
+		_, err = c.ForgotPassword(ctx, &awscognito.ForgotPasswordInput{
+			ClientId: aws.String(clientID),
+			Username: aws.String(username),
+		})
+		require.NoError(t, err)
+
+		_, err = c.ConfirmForgotPassword(ctx, &awscognito.ConfirmForgotPasswordInput{
+			ClientId:         aws.String(clientID),
+			Username:         aws.String(username),
+			ConfirmationCode: aws.String("000000"),
+			Password:         aws.String("NewPassword1!"),
+		})
+		require.Error(t, err)
+		assert.Equal(t, "CodeMismatchException", apiErrorCode(err))
+	})
+
+	t.Run("ChangePassword_Success", func(t *testing.T) {
+		const (
+			username = "changepw-user"
+			password = "Password1!"
+		)
+		poolID, accessToken := createConfirmedUser(
+			t, ctx, c, cap, "changepw-pool", "changepw-client", username, password,
+		)
+		clientOut, err := c.ListUserPoolClients(ctx, &awscognito.ListUserPoolClientsInput{
+			UserPoolId: aws.String(poolID),
+		})
+		require.NoError(t, err)
+		clientID := aws.ToString(clientOut.UserPoolClients[0].ClientId)
+
+		_, err = c.ChangePassword(ctx, &awscognito.ChangePasswordInput{
+			AccessToken:      aws.String(accessToken),
+			PreviousPassword: aws.String(password),
+			ProposedPassword: aws.String("ChangedPassword1!"),
+		})
+		require.NoError(t, err)
+
+		_, err = c.InitiateAuth(ctx, &awscognito.InitiateAuthInput{
+			ClientId: aws.String(clientID),
+			AuthFlow: types.AuthFlowTypeUserPasswordAuth,
+			AuthParameters: map[string]string{
+				"USERNAME": username,
+				"PASSWORD": "ChangedPassword1!",
+			},
+		})
+		require.NoError(t, err)
+
+		_, err = c.InitiateAuth(ctx, &awscognito.InitiateAuthInput{
+			ClientId: aws.String(clientID),
+			AuthFlow: types.AuthFlowTypeUserPasswordAuth,
+			AuthParameters: map[string]string{
+				"USERNAME": username,
+				"PASSWORD": password,
+			},
+		})
+		require.Error(t, err)
+		assert.Equal(t, "NotAuthorizedException", apiErrorCode(err))
+	})
+
+	t.Run("ChangePassword_WrongPreviousPassword", func(t *testing.T) {
+		const (
+			username = "changepw-wrong-user"
+			password = "Password1!"
+		)
+		_, accessToken := createConfirmedUser(
+			t, ctx, c, cap, "changepw-wrong-pool", "changepw-wrong-client", username, password,
+		)
+
+		_, err := c.ChangePassword(ctx, &awscognito.ChangePasswordInput{
+			AccessToken:      aws.String(accessToken),
+			PreviousPassword: aws.String("WrongPassword1!"),
+			ProposedPassword: aws.String("ChangedPassword1!"),
+		})
+		require.Error(t, err)
+		assert.Equal(t, "NotAuthorizedException", apiErrorCode(err))
+	})
+
+	t.Run("ChangePassword_InvalidProposedPassword", func(t *testing.T) {
+		const (
+			username = "changepw-invalid-user"
+			password = "Password1!"
+		)
+		_, accessToken := createConfirmedUser(
+			t, ctx, c, cap, "changepw-invalid-pool", "changepw-invalid-client", username, password,
+		)
+
+		_, err := c.ChangePassword(ctx, &awscognito.ChangePasswordInput{
+			AccessToken:      aws.String(accessToken),
+			PreviousPassword: aws.String(password),
+			ProposedPassword: aws.String("short"),
+		})
+		require.Error(t, err)
+		assert.Equal(t, "InvalidPasswordException", apiErrorCode(err))
 	})
 }
