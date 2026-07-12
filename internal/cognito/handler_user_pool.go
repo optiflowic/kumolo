@@ -582,8 +582,7 @@ func (ro *Router) handleDeleteUserPool(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	meta, err := ro.storage.GetUserPool(req.UserPoolId)
-	if err != nil {
+	if err := ro.storage.DeleteUserPool(req.UserPoolId); err != nil {
 		if errors.Is(err, errUserPoolNotFound) {
 			writeError(
 				w,
@@ -593,31 +592,12 @@ func (ro *Router) handleDeleteUserPool(w http.ResponseWriter, body []byte) {
 			)
 			return
 		}
-		writeError(
-			w,
-			http.StatusInternalServerError,
-			ErrTypeInternalErrorException,
-			"failed to get user pool",
-		)
-		return
-	}
-	if meta.DeletionProtection == "ACTIVE" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"User Pool cannot be deleted currently because it has deletion protection enabled. To delete this User Pool, please first disable the deletion protection via UpdateUserPool API.",
-		)
-		return
-	}
-
-	if err := ro.storage.DeleteUserPool(req.UserPoolId); err != nil {
-		if errors.Is(err, errUserPoolNotFound) {
+		if errors.Is(err, errDeletionProtectionActive) {
 			writeError(
 				w,
 				http.StatusBadRequest,
-				ErrTypeResourceNotFoundException,
-				"User pool not found.",
+				ErrTypeInvalidParameterException,
+				"User Pool cannot be deleted currently because it has deletion protection enabled. To delete this User Pool, please first disable the deletion protection via UpdateUserPool API.",
 			)
 			return
 		}
