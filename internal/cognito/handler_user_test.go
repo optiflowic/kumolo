@@ -529,7 +529,17 @@ func TestGlobalSignOut_PoolKeyError(t *testing.T) {
 	key := testRSAKey(t)
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
-	token, _, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil, "")
+	token, _, _, _, _, err := issueTokens(
+		key,
+		"kid",
+		poolID,
+		"client-1",
+		user,
+		nil,
+		"",
+		accessTokenExpiry,
+		accessTokenExpiry,
+	)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{
@@ -548,7 +558,17 @@ func TestGlobalSignOut_WrongKeySignature(t *testing.T) {
 	key2 := testRSAKey(t)
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
-	token, _, _, _, _, err := issueTokens(key1, "kid", poolID, "client-1", user, nil, "")
+	token, _, _, _, _, err := issueTokens(
+		key1,
+		"kid",
+		poolID,
+		"client-1",
+		user,
+		nil,
+		"",
+		accessTokenExpiry,
+		accessTokenExpiry,
+	)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{
@@ -566,7 +586,17 @@ func TestGlobalSignOut_RevokeAccessTokenStorageError(t *testing.T) {
 	key := testRSAKey(t)
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
-	token, _, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil, "")
+	token, _, _, _, _, err := issueTokens(
+		key,
+		"kid",
+		poolID,
+		"client-1",
+		user,
+		nil,
+		"",
+		accessTokenExpiry,
+		accessTokenExpiry,
+	)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{
@@ -620,7 +650,17 @@ func TestGetUser_CheckTokenRevokedStorageError(t *testing.T) {
 	key := testRSAKey(t)
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
-	token, _, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil, "")
+	token, _, _, _, _, err := issueTokens(
+		key,
+		"kid",
+		poolID,
+		"client-1",
+		user,
+		nil,
+		"",
+		accessTokenExpiry,
+		accessTokenExpiry,
+	)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{
@@ -703,7 +743,17 @@ func TestGlobalSignOut_RevokeTokenFamiliesStorageError(t *testing.T) {
 	key := testRSAKey(t)
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
-	token, _, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil, "")
+	token, _, _, _, _, err := issueTokens(
+		key,
+		"kid",
+		poolID,
+		"client-1",
+		user,
+		nil,
+		"",
+		accessTokenExpiry,
+		accessTokenExpiry,
+	)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{
@@ -722,7 +772,17 @@ func TestGlobalSignOut_DeleteRefreshTokensStorageError(t *testing.T) {
 	key := testRSAKey(t)
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
-	token, _, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil, "")
+	token, _, _, _, _, err := issueTokens(
+		key,
+		"kid",
+		poolID,
+		"client-1",
+		user,
+		nil,
+		"",
+		accessTokenExpiry,
+		accessTokenExpiry,
+	)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{
@@ -990,7 +1050,17 @@ func TestUpdateUserAttributes_CheckTokenRevokedStorageError(t *testing.T) {
 	key := testRSAKey(t)
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
-	token, _, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil, "")
+	token, _, _, _, _, err := issueTokens(
+		key,
+		"kid",
+		poolID,
+		"client-1",
+		user,
+		nil,
+		"",
+		accessTokenExpiry,
+		accessTokenExpiry,
+	)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{
@@ -1049,7 +1119,17 @@ func TestUpdateUserAttributes_StorageUpdateError(t *testing.T) {
 	key := testRSAKey(t)
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
-	token, _, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil, "")
+	token, _, _, _, _, err := issueTokens(
+		key,
+		"kid",
+		poolID,
+		"client-1",
+		user,
+		nil,
+		"",
+		accessTokenExpiry,
+		accessTokenExpiry,
+	)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{
@@ -1228,7 +1308,17 @@ func TestGetUserAttributeVerificationCode_CheckTokenRevokedStorageError(t *testi
 	key := testRSAKey(t)
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
-	token, _, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil, "")
+	token, _, _, _, _, err := issueTokens(
+		key,
+		"kid",
+		poolID,
+		"client-1",
+		user,
+		nil,
+		"",
+		accessTokenExpiry,
+		accessTokenExpiry,
+	)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{
@@ -1284,7 +1374,17 @@ func TestGetUserAttributeVerificationCode_UpdateUserStorageError(t *testing.T) {
 		Username: "alice", Sub: "sub-alice",
 		Attributes: []AttributeType{{Name: "email", Value: "alice@example.com"}},
 	}
-	token, _, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil, "")
+	token, _, _, _, _, err := issueTokens(
+		key,
+		"kid",
+		poolID,
+		"client-1",
+		user,
+		nil,
+		"",
+		accessTokenExpiry,
+		accessTokenExpiry,
+	)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{
@@ -1306,7 +1406,17 @@ func TestGetUserAttributeVerificationCode_UserNotFoundOnUpdate(t *testing.T) {
 		Username: "alice", Sub: "sub-alice",
 		Attributes: []AttributeType{{Name: "email", Value: "alice@example.com"}},
 	}
-	token, _, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil, "")
+	token, _, _, _, _, err := issueTokens(
+		key,
+		"kid",
+		poolID,
+		"client-1",
+		user,
+		nil,
+		"",
+		accessTokenExpiry,
+		accessTokenExpiry,
+	)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{
@@ -1466,7 +1576,17 @@ func TestVerifyUserAttribute_CheckTokenRevokedStorageError(t *testing.T) {
 	key := testRSAKey(t)
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
-	token, _, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil, "")
+	token, _, _, _, _, err := issueTokens(
+		key,
+		"kid",
+		poolID,
+		"client-1",
+		user,
+		nil,
+		"",
+		accessTokenExpiry,
+		accessTokenExpiry,
+	)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{
@@ -1508,7 +1628,17 @@ func TestVerifyUserAttribute_StorageError(t *testing.T) {
 	key := testRSAKey(t)
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
-	token, _, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil, "")
+	token, _, _, _, _, err := issueTokens(
+		key,
+		"kid",
+		poolID,
+		"client-1",
+		user,
+		nil,
+		"",
+		accessTokenExpiry,
+		accessTokenExpiry,
+	)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{
@@ -1527,7 +1657,17 @@ func TestVerifyUserAttribute_UserNotFoundOnUpdate(t *testing.T) {
 	key := testRSAKey(t)
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
-	token, _, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil, "")
+	token, _, _, _, _, err := issueTokens(
+		key,
+		"kid",
+		poolID,
+		"client-1",
+		user,
+		nil,
+		"",
+		accessTokenExpiry,
+		accessTokenExpiry,
+	)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{
@@ -1680,7 +1820,17 @@ func TestDeleteUser_StorageError(t *testing.T) {
 	key := testRSAKey(t)
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
-	token, _, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil, "")
+	token, _, _, _, _, err := issueTokens(
+		key,
+		"kid",
+		poolID,
+		"client-1",
+		user,
+		nil,
+		"",
+		accessTokenExpiry,
+		accessTokenExpiry,
+	)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{
@@ -1701,7 +1851,17 @@ func TestDeleteUser_UserNotFoundOnDelete(t *testing.T) {
 	key := testRSAKey(t)
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
-	token, _, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil, "")
+	token, _, _, _, _, err := issueTokens(
+		key,
+		"kid",
+		poolID,
+		"client-1",
+		user,
+		nil,
+		"",
+		accessTokenExpiry,
+		accessTokenExpiry,
+	)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{
@@ -1722,7 +1882,17 @@ func TestUpdateUserAttributes_UserNotFoundOnUpdate(t *testing.T) {
 	key := testRSAKey(t)
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
-	token, _, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil, "")
+	token, _, _, _, _, err := issueTokens(
+		key,
+		"kid",
+		poolID,
+		"client-1",
+		user,
+		nil,
+		"",
+		accessTokenExpiry,
+		accessTokenExpiry,
+	)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{

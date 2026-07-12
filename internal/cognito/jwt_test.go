@@ -165,6 +165,8 @@ func TestIssueTokens_Success(t *testing.T) {
 		user,
 		nil,
 		"",
+		accessTokenExpiry,
+		accessTokenExpiry,
 	)
 	require.NoError(t, err)
 	require.NotEmpty(t, access)
@@ -203,7 +205,17 @@ func TestIssueTokens_ReservedClaimsNotOverridden(t *testing.T) {
 			{Name: "email", Value: "alice@example.com"},
 		},
 	}
-	_, id, _, _, _, err := issueTokens(key, keyID, "us-east-1_Pool1", "client-1", user, nil, "")
+	_, id, _, _, _, err := issueTokens(
+		key,
+		keyID,
+		"us-east-1_Pool1",
+		"client-1",
+		user,
+		nil,
+		"",
+		accessTokenExpiry,
+		accessTokenExpiry,
+	)
 	require.NoError(t, err)
 
 	idClaims, err := verifyJWT(id, &key.PublicKey)
@@ -232,7 +244,17 @@ func TestIssueTokens_CognitoPrefixAttributesBlocked(t *testing.T) {
 			{Name: "custom:plan", Value: "pro"},
 		},
 	}
-	_, id, _, _, _, err := issueTokens(key, keyID, "us-east-1_Pool1", "client-1", user, nil, "")
+	_, id, _, _, _, err := issueTokens(
+		key,
+		keyID,
+		"us-east-1_Pool1",
+		"client-1",
+		user,
+		nil,
+		"",
+		accessTokenExpiry,
+		accessTokenExpiry,
+	)
 	require.NoError(t, err)
 
 	idClaims, err := verifyJWT(id, &key.PublicKey)
@@ -253,9 +275,101 @@ func TestIssueTokens_AccessTokenBuildFails(t *testing.T) {
 		Primes:    []*big.Int{big.NewInt(127)},
 	}
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
-	_, _, _, _, _, err := issueTokens(key, "kid", "us-east-1_Pool1", "client-1", user, nil, "")
+	_, _, _, _, _, err := issueTokens(
+		key, "kid", "us-east-1_Pool1", "client-1", user, nil, "",
+		accessTokenExpiry, accessTokenExpiry,
+	)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "build access token")
+}
+
+func TestIssueTokens_HonorsPerTokenExpiry(t *testing.T) {
+	key, keyID := genTestKey(t)
+	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
+
+	before := time.Now().Unix()
+	access, id, _, _, _, err := issueTokens(
+		key, keyID, "us-east-1_Pool1", "client-1", user, nil, "",
+		600, 7200,
+	)
+	require.NoError(t, err)
+
+	accessClaims, err := verifyJWT(access, &key.PublicKey)
+	require.NoError(t, err)
+	idClaims, err := verifyJWT(id, &key.PublicKey)
+	require.NoError(t, err)
+
+	accessExp := int64(accessClaims[jwtClaimExp].(float64))
+	idExp := int64(idClaims[jwtClaimExp].(float64))
+	assert.InDelta(t, before+600, accessExp, 2)
+	assert.InDelta(t, before+7200, idExp, 2)
+	assert.NotEqual(t, accessExp, idExp)
+}
+
+// ── token validity units ────────────────────────────────────────────────────
+
+func TestParseTokenValidityUnits(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  json.RawMessage
+		want tokenValidityUnits
+	}{
+		{"empty", nil, tokenValidityUnits{}},
+		{
+			"full",
+			json.RawMessage(`{"AccessToken":"minutes","IdToken":"hours","RefreshToken":"days"}`),
+			tokenValidityUnits{AccessToken: "minutes", IdToken: "hours", RefreshToken: "days"},
+		},
+		{"malformed", json.RawMessage(`not json`), tokenValidityUnits{}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, parseTokenValidityUnits(tc.raw))
+		})
+	}
+}
+
+func TestResolveValiditySeconds(t *testing.T) {
+	tests := []struct {
+		name            string
+		value           int
+		unit            string
+		defaultUnit     string
+		fallbackSeconds int64
+		want            int64
+	}{
+		{"unset falls back", 0, "", defaultAccessIDTokenUnit, accessTokenExpiry, accessTokenExpiry},
+		{
+			"negative falls back",
+			-1,
+			"hours",
+			defaultAccessIDTokenUnit,
+			accessTokenExpiry,
+			accessTokenExpiry,
+		},
+		{"seconds unit", 90, tokenUnitSeconds, defaultAccessIDTokenUnit, accessTokenExpiry, 90},
+		{"minutes unit", 5, tokenUnitMinutes, defaultAccessIDTokenUnit, accessTokenExpiry, 300},
+		{"hours unit", 2, tokenUnitHours, defaultAccessIDTokenUnit, accessTokenExpiry, 7200},
+		{"days unit", 10, tokenUnitDays, defaultRefreshTokenUnit, 0, 10 * secondsPerDay},
+		{
+			"unset unit defaults to hours for access/id",
+			3, "", defaultAccessIDTokenUnit, accessTokenExpiry, 3 * 3600,
+		},
+		{
+			"unset unit defaults to days for refresh",
+			3, "", defaultRefreshTokenUnit, 0, 3 * secondsPerDay,
+		},
+		{
+			"unrecognized unit falls back to defaultUnit",
+			3, "fortnights", defaultAccessIDTokenUnit, accessTokenExpiry, 3 * 3600,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := resolveValiditySeconds(tc.value, tc.unit, tc.defaultUnit, tc.fallbackSeconds)
+			assert.Equal(t, tc.want, got)
+		})
+	}
 }
 
 // ── buildSessionToken / parseSessionToken ─────────────────────────────────────

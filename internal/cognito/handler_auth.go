@@ -570,6 +570,20 @@ func (ro *Router) writeAuthResult(
 		return
 	}
 
+	client, cerr := ro.storage.GetUserPoolClient(poolID, clientID)
+	if cerr != nil {
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to read pool client")
+		return
+	}
+	units := parseTokenValidityUnits(client.TokenValidityUnits)
+	accessExpSeconds := resolveValiditySeconds(
+		client.AccessTokenValidity, units.AccessToken, defaultAccessIDTokenUnit, accessTokenExpiry,
+	)
+	idExpSeconds := resolveValiditySeconds(
+		client.IdTokenValidity, units.IdToken, defaultAccessIDTokenUnit, accessTokenExpiry,
+	)
+
 	accessToken, idToken, rt, _, retOriginJTI, err := issueTokens(
 		privateKey,
 		keyID,
@@ -578,6 +592,8 @@ func (ro *Router) writeAuthResult(
 		user,
 		groups,
 		originJTI,
+		accessExpSeconds,
+		idExpSeconds,
 	)
 	if err != nil {
 		// untestable: issueTokens only fails on crypto/rand.Read OS-level failures
@@ -587,16 +603,10 @@ func (ro *Router) writeAuthResult(
 	}
 
 	if includeRefreshToken {
-		validity := defaultRefreshTokenDays
-		client, cerr := ro.storage.GetUserPoolClient(poolID, clientID)
-		if cerr != nil {
-			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
-				"failed to read pool client")
-			return
-		}
-		if client.RefreshTokenValidity > 0 {
-			validity = client.RefreshTokenValidity
-		}
+		refreshExpSeconds := resolveValiditySeconds(
+			client.RefreshTokenValidity, units.RefreshToken, defaultRefreshTokenUnit,
+			int64(defaultRefreshTokenDays)*secondsPerDay,
+		)
 		issuedAt := nowUnix()
 		rtData := &refreshTokenData{
 			Token:     rt,
@@ -605,7 +615,7 @@ func (ro *Router) writeAuthResult(
 			Username:  user.Username,
 			Sub:       user.Sub,
 			IssuedAt:  issuedAt,
-			ExpiresAt: issuedAt + float64(validity)*secondsPerDay,
+			ExpiresAt: issuedAt + float64(refreshExpSeconds),
 			OriginJTI: retOriginJTI,
 		}
 		if err := ro.storage.CreateRefreshToken(rtData); err != nil {
@@ -617,7 +627,7 @@ func (ro *Router) writeAuthResult(
 
 	result := authResult{
 		AccessToken: accessToken,
-		ExpiresIn:   accessTokenExpiry,
+		ExpiresIn:   int(accessExpSeconds),
 		IdToken:     idToken,
 		TokenType:   "Bearer",
 	}

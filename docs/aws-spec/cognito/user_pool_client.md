@@ -10,7 +10,7 @@ url: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference
 sdk_types:
   input: cognitoidentityprovider.CreateUserPoolClientInput
   output: cognitoidentityprovider.CreateUserPoolClientOutput
-last_verified: 2026-06-23
+last_verified: 2026-07-12
 ---
 
 ## CreateUserPoolClient
@@ -31,6 +31,11 @@ Creates an app client in a user pool.
 - `AccessTokenValidity` (int, 1–86400): default 1 hour.
 - `IdTokenValidity` (int, 1–86400): default 1 hour.
 - `AuthSessionValidity` (int, 3–15 minutes): default 3 minutes.
+- `TokenValidityUnits` (`{AccessToken, IdToken, RefreshToken}`, each `seconds|minutes|hours|days`):
+  unit for interpreting the corresponding `*Validity` value. Defaults per AWS: `hours` for
+  AccessToken/IdToken, `days` for RefreshToken. kumolo stores this as opaque JSON and resolves it
+  at token-minting time (see `initiate_auth.md`); unrecognized/missing units fall back to the AWS
+  default rather than being rejected.
 
 **Response**: `{ "UserPoolClient": UserPoolClientType }` — HTTP 200. Includes generated `ClientId` and `ClientSecret` (if generated).
 

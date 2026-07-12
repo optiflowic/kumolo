@@ -6,6 +6,7 @@ import (
 	"crypto/rsa"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -401,6 +402,54 @@ func TestInitiateAuth_UserPasswordAuth_Success(t *testing.T) {
 	assert.Equal(t, float64(accessTokenExpiry), result["ExpiresIn"])
 }
 
+func TestInitiateAuth_UserPasswordAuth_HonorsClientTokenValidity(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "test-pool")
+	w := doOp(t, ro, "CreateUserPoolClient", fmt.Sprintf(`{
+		"UserPoolId": %q,
+		"ClientName": "custom-validity-client",
+		"AccessTokenValidity": 10,
+		"IdTokenValidity": 30,
+		"RefreshTokenValidity": 60,
+		"TokenValidityUnits": {"AccessToken":"minutes","IdToken":"minutes","RefreshToken":"minutes"}
+	}`, poolID))
+	require.Equal(t, http.StatusOK, w.Code)
+	var clientResp struct {
+		UserPoolClient struct {
+			ClientId string `json:"ClientId"`
+		} `json:"UserPoolClient"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&clientResp))
+	clientID := clientResp.UserPoolClient.ClientId
+
+	signUpUser(t, ro, clientID, "alice", "Password123!")
+	confirmUser(t, ro, clientID, "alice")
+
+	before := nowUnix()
+	w = doInitAuth(t, ro, clientID, "alice", "Password123!")
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp map[string]any
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	result, ok := resp["AuthenticationResult"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, float64(10*60), result["ExpiresIn"])
+
+	_, privateKey, err := ro.storage.GetOrCreatePoolKeys(poolID)
+	require.NoError(t, err)
+
+	accessClaims, err := verifyJWT(result["AccessToken"].(string), &privateKey.PublicKey)
+	require.NoError(t, err)
+	idClaims, err := verifyJWT(result["IdToken"].(string), &privateKey.PublicKey)
+	require.NoError(t, err)
+	assert.InDelta(t, before+10*60, accessClaims[jwtClaimExp].(float64), 2)
+	assert.InDelta(t, before+30*60, idClaims[jwtClaimExp].(float64), 2)
+
+	rt, err := ro.storage.GetRefreshToken(poolID, result["RefreshToken"].(string))
+	require.NoError(t, err)
+	assert.InDelta(t, before+60*60, rt.ExpiresAt, 2)
+}
+
 func TestInitiateAuth_WrongPassword(t *testing.T) {
 	ro := newTestRouter(t)
 	_, clientID := setupPool(t, ro)
@@ -606,6 +655,59 @@ func TestInitiateAuth_RefreshTokenAuth_Success(t *testing.T) {
 	assert.NotEmpty(t, result2["IdToken"])
 	_, hasRefresh := result2["RefreshToken"]
 	assert.False(t, hasRefresh, "refresh token flow must not issue a new refresh token")
+}
+
+func TestInitiateAuth_RefreshTokenAuth_HonorsClientTokenValidity(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "test-pool")
+	w := doOp(t, ro, "CreateUserPoolClient", fmt.Sprintf(`{
+		"UserPoolId": %q,
+		"ClientName": "custom-validity-client",
+		"AccessTokenValidity": 15,
+		"IdTokenValidity": 45,
+		"TokenValidityUnits": {"AccessToken":"seconds","IdToken":"seconds"}
+	}`, poolID))
+	require.Equal(t, http.StatusOK, w.Code)
+	var clientResp struct {
+		UserPoolClient struct {
+			ClientId string `json:"ClientId"`
+		} `json:"UserPoolClient"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&clientResp))
+	clientID := clientResp.UserPoolClient.ClientId
+
+	signUpUser(t, ro, clientID, "alice", "Password123!")
+	confirmUser(t, ro, clientID, "alice")
+
+	w = doInitAuth(t, ro, clientID, "alice", "Password123!")
+	require.Equal(t, http.StatusOK, w.Code)
+	var firstResp map[string]any
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&firstResp))
+	refreshToken := firstResp["AuthenticationResult"].(map[string]any)["RefreshToken"].(string)
+
+	before := nowUnix()
+	body, _ := json.Marshal(map[string]any{
+		"ClientId": clientID,
+		"AuthFlow": "REFRESH_TOKEN_AUTH",
+		"AuthParameters": map[string]string{
+			"REFRESH_TOKEN": refreshToken,
+		},
+	})
+	w2 := doOp(t, ro, "InitiateAuth", string(body))
+	require.Equal(t, http.StatusOK, w2.Code)
+	var secondResp map[string]any
+	require.NoError(t, json.NewDecoder(w2.Body).Decode(&secondResp))
+	result2 := secondResp["AuthenticationResult"].(map[string]any)
+	assert.Equal(t, float64(15), result2["ExpiresIn"])
+
+	_, privateKey, err := ro.storage.GetOrCreatePoolKeys(poolID)
+	require.NoError(t, err)
+	accessClaims, err := verifyJWT(result2["AccessToken"].(string), &privateKey.PublicKey)
+	require.NoError(t, err)
+	idClaims, err := verifyJWT(result2["IdToken"].(string), &privateKey.PublicKey)
+	require.NoError(t, err)
+	assert.InDelta(t, before+15, accessClaims[jwtClaimExp].(float64), 2)
+	assert.InDelta(t, before+45, idClaims[jwtClaimExp].(float64), 2)
 }
 
 // TestInitiateAuth_RefreshTokenAuth_DisabledUser uses a mockStore because
@@ -1156,6 +1258,37 @@ func TestWriteAuthResult_GetUserPoolClientError_ReturnsInternalError(t *testing.
 	body, _ := json.Marshal(map[string]any{
 		"ClientId": "c", "AuthFlow": "USER_PASSWORD_AUTH",
 		"AuthParameters": map[string]string{"USERNAME": "u", "PASSWORD": "Password123!"},
+	})
+	w := doOp(t, ro, "InitiateAuth", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestWriteAuthResult_RefreshTokenAuth_GetUserPoolClientError_ReturnsInternalError(
+	t *testing.T,
+) {
+	key := testRSAKey(t)
+	keyID, err := generateTokenID()
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
+		getRefreshFn: func(string, string) (*refreshTokenData, error) {
+			return &refreshTokenData{
+				Token: "rt", PoolID: "pool-1", ClientID: "c", Sub: "sub-u",
+			}, nil
+		},
+		getUserBySubFn: func(string, string) (*UserMetadata, error) {
+			return &UserMetadata{Username: "u", Sub: "sub-u", Enabled: true}, nil
+		},
+		getOrCreateKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: keyID}, key, nil
+		},
+		getClientErr: errors.New("storage unavailable"),
+	}}
+	body, _ := json.Marshal(map[string]any{
+		"ClientId": "c", "AuthFlow": "REFRESH_TOKEN_AUTH",
+		"AuthParameters": map[string]string{"REFRESH_TOKEN": "rt"},
 	})
 	w := doOp(t, ro, "InitiateAuth", string(body))
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
