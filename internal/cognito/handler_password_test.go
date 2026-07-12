@@ -65,7 +65,7 @@ func TestForgotPassword_Success_PhoneVerifiedOnly(t *testing.T) {
 	assert.Equal(t, deliverySMS, resp.CodeDeliveryDetails.DeliveryMedium)
 }
 
-func TestForgotPassword_PrefersEmailOverPhone(t *testing.T) {
+func TestForgotPassword_DefaultPrefersPhoneOverEmail(t *testing.T) {
 	ro := newTestRouter(t)
 	poolID, clientID := setupPool(t, ro)
 	signUpUser(t, ro, clientID, "alice", "Password123!")
@@ -79,7 +79,74 @@ func TestForgotPassword_PrefersEmailOverPhone(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	var resp forgotPasswordResponse
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, attrPhoneNumber, resp.CodeDeliveryDetails.AttributeName)
+}
+
+func TestForgotPassword_HonorsCustomPriorityOrder(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID, clientID := setupPool(t, ro)
+	require.NoError(t, ro.storage.UpdateUserPool(poolID, func(m *UserPoolMetadata) error {
+		m.AccountRecoverySetting = json.RawMessage(
+			`{"RecoveryMechanisms":[{"Name":"verified_email","Priority":1},` +
+				`{"Name":"verified_phone_number","Priority":2}]}`,
+		)
+		return nil
+	}))
+	signUpUser(t, ro, clientID, "alice", "Password123!")
+	confirmUser(t, ro, clientID, "alice")
+	verifyAttr(t, ro, poolID, "alice", attrPhoneNumber, "+15551234567")
+	verifyAttr(t, ro, poolID, "alice", attrEmail, "alice@example.com")
+
+	body, _ := json.Marshal(map[string]string{"ClientId": clientID, "Username": "alice"})
+	w := doOp(t, ro, "ForgotPassword", string(body))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp forgotPasswordResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
 	assert.Equal(t, attrEmail, resp.CodeDeliveryDetails.AttributeName)
+}
+
+func TestForgotPassword_FallsBackToSecondaryMechanism(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID, clientID := setupPool(t, ro)
+	require.NoError(t, ro.storage.UpdateUserPool(poolID, func(m *UserPoolMetadata) error {
+		m.AccountRecoverySetting = json.RawMessage(
+			`{"RecoveryMechanisms":[{"Name":"verified_email","Priority":1},` +
+				`{"Name":"verified_phone_number","Priority":2}]}`,
+		)
+		return nil
+	}))
+	signUpUser(t, ro, clientID, "alice", "Password123!")
+	confirmUser(t, ro, clientID, "alice")
+	verifyAttr(t, ro, poolID, "alice", attrPhoneNumber, "+15551234567")
+
+	body, _ := json.Marshal(map[string]string{"ClientId": clientID, "Username": "alice"})
+	w := doOp(t, ro, "ForgotPassword", string(body))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp forgotPasswordResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, attrPhoneNumber, resp.CodeDeliveryDetails.AttributeName)
+}
+
+func TestForgotPassword_AdminOnlyRecovery_NoSelfService(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID, clientID := setupPool(t, ro)
+	require.NoError(t, ro.storage.UpdateUserPool(poolID, func(m *UserPoolMetadata) error {
+		m.AccountRecoverySetting = json.RawMessage(
+			`{"RecoveryMechanisms":[{"Name":"admin_only","Priority":1}]}`,
+		)
+		return nil
+	}))
+	signUpUser(t, ro, clientID, "alice", "Password123!")
+	confirmUser(t, ro, clientID, "alice")
+	verifyAttr(t, ro, poolID, "alice", attrEmail, "alice@example.com")
+
+	body, _ := json.Marshal(map[string]string{"ClientId": clientID, "Username": "alice"})
+	w := doOp(t, ro, "ForgotPassword", string(body))
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeInvalidParameterException)
 }
 
 func TestForgotPassword_NoVerifiedContact(t *testing.T) {
@@ -138,6 +205,17 @@ func TestForgotPassword_UserNotFound(t *testing.T) {
 func TestForgotPassword_ClientLookupStorageError(t *testing.T) {
 	ro := &Router{storage: &mockStore{
 		getPoolForClient: func(string) (string, error) { return "", errors.New("storage error") },
+	}}
+	body, _ := json.Marshal(map[string]string{"ClientId": "c", "Username": "alice"})
+	w := doOp(t, ro, "ForgotPassword", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestForgotPassword_GetUserPoolStorageError(t *testing.T) {
+	ro := &Router{storage: &mockStore{
+		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
+		getErr:           errors.New("storage error"),
 	}}
 	body, _ := json.Marshal(map[string]string{"ClientId": "c", "Username": "alice"})
 	w := doOp(t, ro, "ForgotPassword", string(body))

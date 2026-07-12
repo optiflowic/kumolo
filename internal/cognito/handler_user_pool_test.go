@@ -91,13 +91,41 @@ func TestCreateUserPool_Defaults(t *testing.T) {
 
 	var resp struct {
 		UserPool struct {
-			MfaConfiguration string `json:"MfaConfiguration"`
-			UserPoolTier     string `json:"UserPoolTier"`
+			MfaConfiguration       string          `json:"MfaConfiguration"`
+			UserPoolTier           string          `json:"UserPoolTier"`
+			AccountRecoverySetting json.RawMessage `json:"AccountRecoverySetting"`
 		} `json:"UserPool"`
 	}
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
 	assert.Equal(t, "OFF", resp.UserPool.MfaConfiguration)
 	assert.Equal(t, "ESSENTIALS", resp.UserPool.UserPoolTier)
+	assert.JSONEq(
+		t,
+		`{"RecoveryMechanisms":[{"Name":"verified_phone_number","Priority":1},`+
+			`{"Name":"verified_email","Priority":2}]}`,
+		string(resp.UserPool.AccountRecoverySetting),
+	)
+}
+
+func TestCreateUserPool_ExplicitAccountRecoverySetting(t *testing.T) {
+	ro := newTestRouter(t)
+	w := doOp(t, ro, "CreateUserPool", `{
+		"PoolName": "custom-recovery-pool",
+		"AccountRecoverySetting": {"RecoveryMechanisms": [{"Name":"admin_only","Priority":1}]}
+	}`)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp struct {
+		UserPool struct {
+			AccountRecoverySetting json.RawMessage `json:"AccountRecoverySetting"`
+		} `json:"UserPool"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.JSONEq(
+		t,
+		`{"RecoveryMechanisms":[{"Name":"admin_only","Priority":1}]}`,
+		string(resp.UserPool.AccountRecoverySetting),
+	)
 }
 
 func TestCreateUserPool_ExplicitPoliciesAndAdminConfig(t *testing.T) {

@@ -143,6 +143,16 @@ func defaultAdminCreateUserConfig() json.RawMessage {
 	return json.RawMessage(`{"AllowAdminCreateUserOnly":false,"UnusedAccountValidityDays":7}`)
 }
 
+// defaultAccountRecoverySetting matches AWS's documented default when CreateUserPool
+// omits AccountRecoverySetting: phone first, falling back to email.
+func defaultAccountRecoverySetting() json.RawMessage {
+	return json.RawMessage(
+		`{"RecoveryMechanisms":[` +
+			`{"Name":"verified_phone_number","Priority":1},` +
+			`{"Name":"verified_email","Priority":2}]}`,
+	)
+}
+
 type createUserPoolRequest struct {
 	PoolName                    string            `json:"PoolName"`
 	MfaConfiguration            string            `json:"MfaConfiguration"`
@@ -250,6 +260,10 @@ func (ro *Router) handleCreateUserPool(w http.ResponseWriter, body []byte) {
 	if adminCreateUserConfig == nil {
 		adminCreateUserConfig = defaultAdminCreateUserConfig()
 	}
+	accountRecoverySetting := req.AccountRecoverySetting
+	if accountRecoverySetting == nil {
+		accountRecoverySetting = defaultAccountRecoverySetting()
+	}
 
 	ts := nowUnix()
 	meta := &UserPoolMetadata{
@@ -272,7 +286,7 @@ func (ro *Router) handleCreateUserPool(w http.ResponseWriter, body []byte) {
 		SmsConfiguration:            req.SmsConfiguration,
 		DeviceConfiguration:         req.DeviceConfiguration,
 		AdminCreateUserConfig:       adminCreateUserConfig,
-		AccountRecoverySetting:      req.AccountRecoverySetting,
+		AccountRecoverySetting:      accountRecoverySetting,
 		UserAttributeUpdateSettings: req.UserAttributeUpdateSettings,
 		UserPoolAddOns:              req.UserPoolAddOns,
 		VerificationMessageTemplate: req.VerificationMessageTemplate,
