@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"math/big"
 	"strings"
 	"time"
@@ -27,7 +28,79 @@ const (
 	jwtClaimJTI       = "jti"
 	jwtClaimOriginJTI = "origin_jti"
 	jwtTokenUseAccess = "access"
+
+	tokenUnitSeconds = "seconds"
+	tokenUnitMinutes = "minutes"
+	tokenUnitHours   = "hours"
+	tokenUnitDays    = "days"
+
+	// defaultAccessIDTokenUnit and defaultRefreshTokenUnit are the units AWS assumes for
+	// AccessTokenValidity/IdTokenValidity and RefreshTokenValidity, respectively, when
+	// TokenValidityUnits does not specify one.
+	defaultAccessIDTokenUnit = tokenUnitHours
+	defaultRefreshTokenUnit  = tokenUnitDays
 )
+
+// tokenValidityUnits mirrors AWS's TokenValidityUnitsType.
+type tokenValidityUnits struct {
+	AccessToken  string `json:"AccessToken"`
+	IdToken      string `json:"IdToken"`
+	RefreshToken string `json:"RefreshToken"`
+}
+
+// parseTokenValidityUnits decodes a UserPoolClient's stored TokenValidityUnits.
+// Malformed or absent input yields the zero value, which falls back to AWS defaults.
+func parseTokenValidityUnits(raw json.RawMessage) tokenValidityUnits {
+	var u tokenValidityUnits
+	if len(raw) == 0 {
+		return u
+	}
+	if err := json.Unmarshal(raw, &u); err != nil {
+		slog.Debug(
+			"parseTokenValidityUnits",
+			"error",
+			fmt.Errorf("malformed TokenValidityUnits: %w", err),
+		)
+	}
+	return u
+}
+
+// namedUnitSeconds returns the number of seconds in a recognized TokenValidityUnits value.
+func namedUnitSeconds(unit string) (int64, bool) {
+	switch unit {
+	case tokenUnitSeconds:
+		return 1, true
+	case tokenUnitMinutes:
+		return 60, true
+	case tokenUnitHours:
+		return 3600, true
+	case tokenUnitDays:
+		return secondsPerDay, true
+	default:
+		return 0, false
+	}
+}
+
+// unitSeconds returns the number of seconds in unit, falling back to defaultUnit
+// (always defaultAccessIDTokenUnit or defaultRefreshTokenUnit) when unit is unset or
+// unrecognized.
+func unitSeconds(unit, defaultUnit string) int64 {
+	if sec, ok := namedUnitSeconds(unit); ok {
+		return sec
+	}
+	sec, _ := namedUnitSeconds(defaultUnit)
+	return sec
+}
+
+// resolveValiditySeconds converts a UserPoolClient validity value (in unit, defaulting to
+// defaultUnit when unset) to seconds. value <= 0 (unset) yields fallbackSeconds, matching
+// AWS's behavior of substituting its own default when a client leaves a validity field unset.
+func resolveValiditySeconds(value int, unit, defaultUnit string, fallbackSeconds int64) int64 {
+	if value <= 0 {
+		return fallbackSeconds
+	}
+	return int64(value) * unitSeconds(unit, defaultUnit)
+}
 
 // issuerURL returns the AWS-format issuer URL for a user pool.
 func issuerURL(poolID string) string {
@@ -122,6 +195,9 @@ func buildJWKS(publicKey *rsa.PublicKey, keyID string) map[string]any {
 // originJTI ties all tokens issued from the same refresh token family together; pass "" to
 // generate a new one (initial auth). Pass the stored origin_jti when refreshing so that
 // RevokeToken can revoke the entire family in one operation.
+// accessTokenExpirySeconds and idTokenExpirySeconds set each token's lifetime; callers resolve
+// these from the requesting UserPoolClient's AccessTokenValidity/IdTokenValidity/TokenValidityUnits
+// (falling back to accessTokenExpiry) via resolveValiditySeconds.
 // Returns accessJTI and the used originJTI so callers can associate tokens with the refresh token.
 func issueTokens(
 	privateKey *rsa.PrivateKey,
@@ -129,9 +205,11 @@ func issueTokens(
 	user *UserMetadata,
 	groups []string,
 	originJTI string,
+	accessTokenExpirySeconds, idTokenExpirySeconds int64,
 ) (accessToken, idToken, refreshToken, accessJTI, retOriginJTI string, err error) {
 	now := time.Now().Unix()
-	exp := now + accessTokenExpiry
+	accessExp := now + accessTokenExpirySeconds
+	idExp := now + idTokenExpirySeconds
 	if originJTI == "" {
 		originJTI, err = generateTokenID()
 		if err != nil {
@@ -169,7 +247,7 @@ func issueTokens(
 		jwtClaimTokenUse:  "access",
 		"scope":           "aws.cognito.signin.user.admin",
 		"auth_time":       now,
-		jwtClaimExp:       exp,
+		jwtClaimExp:       accessExp,
 		"iat":             now,
 		jwtClaimJTI:       accessJTI,
 		"username":        user.Username,
@@ -186,7 +264,7 @@ func issueTokens(
 		"cognito:username": user.Username,
 		jwtClaimOriginJTI:  originJTI,
 		"auth_time":        now,
-		jwtClaimExp:        exp,
+		jwtClaimExp:        idExp,
 		"iat":              now,
 		"jti":              idJTI,
 	}

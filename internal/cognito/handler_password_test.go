@@ -527,7 +527,17 @@ func TestChangePassword_PasswordlessUser_Success(t *testing.T) {
 
 	keys, privateKey, err := ro.storage.GetOrCreatePoolKeys(poolID)
 	require.NoError(t, err)
-	token, _, _, _, _, err := issueTokens(privateKey, keys.KeyID, poolID, clientID, user, nil, "")
+	token, _, _, _, _, err := issueTokens(
+		privateKey,
+		keys.KeyID,
+		poolID,
+		clientID,
+		user,
+		nil,
+		"",
+		accessTokenExpiry,
+		accessTokenExpiry,
+	)
 	require.NoError(t, err)
 
 	body, _ := json.Marshal(map[string]string{
@@ -620,7 +630,17 @@ func TestChangePassword_RevokedToken(t *testing.T) {
 	key := testRSAKey(t)
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
-	token, _, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil, "")
+	token, _, _, _, _, err := issueTokens(
+		key,
+		"kid",
+		poolID,
+		"client-1",
+		user,
+		nil,
+		"",
+		accessTokenExpiry,
+		accessTokenExpiry,
+	)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{
@@ -641,7 +661,17 @@ func TestChangePassword_UserNotFound(t *testing.T) {
 	key := testRSAKey(t)
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
-	token, _, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil, "")
+	token, _, _, _, _, err := issueTokens(
+		key,
+		"kid",
+		poolID,
+		"client-1",
+		user,
+		nil,
+		"",
+		accessTokenExpiry,
+		accessTokenExpiry,
+	)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{
@@ -661,7 +691,17 @@ func TestChangePassword_GetUserPoolStorageError(t *testing.T) {
 	key := testRSAKey(t)
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
-	token, _, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil, "")
+	token, _, _, _, _, err := issueTokens(
+		key,
+		"kid",
+		poolID,
+		"client-1",
+		user,
+		nil,
+		"",
+		accessTokenExpiry,
+		accessTokenExpiry,
+	)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{
@@ -683,7 +723,17 @@ func TestChangePassword_UpdateUserStorageError(t *testing.T) {
 	key := testRSAKey(t)
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
-	token, _, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil, "")
+	token, _, _, _, _, err := issueTokens(
+		key,
+		"kid",
+		poolID,
+		"client-1",
+		user,
+		nil,
+		"",
+		accessTokenExpiry,
+		accessTokenExpiry,
+	)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{
@@ -708,7 +758,17 @@ func TestChangePassword_UpdateUserNotFound(t *testing.T) {
 	key := testRSAKey(t)
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
-	token, _, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil, "")
+	token, _, _, _, _, err := issueTokens(
+		key,
+		"kid",
+		poolID,
+		"client-1",
+		user,
+		nil,
+		"",
+		accessTokenExpiry,
+		accessTokenExpiry,
+	)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{
@@ -732,7 +792,17 @@ func TestChangePassword_HashError(t *testing.T) {
 	key := testRSAKey(t)
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
-	token, _, _, _, _, err := issueTokens(key, "kid", poolID, "client-1", user, nil, "")
+	token, _, _, _, _, err := issueTokens(
+		key,
+		"kid",
+		poolID,
+		"client-1",
+		user,
+		nil,
+		"",
+		accessTokenExpiry,
+		accessTokenExpiry,
+	)
 	require.NoError(t, err)
 
 	ro := &Router{

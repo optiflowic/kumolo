@@ -2,7 +2,7 @@
 
 URL: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_InitiateAuth.html
 SDK: `cognitoidentityprovider.InitiateAuthInput` / `cognitoidentityprovider.InitiateAuthOutput`
-Last verified: 2026-06-23
+Last verified: 2026-07-12
 
 ## Request Parameters
 
@@ -83,7 +83,7 @@ Or, when a challenge is required:
   "token_use": "access",
   "scope": "aws.cognito.signin.user.admin",
   "auth_time": <unix>,
-  "exp": <unix+3600>,
+  "exp": <unix+AccessTokenValidity>,
   "iat": <unix>,
   "jti": "<uuid>",
   "username": "<username>"
@@ -100,17 +100,23 @@ Or, when a challenge is required:
   "cognito:username": "<username>",
   "origin_jti": "<uuid>",
   "auth_time": <unix>,
-  "exp": <unix+3600>,
+  "exp": <unix+IdTokenValidity>,
   "iat": <unix>,
   "jti": "<uuid>"
 }
 ```
 
+`AccessTokenValidity`/`IdTokenValidity` come from the requesting client's `UserPoolClient` config
+(interpreted per `TokenValidityUnits`, defaulting to hours), falling back to AWS's own default of
+1 hour (3600s) when the client leaves them unset.
+
 User attributes (e.g. `email`, `email_verified`) are included in the ID token if present.
 
 ### Refresh Token
+
 Opaque 256-bit hex token stored in `pools/{poolID}/refresh_tokens/{token}.json`.
-`ExpiresAt` is set on issuance using the pool client's `RefreshTokenValidity` (days).
+`ExpiresAt` is set on issuance using the requesting client's `RefreshTokenValidity` and
+`TokenValidityUnits.RefreshToken` (defaults to days per AWS spec).
 Default validity: 30 days (matches AWS default). Tokens with `ExpiresAt == 0` (legacy) are not rejected.
 Presenting an expired token returns `NotAuthorizedException`.
 
@@ -121,8 +127,9 @@ Presenting an expired token returns `NotAuthorizedException`.
 ## kumolo Deviations
 
 - Only USER_PASSWORD_AUTH and REFRESH_TOKEN_AUTH/REFRESH_TOKEN flows supported.
-- Token expiry (ExpiresIn=3600) is returned but not enforced.
-- Refresh tokens expire after `RefreshTokenValidity` days (default 30). Tokens without `ExpiresAt` (legacy) are not expired.
-- `TokenValidityUnits` is stored but not enforced; `RefreshTokenValidity` is always interpreted as days.
+- `ExpiresIn` reflects the requesting client's `AccessTokenValidity` (default 3600s) and access
+  token expiry is enforced on every authenticated request (see `get_user.md` / `validateAccessJWT`).
+- Refresh tokens expire after `RefreshTokenValidity` (default 30 days), honoring `TokenValidityUnits.RefreshToken`.
+  Tokens without `ExpiresAt` (legacy) are not expired.
 - Session token for challenges is a signed JWT (kumolo-specific encoding).
 - SecretHash, ClientMetadata, AnalyticsMetadata, UserContextData are accepted but ignored.

@@ -292,6 +292,84 @@ $AWS delete-user-pool-client \
   --client-id "$RT_CLIENT_ID" >/dev/null 2>&1 || true
 
 # ---------------------------------------------------------------------------
+# TokenValidityUnits (AccessTokenValidity/IdTokenValidity honored per-client)
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- TokenValidityUnits ---"
+
+TVU_CLIENT_JSON=$($AWS create-user-pool-client \
+  --user-pool-id "$POOL_ID" \
+  --client-name "e2e-tvu-client" \
+  --access-token-validity 10 \
+  --id-token-validity 30 \
+  --token-validity-units AccessToken=minutes,IdToken=minutes \
+  --explicit-auth-flows ALLOW_USER_PASSWORD_AUTH ALLOW_REFRESH_TOKEN_AUTH 2>&1)
+if echo "$TVU_CLIENT_JSON" | grep -q '"ClientId"'; then
+  TVU_ACCESS_UNIT=$(echo "$TVU_CLIENT_JSON" | jq -r '.UserPoolClient.TokenValidityUnits.AccessToken // empty' 2>/dev/null || true)
+  if [[ "$TVU_ACCESS_UNIT" == "minutes" ]]; then
+    ok "CreateUserPoolClient (token_validity_units=minutes)"
+  else
+    fail "CreateUserPoolClient (token_validity_units=minutes) — expected minutes, got ${TVU_ACCESS_UNIT:-<empty>}"
+  fi
+  TVU_CLIENT_ID=$(echo "$TVU_CLIENT_JSON" | jq -r '.UserPoolClient.ClientId // empty' 2>/dev/null || true)
+else
+  fail "CreateUserPoolClient (token_validity_units=minutes)"
+  TVU_CLIENT_ID="UNKNOWN"
+fi
+
+TVU_USERNAME="e2e-tvu-user@example.com"
+
+TVU_SIGNUP_JSON=$($AWS sign-up \
+  --client-id "$TVU_CLIENT_ID" \
+  --username "$TVU_USERNAME" \
+  --password "$PASSWORD" \
+  --user-attributes "Name=email,Value=$TVU_USERNAME" 2>&1)
+if echo "$TVU_SIGNUP_JSON" | grep -q '"UserSub"'; then
+  ok "SignUp (TokenValidityUnits client)"
+else
+  fail "SignUp (TokenValidityUnits client)"
+fi
+
+TVU_CONFIRM_CODE="${E2E_COGNITO_CODE:-}"
+if [[ -z "$TVU_CONFIRM_CODE" ]]; then
+  if command -v docker &>/dev/null && docker compose ps --services 2>/dev/null | grep -q .; then
+    TVU_CONFIRM_CODE=$(docker compose logs 2>/dev/null \
+      | grep 'SignUp confirmation code' \
+      | grep "$TVU_USERNAME" \
+      | tail -1 \
+      | grep -oE 'code=[0-9]+' \
+      | cut -d= -f2 || true)
+  fi
+fi
+
+if [[ -n "$TVU_CONFIRM_CODE" ]]; then
+  run "ConfirmSignUp (TokenValidityUnits client)" \
+    $AWS confirm-sign-up \
+      --client-id "$TVU_CLIENT_ID" \
+      --username "$TVU_USERNAME" \
+      --confirmation-code "$TVU_CONFIRM_CODE"
+
+  TVU_AUTH_JSON=$($AWS initiate-auth \
+    --client-id "$TVU_CLIENT_ID" \
+    --auth-flow "USER_PASSWORD_AUTH" \
+    --auth-parameters "USERNAME=$TVU_USERNAME,PASSWORD=$PASSWORD" 2>&1)
+  TVU_EXPIRES_IN=$(echo "$TVU_AUTH_JSON" | jq -r '.AuthenticationResult.ExpiresIn // empty' 2>/dev/null || true)
+  if [[ "$TVU_EXPIRES_IN" == "600" ]]; then
+    ok "InitiateAuth — ExpiresIn=600 for AccessTokenValidity=10 with unit=minutes"
+  else
+    fail "InitiateAuth — expected ExpiresIn=600, got ${TVU_EXPIRES_IN:-<empty>}"
+  fi
+else
+  skip "ConfirmSignUp (TokenValidityUnits client) — no confirmation code available"
+  skip "InitiateAuth (TokenValidityUnits client) — skipped (user not confirmed)"
+  echo "  Hint: set E2E_COGNITO_CODE=<code> from kumolo logs, or use Docker Compose"
+fi
+
+$AWS delete-user-pool-client \
+  --user-pool-id "$POOL_ID" \
+  --client-id "$TVU_CLIENT_ID" >/dev/null 2>&1 || true
+
+# ---------------------------------------------------------------------------
 # ResendConfirmationCode
 # ---------------------------------------------------------------------------
 echo ""

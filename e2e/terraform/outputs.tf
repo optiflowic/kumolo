@@ -93,6 +93,18 @@ output "cognito_client_refresh_token_validity" {
   value = aws_cognito_user_pool_client.main.refresh_token_validity
 }
 
+output "cognito_client_access_token_validity" {
+  value = aws_cognito_user_pool_client.main.access_token_validity
+}
+
+output "cognito_client_id_token_validity" {
+  value = aws_cognito_user_pool_client.main.id_token_validity
+}
+
+output "cognito_client_token_validity_units" {
+  value = aws_cognito_user_pool_client.main.token_validity_units
+}
+
 output "cognito_user_pool_tags" {
   value = aws_cognito_user_pool.main.tags_all
 }

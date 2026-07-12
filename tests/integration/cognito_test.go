@@ -1722,6 +1722,159 @@ func TestCognitoIntegration_RefreshTokenExpiry(t *testing.T) {
 	})
 }
 
+// decodeJWTExpClaim decodes a JWT's payload and returns its "exp" claim, without verifying
+// the signature. Used to assert token lifetimes independently of the SDK's ExpiresIn field.
+func decodeJWTExpClaim(t *testing.T, token string) float64 {
+	t.Helper()
+	parts := strings.Split(token, ".")
+	require.Len(t, parts, 3)
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	require.NoError(t, err)
+	var claims struct {
+		Exp float64 `json:"exp"`
+	}
+	require.NoError(t, json.Unmarshal(payload, &claims))
+	return claims.Exp
+}
+
+// ── TokenValidityUnits ───────────────────────────────────────────────────────
+
+func TestCognitoIntegration_TokenValidityUnits(t *testing.T) {
+	const (
+		accessTokenValidityMinutes  = 10
+		idTokenValidityMinutes      = 30
+		refreshTokenValidityMinutes = 60
+		secondsPerMinute            = 60
+	)
+
+	cap := withCodeCapture(t)
+	clients := newTestClients(t)
+	ctx := context.Background()
+	c := clients.cognito
+
+	pool, err := c.CreateUserPool(ctx, &awscognito.CreateUserPoolInput{
+		PoolName: aws.String("token-validity-pool"),
+	})
+	require.NoError(t, err)
+	poolID := aws.ToString(pool.UserPool.Id)
+
+	client, err := c.CreateUserPoolClient(ctx, &awscognito.CreateUserPoolClientInput{
+		UserPoolId:           aws.String(poolID),
+		ClientName:           aws.String("token-validity-client"),
+		AccessTokenValidity:  aws.Int32(accessTokenValidityMinutes),
+		IdTokenValidity:      aws.Int32(idTokenValidityMinutes),
+		RefreshTokenValidity: refreshTokenValidityMinutes,
+		TokenValidityUnits: &types.TokenValidityUnitsType{
+			AccessToken:  types.TimeUnitsTypeMinutes,
+			IdToken:      types.TimeUnitsTypeMinutes,
+			RefreshToken: types.TimeUnitsTypeMinutes,
+		},
+	})
+	require.NoError(t, err)
+	clientID := aws.ToString(client.UserPoolClient.ClientId)
+
+	const (
+		username = "validity-user"
+		password = "Password1!"
+		email    = "validity@example.com"
+	)
+
+	_, err = c.SignUp(ctx, &awscognito.SignUpInput{
+		ClientId: aws.String(clientID),
+		Username: aws.String(username),
+		Password: aws.String(password),
+		UserAttributes: []types.AttributeType{
+			{Name: aws.String("email"), Value: aws.String(email)},
+		},
+	})
+	require.NoError(t, err)
+
+	code := cap.get(username)
+	require.NotEmpty(t, code)
+	_, err = c.ConfirmSignUp(ctx, &awscognito.ConfirmSignUpInput{
+		ClientId:         aws.String(clientID),
+		Username:         aws.String(username),
+		ConfirmationCode: aws.String(code),
+	})
+	require.NoError(t, err)
+
+	t.Run("InitiateAuth_HonorsAccessAndIdTokenValidity", func(t *testing.T) {
+		before := time.Now().Unix()
+		auth, err := c.InitiateAuth(ctx, &awscognito.InitiateAuthInput{
+			ClientId: aws.String(clientID),
+			AuthFlow: types.AuthFlowTypeUserPasswordAuth,
+			AuthParameters: map[string]string{
+				"USERNAME": username,
+				"PASSWORD": password,
+			},
+		})
+		after := time.Now().Unix()
+		require.NoError(t, err)
+		require.NotNil(t, auth.AuthenticationResult)
+		assert.Equal(
+			t,
+			int32(accessTokenValidityMinutes*secondsPerMinute),
+			auth.AuthenticationResult.ExpiresIn,
+		)
+
+		accessExp := decodeJWTExpClaim(t, aws.ToString(auth.AuthenticationResult.AccessToken))
+		idExp := decodeJWTExpClaim(t, aws.ToString(auth.AuthenticationResult.IdToken))
+		assert.GreaterOrEqual(
+			t,
+			accessExp,
+			float64(before+accessTokenValidityMinutes*secondsPerMinute),
+		)
+		assert.LessOrEqual(t, accessExp, float64(after+accessTokenValidityMinutes*secondsPerMinute))
+		assert.GreaterOrEqual(t, idExp, float64(before+idTokenValidityMinutes*secondsPerMinute))
+		assert.LessOrEqual(t, idExp, float64(after+idTokenValidityMinutes*secondsPerMinute))
+	})
+
+	t.Run("RefreshTokenAuth_HonorsRefreshTokenValidity", func(t *testing.T) {
+		auth, err := c.InitiateAuth(ctx, &awscognito.InitiateAuthInput{
+			ClientId: aws.String(clientID),
+			AuthFlow: types.AuthFlowTypeUserPasswordAuth,
+			AuthParameters: map[string]string{
+				"USERNAME": username,
+				"PASSWORD": password,
+			},
+		})
+		require.NoError(t, err)
+		require.NotNil(t, auth.AuthenticationResult)
+		refreshToken := aws.ToString(auth.AuthenticationResult.RefreshToken)
+		require.NotEmpty(t, refreshToken)
+
+		tokenPath := filepath.Join(
+			clients.dataDir, "cognito", "pools", poolID,
+			"refresh_tokens", refreshToken+".json",
+		)
+		raw, err := os.ReadFile(filepath.Clean(tokenPath))
+		require.NoError(t, err)
+		var tokenJSON map[string]any
+		require.NoError(t, json.Unmarshal(raw, &tokenJSON))
+		issuedAt, ok := tokenJSON["IssuedAt"].(float64)
+		require.True(t, ok)
+		expiresAt, ok := tokenJSON["ExpiresAt"].(float64)
+		require.True(t, ok)
+		assert.InDelta(t, issuedAt+refreshTokenValidityMinutes*secondsPerMinute, expiresAt, 2,
+			"RefreshTokenValidity=60 with unit=minutes must yield a 60-minute lifetime")
+
+		refreshed, err := c.InitiateAuth(ctx, &awscognito.InitiateAuthInput{
+			ClientId: aws.String(clientID),
+			AuthFlow: types.AuthFlowTypeRefreshTokenAuth,
+			AuthParameters: map[string]string{
+				"REFRESH_TOKEN": refreshToken,
+			},
+		})
+		require.NoError(t, err)
+		require.NotNil(t, refreshed.AuthenticationResult)
+		assert.Equal(
+			t,
+			int32(accessTokenValidityMinutes*secondsPerMinute),
+			refreshed.AuthenticationResult.ExpiresIn,
+		)
+	})
+}
+
 // ── ListUsers ─────────────────────────────────────────────────────────────────
 
 func TestCognitoIntegration_ListUsers(t *testing.T) {
