@@ -130,12 +130,18 @@ func TestWithCognitoOptions(t *testing.T) {
 func TestNewMux_WithCognitoOptions(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
+
+	applied := false
+	sentinel := cognito.Option(func(*cognito.Router) { applied = true })
+
 	mux, cleanup, err := NewMux(ctx, t.TempDir(), time.Minute,
-		WithCognitoOptions(cognito.WithBcryptCost(bcrypt.MinCost)),
+		WithCognitoOptions(cognito.WithBcryptCost(bcrypt.MinCost), sentinel),
 	)
 	require.NoError(t, err)
 	require.NotNil(t, mux)
 	t.Cleanup(cleanup)
+
+	assert.True(t, applied, "NewMux should forward and apply the provided cognito options")
 }
 
 func TestNewMux(t *testing.T) {
