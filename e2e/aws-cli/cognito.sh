@@ -28,6 +28,7 @@ echo "=== Cognito ==="
 
 POOL_ID=""
 CLIENT_ID=""
+DP_POOL_ID=""
 
 cleanup() {
   if [[ -n "$CLIENT_ID" && "$CLIENT_ID" != "UNKNOWN" ]]; then
@@ -37,6 +38,10 @@ cleanup() {
   fi
   if [[ -n "$POOL_ID" && "$POOL_ID" != "us-east-1_UNKNOWN" ]]; then
     $AWS delete-user-pool --user-pool-id "$POOL_ID" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "$DP_POOL_ID" ]]; then
+    $AWS update-user-pool --user-pool-id "$DP_POOL_ID" --deletion-protection "INACTIVE" >/dev/null 2>&1 || true
+    $AWS delete-user-pool --user-pool-id "$DP_POOL_ID" >/dev/null 2>&1 || true
   fi
 }
 trap cleanup EXIT
