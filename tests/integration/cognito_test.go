@@ -1832,6 +1832,7 @@ func TestCognitoIntegration_TokenValidityUnits(t *testing.T) {
 			},
 		})
 		require.NoError(t, err)
+		require.NotNil(t, auth.AuthenticationResult)
 		refreshToken := aws.ToString(auth.AuthenticationResult.RefreshToken)
 		require.NotEmpty(t, refreshToken)
 
