@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"math/big"
 	"strings"
 	"time"
@@ -54,7 +55,13 @@ func parseTokenValidityUnits(raw json.RawMessage) tokenValidityUnits {
 	if len(raw) == 0 {
 		return u
 	}
-	_ = json.Unmarshal(raw, &u)
+	if err := json.Unmarshal(raw, &u); err != nil {
+		slog.Debug(
+			"parseTokenValidityUnits",
+			"error",
+			fmt.Errorf("malformed TokenValidityUnits: %w", err),
+		)
+	}
 	return u
 }
 

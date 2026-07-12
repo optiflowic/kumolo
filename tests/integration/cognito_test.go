@@ -1740,6 +1740,13 @@ func decodeJWTExpClaim(t *testing.T, token string) float64 {
 // ── TokenValidityUnits ───────────────────────────────────────────────────────
 
 func TestCognitoIntegration_TokenValidityUnits(t *testing.T) {
+	const (
+		accessTokenValidityMinutes  = 10
+		idTokenValidityMinutes      = 30
+		refreshTokenValidityMinutes = 60
+		secondsPerMinute            = 60
+	)
+
 	cap := withCodeCapture(t)
 	clients := newTestClients(t)
 	ctx := context.Background()
@@ -1754,9 +1761,9 @@ func TestCognitoIntegration_TokenValidityUnits(t *testing.T) {
 	client, err := c.CreateUserPoolClient(ctx, &awscognito.CreateUserPoolClientInput{
 		UserPoolId:           aws.String(poolID),
 		ClientName:           aws.String("token-validity-client"),
-		AccessTokenValidity:  aws.Int32(10),
-		IdTokenValidity:      aws.Int32(30),
-		RefreshTokenValidity: 60,
+		AccessTokenValidity:  aws.Int32(accessTokenValidityMinutes),
+		IdTokenValidity:      aws.Int32(idTokenValidityMinutes),
+		RefreshTokenValidity: refreshTokenValidityMinutes,
 		TokenValidityUnits: &types.TokenValidityUnitsType{
 			AccessToken:  types.TimeUnitsTypeMinutes,
 			IdToken:      types.TimeUnitsTypeMinutes,
@@ -1803,12 +1810,16 @@ func TestCognitoIntegration_TokenValidityUnits(t *testing.T) {
 		})
 		require.NoError(t, err)
 		require.NotNil(t, auth.AuthenticationResult)
-		assert.Equal(t, int32(10*60), auth.AuthenticationResult.ExpiresIn)
+		assert.Equal(
+			t,
+			int32(accessTokenValidityMinutes*secondsPerMinute),
+			auth.AuthenticationResult.ExpiresIn,
+		)
 
 		accessExp := decodeJWTExpClaim(t, aws.ToString(auth.AuthenticationResult.AccessToken))
 		idExp := decodeJWTExpClaim(t, aws.ToString(auth.AuthenticationResult.IdToken))
-		assert.InDelta(t, float64(before+10*60), accessExp, 2)
-		assert.InDelta(t, float64(before+30*60), idExp, 2)
+		assert.InDelta(t, float64(before+accessTokenValidityMinutes*secondsPerMinute), accessExp, 2)
+		assert.InDelta(t, float64(before+idTokenValidityMinutes*secondsPerMinute), idExp, 2)
 	})
 
 	t.Run("RefreshTokenAuth_HonorsRefreshTokenValidity", func(t *testing.T) {
@@ -1836,7 +1847,7 @@ func TestCognitoIntegration_TokenValidityUnits(t *testing.T) {
 		require.True(t, ok)
 		expiresAt, ok := tokenJSON["ExpiresAt"].(float64)
 		require.True(t, ok)
-		assert.InDelta(t, issuedAt+60*60, expiresAt, 2,
+		assert.InDelta(t, issuedAt+refreshTokenValidityMinutes*secondsPerMinute, expiresAt, 2,
 			"RefreshTokenValidity=60 with unit=minutes must yield a 60-minute lifetime")
 
 		refreshed, err := c.InitiateAuth(ctx, &awscognito.InitiateAuthInput{
@@ -1847,7 +1858,12 @@ func TestCognitoIntegration_TokenValidityUnits(t *testing.T) {
 			},
 		})
 		require.NoError(t, err)
-		assert.Equal(t, int32(10*60), refreshed.AuthenticationResult.ExpiresIn)
+		require.NotNil(t, refreshed.AuthenticationResult)
+		assert.Equal(
+			t,
+			int32(accessTokenValidityMinutes*secondsPerMinute),
+			refreshed.AuthenticationResult.ExpiresIn,
+		)
 	})
 }
 

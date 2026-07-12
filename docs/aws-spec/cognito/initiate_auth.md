@@ -113,6 +113,7 @@ Or, when a challenge is required:
 User attributes (e.g. `email`, `email_verified`) are included in the ID token if present.
 
 ### Refresh Token
+
 Opaque 256-bit hex token stored in `pools/{poolID}/refresh_tokens/{token}.json`.
 `ExpiresAt` is set on issuance using the requesting client's `RefreshTokenValidity` and
 `TokenValidityUnits.RefreshToken` (defaults to days per AWS spec).
