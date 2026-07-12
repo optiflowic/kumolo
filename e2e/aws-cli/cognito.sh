@@ -28,6 +28,7 @@ echo "=== Cognito ==="
 
 POOL_ID=""
 CLIENT_ID=""
+DP_POOL_ID=""
 
 cleanup() {
   if [[ -n "$CLIENT_ID" && "$CLIENT_ID" != "UNKNOWN" ]]; then
@@ -37,6 +38,10 @@ cleanup() {
   fi
   if [[ -n "$POOL_ID" && "$POOL_ID" != "us-east-1_UNKNOWN" ]]; then
     $AWS delete-user-pool --user-pool-id "$POOL_ID" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "$DP_POOL_ID" ]]; then
+    $AWS update-user-pool --user-pool-id "$DP_POOL_ID" --deletion-protection "INACTIVE" >/dev/null 2>&1 || true
+    $AWS delete-user-pool --user-pool-id "$DP_POOL_ID" >/dev/null 2>&1 || true
   fi
 }
 trap cleanup EXIT
@@ -70,6 +75,31 @@ if echo "$LIST_JSON" | grep -q '"UserPools"'; then
   ok "ListUserPools"
 else
   fail "ListUserPools"
+fi
+
+# DeleteUserPool must be rejected while DeletionProtection is ACTIVE, then
+# succeed once it's switched back to INACTIVE. Uses an isolated pool so the
+# script's shared $POOL_ID (deleted by the cleanup trap) is unaffected.
+DP_POOL_JSON=$($AWS create-user-pool --pool-name "e2e-deletion-protection-pool" \
+  --deletion-protection "ACTIVE" 2>&1)
+DP_POOL_ID=$(echo "$DP_POOL_JSON" | jq -r '.UserPool.Id // empty' 2>/dev/null || true)
+if [[ -n "$DP_POOL_ID" ]]; then
+  ok "CreateUserPool (DeletionProtection=ACTIVE)"
+
+  DP_DELETE_JSON=$($AWS delete-user-pool --user-pool-id "$DP_POOL_ID" 2>&1) || true
+  if echo "$DP_DELETE_JSON" | grep -qi 'InvalidParameterException'; then
+    ok "DeleteUserPool — rejected while DeletionProtection is ACTIVE"
+  else
+    fail "DeleteUserPool — expected InvalidParameterException while DeletionProtection is ACTIVE"
+  fi
+
+  run "UpdateUserPool (DeletionProtection=INACTIVE)" \
+    $AWS update-user-pool --user-pool-id "$DP_POOL_ID" --deletion-protection "INACTIVE"
+
+  run "DeleteUserPool — succeeds after DeletionProtection is deactivated" \
+    $AWS delete-user-pool --user-pool-id "$DP_POOL_ID"
+else
+  fail "CreateUserPool (DeletionProtection=ACTIVE)"
 fi
 
 # ---------------------------------------------------------------------------

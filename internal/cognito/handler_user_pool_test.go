@@ -323,9 +323,67 @@ func TestDeleteUserPool_Success(t *testing.T) {
 	assert.Equal(t, ErrTypeResourceNotFoundException, resp.Type)
 }
 
+func TestDeleteUserPool_DeletionProtectionActive(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "protected-pool")
+
+	w := doOp(
+		t,
+		ro,
+		"UpdateUserPool",
+		fmt.Sprintf(`{"UserPoolId":%q,"DeletionProtection":"ACTIVE"}`, poolID),
+	)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	w2 := doOp(t, ro, "DeleteUserPool", fmt.Sprintf(`{"UserPoolId":%q}`, poolID))
+	assert.Equal(t, http.StatusBadRequest, w2.Code)
+	var resp errResponse
+	require.NoError(t, json.NewDecoder(w2.Body).Decode(&resp))
+	assert.Equal(t, ErrTypeInvalidParameterException, resp.Type)
+
+	// Pool must still exist.
+	w3 := doOp(t, ro, "DescribeUserPool", fmt.Sprintf(`{"UserPoolId":%q}`, poolID))
+	assert.Equal(t, http.StatusOK, w3.Code)
+}
+
+func TestDeleteUserPool_DeletionProtectionDeactivated(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "protected-pool")
+
+	w := doOp(
+		t,
+		ro,
+		"UpdateUserPool",
+		fmt.Sprintf(`{"UserPoolId":%q,"DeletionProtection":"ACTIVE"}`, poolID),
+	)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	w2 := doOp(
+		t,
+		ro,
+		"UpdateUserPool",
+		fmt.Sprintf(`{"UserPoolId":%q,"DeletionProtection":"INACTIVE"}`, poolID),
+	)
+	require.Equal(t, http.StatusOK, w2.Code)
+
+	w3 := doOp(t, ro, "DeleteUserPool", fmt.Sprintf(`{"UserPoolId":%q}`, poolID))
+	assert.Equal(t, http.StatusOK, w3.Code)
+}
+
 func TestDeleteUserPool_NotFound(t *testing.T) {
 	ro := newTestRouter(t)
 	w := doOp(t, ro, "DeleteUserPool", `{"UserPoolId":"us-east-1_NOTEXIST"}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	var resp errResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, ErrTypeResourceNotFoundException, resp.Type)
+}
+
+func TestDeleteUserPool_NotFoundFromStorage(t *testing.T) {
+	store := mockStore{deleteErr: errUserPoolNotFound}
+	ro := &Router{storage: &store}
+	w := doOp(t, ro, "DeleteUserPool", `{"UserPoolId":"us-east-1_Test12345"}`)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 
 	var resp errResponse

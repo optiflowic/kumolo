@@ -592,6 +592,15 @@ func (ro *Router) handleDeleteUserPool(w http.ResponseWriter, body []byte) {
 			)
 			return
 		}
+		if errors.Is(err, errDeletionProtectionActive) {
+			writeError(
+				w,
+				http.StatusBadRequest,
+				ErrTypeInvalidParameterException,
+				"User Pool cannot be deleted currently because it has deletion protection enabled. To delete this User Pool, please first disable the deletion protection via UpdateUserPool API.",
+			)
+			return
+		}
 		writeError(
 			w,
 			http.StatusInternalServerError,

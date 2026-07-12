@@ -11,13 +11,16 @@ import (
 )
 
 var (
-	errUserPoolNotFound = errors.New("user pool not found")
-	errInvalidNextToken = errors.New("invalid pagination token")
+	errUserPoolNotFound         = errors.New("user pool not found")
+	errInvalidNextToken         = errors.New("invalid pagination token")
+	errDeletionProtectionActive = errors.New("deletion protection is active")
 )
 
 const (
 	poolRegion  = "us-east-1"
 	poolAccount = "000000000000"
+
+	deletionProtectionActive = "ACTIVE"
 )
 
 // UserPoolMetadata stores the full state of a Cognito user pool.
@@ -112,11 +115,12 @@ func (s *Storage) DeleteUserPool(poolID string) error {
 	defer s.mu.Unlock()
 
 	metaPath := filepath.Join("pools", poolID, "meta.json")
-	if _, err := s.statFn(metaPath); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return errUserPoolNotFound
-		}
-		return fmt.Errorf("stat pool meta: %w", err)
+	meta, err := s.getUserPoolLocked(poolID)
+	if err != nil {
+		return fmt.Errorf("load user pool metadata: %w", err)
+	}
+	if meta.DeletionProtection == deletionProtectionActive {
+		return errDeletionProtectionActive
 	}
 	if err := s.deleteClientsDirLocked(poolID); err != nil {
 		return fmt.Errorf("delete clients dir: %w", err)

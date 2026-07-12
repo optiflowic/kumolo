@@ -203,7 +203,10 @@ type mockStore struct {
 
 func (m *mockStore) CreateUserPool(*UserPoolMetadata) error { return m.createErr }
 func (m *mockStore) GetUserPool(string) (*UserPoolMetadata, error) {
-	return nil, m.getErr
+	if m.getErr != nil {
+		return nil, m.getErr
+	}
+	return &UserPoolMetadata{}, nil
 }
 func (m *mockStore) UpdateUserPool(_ string, _ func(*UserPoolMetadata) error) error {
 	return m.updateErr
@@ -477,17 +480,7 @@ func TestStorage_DeleteUserPool_ErrorPaths(t *testing.T) {
 		withClient bool
 		setup      func(t *testing.T, s *Storage, dataDir string)
 		wantMsg    string
-		notFound   bool
 	}{
-		{
-			name: "stat error",
-			setup: func(_ *testing.T, s *Storage, _ string) {
-				s.statFn = func(string) (os.FileInfo, error) {
-					return nil, errors.New("stat failed")
-				}
-			},
-			notFound: true,
-		},
 		{
 			name:       "clients dir remove error",
 			withClient: true,
@@ -608,9 +601,6 @@ func TestStorage_DeleteUserPool_ErrorPaths(t *testing.T) {
 			tt.setup(t, storage, dataDir)
 			err = storage.DeleteUserPool(poolID)
 			require.Error(t, err)
-			if tt.notFound {
-				assert.False(t, errors.Is(err, errUserPoolNotFound))
-			}
 			if tt.wantMsg != "" {
 				assert.Contains(t, err.Error(), tt.wantMsg)
 			}
