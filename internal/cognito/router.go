@@ -98,13 +98,29 @@ type Router struct {
 	bcryptCost int       // injectable for testing; defaults to bcrypt.DefaultCost
 }
 
-func NewRouter(storage *Storage) *Router {
-	return &Router{
+// Option configures a Router at construction time.
+type Option func(*Router)
+
+// WithBcryptCost overrides the bcrypt cost used for password hashing.
+// Intended for tests that need to avoid the real cost's latency; production
+// code should rely on the default.
+func WithBcryptCost(cost int) Option {
+	return func(ro *Router) {
+		ro.bcryptCost = cost
+	}
+}
+
+func NewRouter(storage *Storage, opts ...Option) *Router {
+	ro := &Router{
 		storage:    storage,
 		groups:     storage,
 		codeReader: randReader,
 		bcryptCost: bcrypt.DefaultCost,
 	}
+	for _, opt := range opts {
+		opt(ro)
+	}
+	return ro
 }
 
 func (ro *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {

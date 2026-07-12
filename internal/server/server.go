@@ -35,11 +35,32 @@ func (a *kmsAdapter) ResolveKeyForEncryption(keyRef string) (string, error) {
 	return arn, nil
 }
 
+// Option configures NewMux at construction time.
+type Option func(*options)
+
+type options struct {
+	cognitoOpts []cognito.Option
+}
+
+// WithCognitoOptions passes through options to cognito.NewRouter. Intended
+// for tests that need to override internals such as bcrypt cost; production
+// code should not need this.
+func WithCognitoOptions(opts ...cognito.Option) Option {
+	return func(o *options) {
+		o.cognitoOpts = append(o.cognitoOpts, opts...)
+	}
+}
+
 func NewMux(
 	ctx context.Context,
 	dataDir string,
 	lifecycleInterval time.Duration,
+	opts ...Option,
 ) (http.Handler, func(), error) {
+	o := &options{}
+	for _, opt := range opts {
+		opt(o)
+	}
 	s3Storage, err := s3.NewStorage(dataDir)
 	if err != nil {
 		return nil, nil, err
@@ -68,7 +89,7 @@ func NewMux(
 	dynamoStreamsRouter := dynamodb.NewStreamsRouter(dynamoStorage)
 	stsRouter := sts.NewRouter()
 	kmsRouter := kms.NewRouter(kmsStorage)
-	cognitoRouter := cognito.NewRouter(cognitoStorage)
+	cognitoRouter := cognito.NewRouter(cognitoStorage, o.cognitoOpts...)
 
 	s3.NewLifecycleEnforcer(s3Storage, lifecycleInterval).Start(ctx)
 

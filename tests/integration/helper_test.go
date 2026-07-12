@@ -17,8 +17,10 @@ import (
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	awssts "github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/aws/smithy-go"
+	"github.com/optiflowic/kumolo/internal/cognito"
 	"github.com/optiflowic/kumolo/internal/server"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type testClients struct {
@@ -48,7 +50,9 @@ func apiErrorCode(err error) string {
 func newServerAt(t *testing.T, dataDir string) (testClients, func()) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	mux, cleanup, err := server.NewMux(ctx, dataDir, time.Minute)
+	mux, cleanup, err := server.NewMux(ctx, dataDir, time.Minute,
+		server.WithCognitoOptions(cognito.WithBcryptCost(bcrypt.MinCost)),
+	)
 	require.NoError(t, err)
 	srv := httptest.NewServer(mux)
 
