@@ -1808,6 +1808,7 @@ func TestCognitoIntegration_TokenValidityUnits(t *testing.T) {
 				"PASSWORD": password,
 			},
 		})
+		after := time.Now().Unix()
 		require.NoError(t, err)
 		require.NotNil(t, auth.AuthenticationResult)
 		assert.Equal(
@@ -1818,8 +1819,14 @@ func TestCognitoIntegration_TokenValidityUnits(t *testing.T) {
 
 		accessExp := decodeJWTExpClaim(t, aws.ToString(auth.AuthenticationResult.AccessToken))
 		idExp := decodeJWTExpClaim(t, aws.ToString(auth.AuthenticationResult.IdToken))
-		assert.InDelta(t, float64(before+accessTokenValidityMinutes*secondsPerMinute), accessExp, 2)
-		assert.InDelta(t, float64(before+idTokenValidityMinutes*secondsPerMinute), idExp, 2)
+		assert.GreaterOrEqual(
+			t,
+			accessExp,
+			float64(before+accessTokenValidityMinutes*secondsPerMinute),
+		)
+		assert.LessOrEqual(t, accessExp, float64(after+accessTokenValidityMinutes*secondsPerMinute))
+		assert.GreaterOrEqual(t, idExp, float64(before+idTokenValidityMinutes*secondsPerMinute))
+		assert.LessOrEqual(t, idExp, float64(after+idTokenValidityMinutes*secondsPerMinute))
 	})
 
 	t.Run("RefreshTokenAuth_HonorsRefreshTokenValidity", func(t *testing.T) {
