@@ -117,7 +117,7 @@ func (s *Storage) DeleteUserPool(poolID string) error {
 	metaPath := filepath.Join("pools", poolID, "meta.json")
 	meta, err := s.getUserPoolLocked(poolID)
 	if err != nil {
-		return err
+		return fmt.Errorf("load user pool metadata: %w", err)
 	}
 	if meta.DeletionProtection == deletionProtectionActive {
 		return errDeletionProtectionActive
