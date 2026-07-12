@@ -144,13 +144,18 @@ func defaultAdminCreateUserConfig() json.RawMessage {
 }
 
 // defaultAccountRecoverySetting matches AWS's documented default when CreateUserPool
-// omits AccountRecoverySetting: phone first, falling back to email.
+// omits AccountRecoverySetting: phone first, falling back to email. Reuses
+// defaultRecoveryMechanisms (handler_password.go) so ForgotPassword's fallback and
+// CreateUserPool's default can't drift apart.
 func defaultAccountRecoverySetting() json.RawMessage {
-	return json.RawMessage(
-		`{"RecoveryMechanisms":[` +
-			`{"Name":"verified_phone_number","Priority":1},` +
-			`{"Name":"verified_email","Priority":2}]}`,
-	)
+	data, err := json.Marshal(struct {
+		RecoveryMechanisms []recoveryMechanism `json:"RecoveryMechanisms"`
+	}{RecoveryMechanisms: defaultRecoveryMechanisms()})
+	if err != nil {
+		// unreachable: recoveryMechanism contains only primitive fields, always marshals
+		return json.RawMessage(`{}`)
+	}
+	return json.RawMessage(data)
 }
 
 type createUserPoolRequest struct {
