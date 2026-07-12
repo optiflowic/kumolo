@@ -10,10 +10,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/optiflowic/kumolo/internal/cognito"
 	"github.com/optiflowic/kumolo/internal/kms"
 	"github.com/optiflowic/kumolo/internal/s3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func newTestKMSStorage(t *testing.T) (*kms.Storage, string) {
@@ -117,6 +119,23 @@ func TestNewMuxError(t *testing.T) {
 		assert.Nil(t, mux)
 		assert.Nil(t, cleanup)
 	})
+}
+
+func TestWithCognitoOptions(t *testing.T) {
+	o := &options{}
+	WithCognitoOptions(cognito.WithBcryptCost(bcrypt.MinCost))(o)
+	require.Len(t, o.cognitoOpts, 1)
+}
+
+func TestNewMux_WithCognitoOptions(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	mux, cleanup, err := NewMux(ctx, t.TempDir(), time.Minute,
+		WithCognitoOptions(cognito.WithBcryptCost(bcrypt.MinCost)),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, mux)
+	t.Cleanup(cleanup)
 }
 
 func TestNewMux(t *testing.T) {
