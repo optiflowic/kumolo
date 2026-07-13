@@ -30,8 +30,8 @@
   - `verified_phone_number` / `verified_email`: selected if the user has the matching
     `_verified: "true"` attribute.
   - `admin_only`: no self-service recovery; treated as no eligible mechanism.
-- If no mechanism is satisfied (including an `admin_only`-only pool, or a pool whose
-  configured attribute isn't verified for the user), returns `InvalidParameterException`
+- If no mechanism is satisfied (including a pool configured solely with `admin_only`, or a
+  pool whose configured attribute isn't verified for the user), returns `InvalidParameterException`
   (matches AWS's documented "users who don't have a valid recovery method" behavior).
 - Generates a random 6-digit code (same generator as `SignUp`/`ConfirmSignUp`), stores it on
   the user record, and logs `pool_id`/`username` at Info level plus `code` at Debug level
