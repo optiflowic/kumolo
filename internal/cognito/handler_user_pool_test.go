@@ -107,51 +107,51 @@ func TestCreateUserPool_Defaults(t *testing.T) {
 	)
 }
 
-// TestCreateUserPool_ExplicitNullAccountRecoverySetting is a regression test: an
-// explicit JSON null must be treated the same as an omitted field, since
-// json.RawMessage unmarshals a literal null into the 4-byte string "null" rather
-// than a nil slice.
-func TestCreateUserPool_ExplicitNullAccountRecoverySetting(t *testing.T) {
-	ro := newTestRouter(t)
-	w := doOp(t, ro, "CreateUserPool", `{
-		"PoolName": "null-recovery-pool",
-		"AccountRecoverySetting": null
-	}`)
-	require.Equal(t, http.StatusOK, w.Code)
-
-	var resp struct {
-		UserPool struct {
-			AccountRecoverySetting json.RawMessage `json:"AccountRecoverySetting"`
-		} `json:"UserPool"`
+// TestCreateUserPool_AccountRecoverySetting covers explicit JSON null being treated
+// the same as an omitted field (json.RawMessage unmarshals a literal null into the
+// 4-byte string "null" rather than a nil slice, so this is a regression case) and an
+// explicit custom setting being preserved as-is.
+func TestCreateUserPool_AccountRecoverySetting(t *testing.T) {
+	defaultJSON := `{"RecoveryMechanisms":[{"Name":"verified_phone_number","Priority":1},` +
+		`{"Name":"verified_email","Priority":2}]}`
+	tests := []struct {
+		name        string
+		requestBody string
+		wantJSON    string
+	}{
+		{
+			name: "explicit null defaults to phone-then-email",
+			requestBody: `{
+				"PoolName": "null-recovery-pool",
+				"AccountRecoverySetting": null
+			}`,
+			wantJSON: defaultJSON,
+		},
+		{
+			name: "explicit setting is preserved",
+			requestBody: `{
+				"PoolName": "custom-recovery-pool",
+				"AccountRecoverySetting": {"RecoveryMechanisms": [{"Name":"admin_only","Priority":1}]}
+			}`,
+			wantJSON: `{"RecoveryMechanisms":[{"Name":"admin_only","Priority":1}]}`,
+		},
 	}
-	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
-	assert.JSONEq(
-		t,
-		`{"RecoveryMechanisms":[{"Name":"verified_phone_number","Priority":1},`+
-			`{"Name":"verified_email","Priority":2}]}`,
-		string(resp.UserPool.AccountRecoverySetting),
-	)
-}
 
-func TestCreateUserPool_ExplicitAccountRecoverySetting(t *testing.T) {
-	ro := newTestRouter(t)
-	w := doOp(t, ro, "CreateUserPool", `{
-		"PoolName": "custom-recovery-pool",
-		"AccountRecoverySetting": {"RecoveryMechanisms": [{"Name":"admin_only","Priority":1}]}
-	}`)
-	require.Equal(t, http.StatusOK, w.Code)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ro := newTestRouter(t)
+			w := doOp(t, ro, "CreateUserPool", tc.requestBody)
+			require.Equal(t, http.StatusOK, w.Code)
 
-	var resp struct {
-		UserPool struct {
-			AccountRecoverySetting json.RawMessage `json:"AccountRecoverySetting"`
-		} `json:"UserPool"`
+			var resp struct {
+				UserPool struct {
+					AccountRecoverySetting json.RawMessage `json:"AccountRecoverySetting"`
+				} `json:"UserPool"`
+			}
+			require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+			assert.JSONEq(t, tc.wantJSON, string(resp.UserPool.AccountRecoverySetting))
+		})
 	}
-	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
-	assert.JSONEq(
-		t,
-		`{"RecoveryMechanisms":[{"Name":"admin_only","Priority":1}]}`,
-		string(resp.UserPool.AccountRecoverySetting),
-	)
 }
 
 func TestCreateUserPool_ExplicitPoliciesAndAdminConfig(t *testing.T) {
