@@ -47,6 +47,7 @@ func init() {
 	var ok bool
 	srpN, ok = new(big.Int).SetString(srpNHex, 16)
 	if !ok {
+		// unreachable: srpNHex is a fixed, valid hex literal
 		panic("cognitotest: invalid SRP N constant")
 	}
 	srpK = new(big.Int).SetBytes(sha256Concat(padHex(srpN), padHex(srpG)))
@@ -86,6 +87,7 @@ type SRPClient struct {
 func NewSRPClient() (*SRPClient, error) {
 	aBytes := make([]byte, 128)
 	if _, err := rand.Read(aBytes); err != nil {
+		// untestable: crypto/rand.Read only fails on OS-level entropy source errors
 		return nil, fmt.Errorf("read entropy: %w", err)
 	}
 	a := new(big.Int).SetBytes(aBytes)
@@ -116,6 +118,8 @@ func (c *SRPClient) ComputeSignature(
 
 	u := new(big.Int).SetBytes(sha256Concat(padHex(c.A), padHex(serverB)))
 	if u.Sign() == 0 {
+		// unreachable: constructing A, B such that SHA256(padHex(A)||padHex(B)) == 0
+		// is a preimage attack, computationally infeasible to hit in a test
 		return "", fmt.Errorf("u cannot be zero")
 	}
 

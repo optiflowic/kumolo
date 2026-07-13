@@ -266,6 +266,7 @@ func (ro *Router) handleConfirmForgotPassword(w http.ResponseWriter, body []byte
 		}
 		salt, verifier, serr := srpVerifierFor(poolID, req.Username, req.Password)
 		if serr != nil {
+			// untestable: crypto/rand.Read only fails on OS-level entropy source errors
 			return serr
 		}
 		u.PasswordHash = hash
@@ -369,6 +370,7 @@ func (ro *Router) handleChangePassword(w http.ResponseWriter, body []byte) {
 		}
 		salt, verifier, serr := srpVerifierFor(poolID, u.Username, req.ProposedPassword)
 		if serr != nil {
+			// untestable: crypto/rand.Read only fails on OS-level entropy source errors
 			return serr
 		}
 		u.PasswordHash = hash

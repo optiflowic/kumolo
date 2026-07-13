@@ -113,6 +113,12 @@ func TestPadHex(t *testing.T) {
 	}
 }
 
+func TestPadHex_NegativePanics(t *testing.T) {
+	assert.Panics(t, func() {
+		padHex(big.NewInt(-1))
+	})
+}
+
 func TestSRPVerifierFor(t *testing.T) {
 	salt1, verifier1, err := srpVerifierFor("us-east-1_abc123", "alice", "Password123!")
 	require.NoError(t, err)
@@ -548,6 +554,47 @@ func TestPasswordVerifierChallenge_UserDeletedAfterInitiateAuth(t *testing.T) {
 	})
 	assert.Equal(t, http.StatusBadRequest, w2.Code)
 	assertErrType(t, w2, ErrTypeUserNotFoundException)
+}
+
+func TestPasswordVerifierChallenge_VerifierClearedAfterInitiateAuth(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID, clientID := setupPool(t, ro)
+	signUpUser(t, ro, clientID, "quinn", "Password123!")
+	confirmUser(t, ro, clientID, "quinn")
+
+	client, err := cognitotest.NewSRPClient()
+	require.NoError(t, err)
+	w := doInitSRPAuth(t, ro, clientID, map[string]string{
+		"USERNAME": "quinn", "SRP_A": client.AHex(),
+	})
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp srpInitiateAuthResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+
+	// Simulate the user's password being reset (clearing SRPVerifier) between
+	// InitiateAuth and RespondToAuthChallenge.
+	require.NoError(t, ro.storage.UpdateUser(poolID, "quinn", func(u *UserMetadata) error {
+		u.SRPVerifier = ""
+		return nil
+	}))
+
+	poolName := strings.SplitN(poolID, "_", 2)[1]
+	timestamp := cognitotest.NowString()
+	sig, err := client.ComputeSignature(
+		poolName, "quinn", "Password123!",
+		resp.ChallengeParameters.Salt, resp.ChallengeParameters.SRPB,
+		resp.ChallengeParameters.SecretBlock, timestamp,
+	)
+	require.NoError(t, err)
+
+	w2 := doPasswordVerifier(t, ro, clientID, resp.Session, map[string]string{
+		"USERNAME":                    "quinn",
+		"PASSWORD_CLAIM_SECRET_BLOCK": resp.ChallengeParameters.SecretBlock,
+		"TIMESTAMP":                   timestamp,
+		"PASSWORD_CLAIM_SIGNATURE":    sig,
+	})
+	assert.Equal(t, http.StatusBadRequest, w2.Code)
+	assertErrType(t, w2, ErrTypeNotAuthorizedException)
 }
 
 func TestPasswordVerifierChallenge_GetUserStorageError(t *testing.T) {

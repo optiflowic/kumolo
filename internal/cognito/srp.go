@@ -354,6 +354,8 @@ func (ro *Router) handlePasswordVerifierChallenge(
 
 	u := new(big.Int).SetBytes(sha256Concat(padHex(A), padHex(B)))
 	if u.Sign() == 0 {
+		// unreachable: constructing A, B such that SHA256(padHex(A)||padHex(B)) == 0
+		// is a preimage attack, computationally infeasible to hit in a test
 		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException,
 			"Incorrect username or password.")
 		return
