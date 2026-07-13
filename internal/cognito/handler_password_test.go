@@ -156,6 +156,14 @@ func TestForgotPassword_RecoveryMechanismSelection(t *testing.T) {
 	}
 }
 
+// TestSortedRecoveryMechanisms_MalformedJSONFallsBackToDefault is a regression test:
+// an unparseable AccountRecoverySetting must not error, it must fall back to the same
+// default order used when the setting is absent.
+func TestSortedRecoveryMechanisms_MalformedJSONFallsBackToDefault(t *testing.T) {
+	got := sortedRecoveryMechanisms(json.RawMessage(`{not valid json`))
+	assert.Equal(t, defaultRecoveryMechanisms(), got)
+}
+
 func TestForgotPassword_NoVerifiedContact(t *testing.T) {
 	ro := newTestRouter(t)
 	_, clientID := setupPool(t, ro)
