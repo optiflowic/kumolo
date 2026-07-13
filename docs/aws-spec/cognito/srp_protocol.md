@@ -53,7 +53,10 @@ SRP salt and verifier on the user record (`UserMetadata.SRPSalt` /
 2. `userPoolName` = the part of the pool ID after the `_` (kumolo pool IDs
    are `{region}_{9-char-random}`, matching real AWS's format).
 3. `innerHash = SHA256(userPoolName + username + ":" + password)`.
-4. `x = SHA256(padHex(saltBig) bytes || innerHash) mod N`, as a `*big.Int`.
+4. `x = SHA256(padHex(saltBig) bytes || innerHash)`, as a `*big.Int` (not
+   reduced mod `N` — the SRP-6a exponent is used as-is, since reducing an
+   exponent mod the modulus `N` rather than mod the group order would be
+   mathematically wrong).
 5. `verifier = g^x mod N`.
 
 Users created/migrated before this feature existed have no stored verifier;

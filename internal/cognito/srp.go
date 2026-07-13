@@ -56,12 +56,22 @@ func init() {
 // this positive branch is implemented. Real Cognito SDK clients apply the
 // same padding before hashing/HMAC'ing these values, so it must match
 // bit-for-bit — see docs/aws-spec/cognito/srp_protocol.md.
+// Callers must reject negative input themselves (see handleUserSRPAuth's
+// SRP_A validation); padHex panics rather than silently producing wrong
+// output if that precondition is violated.
 func padHex(n *big.Int) []byte {
+	if n.Sign() < 0 {
+		panic("cognito: padHex requires a non-negative big.Int")
+	}
 	h := n.Text(16)
 	if len(h)%2 != 0 {
 		h = "0" + h
 	}
-	b, _ := hex.DecodeString(h)
+	b, err := hex.DecodeString(h)
+	if err != nil {
+		// unreachable: h is always a valid hex string built from n.Text(16)
+		panic("cognito: padHex produced invalid hex: " + err.Error())
+	}
 	if len(b) > 0 && b[0] >= 0x80 {
 		b = append([]byte{0x00}, b...)
 	}
@@ -150,7 +160,7 @@ func (ro *Router) handleUserSRPAuth(
 	}
 
 	A, ok := new(big.Int).SetString(srpAHex, 16)
-	if !ok {
+	if !ok || A.Sign() < 0 {
 		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
 			"SRP_A is not a valid hex number")
 		return
