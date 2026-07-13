@@ -266,7 +266,7 @@ func (ro *Router) handleCreateUserPool(w http.ResponseWriter, body []byte) {
 		adminCreateUserConfig = defaultAdminCreateUserConfig()
 	}
 	accountRecoverySetting := req.AccountRecoverySetting
-	if accountRecoverySetting == nil {
+	if len(accountRecoverySetting) == 0 || string(accountRecoverySetting) == "null" {
 		accountRecoverySetting = defaultAccountRecoverySetting()
 	}
 
