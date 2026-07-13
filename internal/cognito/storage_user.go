@@ -23,11 +23,17 @@ type AttributeType struct {
 
 // UserMetadata stores the full state of a Cognito user.
 type UserMetadata struct {
-	Username         string          `json:"Username"`
-	Sub              string          `json:"Sub"`
-	Status           string          `json:"Status"`
-	Enabled          bool            `json:"Enabled"`
-	PasswordHash     string          `json:"PasswordHash"`
+	Username     string `json:"Username"`
+	Sub          string `json:"Sub"`
+	Status       string `json:"Status"`
+	Enabled      bool   `json:"Enabled"`
+	PasswordHash string `json:"PasswordHash"`
+	// SRPSalt and SRPVerifier hold the SRP-6a salt and verifier used by the
+	// USER_SRP_AUTH flow, derived alongside PasswordHash whenever a password is
+	// set. Empty for users created before this feature existed or with no
+	// password — USER_SRP_AUTH fails closed for such users (see srp.go).
+	SRPSalt          string          `json:"SRPSalt,omitempty"`
+	SRPVerifier      string          `json:"SRPVerifier,omitempty"`
 	Attributes       []AttributeType `json:"Attributes"`
 	ConfirmationCode string          `json:"ConfirmationCode"`
 	// VerificationCodes holds pending attribute-verification codes keyed by

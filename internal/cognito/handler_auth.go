@@ -142,7 +142,7 @@ func (ro *Router) handleSignUp(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	var passwordHash string
+	var passwordHash, srpSalt, srpVerifier string
 	if req.Password != "" {
 		hash, herr := bcrypt.GenerateFromPassword([]byte(req.Password), ro.bcryptCost)
 		if herr != nil {
@@ -152,6 +152,15 @@ func (ro *Router) handleSignUp(w http.ResponseWriter, body []byte) {
 			return
 		}
 		passwordHash = string(hash)
+
+		salt, verifier, serr := srpVerifierFor(poolID, req.Username, req.Password)
+		if serr != nil {
+			// untestable: crypto/rand.Read only fails on OS-level entropy source errors
+			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+				"failed to derive SRP verifier")
+			return
+		}
+		srpSalt, srpVerifier = salt, verifier
 	}
 
 	ts := nowUnix()
@@ -161,6 +170,8 @@ func (ro *Router) handleSignUp(w http.ResponseWriter, body []byte) {
 		Status:           userStatusUnconfirmed,
 		Enabled:          true,
 		PasswordHash:     passwordHash,
+		SRPSalt:          srpSalt,
+		SRPVerifier:      srpVerifier,
 		Attributes:       req.UserAttributes,
 		ConfirmationCode: code,
 		CreatedAt:        ts,
@@ -402,6 +413,8 @@ func (ro *Router) handleInitiateAuth(w http.ResponseWriter, body []byte) {
 	switch req.AuthFlow {
 	case "USER_PASSWORD_AUTH":
 		ro.handleUserPasswordAuth(w, poolID, req.ClientID, req.AuthParameters)
+	case "USER_SRP_AUTH":
+		ro.handleUserSRPAuth(w, poolID, req.ClientID, req.AuthParameters)
 	case "REFRESH_TOKEN_AUTH", "REFRESH_TOKEN":
 		ro.handleRefreshTokenAuth(w, poolID, req.ClientID, req.AuthParameters)
 	default:
@@ -472,7 +485,7 @@ func (ro *Router) handleUserPasswordAuth(
 
 	if user.Status == userStatusForceChangePasswd {
 		sessionToken, serr := buildSessionToken(
-			privateKey, keys.KeyID, poolID, username, "NEW_PASSWORD_REQUIRED",
+			privateKey, keys.KeyID, poolID, username, "NEW_PASSWORD_REQUIRED", nil,
 		)
 		if serr != nil {
 			// unreachable: buildJWT fails only if claims contain non-serializable types (all primitives here)
@@ -700,6 +713,14 @@ func (ro *Router) handleRespondToAuthChallenge(w http.ResponseWriter, body []byt
 	switch req.ChallengeName {
 	case "NEW_PASSWORD_REQUIRED":
 		ro.handleNewPasswordRequired(w, poolID, req.ClientID, req.Session, req.ChallengeResponses)
+	case "PASSWORD_VERIFIER":
+		ro.handlePasswordVerifierChallenge(
+			w,
+			poolID,
+			req.ClientID,
+			req.Session,
+			req.ChallengeResponses,
+		)
 	default:
 		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
 			"Unsupported ChallengeName: "+req.ChallengeName)
@@ -769,7 +790,14 @@ func (ro *Router) handleNewPasswordRequired(
 			// untestable: bcrypt.GenerateFromPassword only fails on invalid cost (fixed) or OOM
 			return fmt.Errorf("hash password: %w", herr)
 		}
+		salt, verifier, serr := srpVerifierFor(poolID, username, newPassword)
+		if serr != nil {
+			// untestable: crypto/rand.Read only fails on OS-level entropy source errors
+			return fmt.Errorf("derive SRP verifier: %w", serr)
+		}
 		u.PasswordHash = string(hash)
+		u.SRPSalt = salt
+		u.SRPVerifier = verifier
 		u.Status = userStatusConfirmed
 		updatedUser = u
 		return nil

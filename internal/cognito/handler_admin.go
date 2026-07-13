@@ -120,7 +120,7 @@ func (ro *Router) handleAdminCreateUser(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	var passwordHash string
+	var passwordHash, srpSalt, srpVerifier string
 	status := userStatusConfirmed
 	if req.TemporaryPassword != "" {
 		hash, herr := bcrypt.GenerateFromPassword([]byte(req.TemporaryPassword), ro.bcryptCost)
@@ -132,6 +132,15 @@ func (ro *Router) handleAdminCreateUser(w http.ResponseWriter, body []byte) {
 		}
 		passwordHash = string(hash)
 		status = userStatusForceChangePasswd
+
+		salt, verifier, serr := srpVerifierFor(req.UserPoolID, req.Username, req.TemporaryPassword)
+		if serr != nil {
+			// untestable: crypto/rand.Read only fails on OS-level entropy source errors
+			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+				"failed to derive SRP verifier")
+			return
+		}
+		srpSalt, srpVerifier = salt, verifier
 	}
 
 	ts := nowUnix()
@@ -141,6 +150,8 @@ func (ro *Router) handleAdminCreateUser(w http.ResponseWriter, body []byte) {
 		Status:       status,
 		Enabled:      true,
 		PasswordHash: passwordHash,
+		SRPSalt:      srpSalt,
+		SRPVerifier:  srpVerifier,
 		Attributes:   req.UserAttributes,
 		CreatedAt:    ts,
 		UpdatedAt:    ts,
@@ -317,6 +328,14 @@ func (ro *Router) handleAdminSetUserPassword(w http.ResponseWriter, body []byte)
 	}
 	newHash := string(hash)
 
+	srpSalt, srpVerifier, err := srpVerifierFor(req.UserPoolID, req.Username, req.Password)
+	if err != nil {
+		// untestable: crypto/rand.Read only fails on OS-level entropy source errors
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to derive SRP verifier")
+		return
+	}
+
 	newStatus := userStatusForceChangePasswd
 	if req.Permanent {
 		newStatus = userStatusConfirmed
@@ -324,6 +343,8 @@ func (ro *Router) handleAdminSetUserPassword(w http.ResponseWriter, body []byte)
 
 	err = ro.storage.UpdateUser(req.UserPoolID, req.Username, func(u *UserMetadata) error {
 		u.PasswordHash = newHash
+		u.SRPSalt = srpSalt
+		u.SRPVerifier = srpVerifier
 		u.Status = newStatus
 		return nil
 	})

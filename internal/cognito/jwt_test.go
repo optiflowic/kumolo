@@ -379,7 +379,7 @@ func TestBuildAndParseSessionToken_RoundTrip(t *testing.T) {
 	poolID := "us-east-1_Pool1"
 	username := "alice"
 
-	token, err := buildSessionToken(key, keyID, poolID, username, "NEW_PASSWORD_REQUIRED")
+	token, err := buildSessionToken(key, keyID, poolID, username, "NEW_PASSWORD_REQUIRED", nil)
 	require.NoError(t, err)
 	require.NotEmpty(t, token)
 
@@ -421,7 +421,7 @@ func TestParseSessionToken_MissingExpClaim(t *testing.T) {
 
 func TestParseSessionToken_InvalidSignature(t *testing.T) {
 	key, keyID := genTestKey(t)
-	token, err := buildSessionToken(key, keyID, "p", "u", "NEW_PASSWORD_REQUIRED")
+	token, err := buildSessionToken(key, keyID, "p", "u", "NEW_PASSWORD_REQUIRED", nil)
 	require.NoError(t, err)
 
 	otherKey := testRSAKey(t)

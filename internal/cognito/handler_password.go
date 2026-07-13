@@ -264,7 +264,13 @@ func (ro *Router) handleConfirmForgotPassword(w http.ResponseWriter, body []byte
 		if herr != nil {
 			return herr
 		}
+		salt, verifier, serr := srpVerifierFor(poolID, req.Username, req.Password)
+		if serr != nil {
+			return serr
+		}
 		u.PasswordHash = hash
+		u.SRPSalt = salt
+		u.SRPVerifier = verifier
 		u.PasswordResetCode = ""
 		return nil
 	})
@@ -361,7 +367,13 @@ func (ro *Router) handleChangePassword(w http.ResponseWriter, body []byte) {
 		if herr != nil {
 			return herr
 		}
+		salt, verifier, serr := srpVerifierFor(poolID, u.Username, req.ProposedPassword)
+		if serr != nil {
+			return serr
+		}
 		u.PasswordHash = hash
+		u.SRPSalt = salt
+		u.SRPVerifier = verifier
 		return nil
 	})
 	if updateErr != nil {
