@@ -65,7 +65,7 @@ func TestForgotPassword_Success_PhoneVerifiedOnly(t *testing.T) {
 	assert.Equal(t, deliverySMS, resp.CodeDeliveryDetails.DeliveryMedium)
 }
 
-func TestForgotPassword_PrefersEmailOverPhone(t *testing.T) {
+func TestForgotPassword_DefaultPrefersPhoneOverEmail(t *testing.T) {
 	ro := newTestRouter(t)
 	poolID, clientID := setupPool(t, ro)
 	signUpUser(t, ro, clientID, "alice", "Password123!")
@@ -79,7 +79,89 @@ func TestForgotPassword_PrefersEmailOverPhone(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	var resp forgotPasswordResponse
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
-	assert.Equal(t, attrEmail, resp.CodeDeliveryDetails.AttributeName)
+	assert.Equal(t, attrPhoneNumber, resp.CodeDeliveryDetails.AttributeName)
+}
+
+// TestForgotPassword_RecoveryMechanismSelection covers pool-configured
+// AccountRecoverySetting priority ordering: honoring a custom order, falling back to
+// the next mechanism when the preferred one is unverified, and rejecting recovery
+// entirely when only admin_only is configured.
+func TestForgotPassword_RecoveryMechanismSelection(t *testing.T) {
+	customOrder := json.RawMessage(
+		`{"RecoveryMechanisms":[{"Name":"verified_email","Priority":1},` +
+			`{"Name":"verified_phone_number","Priority":2}]}`,
+	)
+	tests := []struct {
+		name                   string
+		accountRecoverySetting json.RawMessage
+		verifyAttrs            func(t *testing.T, ro *Router, poolID string)
+		wantStatus             int
+		wantAttributeName      string
+	}{
+		{
+			name:                   "honors custom priority order",
+			accountRecoverySetting: customOrder,
+			verifyAttrs: func(t *testing.T, ro *Router, poolID string) {
+				verifyAttr(t, ro, poolID, "alice", attrPhoneNumber, "+15551234567")
+				verifyAttr(t, ro, poolID, "alice", attrEmail, "alice@example.com")
+			},
+			wantStatus:        http.StatusOK,
+			wantAttributeName: attrEmail,
+		},
+		{
+			name:                   "falls back to secondary mechanism",
+			accountRecoverySetting: customOrder,
+			verifyAttrs: func(t *testing.T, ro *Router, poolID string) {
+				verifyAttr(t, ro, poolID, "alice", attrPhoneNumber, "+15551234567")
+			},
+			wantStatus:        http.StatusOK,
+			wantAttributeName: attrPhoneNumber,
+		},
+		{
+			name: "admin_only rejects self-service recovery",
+			accountRecoverySetting: json.RawMessage(
+				`{"RecoveryMechanisms":[{"Name":"admin_only","Priority":1}]}`,
+			),
+			verifyAttrs: func(t *testing.T, ro *Router, poolID string) {
+				verifyAttr(t, ro, poolID, "alice", attrEmail, "alice@example.com")
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ro := newTestRouter(t)
+			poolID, clientID := setupPool(t, ro)
+			require.NoError(t, ro.storage.UpdateUserPool(poolID, func(m *UserPoolMetadata) error {
+				m.AccountRecoverySetting = tc.accountRecoverySetting
+				return nil
+			}))
+			signUpUser(t, ro, clientID, "alice", "Password123!")
+			confirmUser(t, ro, clientID, "alice")
+			tc.verifyAttrs(t, ro, poolID)
+
+			body, _ := json.Marshal(map[string]string{"ClientId": clientID, "Username": "alice"})
+			w := doOp(t, ro, "ForgotPassword", string(body))
+
+			require.Equal(t, tc.wantStatus, w.Code)
+			if tc.wantStatus == http.StatusOK {
+				var resp forgotPasswordResponse
+				require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+				assert.Equal(t, tc.wantAttributeName, resp.CodeDeliveryDetails.AttributeName)
+			} else {
+				assertErrType(t, w, ErrTypeInvalidParameterException)
+			}
+		})
+	}
+}
+
+// TestSortedRecoveryMechanisms_MalformedJSONFallsBackToDefault is a regression test:
+// an unparseable AccountRecoverySetting must not error, it must fall back to the same
+// default order used when the setting is absent.
+func TestSortedRecoveryMechanisms_MalformedJSONFallsBackToDefault(t *testing.T) {
+	got := sortedRecoveryMechanisms(json.RawMessage(`{not valid json`))
+	assert.Equal(t, defaultRecoveryMechanisms(), got)
 }
 
 func TestForgotPassword_NoVerifiedContact(t *testing.T) {
@@ -138,6 +220,17 @@ func TestForgotPassword_UserNotFound(t *testing.T) {
 func TestForgotPassword_ClientLookupStorageError(t *testing.T) {
 	ro := &Router{storage: &mockStore{
 		getPoolForClient: func(string) (string, error) { return "", errors.New("storage error") },
+	}}
+	body, _ := json.Marshal(map[string]string{"ClientId": "c", "Username": "alice"})
+	w := doOp(t, ro, "ForgotPassword", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestForgotPassword_GetUserPoolStorageError(t *testing.T) {
+	ro := &Router{storage: &mockStore{
+		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
+		getErr:           errors.New("storage error"),
 	}}
 	body, _ := json.Marshal(map[string]string{"ClientId": "c", "Username": "alice"})
 	w := doOp(t, ro, "ForgotPassword", string(body))

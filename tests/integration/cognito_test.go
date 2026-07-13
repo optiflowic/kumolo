@@ -131,6 +131,49 @@ func TestCognitoIntegration_UserPool(t *testing.T) {
 		assert.NotEmpty(t, aws.ToString(out.UserPool.Arn))
 	})
 
+	t.Run("CreateUserPool_DefaultAccountRecoverySetting", func(t *testing.T) {
+		out, err := c.CreateUserPool(ctx, &awscognito.CreateUserPoolInput{
+			PoolName: aws.String("default-recovery-pool"),
+		})
+		require.NoError(t, err)
+		require.NotNil(t, out.UserPool.AccountRecoverySetting)
+		mechanisms := out.UserPool.AccountRecoverySetting.RecoveryMechanisms
+		require.Len(t, mechanisms, 2)
+		assert.Equal(t, types.RecoveryOptionNameTypeVerifiedPhoneNumber, mechanisms[0].Name)
+		assert.Equal(t, int32(1), aws.ToInt32(mechanisms[0].Priority))
+		assert.Equal(t, types.RecoveryOptionNameTypeVerifiedEmail, mechanisms[1].Name)
+		assert.Equal(t, int32(2), aws.ToInt32(mechanisms[1].Priority))
+	})
+
+	t.Run("UpdateUserPool_AccountRecoverySetting", func(t *testing.T) {
+		created, err := c.CreateUserPool(ctx, &awscognito.CreateUserPoolInput{
+			PoolName: aws.String("custom-recovery-pool"),
+		})
+		require.NoError(t, err)
+		poolID := aws.ToString(created.UserPool.Id)
+
+		_, err = c.UpdateUserPool(ctx, &awscognito.UpdateUserPoolInput{
+			UserPoolId: aws.String(poolID),
+			AccountRecoverySetting: &types.AccountRecoverySettingType{
+				RecoveryMechanisms: []types.RecoveryOptionType{
+					{Name: types.RecoveryOptionNameTypeAdminOnly, Priority: aws.Int32(1)},
+				},
+			},
+		})
+		require.NoError(t, err)
+
+		out, err := c.DescribeUserPool(ctx, &awscognito.DescribeUserPoolInput{
+			UserPoolId: aws.String(poolID),
+		})
+		require.NoError(t, err)
+		require.Len(t, out.UserPool.AccountRecoverySetting.RecoveryMechanisms, 1)
+		assert.Equal(
+			t,
+			types.RecoveryOptionNameTypeAdminOnly,
+			out.UserPool.AccountRecoverySetting.RecoveryMechanisms[0].Name,
+		)
+	})
+
 	t.Run("DescribeUserPool", func(t *testing.T) {
 		created, err := c.CreateUserPool(ctx, &awscognito.CreateUserPoolInput{
 			PoolName: aws.String("describe-pool"),
@@ -2541,6 +2584,96 @@ func TestCognitoIntegration_PasswordManagement(t *testing.T) {
 
 		// The user was created via SignUp with no attributes, so it has no
 		// verified email or phone_number for the reset code to be sent to.
+		_, err = c.ForgotPassword(ctx, &awscognito.ForgotPasswordInput{
+			ClientId: aws.String(clientID),
+			Username: aws.String(username),
+		})
+		require.Error(t, err)
+		assert.Equal(t, "InvalidParameterException", apiErrorCode(err))
+	})
+
+	t.Run("ForgotPassword_HonorsAccountRecoveryPriority", func(t *testing.T) {
+		const (
+			username = "forgotpw-priority-user"
+			password = "Password1!"
+		)
+		poolID, _ := createConfirmedUser(
+			t, ctx, c, cap, "forgotpw-priority-pool", "forgotpw-priority-client",
+			username, password,
+		)
+		clientOut, err := c.ListUserPoolClients(ctx, &awscognito.ListUserPoolClientsInput{
+			UserPoolId: aws.String(poolID),
+		})
+		require.NoError(t, err)
+		clientID := aws.ToString(clientOut.UserPoolClients[0].ClientId)
+
+		// Prefer email over phone, overriding the pool's default (phone first).
+		_, err = c.UpdateUserPool(ctx, &awscognito.UpdateUserPoolInput{
+			UserPoolId: aws.String(poolID),
+			AccountRecoverySetting: &types.AccountRecoverySettingType{
+				RecoveryMechanisms: []types.RecoveryOptionType{
+					{Name: types.RecoveryOptionNameTypeVerifiedEmail, Priority: aws.Int32(1)},
+					{Name: types.RecoveryOptionNameTypeVerifiedPhoneNumber, Priority: aws.Int32(2)},
+				},
+			},
+		})
+		require.NoError(t, err)
+
+		_, err = c.AdminUpdateUserAttributes(ctx, &awscognito.AdminUpdateUserAttributesInput{
+			UserPoolId: aws.String(poolID),
+			Username:   aws.String(username),
+			UserAttributes: []types.AttributeType{
+				{Name: aws.String("email"), Value: aws.String("forgotpw-priority@example.com")},
+				{Name: aws.String("email_verified"), Value: aws.String("true")},
+				{Name: aws.String("phone_number"), Value: aws.String("+15005550100")},
+				{Name: aws.String("phone_number_verified"), Value: aws.String("true")},
+			},
+		})
+		require.NoError(t, err)
+
+		fpOut, err := c.ForgotPassword(ctx, &awscognito.ForgotPasswordInput{
+			ClientId: aws.String(clientID),
+			Username: aws.String(username),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, "email", aws.ToString(fpOut.CodeDeliveryDetails.AttributeName))
+	})
+
+	t.Run("ForgotPassword_AdminOnlyRecovery_InvalidParameterException", func(t *testing.T) {
+		const (
+			username = "forgotpw-adminonly-user"
+			password = "Password1!"
+		)
+		poolID, _ := createConfirmedUser(
+			t, ctx, c, cap, "forgotpw-adminonly-pool", "forgotpw-adminonly-client",
+			username, password,
+		)
+		clientOut, err := c.ListUserPoolClients(ctx, &awscognito.ListUserPoolClientsInput{
+			UserPoolId: aws.String(poolID),
+		})
+		require.NoError(t, err)
+		clientID := aws.ToString(clientOut.UserPoolClients[0].ClientId)
+
+		_, err = c.UpdateUserPool(ctx, &awscognito.UpdateUserPoolInput{
+			UserPoolId: aws.String(poolID),
+			AccountRecoverySetting: &types.AccountRecoverySettingType{
+				RecoveryMechanisms: []types.RecoveryOptionType{
+					{Name: types.RecoveryOptionNameTypeAdminOnly, Priority: aws.Int32(1)},
+				},
+			},
+		})
+		require.NoError(t, err)
+
+		_, err = c.AdminUpdateUserAttributes(ctx, &awscognito.AdminUpdateUserAttributesInput{
+			UserPoolId: aws.String(poolID),
+			Username:   aws.String(username),
+			UserAttributes: []types.AttributeType{
+				{Name: aws.String("email"), Value: aws.String("forgotpw-adminonly@example.com")},
+				{Name: aws.String("email_verified"), Value: aws.String("true")},
+			},
+		})
+		require.NoError(t, err)
+
 		_, err = c.ForgotPassword(ctx, &awscognito.ForgotPasswordInput{
 			ClientId: aws.String(clientID),
 			Username: aws.String(username),

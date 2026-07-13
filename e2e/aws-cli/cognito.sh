@@ -66,6 +66,17 @@ fi
 run "DescribeUserPool" \
   $AWS describe-user-pool --user-pool-id "$POOL_ID"
 
+DESCRIBE_JSON=$($AWS describe-user-pool --user-pool-id "$POOL_ID" 2>&1)
+if echo "$DESCRIBE_JSON" | jq -e '
+    .UserPool.AccountRecoverySetting.RecoveryMechanisms == [
+      {"Name":"verified_phone_number","Priority":1},
+      {"Name":"verified_email","Priority":2}
+    ]' >/dev/null 2>&1; then
+  ok "DescribeUserPool — AccountRecoverySetting defaults to phone-then-email"
+else
+  fail "DescribeUserPool — expected default AccountRecoverySetting (phone-then-email)"
+fi
+
 run "UpdateUserPool" \
   $AWS update-user-pool --user-pool-id "$POOL_ID" --mfa-configuration "OFF"
 
@@ -1502,6 +1513,22 @@ if [[ -n "$PW_CODE" ]]; then
 else
   skip "Password management tests — no confirmation code available"
   echo "  Hint: set E2E_COGNITO_PW_CODE=<code> from kumolo logs, or use Docker Compose"
+fi
+
+# admin_only AccountRecoverySetting: self-service ForgotPassword must be refused
+# even for a user with a verified contact attribute.
+run "UpdateUserPool (admin_only recovery)" \
+  $AWS update-user-pool \
+    --user-pool-id "$POOL_ID" \
+    --account-recovery-setting '{"RecoveryMechanisms":[{"Name":"admin_only","Priority":1}]}'
+
+ADMINONLY_JSON=$($AWS forgot-password \
+  --client-id "$CLIENT_ID" \
+  --username "$PW_USER" 2>&1) || true
+if echo "$ADMINONLY_JSON" | grep -qi 'InvalidParameterException'; then
+  ok "ForgotPassword — InvalidParameterException when pool is admin_only"
+else
+  fail "ForgotPassword — expected InvalidParameterException when pool is admin_only"
 fi
 
 # ---------------------------------------------------------------------------

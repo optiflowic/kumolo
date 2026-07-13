@@ -25,6 +25,9 @@ kumolo generates: `us-east-1_` + 9 random alphanumeric chars (A-Z, a-z, 0-9).
 - `SchemaAttributes` always includes standard OIDC attributes merged with any caller-provided `Schema`
 - `MfaConfiguration` defaults to `"OFF"` if not provided
 - `UserPoolTier` defaults to `"ESSENTIALS"` if not provided
+- `AccountRecoverySetting` defaults to `{"RecoveryMechanisms":[{"Name":"verified_phone_number","Priority":1},{"Name":"verified_email","Priority":2}]}`
+  if not provided (matches AWS: phone first, falling back to email) — see
+  `docs/aws-spec/cognito/forgot_password.md` for how `ForgotPassword` consumes this setting.
 - Errors: InvalidParameterException (400), InternalErrorException (500)
 
 ## DescribeUserPool
@@ -85,6 +88,19 @@ kumolo generates: `us-east-1_` + 9 random alphanumeric chars (A-Z, a-z, 0-9).
 | phone_number_verified | Boolean | false | true | — |
 | address | String | false | true | min=0, max=2048 |
 | updated_at | Number | false | true | min=0 |
+
+## AccountRecoverySetting
+
+`{"RecoveryMechanisms":[{"Name":"...","Priority":N}, ...]}` — accepted/stored/returned as opaque
+JSON on `CreateUserPool`/`UpdateUserPool`/`DescribeUserPool`, and consumed by `ForgotPassword`
+(see `docs/aws-spec/cognito/forgot_password.md`).
+
+- `Name`: `verified_email` | `verified_phone_number` | `admin_only` (1-2 array entries)
+- `Priority`: `1` (highest) or `2`
+- `admin_only` is mutually exclusive with the other mechanisms per AWS docs; kumolo does not
+  validate this — it is passed through as-is.
+- kumolo does not validate `Name`/`Priority` values or uniqueness on write, matching the
+  pass-through treatment of other JSON blob fields (`Policies`, `LambdaConfig`, etc.).
 
 ## kumolo Deviations
 

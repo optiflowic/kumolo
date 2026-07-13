@@ -3,7 +3,7 @@
 - **URL**: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_ForgotPassword.html
 - **Target**: `AWSCognitoIdentityProviderService.ForgotPassword`
 - **SDK**: `cognitoidentityprovider.ForgotPasswordInput` / `ForgotPasswordOutput`
-- **Last verified**: 2026-07-11
+- **Last verified**: 2026-07-12
 
 ## Request
 
@@ -23,10 +23,16 @@
   behavior, kumolo always reveals `UserNotFoundException` for a missing user — consistent
   with `InitiateAuth`'s `USER_PASSWORD_AUTH` flow (see `docs/aws-spec/cognito/initiate_auth.md`),
   which has the same deviation.
-- Requires a verified delivery attribute: the user must have `email_verified: "true"` or
-  `phone_number_verified: "true"`. If neither is set, returns `InvalidParameterException`
-  (matches AWS's documented "If neither a verified phone number nor a verified email exists"
-  behavior). Email takes precedence over phone when both are verified.
+- Resolves the user pool's `AccountRecoverySetting.RecoveryMechanisms` (defaults to
+  `verified_phone_number` priority 1, `verified_email` priority 2 when the pool has none —
+  see `docs/aws-spec/cognito/user_pool.md`), sorts by `Priority` ascending, and picks the
+  first mechanism the user satisfies:
+  - `verified_phone_number` / `verified_email`: selected if the user has the matching
+    `_verified: "true"` attribute.
+  - `admin_only`: no self-service recovery; treated as no eligible mechanism.
+- If no mechanism is satisfied (including a pool configured solely with `admin_only`, or a
+  pool whose configured attribute isn't verified for the user), returns `InvalidParameterException`
+  (matches AWS's documented "users who don't have a valid recovery method" behavior).
 - Generates a random 6-digit code (same generator as `SignUp`/`ConfirmSignUp`), stores it on
   the user record, and logs `pool_id`/`username` at Info level plus `code` at Debug level
   (same split as `ResendConfirmationCode`) — kumolo has no real email/SMS delivery, so the
@@ -46,7 +52,7 @@ HTTP 200:
 
 | Error type                | HTTP | Trigger |
 |----------------------------|------|---------|
-| InvalidParameterException  | 400  | missing `ClientId`/`Username`; no verified email or phone attribute |
+| InvalidParameterException  | 400  | missing `ClientId`/`Username`; no eligible recovery mechanism |
 | ResourceNotFoundException  | 400  | `ClientId` not found in any pool |
 | UserNotFoundException      | 400  | `Username` not found in the resolved pool |
 | InternalErrorException     | 500  | storage failure |
@@ -61,5 +67,5 @@ HTTP 200:
   (SecretHash mismatch), `OperationNotEnabledException`, `TooManyRequestsException`,
   `UnexpectedLambdaException`, `UserLambdaValidationException` (documented AWS errors) are not
   implemented.
-- No `AccountRecoverySetting`-based delivery-method selection — kumolo always prefers a verified
-  email over a verified phone number, regardless of pool recovery configuration.
+- kumolo does not check whether the user's preferred MFA method conflicts with the selected
+  recovery destination (AWS forbids sending a recovery code to the same channel used for MFA).

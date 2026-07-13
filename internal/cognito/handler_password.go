@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"sort"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -32,25 +33,70 @@ type forgotPasswordResponse struct {
 	CodeDeliveryDetails codeDeliveryDetails `json:"CodeDeliveryDetails"`
 }
 
-// forgotPasswordDeliveryDetails returns delivery details for the user's verified
-// contact attribute, requiring email_verified or phone_number_verified to be "true".
-// Email takes precedence over phone when both are verified.
-func forgotPasswordDeliveryDetails(attrs []AttributeType) (codeDeliveryDetails, bool) {
-	if v, _ := getAttr(attrs, attrEmail+"_verified"); v == "true" {
-		email, _ := getAttr(attrs, attrEmail)
-		return codeDeliveryDetails{
-			AttributeName:  attrEmail,
-			DeliveryMedium: deliveryEmail,
-			Destination:    maskEmail(email),
-		}, true
+// recoveryMechanism mirrors AWS's RecoveryOptionType (Name/Priority) within an
+// AccountRecoverySetting.RecoveryMechanisms array.
+type recoveryMechanism struct {
+	Name     string `json:"Name"`
+	Priority int    `json:"Priority"`
+}
+
+// defaultRecoveryMechanisms matches AWS's documented default when a pool has no
+// AccountRecoverySetting: phone first, falling back to email.
+func defaultRecoveryMechanisms() []recoveryMechanism {
+	return []recoveryMechanism{
+		{Name: "verified_phone_number", Priority: 1},
+		{Name: "verified_email", Priority: 2},
 	}
-	if v, _ := getAttr(attrs, attrPhoneNumber+"_verified"); v == "true" {
-		phone, _ := getAttr(attrs, attrPhoneNumber)
-		return codeDeliveryDetails{
-			AttributeName:  attrPhoneNumber,
-			DeliveryMedium: deliverySMS,
-			Destination:    maskPhone(phone),
-		}, true
+}
+
+// sortedRecoveryMechanisms decodes a pool's AccountRecoverySetting into its
+// RecoveryMechanisms, sorted by ascending Priority, falling back to
+// defaultRecoveryMechanisms when unset or unparseable.
+func sortedRecoveryMechanisms(raw json.RawMessage) []recoveryMechanism {
+	mechanisms := defaultRecoveryMechanisms()
+	if len(raw) > 0 {
+		var setting struct {
+			RecoveryMechanisms []recoveryMechanism `json:"RecoveryMechanisms"`
+		}
+		if err := json.Unmarshal(raw, &setting); err == nil && len(setting.RecoveryMechanisms) > 0 {
+			mechanisms = setting.RecoveryMechanisms
+		}
+	}
+	sorted := make([]recoveryMechanism, len(mechanisms))
+	copy(sorted, mechanisms)
+	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Priority < sorted[j].Priority })
+	return sorted
+}
+
+// forgotPasswordDeliveryDetails returns delivery details for the user's verified
+// contact attribute matching the first satisfied mechanism in the pool's
+// AccountRecoverySetting priority order. admin_only mechanisms are skipped, since
+// they disable self-service recovery.
+func forgotPasswordDeliveryDetails(
+	attrs []AttributeType,
+	accountRecoverySetting json.RawMessage,
+) (codeDeliveryDetails, bool) {
+	for _, m := range sortedRecoveryMechanisms(accountRecoverySetting) {
+		switch m.Name {
+		case "verified_email":
+			if v, _ := getAttr(attrs, attrEmail+"_verified"); v == "true" {
+				email, _ := getAttr(attrs, attrEmail)
+				return codeDeliveryDetails{
+					AttributeName:  attrEmail,
+					DeliveryMedium: deliveryEmail,
+					Destination:    maskEmail(email),
+				}, true
+			}
+		case "verified_phone_number":
+			if v, _ := getAttr(attrs, attrPhoneNumber+"_verified"); v == "true" {
+				phone, _ := getAttr(attrs, attrPhoneNumber)
+				return codeDeliveryDetails{
+					AttributeName:  attrPhoneNumber,
+					DeliveryMedium: deliverySMS,
+					Destination:    maskPhone(phone),
+				}, true
+			}
+		}
 	}
 	return codeDeliveryDetails{}, false
 }
@@ -85,6 +131,13 @@ func (ro *Router) handleForgotPassword(w http.ResponseWriter, body []byte) {
 		return
 	}
 
+	pool, err := ro.storage.GetUserPool(poolID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to get user pool")
+		return
+	}
+
 	user, err := ro.storage.GetUser(poolID, req.Username)
 	if err != nil {
 		if errors.Is(err, errUserNotFound) {
@@ -97,7 +150,7 @@ func (ro *Router) handleForgotPassword(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	delivery, ok := forgotPasswordDeliveryDetails(user.Attributes)
+	delivery, ok := forgotPasswordDeliveryDetails(user.Attributes, pool.AccountRecoverySetting)
 	if !ok {
 		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
 			"Cannot reset password for the user as there is no registered/verified email "+

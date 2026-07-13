@@ -108,3 +108,7 @@ output "cognito_client_token_validity_units" {
 output "cognito_user_pool_tags" {
   value = aws_cognito_user_pool.main.tags_all
 }
+
+output "cognito_user_pool_account_recovery_setting" {
+  value = aws_cognito_user_pool.main.account_recovery_setting
+}
