@@ -37,31 +37,39 @@ const srpNHex = "FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD1" +
 	"BBE117577A615D6C770988C0BAD946E208E24FA074E5AB31" +
 	"43DB5BFCE0FD108E4B82D120A93AD2CAFFFFFFFFFFFFFFFF"
 
-var (
-	srpN *big.Int
-	srpG = big.NewInt(2)
-	srpK *big.Int
-)
-
-func init() {
-	var ok bool
-	srpN, ok = new(big.Int).SetString(srpNHex, 16)
+func mustParseSRPN() *big.Int {
+	n, ok := new(big.Int).SetString(srpNHex, 16)
 	if !ok {
 		// unreachable: srpNHex is a fixed, valid hex literal
 		panic("cognitotest: invalid SRP N constant")
 	}
-	srpK = new(big.Int).SetBytes(sha256Concat(padHex(srpN), padHex(srpG)))
+	return n
 }
+
+var (
+	srpN = mustParseSRPN()
+	srpG = big.NewInt(2)
+	srpK = new(big.Int).SetBytes(sha256Concat(padHex(srpN), padHex(srpG)))
+)
 
 // padHex mirrors internal/cognito/srp.go's padHex: the two's-complement-safe
 // byte encoding of a non-negative big.Int (hex-encode, pad to even length,
-// prepend a zero byte if the top bit would otherwise be set).
+// prepend a zero byte if the top bit would otherwise be set). Callers must
+// reject negative input themselves; padHex panics rather than silently
+// producing wrong output if that precondition is violated.
 func padHex(n *big.Int) []byte {
+	if n.Sign() < 0 {
+		panic("cognitotest: padHex requires a non-negative big.Int")
+	}
 	h := n.Text(16)
 	if len(h)%2 != 0 {
 		h = "0" + h
 	}
-	b, _ := hex.DecodeString(h)
+	b, err := hex.DecodeString(h)
+	if err != nil {
+		// unreachable: h is always a valid hex string built from n.Text(16)
+		panic("cognitotest: padHex produced invalid hex: " + err.Error())
+	}
 	if len(b) > 0 && b[0] >= 0x80 {
 		b = append([]byte{0x00}, b...)
 	}
@@ -83,9 +91,17 @@ type SRPClient struct {
 	A *big.Int
 }
 
+// ephemeralPrivateKeyBytes is the byte length of the entropy used to derive
+// the client's ephemeral private value a.
+const ephemeralPrivateKeyBytes = 128
+
+// derivedKeyLength is the byte length of the SRP session key K after HKDF
+// derivation, matching internal/cognito's deriveSRPKey.
+const derivedKeyLength = 16
+
 // NewSRPClient generates a fresh ephemeral client keypair.
 func NewSRPClient() (*SRPClient, error) {
-	aBytes := make([]byte, 128)
+	aBytes := make([]byte, ephemeralPrivateKeyBytes)
 	if _, err := rand.Read(aBytes); err != nil {
 		// untestable: crypto/rand.Read only fails on OS-level entropy source errors
 		return nil, fmt.Errorf("read entropy: %w", err)
@@ -129,6 +145,9 @@ func (c *SRPClient) ComputeSignature(
 	gx := new(big.Int).Exp(srpG, x, srpN)
 	base := new(big.Int).Sub(serverB, new(big.Int).Mul(srpK, gx))
 	base.Mod(base, srpN)
+	if base.Sign() == 0 {
+		return "", fmt.Errorf("invalid server B value")
+	}
 
 	exponent := new(big.Int).Add(c.a, new(big.Int).Mul(u, x))
 	S := new(big.Int).Exp(base, exponent, srpN)
@@ -159,7 +178,7 @@ func deriveSRPKey(u, s *big.Int) []byte {
 	info := append([]byte("Caldera Derived Key"), 0x01)
 	okmMAC := hmac.New(sha256.New, prk)
 	okmMAC.Write(info)
-	return okmMAC.Sum(nil)[:16]
+	return okmMAC.Sum(nil)[:derivedKeyLength]
 }
 
 // NowString returns the current UTC time formatted as Cognito's TIMESTAMP

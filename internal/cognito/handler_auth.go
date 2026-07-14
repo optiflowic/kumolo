@@ -144,23 +144,19 @@ func (ro *Router) handleSignUp(w http.ResponseWriter, body []byte) {
 
 	var passwordHash, srpSalt, srpVerifier string
 	if req.Password != "" {
-		hash, herr := bcrypt.GenerateFromPassword([]byte(req.Password), ro.bcryptCost)
-		if herr != nil {
-			// untestable: bcrypt.GenerateFromPassword only fails on invalid cost (fixed) or OOM
+		hash, salt, verifier, cerr := derivePasswordCredentials(
+			poolID,
+			req.Username,
+			req.Password,
+			ro.bcryptCost,
+		)
+		if cerr != nil {
+			// untestable: bcrypt.GenerateFromPassword / crypto/rand.Read only fail on OS-level errors
 			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
-				"failed to hash password")
+				"failed to derive password credentials")
 			return
 		}
-		passwordHash = string(hash)
-
-		salt, verifier, serr := srpVerifierFor(poolID, req.Username, req.Password)
-		if serr != nil {
-			// untestable: crypto/rand.Read only fails on OS-level entropy source errors
-			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
-				"failed to derive SRP verifier")
-			return
-		}
-		srpSalt, srpVerifier = salt, verifier
+		passwordHash, srpSalt, srpVerifier = hash, salt, verifier
 	}
 
 	ts := nowUnix()
@@ -785,17 +781,17 @@ func (ro *Router) handleNewPasswordRequired(
 		if u.Status != userStatusForceChangePasswd {
 			return errWrongChallengeStatus
 		}
-		hash, herr := bcrypt.GenerateFromPassword([]byte(newPassword), ro.bcryptCost)
-		if herr != nil {
-			// untestable: bcrypt.GenerateFromPassword only fails on invalid cost (fixed) or OOM
-			return fmt.Errorf("hash password: %w", herr)
+		hash, salt, verifier, cerr := derivePasswordCredentials(
+			poolID,
+			username,
+			newPassword,
+			ro.bcryptCost,
+		)
+		if cerr != nil {
+			// untestable: bcrypt.GenerateFromPassword / crypto/rand.Read only fail on OS-level errors
+			return cerr
 		}
-		salt, verifier, serr := srpVerifierFor(poolID, username, newPassword)
-		if serr != nil {
-			// untestable: crypto/rand.Read only fails on OS-level entropy source errors
-			return fmt.Errorf("derive SRP verifier: %w", serr)
-		}
-		u.PasswordHash = string(hash)
+		u.PasswordHash = hash
 		u.SRPSalt = salt
 		u.SRPVerifier = verifier
 		u.Status = userStatusConfirmed

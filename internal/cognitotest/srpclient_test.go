@@ -31,6 +31,12 @@ func TestPadHex(t *testing.T) {
 	}
 }
 
+func TestPadHex_NegativePanics(t *testing.T) {
+	assert.Panics(t, func() {
+		padHex(big.NewInt(-1))
+	})
+}
+
 func TestSha256Concat(t *testing.T) {
 	a := sha256Concat([]byte("foo"), []byte("bar"))
 	b := sha256Concat([]byte("foobar"))
@@ -155,6 +161,38 @@ func TestComputeSignature_InvalidSRPBHex(t *testing.T) {
 
 	_, err = client.ComputeSignature("pool", "alice", "pw", "abcd", "not-hex!!", "AAAA", "ts")
 	assert.Error(t, err)
+}
+
+func TestComputeSignature_MaliciousServerB_SmallSubgroupAttack(t *testing.T) {
+	const (
+		userPoolName = "TestPool123"
+		username     = "alice"
+		password     = "Password123!"
+	)
+	client, err := NewSRPClient()
+	require.NoError(t, err)
+
+	saltBytes := make([]byte, 16)
+	_, err = rand.Read(saltBytes)
+	require.NoError(t, err)
+	saltPadded := padHex(new(big.Int).SetBytes(saltBytes))
+
+	innerHash := sha256Concat([]byte(userPoolName + username + ":" + password))
+	x := new(big.Int).SetBytes(sha256Concat(saltPadded, innerHash))
+	gx := new(big.Int).Exp(srpG, x, srpN)
+
+	// A malicious/compromised server sending B ≡ k*g^x (mod N) would drive
+	// the client's shared secret to zero absent the base != 0 check.
+	maliciousB := new(big.Int).Mod(new(big.Int).Mul(srpK, gx), srpN)
+
+	_, err = client.ComputeSignature(
+		userPoolName, username, password,
+		hex.EncodeToString(saltPadded),
+		hex.EncodeToString(padHex(maliciousB)),
+		base64.StdEncoding.EncodeToString([]byte("secretblock1234")),
+		NowString(),
+	)
+	assert.ErrorContains(t, err, "invalid server B value")
 }
 
 func TestComputeSignature_InvalidSecretBlockBase64(t *testing.T) {

@@ -61,7 +61,7 @@ Same as InitiateAuth success: `AuthenticationResult` with AccessToken, IdToken, 
 | InvalidParameterException | 400 | Missing required field or unsupported challenge |
 | ResourceNotFoundException | 400 | ClientId not found |
 | UserNotFoundException | 400 | Username in ChallengeResponses not found |
-| NotAuthorizedException | 400 | Session is invalid or expired |
+| NotAuthorizedException | 400 | Session is invalid or expired, or (PASSWORD_VERIFIER) SRP signature verification failed |
 | InvalidPasswordException | 400 | NEW_PASSWORD doesn't meet requirements |
 | InternalErrorException | 500 | Storage or token generation failure |
 

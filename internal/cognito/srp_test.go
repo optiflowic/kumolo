@@ -93,6 +93,28 @@ func srpLogin(
 	})
 }
 
+// initSRPChallenge drives USER_SRP_AUTH's InitiateAuth step for username
+// against ro, using a fresh cognitotest.SRPClient, and returns the client
+// plus the decoded PASSWORD_VERIFIER challenge — for tests that need to
+// customize the RespondToAuthChallenge step themselves.
+func initSRPChallenge(
+	t *testing.T, ro *Router, clientID, username string,
+) (*cognitotest.SRPClient, srpInitiateAuthResponse) {
+	t.Helper()
+	client, err := cognitotest.NewSRPClient()
+	require.NoError(t, err)
+
+	w := doInitSRPAuth(t, ro, clientID, map[string]string{
+		"USERNAME": username,
+		"SRP_A":    client.AHex(),
+	})
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp srpInitiateAuthResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	return client, resp
+}
+
 // ── padHex / srpVerifierFor unit tests ───────────────────────────────────────
 
 func TestPadHex(t *testing.T) {
@@ -187,6 +209,17 @@ func TestUserSRPAuth_InvalidSRPA_NotHex(t *testing.T) {
 
 	w := doInitSRPAuth(t, ro, clientID, map[string]string{
 		"USERNAME": "alice", "SRP_A": "not-hex!!",
+	})
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeInvalidParameterException)
+}
+
+func TestUserSRPAuth_InvalidSRPA_Negative(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+
+	w := doInitSRPAuth(t, ro, clientID, map[string]string{
+		"USERNAME": "alice", "SRP_A": "-1",
 	})
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assertErrType(t, w, ErrTypeInvalidParameterException)
@@ -332,14 +365,7 @@ func TestPasswordVerifierChallenge_TamperedSecretBlock(t *testing.T) {
 	signUpUser(t, ro, clientID, "heidi", "Password123!")
 	confirmUser(t, ro, clientID, "heidi")
 
-	client, err := cognitotest.NewSRPClient()
-	require.NoError(t, err)
-	w := doInitSRPAuth(t, ro, clientID, map[string]string{
-		"USERNAME": "heidi", "SRP_A": client.AHex(),
-	})
-	require.Equal(t, http.StatusOK, w.Code)
-	var resp srpInitiateAuthResponse
-	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	client, resp := initSRPChallenge(t, ro, clientID, "heidi")
 
 	poolName := strings.SplitN(poolID, "_", 2)[1]
 	timestamp := cognitotest.NowString()
@@ -369,14 +395,7 @@ func TestPasswordVerifierChallenge_InvalidSecretBlockBase64(t *testing.T) {
 	signUpUser(t, ro, clientID, "ivan", "Password123!")
 	confirmUser(t, ro, clientID, "ivan")
 
-	client, err := cognitotest.NewSRPClient()
-	require.NoError(t, err)
-	w := doInitSRPAuth(t, ro, clientID, map[string]string{
-		"USERNAME": "ivan", "SRP_A": client.AHex(),
-	})
-	require.Equal(t, http.StatusOK, w.Code)
-	var resp srpInitiateAuthResponse
-	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	_, resp := initSRPChallenge(t, ro, clientID, "ivan")
 	_ = poolID
 
 	// Not a credential — an opaque nonce that happens to be invalid base64 here.
@@ -455,14 +474,7 @@ func TestPasswordVerifierChallenge_UsernameMismatch(t *testing.T) {
 	signUpUser(t, ro, clientID, "leo", "Password123!")
 	confirmUser(t, ro, clientID, "leo")
 
-	client, err := cognitotest.NewSRPClient()
-	require.NoError(t, err)
-	w := doInitSRPAuth(t, ro, clientID, map[string]string{
-		"USERNAME": "leo", "SRP_A": client.AHex(),
-	})
-	require.Equal(t, http.StatusOK, w.Code)
-	var resp srpInitiateAuthResponse
-	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	_, resp := initSRPChallenge(t, ro, clientID, "leo")
 
 	w2 := doPasswordVerifier(t, ro, clientID, resp.Session, map[string]string{
 		"USERNAME":                    "someone-else",
@@ -493,14 +505,7 @@ func TestPasswordVerifierChallenge_UsernameFromSessionClaim(t *testing.T) {
 	signUpUser(t, ro, clientID, "nina", "Password123!")
 	confirmUser(t, ro, clientID, "nina")
 
-	client, err := cognitotest.NewSRPClient()
-	require.NoError(t, err)
-	w := doInitSRPAuth(t, ro, clientID, map[string]string{
-		"USERNAME": "nina", "SRP_A": client.AHex(),
-	})
-	require.Equal(t, http.StatusOK, w.Code)
-	var resp srpInitiateAuthResponse
-	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	client, resp := initSRPChallenge(t, ro, clientID, "nina")
 
 	poolName := strings.SplitN(poolID, "_", 2)[1]
 	timestamp := cognitotest.NowString()
@@ -526,14 +531,7 @@ func TestPasswordVerifierChallenge_UserDeletedAfterInitiateAuth(t *testing.T) {
 	signUpUser(t, ro, clientID, "oscar", "Password123!")
 	confirmUser(t, ro, clientID, "oscar")
 
-	client, err := cognitotest.NewSRPClient()
-	require.NoError(t, err)
-	w := doInitSRPAuth(t, ro, clientID, map[string]string{
-		"USERNAME": "oscar", "SRP_A": client.AHex(),
-	})
-	require.Equal(t, http.StatusOK, w.Code)
-	var resp srpInitiateAuthResponse
-	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	client, resp := initSRPChallenge(t, ro, clientID, "oscar")
 
 	require.NoError(t, ro.storage.DeleteUser(poolID, "oscar"))
 
@@ -562,14 +560,7 @@ func TestPasswordVerifierChallenge_VerifierClearedAfterInitiateAuth(t *testing.T
 	signUpUser(t, ro, clientID, "quinn", "Password123!")
 	confirmUser(t, ro, clientID, "quinn")
 
-	client, err := cognitotest.NewSRPClient()
-	require.NoError(t, err)
-	w := doInitSRPAuth(t, ro, clientID, map[string]string{
-		"USERNAME": "quinn", "SRP_A": client.AHex(),
-	})
-	require.Equal(t, http.StatusOK, w.Code)
-	var resp srpInitiateAuthResponse
-	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	client, resp := initSRPChallenge(t, ro, clientID, "quinn")
 
 	// Simulate the user's password being reset (clearing SRPVerifier) between
 	// InitiateAuth and RespondToAuthChallenge.
@@ -603,14 +594,7 @@ func TestPasswordVerifierChallenge_GetUserStorageError(t *testing.T) {
 	signUpUser(t, ro, clientID, "peggy", "Password123!")
 	confirmUser(t, ro, clientID, "peggy")
 
-	client, err := cognitotest.NewSRPClient()
-	require.NoError(t, err)
-	w := doInitSRPAuth(t, ro, clientID, map[string]string{
-		"USERNAME": "peggy", "SRP_A": client.AHex(),
-	})
-	require.Equal(t, http.StatusOK, w.Code)
-	var resp srpInitiateAuthResponse
-	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	client, resp := initSRPChallenge(t, ro, clientID, "peggy")
 
 	realStorage := ro.storage.(*Storage)
 	keys, privateKey, err := realStorage.GetOrCreatePoolKeys(poolID)

@@ -305,16 +305,15 @@ func buildSessionToken(
 	extraClaims map[string]any,
 ) (string, error) {
 	now := time.Now().Unix()
-	claims := map[string]any{
-		"pool_id":   poolID,
-		"username":  username,
-		"challenge": challengeName,
-		"iat":       now,
-		"exp":       now + sessionExpiry,
-	}
+	claims := map[string]any{}
 	for k, v := range extraClaims {
 		claims[k] = v
 	}
+	claims["pool_id"] = poolID
+	claims["username"] = username
+	claims["challenge"] = challengeName
+	claims["iat"] = now
+	claims["exp"] = now + sessionExpiry
 	token, err := buildJWT(privateKey, keyID, claims)
 	if err != nil {
 		// unreachable: all claim values are primitives, so buildJWT never fails here

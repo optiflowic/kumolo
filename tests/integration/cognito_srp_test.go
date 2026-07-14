@@ -52,13 +52,14 @@ func initiateSRPAuth(
 	}
 }
 
-// respondPasswordVerifier computes and submits the PASSWORD_VERIFIER
-// challenge response for the given username/password.
-func respondPasswordVerifier(
+// respondPasswordVerifierErr computes and submits the PASSWORD_VERIFIER
+// challenge response for the given username/password, returning any error
+// from RespondToAuthChallenge instead of asserting success.
+func respondPasswordVerifierErr(
 	t *testing.T, ctx context.Context, c *awscognito.Client,
 	clientID, poolID, username, password string,
 	client *cognitotest.SRPClient, ch srpChallenge,
-) *awscognito.RespondToAuthChallengeOutput {
+) (*awscognito.RespondToAuthChallengeOutput, error) {
 	t.Helper()
 	poolName := strings.SplitN(poolID, "_", 2)[1]
 	timestamp := cognitotest.NowString()
@@ -67,7 +68,7 @@ func respondPasswordVerifier(
 	)
 	require.NoError(t, err)
 
-	out, err := c.RespondToAuthChallenge(ctx, &awscognito.RespondToAuthChallengeInput{
+	return c.RespondToAuthChallenge(ctx, &awscognito.RespondToAuthChallengeInput{
 		ClientId:      aws.String(clientID),
 		ChallengeName: types.ChallengeNameTypePasswordVerifier,
 		Session:       aws.String(ch.session),
@@ -78,6 +79,27 @@ func respondPasswordVerifier(
 			"PASSWORD_CLAIM_SIGNATURE":    sig,
 		},
 	})
+}
+
+// respondPasswordVerifier is the asserting wrapper for tests that expect
+// RespondToAuthChallenge to succeed.
+func respondPasswordVerifier(
+	t *testing.T, ctx context.Context, c *awscognito.Client,
+	clientID, poolID, username, password string,
+	client *cognitotest.SRPClient, ch srpChallenge,
+) *awscognito.RespondToAuthChallengeOutput {
+	t.Helper()
+	out, err := respondPasswordVerifierErr(
+		t,
+		ctx,
+		c,
+		clientID,
+		poolID,
+		username,
+		password,
+		client,
+		ch,
+	)
 	require.NoError(t, err)
 	return out
 }
@@ -138,24 +160,17 @@ func TestCognitoIntegration_UserSrpAuth(t *testing.T) {
 
 	t.Run("WrongPassword", func(t *testing.T) {
 		client, ch := initiateSRPAuth(t, ctx, c, clientID, username)
-		poolName := strings.SplitN(poolID, "_", 2)[1]
-		timestamp := cognitotest.NowString()
-		sig, err := client.ComputeSignature(
-			poolName, username, "WrongPassword1!", ch.salt, ch.srpB, ch.secretBlock, timestamp,
+		_, err := respondPasswordVerifierErr(
+			t,
+			ctx,
+			c,
+			clientID,
+			poolID,
+			username,
+			"WrongPassword1!",
+			client,
+			ch,
 		)
-		require.NoError(t, err)
-
-		_, err = c.RespondToAuthChallenge(ctx, &awscognito.RespondToAuthChallengeInput{
-			ClientId:      aws.String(clientID),
-			ChallengeName: types.ChallengeNameTypePasswordVerifier,
-			Session:       aws.String(ch.session),
-			ChallengeResponses: map[string]string{
-				"USERNAME":                    username,
-				"PASSWORD_CLAIM_SECRET_BLOCK": ch.secretBlock,
-				"TIMESTAMP":                   timestamp,
-				"PASSWORD_CLAIM_SIGNATURE":    sig,
-			},
-		})
 		require.Error(t, err)
 		assert.Equal(t, "NotAuthorizedException", apiErrorCode(err))
 	})

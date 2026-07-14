@@ -10,8 +10,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-
-	"golang.org/x/crypto/bcrypt"
 )
 
 // ──── AdminCreateUser ────────────────────────────────────────────────────────
@@ -123,24 +121,20 @@ func (ro *Router) handleAdminCreateUser(w http.ResponseWriter, body []byte) {
 	var passwordHash, srpSalt, srpVerifier string
 	status := userStatusConfirmed
 	if req.TemporaryPassword != "" {
-		hash, herr := bcrypt.GenerateFromPassword([]byte(req.TemporaryPassword), ro.bcryptCost)
-		if herr != nil {
-			// untestable: bcrypt.GenerateFromPassword only fails on invalid cost or OOM
+		hash, salt, verifier, cerr := derivePasswordCredentials(
+			req.UserPoolID,
+			req.Username,
+			req.TemporaryPassword,
+			ro.bcryptCost,
+		)
+		if cerr != nil {
+			// untestable: bcrypt.GenerateFromPassword / crypto/rand.Read only fail on OS-level errors
 			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
-				"failed to hash password")
+				"failed to derive password credentials")
 			return
 		}
-		passwordHash = string(hash)
+		passwordHash, srpSalt, srpVerifier = hash, salt, verifier
 		status = userStatusForceChangePasswd
-
-		salt, verifier, serr := srpVerifierFor(req.UserPoolID, req.Username, req.TemporaryPassword)
-		if serr != nil {
-			// untestable: crypto/rand.Read only fails on OS-level entropy source errors
-			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
-				"failed to derive SRP verifier")
-			return
-		}
-		srpSalt, srpVerifier = salt, verifier
 	}
 
 	ts := nowUnix()
@@ -319,20 +313,16 @@ func (ro *Router) handleAdminSetUserPassword(w http.ResponseWriter, body []byte)
 		return
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), ro.bcryptCost)
+	newHash, srpSalt, srpVerifier, err := derivePasswordCredentials(
+		req.UserPoolID,
+		req.Username,
+		req.Password,
+		ro.bcryptCost,
+	)
 	if err != nil {
-		// untestable: bcrypt.GenerateFromPassword only fails on invalid cost or OOM
+		// untestable: bcrypt.GenerateFromPassword / crypto/rand.Read only fail on OS-level errors
 		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
-			"failed to hash password")
-		return
-	}
-	newHash := string(hash)
-
-	srpSalt, srpVerifier, err := srpVerifierFor(req.UserPoolID, req.Username, req.Password)
-	if err != nil {
-		// untestable: crypto/rand.Read only fails on OS-level entropy source errors
-		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
-			"failed to derive SRP verifier")
+			"failed to derive password credentials")
 		return
 	}
 

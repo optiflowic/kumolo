@@ -74,9 +74,9 @@ Or, when a challenge is required:
 |-------|------|-----------|
 | InvalidParameterException | 400 | Missing required field or unsupported AuthFlow |
 | ResourceNotFoundException | 400 | ClientId not found |
-| UserNotFoundException | 400 | Username not found (USER_PASSWORD_AUTH) |
+| UserNotFoundException | 400 | Username not found (USER_PASSWORD_AUTH, USER_SRP_AUTH) |
 | UserNotConfirmedException | 400 | User is UNCONFIRMED |
-| NotAuthorizedException | 400 | Wrong password or invalid refresh token |
+| NotAuthorizedException | 400 | Wrong password, invalid refresh token, or (USER_SRP_AUTH) no stored SRP verifier |
 | InternalErrorException | 500 | Storage or token generation failure |
 
 ## Token Structure
