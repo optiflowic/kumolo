@@ -1,4 +1,4 @@
-package cognitotest
+package srptest
 
 import (
 	"crypto/hmac"
@@ -10,38 +10,10 @@ import (
 	"regexp"
 	"testing"
 
+	"github.com/optiflowic/kumolo/internal/cognito/srpmath"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func TestPadHex(t *testing.T) {
-	tests := []struct {
-		name string
-		n    *big.Int
-		want []byte
-	}{
-		{"zero", big.NewInt(0), []byte{0x00}},
-		{"low byte, no MSB", big.NewInt(0x14), []byte{0x14}},
-		{"high nibble set requires 00 prefix", big.NewInt(0x80), []byte{0x00, 0x80}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, padHex(tt.n))
-		})
-	}
-}
-
-func TestPadHex_NegativePanics(t *testing.T) {
-	assert.Panics(t, func() {
-		padHex(big.NewInt(-1))
-	})
-}
-
-func TestSha256Concat(t *testing.T) {
-	a := sha256Concat([]byte("foo"), []byte("bar"))
-	b := sha256Concat([]byte("foobar"))
-	assert.Equal(t, b, a, "concatenating parts must hash identically to a single pre-joined slice")
-}
 
 func TestNewSRPClient(t *testing.T) {
 	client, err := NewSRPClient()
@@ -80,33 +52,33 @@ func newServerSRPChallenge(
 	saltBytes := make([]byte, 16)
 	_, err := rand.Read(saltBytes)
 	require.NoError(t, err)
-	saltPadded := padHex(new(big.Int).SetBytes(saltBytes))
+	saltPadded := srpmath.PadHex(new(big.Int).SetBytes(saltBytes))
 
-	innerHash := sha256Concat([]byte(userPoolName + username + ":" + password))
-	x := new(big.Int).SetBytes(sha256Concat(saltPadded, innerHash))
-	v := new(big.Int).Exp(srpG, x, srpN)
+	innerHash := srpmath.SHA256Concat([]byte(userPoolName + username + ":" + password))
+	x := new(big.Int).SetBytes(srpmath.SHA256Concat(saltPadded, innerHash))
+	v := new(big.Int).Exp(srpmath.G, x, srpmath.N)
 
-	b, err := rand.Int(rand.Reader, srpN)
+	b, err := rand.Int(rand.Reader, srpmath.N)
 	require.NoError(t, err)
-	gb := new(big.Int).Exp(srpG, b, srpN)
-	kv := new(big.Int).Mul(srpK, v)
-	B := new(big.Int).Mod(new(big.Int).Add(kv, gb), srpN)
+	gb := new(big.Int).Exp(srpmath.G, b, srpmath.N)
+	kv := new(big.Int).Mul(srpmath.K, v)
+	B := new(big.Int).Mod(new(big.Int).Add(kv, gb), srpmath.N)
 
 	secretBlock := make([]byte, 32)
 	_, err = rand.Read(secretBlock)
 	require.NoError(t, err)
 
 	// Server-side S = (A * v^u mod N)^b mod N.
-	u := new(big.Int).SetBytes(sha256Concat(padHex(clientA), padHex(B)))
+	u := new(big.Int).SetBytes(srpmath.SHA256Concat(srpmath.PadHex(clientA), srpmath.PadHex(B)))
 	require.NotZero(t, u.Sign())
-	vu := new(big.Int).Exp(v, u, srpN)
-	avu := new(big.Int).Mod(new(big.Int).Mul(clientA, vu), srpN)
-	S := new(big.Int).Exp(avu, b, srpN)
-	key := deriveSRPKey(u, S)
+	vu := new(big.Int).Exp(v, u, srpmath.N)
+	avu := new(big.Int).Mod(new(big.Int).Mul(clientA, vu), srpmath.N)
+	S := new(big.Int).Exp(avu, b, srpmath.N)
+	key := srpmath.DeriveSessionKey(u, S)
 
 	return serverSRPChallenge{
 		saltHex:        hex.EncodeToString(saltPadded),
-		serverBHex:     hex.EncodeToString(padHex(B)),
+		serverBHex:     hex.EncodeToString(srpmath.PadHex(B)),
 		secretBlockB64: base64.StdEncoding.EncodeToString(secretBlock),
 		timestamp:      NowString(),
 		key:            key,
@@ -175,20 +147,20 @@ func TestComputeSignature_MaliciousServerB_SmallSubgroupAttack(t *testing.T) {
 	saltBytes := make([]byte, 16)
 	_, err = rand.Read(saltBytes)
 	require.NoError(t, err)
-	saltPadded := padHex(new(big.Int).SetBytes(saltBytes))
+	saltPadded := srpmath.PadHex(new(big.Int).SetBytes(saltBytes))
 
-	innerHash := sha256Concat([]byte(userPoolName + username + ":" + password))
-	x := new(big.Int).SetBytes(sha256Concat(saltPadded, innerHash))
-	gx := new(big.Int).Exp(srpG, x, srpN)
+	innerHash := srpmath.SHA256Concat([]byte(userPoolName + username + ":" + password))
+	x := new(big.Int).SetBytes(srpmath.SHA256Concat(saltPadded, innerHash))
+	gx := new(big.Int).Exp(srpmath.G, x, srpmath.N)
 
 	// A malicious/compromised server sending B ≡ k*g^x (mod N) would drive
 	// the client's shared secret to zero absent the base != 0 check.
-	maliciousB := new(big.Int).Mod(new(big.Int).Mul(srpK, gx), srpN)
+	maliciousB := new(big.Int).Mod(new(big.Int).Mul(srpmath.K, gx), srpmath.N)
 
 	_, err = client.ComputeSignature(
 		userPoolName, username, password,
 		hex.EncodeToString(saltPadded),
-		hex.EncodeToString(padHex(maliciousB)),
+		hex.EncodeToString(srpmath.PadHex(maliciousB)),
 		base64.StdEncoding.EncodeToString([]byte("secretblock1234")),
 		NowString(),
 	)

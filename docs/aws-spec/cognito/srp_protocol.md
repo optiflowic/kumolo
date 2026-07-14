@@ -18,7 +18,7 @@ password or the verifier.
 ## Constants
 
 - `N` — a fixed 3072-bit safe prime (the standard Cognito SRP group; hex
-  literal in `internal/cognito/srp.go`).
+  literal in `internal/cognito/srpmath`).
 - `g = 2`
 - `k = SHA256(padHex(N) || padHex(g))`, computed once as a `*big.Int`.
 

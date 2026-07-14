@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/optiflowic/kumolo/internal/cognitotest"
+	"github.com/optiflowic/kumolo/internal/cognito/srptest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -58,14 +58,14 @@ type srpInitiateAuthResponse struct {
 }
 
 // srpLogin drives a full USER_SRP_AUTH + PASSWORD_VERIFIER exchange for
-// username/password against ro, using a fresh cognitotest.SRPClient, and
+// username/password against ro, using a fresh srptest.SRPClient, and
 // returns the final RespondToAuthChallenge response — either tokens or a
 // chained NEW_PASSWORD_REQUIRED challenge for FORCE_CHANGE_PASSWORD users.
 func srpLogin(
 	t *testing.T, ro *Router, poolID, clientID, username, password string,
 ) *httptest.ResponseRecorder {
 	t.Helper()
-	client, err := cognitotest.NewSRPClient()
+	client, err := srptest.NewSRPClient()
 	require.NoError(t, err)
 
 	w := doInitSRPAuth(t, ro, clientID, map[string]string{
@@ -79,7 +79,7 @@ func srpLogin(
 	require.Equal(t, "PASSWORD_VERIFIER", resp.ChallengeName)
 
 	poolName := strings.SplitN(poolID, "_", 2)[1]
-	timestamp := cognitotest.NowString()
+	timestamp := srptest.NowString()
 	sig, err := client.ComputeSignature(
 		poolName, username, password,
 		resp.ChallengeParameters.Salt, resp.ChallengeParameters.SRPB,
@@ -96,14 +96,14 @@ func srpLogin(
 }
 
 // initSRPChallenge drives USER_SRP_AUTH's InitiateAuth step for username
-// against ro, using a fresh cognitotest.SRPClient, and returns the client
+// against ro, using a fresh srptest.SRPClient, and returns the client
 // plus the decoded PASSWORD_VERIFIER challenge — for tests that need to
 // customize the RespondToAuthChallenge step themselves.
 func initSRPChallenge(
 	t *testing.T, ro *Router, clientID, username string,
-) (*cognitotest.SRPClient, srpInitiateAuthResponse) {
+) (*srptest.SRPClient, srpInitiateAuthResponse) {
 	t.Helper()
-	client, err := cognitotest.NewSRPClient()
+	client, err := srptest.NewSRPClient()
 	require.NoError(t, err)
 
 	w := doInitSRPAuth(t, ro, clientID, map[string]string{
@@ -117,31 +117,8 @@ func initSRPChallenge(
 	return client, resp
 }
 
-// ── padHex / srpVerifierFor unit tests ───────────────────────────────────────
-
-func TestPadHex(t *testing.T) {
-	tests := []struct {
-		name string
-		n    *big.Int
-		want []byte
-	}{
-		{"zero", big.NewInt(0), []byte{0x00}},
-		{"low byte, no MSB", big.NewInt(0x14), []byte{0x14}},
-		{"high nibble set requires 00 prefix", big.NewInt(0x80), []byte{0x00, 0x80}},
-		{"already even length, high bit set", big.NewInt(0xFF14), []byte{0x00, 0xFF, 0x14}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, padHex(tt.n))
-		})
-	}
-}
-
-func TestPadHex_NegativePanics(t *testing.T) {
-	assert.Panics(t, func() {
-		padHex(big.NewInt(-1))
-	})
-}
+// ── srpVerifierFor unit tests ────────────────────────────────────────────────
+// padHex/sha256Concat/deriveSessionKey are covered in internal/cognito/srpmath.
 
 func TestSRPVerifierFor(t *testing.T) {
 	salt1, verifier1, err := srpVerifierFor("us-east-1_abc123", "alice", "Password123!")
@@ -188,7 +165,7 @@ func TestUserSRPAuth_Success(t *testing.T) {
 func TestUserSRPAuth_MissingUsername(t *testing.T) {
 	ro := newTestRouter(t)
 	_, clientID := setupPool(t, ro)
-	client, err := cognitotest.NewSRPClient()
+	client, err := srptest.NewSRPClient()
 	require.NoError(t, err)
 
 	w := doInitSRPAuth(t, ro, clientID, map[string]string{"SRP_A": client.AHex()})
@@ -241,7 +218,7 @@ func TestUserSRPAuth_InvalidSRPA_ModNZero(t *testing.T) {
 func TestUserSRPAuth_UnknownUser(t *testing.T) {
 	ro := newTestRouter(t)
 	_, clientID := setupPool(t, ro)
-	client, err := cognitotest.NewSRPClient()
+	client, err := srptest.NewSRPClient()
 	require.NoError(t, err)
 
 	w := doInitSRPAuth(t, ro, clientID, map[string]string{
@@ -262,7 +239,7 @@ func TestUserSRPAuth_UserDisabled(t *testing.T) {
 	}))
 	require.Equal(t, http.StatusOK, w.Code)
 
-	client, err := cognitotest.NewSRPClient()
+	client, err := srptest.NewSRPClient()
 	require.NoError(t, err)
 	w2 := doInitSRPAuth(t, ro, clientID, map[string]string{
 		"USERNAME": "bob", "SRP_A": client.AHex(),
@@ -276,7 +253,7 @@ func TestUserSRPAuth_UserUnconfirmed(t *testing.T) {
 	_, clientID := setupPool(t, ro)
 	signUpUser(t, ro, clientID, "carol", "Password123!")
 
-	client, err := cognitotest.NewSRPClient()
+	client, err := srptest.NewSRPClient()
 	require.NoError(t, err)
 	w := doInitSRPAuth(t, ro, clientID, map[string]string{
 		"USERNAME": "carol", "SRP_A": client.AHex(),
@@ -298,7 +275,7 @@ func TestUserSRPAuth_NoSRPVerifierStored(t *testing.T) {
 		Enabled: true, PasswordHash: hash,
 	}))
 
-	client, err := cognitotest.NewSRPClient()
+	client, err := srptest.NewSRPClient()
 	require.NoError(t, err)
 	w := doInitSRPAuth(t, ro, clientID, map[string]string{
 		"USERNAME": "dave", "SRP_A": client.AHex(),
@@ -314,7 +291,7 @@ func TestUserSRPAuth_GetUserStorageError(t *testing.T) {
 			return nil, errors.New("boom")
 		},
 	}}
-	client, err := cognitotest.NewSRPClient()
+	client, err := srptest.NewSRPClient()
 	require.NoError(t, err)
 
 	w := doInitSRPAuth(t, ro, "client-1", map[string]string{
@@ -336,7 +313,7 @@ func TestUserSRPAuth_GetPoolKeysStorageError(t *testing.T) {
 			}, nil
 		},
 	}}
-	client, err := cognitotest.NewSRPClient()
+	client, err := srptest.NewSRPClient()
 	require.NoError(t, err)
 
 	w := doInitSRPAuth(t, ro, "client-1", map[string]string{
@@ -370,7 +347,7 @@ func TestPasswordVerifierChallenge_TamperedSecretBlock(t *testing.T) {
 	client, resp := initSRPChallenge(t, ro, clientID, "heidi")
 
 	poolName := strings.SplitN(poolID, "_", 2)[1]
-	timestamp := cognitotest.NowString()
+	timestamp := srptest.NowString()
 	sig, err := client.ComputeSignature(
 		poolName, "heidi", "Password123!",
 		resp.ChallengeParameters.Salt, resp.ChallengeParameters.SRPB,
@@ -404,7 +381,7 @@ func TestPasswordVerifierChallenge_InvalidSecretBlockBase64(t *testing.T) {
 	w2 := doPasswordVerifier(t, ro, clientID, resp.Session, map[string]string{ //nolint:gosec
 		"USERNAME":                    "ivan",
 		"PASSWORD_CLAIM_SECRET_BLOCK": "not-valid-base64!!",
-		"TIMESTAMP":                   cognitotest.NowString(),
+		"TIMESTAMP":                   srptest.NowString(),
 		"PASSWORD_CLAIM_SIGNATURE":    "AAAA",
 	})
 	assert.Equal(t, http.StatusBadRequest, w2.Code)
@@ -481,7 +458,7 @@ func TestPasswordVerifierChallenge_UsernameMismatch(t *testing.T) {
 	w2 := doPasswordVerifier(t, ro, clientID, resp.Session, map[string]string{
 		"USERNAME":                    "someone-else",
 		"PASSWORD_CLAIM_SECRET_BLOCK": resp.ChallengeParameters.SecretBlock,
-		"TIMESTAMP":                   cognitotest.NowString(),
+		"TIMESTAMP":                   srptest.NowString(),
 		"PASSWORD_CLAIM_SIGNATURE":    "AAAA",
 	})
 	assert.Equal(t, http.StatusBadRequest, w2.Code)
@@ -510,7 +487,7 @@ func TestPasswordVerifierChallenge_UsernameFromSessionClaim(t *testing.T) {
 	client, resp := initSRPChallenge(t, ro, clientID, "nina")
 
 	poolName := strings.SplitN(poolID, "_", 2)[1]
-	timestamp := cognitotest.NowString()
+	timestamp := srptest.NowString()
 	sig, err := client.ComputeSignature(
 		poolName, "nina", "Password123!",
 		resp.ChallengeParameters.Salt, resp.ChallengeParameters.SRPB,
@@ -538,7 +515,7 @@ func TestPasswordVerifierChallenge_UserDeletedAfterInitiateAuth(t *testing.T) {
 	require.NoError(t, ro.storage.DeleteUser(poolID, "oscar"))
 
 	poolName := strings.SplitN(poolID, "_", 2)[1]
-	timestamp := cognitotest.NowString()
+	timestamp := srptest.NowString()
 	sig, err := client.ComputeSignature(
 		poolName, "oscar", "Password123!",
 		resp.ChallengeParameters.Salt, resp.ChallengeParameters.SRPB,
@@ -572,7 +549,7 @@ func TestPasswordVerifierChallenge_VerifierClearedAfterInitiateAuth(t *testing.T
 	}))
 
 	poolName := strings.SplitN(poolID, "_", 2)[1]
-	timestamp := cognitotest.NowString()
+	timestamp := srptest.NowString()
 	sig, err := client.ComputeSignature(
 		poolName, "quinn", "Password123!",
 		resp.ChallengeParameters.Salt, resp.ChallengeParameters.SRPB,
@@ -613,7 +590,7 @@ func TestPasswordVerifierChallenge_GetUserStorageError(t *testing.T) {
 	}}
 
 	poolName := strings.SplitN(poolID, "_", 2)[1]
-	timestamp := cognitotest.NowString()
+	timestamp := srptest.NowString()
 	sig, err := client.ComputeSignature(
 		poolName, "peggy", "Password123!",
 		resp.ChallengeParameters.Salt, resp.ChallengeParameters.SRPB,

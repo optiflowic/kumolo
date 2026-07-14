@@ -8,7 +8,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awscognito "github.com/aws/aws-sdk-go-v2/service/cognitoidentityprovider"
 	"github.com/aws/aws-sdk-go-v2/service/cognitoidentityprovider/types"
-	"github.com/optiflowic/kumolo/internal/cognitotest"
+	"github.com/optiflowic/kumolo/internal/cognito/srptest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -23,14 +23,14 @@ type srpChallenge struct {
 }
 
 // initiateSRPAuth drives InitiateAuth with AuthFlow=USER_SRP_AUTH, computing
-// SRP_A via a fresh cognitotest.SRPClient (aws-sdk-go-v2 has no built-in SRP
+// SRP_A via a fresh srptest.SRPClient (aws-sdk-go-v2 has no built-in SRP
 // support — real Amplify apps compute these fields client-side, so this
 // mirrors that).
 func initiateSRPAuth(
 	t *testing.T, ctx context.Context, c *awscognito.Client, clientID, username string,
-) (*cognitotest.SRPClient, srpChallenge) {
+) (*srptest.SRPClient, srpChallenge) {
 	t.Helper()
-	client, err := cognitotest.NewSRPClient()
+	client, err := srptest.NewSRPClient()
 	require.NoError(t, err)
 
 	out, err := c.InitiateAuth(ctx, &awscognito.InitiateAuthInput{
@@ -58,11 +58,11 @@ func initiateSRPAuth(
 func respondPasswordVerifierErr(
 	t *testing.T, ctx context.Context, c *awscognito.Client,
 	clientID, poolID, username, password string,
-	client *cognitotest.SRPClient, ch srpChallenge,
+	client *srptest.SRPClient, ch srpChallenge,
 ) (*awscognito.RespondToAuthChallengeOutput, error) {
 	t.Helper()
 	poolName := strings.SplitN(poolID, "_", 2)[1]
-	timestamp := cognitotest.NowString()
+	timestamp := srptest.NowString()
 	sig, err := client.ComputeSignature(
 		poolName, username, password, ch.salt, ch.srpB, ch.secretBlock, timestamp,
 	)
@@ -86,7 +86,7 @@ func respondPasswordVerifierErr(
 func respondPasswordVerifier(
 	t *testing.T, ctx context.Context, c *awscognito.Client,
 	clientID, poolID, username, password string,
-	client *cognitotest.SRPClient, ch srpChallenge,
+	client *srptest.SRPClient, ch srpChallenge,
 ) *awscognito.RespondToAuthChallengeOutput {
 	t.Helper()
 	out, err := respondPasswordVerifierErr(

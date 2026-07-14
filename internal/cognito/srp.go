@@ -15,79 +15,9 @@ import (
 	"math/big"
 	"net/http"
 	"strings"
+
+	"github.com/optiflowic/kumolo/internal/cognito/srpmath"
 )
-
-// srpNHex is the 3072-bit safe prime used by AWS Cognito's SRP-6a group.
-// See docs/aws-spec/cognito/srp_protocol.md for the protocol this implements.
-const srpNHex = "FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD1" +
-	"29024E088A67CC74020BBEA63B139B22514A08798E3404DD" +
-	"EF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245" +
-	"E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7ED" +
-	"EE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3D" +
-	"C2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F" +
-	"83655D23DCA3AD961C62F356208552BB9ED529077096966D" +
-	"670C354E4ABC9804F1746C08CA18217C32905E462E36CE3B" +
-	"E39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9" +
-	"DE2BCBF6955817183995497CEA956AE515D2261898FA0510" +
-	"15728E5A8AAAC42DAD33170D04507A33A85521ABDF1CBA64" +
-	"ECFB850458DBEF0A8AEA71575D060C7DB3970F85A6E1E4C7" +
-	"ABF5AE8CDB0933D71E8C94E04A25619DCEE3D2261AD2EE6B" +
-	"F12FFA06D98A0864D87602733EC86A64521F2B18177B200C" +
-	"BBE117577A615D6C770988C0BAD946E208E24FA074E5AB31" +
-	"43DB5BFCE0FD108E4B82D120A93AD2CAFFFFFFFFFFFFFFFF"
-
-var (
-	srpN *big.Int
-	srpG = big.NewInt(2)
-	srpK *big.Int
-)
-
-func init() {
-	var ok bool
-	srpN, ok = new(big.Int).SetString(srpNHex, 16)
-	if !ok {
-		// unreachable: srpNHex is a fixed, valid hex literal
-		panic("cognito: invalid SRP N constant")
-	}
-	srpK = new(big.Int).SetBytes(sha256Concat(padHex(srpN), padHex(srpG)))
-}
-
-// padHex returns the two's-complement-safe byte encoding of a non-negative
-// big.Int: hex-encode, pad to even length, and prepend a zero byte if the
-// top bit of the first byte would otherwise be set. Every value in this
-// protocol (N, g, A, B, S, U, salt, verifier) is always non-negative, so only
-// this positive branch is implemented. Real Cognito SDK clients apply the
-// same padding before hashing/HMAC'ing these values, so it must match
-// bit-for-bit — see docs/aws-spec/cognito/srp_protocol.md.
-// Callers must reject negative input themselves (see handleUserSRPAuth's
-// SRP_A validation); padHex panics rather than silently producing wrong
-// output if that precondition is violated.
-func padHex(n *big.Int) []byte {
-	if n.Sign() < 0 {
-		panic("cognito: padHex requires a non-negative big.Int")
-	}
-	h := n.Text(16)
-	if len(h)%2 != 0 {
-		h = "0" + h
-	}
-	b, err := hex.DecodeString(h)
-	if err != nil {
-		// unreachable: h is always a valid hex string built from n.Text(16)
-		panic("cognito: padHex produced invalid hex: " + err.Error())
-	}
-	if len(b) > 0 && b[0] >= 0x80 {
-		b = append([]byte{0x00}, b...)
-	}
-	return b
-}
-
-func sha256Concat(parts ...[]byte) []byte {
-	h := sha256.New()
-	for _, p := range parts {
-		h.Write(p)
-	}
-	return h.Sum(nil)
-}
 
 // userPoolNameFromID returns the part of a Cognito pool ID after the region
 // prefix (e.g. "AbCdEfGhI" from "us-east-1_AbCdEfGhI") — the "user pool name"
@@ -109,37 +39,23 @@ func srpVerifierFor(poolID, username, password string) (saltHex, verifierHex str
 		// untestable: crypto/rand.Read only fails on OS-level entropy source errors
 		return "", "", fmt.Errorf("read SRP salt entropy: %w", err)
 	}
-	saltPadded := padHex(new(big.Int).SetBytes(saltBytes))
+	saltPadded := srpmath.PadHex(new(big.Int).SetBytes(saltBytes))
 
 	poolName := userPoolNameFromID(poolID)
-	innerHash := sha256Concat([]byte(poolName + username + ":" + password))
-	x := new(big.Int).SetBytes(sha256Concat(saltPadded, innerHash))
+	innerHash := srpmath.SHA256Concat([]byte(poolName + username + ":" + password))
+	x := new(big.Int).SetBytes(srpmath.SHA256Concat(saltPadded, innerHash))
 
-	verifier := new(big.Int).Exp(srpG, x, srpN)
+	verifier := new(big.Int).Exp(srpmath.G, x, srpmath.N)
 
 	return hex.EncodeToString(saltPadded), verifier.Text(16), nil
 }
 
 // computeSRPB computes the server's public SRP value B = (k*v + g^b mod N) mod N.
 func computeSRPB(v, b *big.Int) *big.Int {
-	gb := new(big.Int).Exp(srpG, b, srpN)
-	kv := new(big.Int).Mul(srpK, v)
+	gb := new(big.Int).Exp(srpmath.G, b, srpmath.N)
+	kv := new(big.Int).Mul(srpmath.K, v)
 	B := new(big.Int).Add(kv, gb)
-	return B.Mod(B, srpN)
-}
-
-// deriveSRPKey derives the 16-byte session key K from the shared secret S and
-// scrambling parameter u, using Cognito's non-standard "HKDF": the salt/IKM
-// roles are swapped relative to RFC 5869, and the info string is fixed.
-func deriveSRPKey(u, s *big.Int) []byte {
-	prkMAC := hmac.New(sha256.New, padHex(u))
-	prkMAC.Write(padHex(s))
-	prk := prkMAC.Sum(nil)
-
-	info := append([]byte("Caldera Derived Key"), 0x01)
-	okmMAC := hmac.New(sha256.New, prk)
-	okmMAC.Write(info)
-	return okmMAC.Sum(nil)[:16]
+	return B.Mod(B, srpmath.N)
 }
 
 // srpSessionKey derives a 32-byte AES-256 key from the pool's RSA signing key,
@@ -176,7 +92,7 @@ func encryptSRPPrivB(privateKey *rsa.PrivateKey, b *big.Int) (string, error) {
 		// untestable: crypto/rand.Read only fails on OS-level entropy source errors
 		return "", fmt.Errorf("read GCM nonce entropy: %w", err)
 	}
-	sealed := gcm.Seal(nonce, nonce, padHex(b), nil)
+	sealed := gcm.Seal(nonce, nonce, srpmath.PadHex(b), nil)
 	return base64.StdEncoding.EncodeToString(sealed), nil
 }
 
@@ -234,7 +150,7 @@ func (ro *Router) handleUserSRPAuth(
 			"SRP_A is not a valid hex number")
 		return
 	}
-	if new(big.Int).Mod(A, srpN).Sign() == 0 {
+	if new(big.Int).Mod(A, srpmath.N).Sign() == 0 {
 		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
 			"SRP_A mod N cannot be 0")
 		return
@@ -277,7 +193,7 @@ func (ro *Router) handleUserSRPAuth(
 		return
 	}
 
-	b, err := rand.Int(rand.Reader, srpN)
+	b, err := rand.Int(rand.Reader, srpmath.N)
 	if err != nil {
 		// untestable: crypto/rand.Int only fails on OS-level entropy source errors
 		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
@@ -318,7 +234,7 @@ func (ro *Router) handleUserSRPAuth(
 	sessionToken, err := buildSessionToken(
 		privateKey, keys.KeyID, poolID, username, "PASSWORD_VERIFIER",
 		map[string]any{
-			"srp_a":      hex.EncodeToString(padHex(A)),
+			"srp_a":      hex.EncodeToString(srpmath.PadHex(A)),
 			"srp_b_priv": encryptedB,
 		},
 	)
@@ -333,7 +249,7 @@ func (ro *Router) handleUserSRPAuth(
 		"ChallengeName": "PASSWORD_VERIFIER",
 		"ChallengeParameters": map[string]string{
 			"SALT":            user.SRPSalt,
-			"SRP_B":           hex.EncodeToString(padHex(B)),
+			"SRP_B":           hex.EncodeToString(srpmath.PadHex(B)),
 			"SECRET_BLOCK":    base64.StdEncoding.EncodeToString(secretBlock),
 			"USER_ID_FOR_SRP": username,
 		},
@@ -430,9 +346,9 @@ func (ro *Router) handlePasswordVerifierChallenge(
 
 	B := computeSRPB(v, b)
 
-	u := new(big.Int).SetBytes(sha256Concat(padHex(A), padHex(B)))
+	u := new(big.Int).SetBytes(srpmath.SHA256Concat(srpmath.PadHex(A), srpmath.PadHex(B)))
 	if u.Sign() == 0 {
-		// unreachable: constructing A, B such that SHA256(padHex(A)||padHex(B)) == 0
+		// unreachable: constructing A, B such that SHA256(srpmath.PadHex(A)||srpmath.PadHex(B)) == 0
 		// is a preimage attack, computationally infeasible to hit in a test
 		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException,
 			"Incorrect username or password.")
@@ -440,11 +356,11 @@ func (ro *Router) handlePasswordVerifierChallenge(
 	}
 
 	// S = (A * v^u mod N)^b mod N — the server-side SRP-6a formula.
-	vu := new(big.Int).Exp(v, u, srpN)
-	avu := new(big.Int).Mod(new(big.Int).Mul(A, vu), srpN)
-	S := new(big.Int).Exp(avu, b, srpN)
+	vu := new(big.Int).Exp(v, u, srpmath.N)
+	avu := new(big.Int).Mod(new(big.Int).Mul(A, vu), srpmath.N)
+	S := new(big.Int).Exp(avu, b, srpmath.N)
 
-	key := deriveSRPKey(u, S)
+	key := srpmath.DeriveSessionKey(u, S)
 
 	secretBlockRaw, err := base64.StdEncoding.DecodeString(secretBlockB64)
 	if err != nil {
