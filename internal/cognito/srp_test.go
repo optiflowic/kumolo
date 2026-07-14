@@ -1,7 +1,9 @@
 package cognito
 
 import (
+	"crypto/rand"
 	"crypto/rsa"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"math/big"
@@ -663,6 +665,69 @@ func TestPasswordVerifierChallenge_ForceChangePasswordChaining(t *testing.T) {
 		},
 	}))
 	assert.Equal(t, http.StatusOK, w2.Code)
+}
+
+// ── srp_b_priv encryption ────────────────────────────────────────────────────
+
+// testSRPKey generates an RSA key for encryptSRPPrivB/decryptSRPPrivB tests.
+// It doesn't need to be pool-associated, just a valid signing key.
+func testSRPKey(t *testing.T) *rsa.PrivateKey {
+	t.Helper()
+	privateKey, err := rsa.GenerateKey(rand.Reader, rsaKeyBits)
+	require.NoError(t, err)
+	return privateKey
+}
+
+func TestEncryptDecryptSRPPrivB_RoundTrip(t *testing.T) {
+	privateKey := testSRPKey(t)
+
+	b := big.NewInt(123456789)
+	encrypted, err := encryptSRPPrivB(privateKey, b)
+	require.NoError(t, err)
+
+	decrypted, err := decryptSRPPrivB(privateKey, encrypted)
+	require.NoError(t, err)
+	assert.Equal(t, 0, b.Cmp(decrypted))
+}
+
+func TestDecryptSRPPrivB_InvalidBase64(t *testing.T) {
+	privateKey := testSRPKey(t)
+
+	_, err := decryptSRPPrivB(privateKey, "not-valid-base64!!")
+	require.Error(t, err)
+}
+
+func TestDecryptSRPPrivB_TooShort(t *testing.T) {
+	privateKey := testSRPKey(t)
+
+	_, err := decryptSRPPrivB(privateKey, base64.StdEncoding.EncodeToString([]byte("short")))
+	require.Error(t, err)
+}
+
+func TestDecryptSRPPrivB_TamperedCiphertext(t *testing.T) {
+	privateKey := testSRPKey(t)
+
+	encrypted, err := encryptSRPPrivB(privateKey, big.NewInt(42))
+	require.NoError(t, err)
+
+	sealed, err := base64.StdEncoding.DecodeString(encrypted)
+	require.NoError(t, err)
+	sealed[len(sealed)-1] ^= 0xFF
+	tampered := base64.StdEncoding.EncodeToString(sealed)
+
+	_, err = decryptSRPPrivB(privateKey, tampered)
+	require.Error(t, err)
+}
+
+func TestDecryptSRPPrivB_WrongKey(t *testing.T) {
+	privateKey := testSRPKey(t)
+	otherKey := testSRPKey(t)
+
+	encrypted, err := encryptSRPPrivB(privateKey, big.NewInt(42))
+	require.NoError(t, err)
+
+	_, err = decryptSRPPrivB(otherKey, encrypted)
+	require.Error(t, err)
 }
 
 // ── small JSON helpers ────────────────────────────────────────────────────────

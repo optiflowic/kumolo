@@ -161,15 +161,7 @@ func TestCognitoIntegration_UserSrpAuth(t *testing.T) {
 	t.Run("WrongPassword", func(t *testing.T) {
 		client, ch := initiateSRPAuth(t, ctx, c, clientID, username)
 		_, err := respondPasswordVerifierErr(
-			t,
-			ctx,
-			c,
-			clientID,
-			poolID,
-			username,
-			"WrongPassword1!",
-			client,
-			ch,
+			t, ctx, c, clientID, poolID, username, "WrongPassword1!", client, ch,
 		)
 		require.Error(t, err)
 		assert.Equal(t, "NotAuthorizedException", apiErrorCode(err))

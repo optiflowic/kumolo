@@ -72,10 +72,16 @@ client's `A`, the username, pool ID) is carried in the existing signed
 session JWT (`buildSessionToken`/`parseSessionToken`, RS256, 180s expiry —
 the same mechanism the `NEW_PASSWORD_REQUIRED` challenge already uses).
 
-This is intentionally safe to expose in a JWT payload (signed but not
-encrypted): recovering the shared secret `S` from `A`, `b`, and the protocol
-math still requires the verifier `v`, which is never transmitted and is
-re-looked-up from storage by username at verification time.
+The client's `A` is safe to expose in plaintext (it's already public — sent
+by the client itself). The server's `b`, however, is not: since
+`B = (k*v + g^b) mod N` is public (returned as `SRP_B`), anyone who reads
+plaintext `b` can recover the verifier `v = (B - g^b) * k^-1 mod N` and mount
+an offline dictionary attack against it — a JWT signature guarantees
+integrity, not confidentiality, so a signed-but-unencrypted claim would leak
+`b` to the client holding the session token. To close this, `srp_b_priv` is
+sealed with AES-256-GCM under a key derived from the pool's RSA signing key
+(`srpSessionKey` in `srp.go`) before being embedded as a JWT claim, and
+opened again when the claim is read back in `RespondToAuthChallenge`.
 
 ## Server-side math (InitiateAuth)
 
@@ -118,6 +124,9 @@ Given the client's `SRP_A` and the stored verifier `v`:
   fails fast with `UserNotFoundException` at `InitiateAuth`, consistent with
   `USER_PASSWORD_AUTH`'s existing behavior.
 - `SECRET_BLOCK` is an opaque random nonce, not an encrypted state blob;
-  actual session state lives in the signed session JWT instead.
+  actual session state lives in the signed session JWT instead. The server's
+  private ephemeral `b` is additionally AES-256-GCM sealed within that JWT
+  claim (see above) since, unlike the rest of the session state, it must stay
+  confidential from the client holding the token.
 - `TIMESTAMP` is not format- or freshness-validated beyond the session JWT's
   180s expiry.

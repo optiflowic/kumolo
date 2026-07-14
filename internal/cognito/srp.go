@@ -1,8 +1,11 @@
 package cognito
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/hmac"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
@@ -139,6 +142,72 @@ func deriveSRPKey(u, s *big.Int) []byte {
 	return okmMAC.Sum(nil)[:16]
 }
 
+// srpSessionKey derives a 32-byte AES-256 key from the pool's RSA signing key,
+// used to encrypt the server's private SRP ephemeral value `b` before it is
+// embedded in the (client-visible) session JWT. `b` must never be readable by
+// the client: B = (k*v + g^b) mod N is public, so anyone holding plaintext `b`
+// can recover the SRP verifier v = (B - g^b) * k^-1 mod N and mount an offline
+// dictionary attack against it. A signed-but-unencrypted JWT claim would leak
+// exactly that. The key is a domain-separated hash of the RSA private
+// exponent, not the exponent itself, so a symmetric-key compromise can't be
+// mistaken for (or trivially converted into) the RSA private key.
+func srpSessionKey(privateKey *rsa.PrivateKey) []byte {
+	sum := sha256.Sum256(append([]byte("kumolo-cognito-srp-b-key:"), privateKey.D.Bytes()...))
+	return sum[:]
+}
+
+// encryptSRPPrivB seals the server's private SRP ephemeral value `b` with
+// AES-256-GCM under a key derived from the pool's RSA signing key, returning
+// a base64 string safe to embed as a session JWT claim. See srpSessionKey for
+// why `b` must not be embedded in plaintext.
+func encryptSRPPrivB(privateKey *rsa.PrivateKey, b *big.Int) (string, error) {
+	block, err := aes.NewCipher(srpSessionKey(privateKey))
+	if err != nil {
+		// unreachable: srpSessionKey always returns exactly 32 bytes, a valid AES-256 key size
+		return "", fmt.Errorf("create AES cipher: %w", err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		// unreachable: aes.NewCipher's block always has the fixed AES block size cipher.NewGCM requires
+		return "", fmt.Errorf("create GCM: %w", err)
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		// untestable: crypto/rand.Read only fails on OS-level entropy source errors
+		return "", fmt.Errorf("read GCM nonce entropy: %w", err)
+	}
+	sealed := gcm.Seal(nonce, nonce, padHex(b), nil)
+	return base64.StdEncoding.EncodeToString(sealed), nil
+}
+
+// decryptSRPPrivB reverses encryptSRPPrivB, recovering the server's private
+// SRP ephemeral value `b`.
+func decryptSRPPrivB(privateKey *rsa.PrivateKey, encoded string) (*big.Int, error) {
+	sealed, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil, fmt.Errorf("decode srp_b_priv: %w", err)
+	}
+	block, err := aes.NewCipher(srpSessionKey(privateKey))
+	if err != nil {
+		// unreachable: srpSessionKey always returns exactly 32 bytes, a valid AES-256 key size
+		return nil, fmt.Errorf("create AES cipher: %w", err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		// unreachable: aes.NewCipher's block always has the fixed AES block size cipher.NewGCM requires
+		return nil, fmt.Errorf("create GCM: %w", err)
+	}
+	if len(sealed) < gcm.NonceSize() {
+		return nil, fmt.Errorf("srp_b_priv ciphertext too short")
+	}
+	nonce, ciphertext := sealed[:gcm.NonceSize()], sealed[gcm.NonceSize():]
+	plain, err := gcm.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt srp_b_priv: %w", err)
+	}
+	return new(big.Int).SetBytes(plain), nil
+}
+
 // ──── InitiateAuth: USER_SRP_AUTH ────────────────────────────────────────────
 
 func (ro *Router) handleUserSRPAuth(
@@ -238,11 +307,19 @@ func (ro *Router) handleUserSRPAuth(
 		return
 	}
 
+	encryptedB, err := encryptSRPPrivB(privateKey, b)
+	if err != nil {
+		// untestable: only fails on AES/GCM setup or crypto/rand entropy errors
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to seal session state")
+		return
+	}
+
 	sessionToken, err := buildSessionToken(
 		privateKey, keys.KeyID, poolID, username, "PASSWORD_VERIFIER",
 		map[string]any{
 			"srp_a":      hex.EncodeToString(padHex(A)),
-			"srp_b_priv": hex.EncodeToString(padHex(b)),
+			"srp_b_priv": encryptedB,
 		},
 	)
 	if err != nil {
@@ -318,9 +395,10 @@ func (ro *Router) handlePasswordVerifierChallenge(
 	}
 
 	A, okA := new(big.Int).SetString(claimA, 16)
-	b, okB := new(big.Int).SetString(claimB, 16)
-	if !okA || !okB {
-		// unreachable: srp_a/srp_b_priv are always written as valid hex by handleUserSRPAuth
+	b, errB := decryptSRPPrivB(privateKey, claimB)
+	if !okA || errB != nil {
+		// unreachable: srp_a is always written as valid hex, and srp_b_priv is
+		// always written as a validly-encrypted blob, by handleUserSRPAuth
 		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
 			"failed to parse session SRP state")
 		return
