@@ -526,7 +526,7 @@ func TestInitiateAuth_UnsupportedAuthFlow(t *testing.T) {
 	ro := newTestRouter(t)
 	_, clientID := setupPool(t, ro)
 	body, _ := json.Marshal(map[string]string{
-		"ClientId": clientID, "AuthFlow": "USER_SRP_AUTH",
+		"ClientId": clientID, "AuthFlow": "CUSTOM_AUTH",
 	})
 	w := doOp(t, ro, "InitiateAuth", string(body))
 	assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -976,7 +976,7 @@ func TestRespondToAuthChallenge_NewPasswordRequired_GetUserPoolStorageError(t *t
 	key := testRSAKey(t)
 	keyID, _ := generateTokenID()
 
-	session, err := buildSessionToken(key, keyID, "pool-1", "u", "NEW_PASSWORD_REQUIRED")
+	session, err := buildSessionToken(key, keyID, "pool-1", "u", "NEW_PASSWORD_REQUIRED", nil)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{
@@ -1480,7 +1480,7 @@ func TestRespondToAuthChallenge_UpdateUserNotFound(t *testing.T) {
 	keyID, _ := generateTokenID()
 
 	// Build a valid session token.
-	session, err := buildSessionToken(key, keyID, "pool-1", "u", "NEW_PASSWORD_REQUIRED")
+	session, err := buildSessionToken(key, keyID, "pool-1", "u", "NEW_PASSWORD_REQUIRED", nil)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{
@@ -1503,7 +1503,7 @@ func TestRespondToAuthChallenge_UpdateUserStorageError(t *testing.T) {
 	key := testRSAKey(t)
 	keyID, _ := generateTokenID()
 
-	session, err := buildSessionToken(key, keyID, "pool-1", "u", "NEW_PASSWORD_REQUIRED")
+	session, err := buildSessionToken(key, keyID, "pool-1", "u", "NEW_PASSWORD_REQUIRED", nil)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{
@@ -1604,7 +1604,7 @@ func TestRespondToAuthChallenge_WrongChallengeName(t *testing.T) {
 	keyID, _ := generateTokenID()
 
 	// Build a session token with a different challenge name.
-	session, err := buildSessionToken(key, keyID, "pool-1", "u", "SOME_OTHER_CHALLENGE")
+	session, err := buildSessionToken(key, keyID, "pool-1", "u", "SOME_OTHER_CHALLENGE", nil)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{
@@ -1628,7 +1628,7 @@ func TestRespondToAuthChallenge_WrongChallengeStatus(t *testing.T) {
 	key := testRSAKey(t)
 	keyID, _ := generateTokenID()
 
-	session, err := buildSessionToken(key, keyID, "pool-1", "u", "NEW_PASSWORD_REQUIRED")
+	session, err := buildSessionToken(key, keyID, "pool-1", "u", "NEW_PASSWORD_REQUIRED", nil)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{
@@ -1667,6 +1667,7 @@ func TestRespondToAuthChallenge_UserAlreadyConfirmed(t *testing.T) {
 		poolID,
 		"henry",
 		"NEW_PASSWORD_REQUIRED",
+		nil,
 	)
 	require.NoError(t, err)
 

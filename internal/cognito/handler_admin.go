@@ -10,8 +10,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-
-	"golang.org/x/crypto/bcrypt"
 )
 
 // ──── AdminCreateUser ────────────────────────────────────────────────────────
@@ -120,17 +118,22 @@ func (ro *Router) handleAdminCreateUser(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	var passwordHash string
+	var passwordHash, srpSalt, srpVerifier string
 	status := userStatusConfirmed
 	if req.TemporaryPassword != "" {
-		hash, herr := bcrypt.GenerateFromPassword([]byte(req.TemporaryPassword), ro.bcryptCost)
-		if herr != nil {
-			// untestable: bcrypt.GenerateFromPassword only fails on invalid cost or OOM
+		hash, salt, verifier, cerr := derivePasswordCredentials(
+			req.UserPoolID,
+			req.Username,
+			req.TemporaryPassword,
+			ro.bcryptCost,
+		)
+		if cerr != nil {
+			// untestable: bcrypt.GenerateFromPassword / crypto/rand.Read only fail on OS-level errors
 			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
-				"failed to hash password")
+				"failed to derive password credentials")
 			return
 		}
-		passwordHash = string(hash)
+		passwordHash, srpSalt, srpVerifier = hash, salt, verifier
 		status = userStatusForceChangePasswd
 	}
 
@@ -141,6 +144,8 @@ func (ro *Router) handleAdminCreateUser(w http.ResponseWriter, body []byte) {
 		Status:       status,
 		Enabled:      true,
 		PasswordHash: passwordHash,
+		SRPSalt:      srpSalt,
+		SRPVerifier:  srpVerifier,
 		Attributes:   req.UserAttributes,
 		CreatedAt:    ts,
 		UpdatedAt:    ts,
@@ -308,14 +313,18 @@ func (ro *Router) handleAdminSetUserPassword(w http.ResponseWriter, body []byte)
 		return
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), ro.bcryptCost)
+	newHash, srpSalt, srpVerifier, err := derivePasswordCredentials(
+		req.UserPoolID,
+		req.Username,
+		req.Password,
+		ro.bcryptCost,
+	)
 	if err != nil {
-		// untestable: bcrypt.GenerateFromPassword only fails on invalid cost or OOM
+		// untestable: bcrypt.GenerateFromPassword / crypto/rand.Read only fail on OS-level errors
 		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
-			"failed to hash password")
+			"failed to derive password credentials")
 		return
 	}
-	newHash := string(hash)
 
 	newStatus := userStatusForceChangePasswd
 	if req.Permanent {
@@ -324,6 +333,8 @@ func (ro *Router) handleAdminSetUserPassword(w http.ResponseWriter, body []byte)
 
 	err = ro.storage.UpdateUser(req.UserPoolID, req.Username, func(u *UserMetadata) error {
 		u.PasswordHash = newHash
+		u.SRPSalt = srpSalt
+		u.SRPVerifier = srpVerifier
 		u.Status = newStatus
 		return nil
 	})

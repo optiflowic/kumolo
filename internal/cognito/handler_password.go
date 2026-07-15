@@ -4,6 +4,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"sort"
@@ -20,6 +21,27 @@ func hashPassword(password string, cost int) (string, error) {
 		return "", err
 	}
 	return string(hash), nil
+}
+
+// derivePasswordCredentials bcrypt-hashes password and derives its SRP-6a
+// salt/verifier pair — the two credential artifacts stored together whenever
+// a plaintext password is set (sign-up, admin create/set, forgot-password
+// confirm, change password, force-change).
+func derivePasswordCredentials(
+	poolID, username, password string,
+	cost int,
+) (hash, srpSalt, srpVerifier string, err error) {
+	hash, err = hashPassword(password, cost)
+	if err != nil {
+		// untestable: bcrypt.GenerateFromPassword only fails on invalid cost (fixed) or OOM
+		return "", "", "", fmt.Errorf("hash password: %w", err)
+	}
+	srpSalt, srpVerifier, err = srpVerifierFor(poolID, username, password)
+	if err != nil {
+		// untestable: crypto/rand.Read only fails on OS-level entropy source errors
+		return "", "", "", fmt.Errorf("derive SRP verifier: %w", err)
+	}
+	return hash, srpSalt, srpVerifier, nil
 }
 
 // ──── ForgotPassword ──────────────────────────────────────────────────────────
@@ -260,11 +282,19 @@ func (ro *Router) handleConfirmForgotPassword(w http.ResponseWriter, body []byte
 		) != 1 {
 			return errCodeMismatch
 		}
-		hash, herr := hashPassword(req.Password, ro.bcryptCost)
-		if herr != nil {
-			return herr
+		hash, salt, verifier, cerr := derivePasswordCredentials(
+			poolID,
+			req.Username,
+			req.Password,
+			ro.bcryptCost,
+		)
+		if cerr != nil {
+			// untestable: bcrypt.GenerateFromPassword / crypto/rand.Read only fail on OS-level errors
+			return cerr
 		}
 		u.PasswordHash = hash
+		u.SRPSalt = salt
+		u.SRPVerifier = verifier
 		u.PasswordResetCode = ""
 		return nil
 	})
@@ -357,11 +387,19 @@ func (ro *Router) handleChangePassword(w http.ResponseWriter, body []byte) {
 				return errPreviousPassword
 			}
 		}
-		hash, herr := hashPassword(req.ProposedPassword, ro.bcryptCost)
-		if herr != nil {
-			return herr
+		hash, salt, verifier, cerr := derivePasswordCredentials(
+			poolID,
+			u.Username,
+			req.ProposedPassword,
+			ro.bcryptCost,
+		)
+		if cerr != nil {
+			// untestable: bcrypt.GenerateFromPassword / crypto/rand.Read only fail on OS-level errors
+			return cerr
 		}
 		u.PasswordHash = hash
+		u.SRPSalt = salt
+		u.SRPVerifier = verifier
 		return nil
 	})
 	if updateErr != nil {

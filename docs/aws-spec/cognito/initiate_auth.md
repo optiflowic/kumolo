@@ -2,7 +2,7 @@
 
 URL: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_InitiateAuth.html
 SDK: `cognitoidentityprovider.InitiateAuthInput` / `cognitoidentityprovider.InitiateAuthOutput`
-Last verified: 2026-07-12
+Last verified: 2026-07-13
 
 ## Request Parameters
 
@@ -30,6 +30,15 @@ AuthParameters required: `REFRESH_TOKEN`
 The refresh token must have been issued by the same `ClientId`; presenting a token issued by a different client returns `NotAuthorizedException`.
 
 Success response: `AuthenticationResult` with new `AccessToken` and `IdToken` (no new `RefreshToken`).
+
+### USER_SRP_AUTH
+AuthParameters required: `USERNAME`, `SRP_A`
+
+See `docs/aws-spec/cognito/srp_protocol.md` for the shared SRP math. Always
+returns `ChallengeName: "PASSWORD_VERIFIER"` with `ChallengeParameters`
+(`SALT`, `SRP_B`, `SECRET_BLOCK`, `USER_ID_FOR_SRP`) and a `Session` token;
+never returns `AuthenticationResult` directly. Complete the flow via
+`RespondToAuthChallenge` with `ChallengeName: "PASSWORD_VERIFIER"`.
 
 ## Response
 
@@ -65,9 +74,9 @@ Or, when a challenge is required:
 |-------|------|-----------|
 | InvalidParameterException | 400 | Missing required field or unsupported AuthFlow |
 | ResourceNotFoundException | 400 | ClientId not found |
-| UserNotFoundException | 400 | Username not found (USER_PASSWORD_AUTH) |
+| UserNotFoundException | 400 | Username not found (USER_PASSWORD_AUTH, USER_SRP_AUTH) |
 | UserNotConfirmedException | 400 | User is UNCONFIRMED |
-| NotAuthorizedException | 400 | Wrong password or invalid refresh token |
+| NotAuthorizedException | 400 | Wrong password, invalid refresh token, or (USER_SRP_AUTH) no stored SRP verifier |
 | InternalErrorException | 500 | Storage or token generation failure |
 
 ## Token Structure
@@ -126,7 +135,12 @@ Presenting an expired token returns `NotAuthorizedException`.
 
 ## kumolo Deviations
 
-- Only USER_PASSWORD_AUTH and REFRESH_TOKEN_AUTH/REFRESH_TOKEN flows supported.
+- Only USER_PASSWORD_AUTH, USER_SRP_AUTH, and REFRESH_TOKEN_AUTH/REFRESH_TOKEN flows supported.
+- USER_SRP_AUTH: no AWS-style anti-enumeration "fake verifier" trick — an
+  unknown username fails fast with `UserNotFoundException`, consistent with
+  USER_PASSWORD_AUTH. A user with no stored SRP verifier (e.g. created before
+  this feature existed) fails closed with `NotAuthorizedException`. See
+  `docs/aws-spec/cognito/srp_protocol.md` for full deviation list.
 - `ExpiresIn` reflects the requesting client's `AccessTokenValidity` (default 3600s) and access
   token expiry is enforced on every authenticated request (see `get_user.md` / `validateAccessJWT`).
 - Refresh tokens expire after `RefreshTokenValidity` (default 30 days), honoring `TokenValidityUnits.RefreshToken`.
