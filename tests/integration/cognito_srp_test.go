@@ -27,7 +27,7 @@ type srpChallenge struct {
 // support — real Amplify apps compute these fields client-side, so this
 // mirrors that).
 func initiateSRPAuth(
-	t *testing.T, ctx context.Context, c *awscognito.Client, clientID, username string,
+	ctx context.Context, t *testing.T, c *awscognito.Client, clientID, username string,
 ) (*srptest.SRPClient, srpChallenge) {
 	t.Helper()
 	client, err := srptest.NewSRPClient()
@@ -56,7 +56,7 @@ func initiateSRPAuth(
 // challenge response for the given username/password, returning any error
 // from RespondToAuthChallenge instead of asserting success.
 func respondPasswordVerifierErr(
-	t *testing.T, ctx context.Context, c *awscognito.Client,
+	ctx context.Context, t *testing.T, c *awscognito.Client,
 	clientID, poolID, username, password string,
 	client *srptest.SRPClient, ch srpChallenge,
 ) (*awscognito.RespondToAuthChallengeOutput, error) {
@@ -84,14 +84,14 @@ func respondPasswordVerifierErr(
 // respondPasswordVerifier is the asserting wrapper for tests that expect
 // RespondToAuthChallenge to succeed.
 func respondPasswordVerifier(
-	t *testing.T, ctx context.Context, c *awscognito.Client,
+	ctx context.Context, t *testing.T, c *awscognito.Client,
 	clientID, poolID, username, password string,
 	client *srptest.SRPClient, ch srpChallenge,
 ) *awscognito.RespondToAuthChallengeOutput {
 	t.Helper()
 	out, err := respondPasswordVerifierErr(
-		t,
 		ctx,
+		t,
 		c,
 		clientID,
 		poolID,
@@ -148,8 +148,8 @@ func TestCognitoIntegration_UserSrpAuth(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("Success", func(t *testing.T) {
-		client, ch := initiateSRPAuth(t, ctx, c, clientID, username)
-		out := respondPasswordVerifier(t, ctx, c, clientID, poolID, username, password, client, ch)
+		client, ch := initiateSRPAuth(ctx, t, c, clientID, username)
+		out := respondPasswordVerifier(ctx, t, c, clientID, poolID, username, password, client, ch)
 
 		require.NotNil(t, out.AuthenticationResult)
 		assert.NotEmpty(t, aws.ToString(out.AuthenticationResult.AccessToken))
@@ -159,9 +159,9 @@ func TestCognitoIntegration_UserSrpAuth(t *testing.T) {
 	})
 
 	t.Run("WrongPassword", func(t *testing.T) {
-		client, ch := initiateSRPAuth(t, ctx, c, clientID, username)
+		client, ch := initiateSRPAuth(ctx, t, c, clientID, username)
 		_, err := respondPasswordVerifierErr(
-			t, ctx, c, clientID, poolID, username, "WrongPassword1!", client, ch,
+			ctx, t, c, clientID, poolID, username, "WrongPassword1!", client, ch,
 		)
 		require.Error(t, err)
 		assert.Equal(t, "NotAuthorizedException", apiErrorCode(err))
@@ -187,10 +187,10 @@ func TestCognitoIntegration_UserSrpAuth_ForceChangePasswordChaining(t *testing.T
 	})
 	require.NoError(t, err)
 
-	client, ch := initiateSRPAuth(t, ctx, c, env.clientID, username)
+	client, ch := initiateSRPAuth(ctx, t, c, env.clientID, username)
 	out := respondPasswordVerifier(
-		t,
 		ctx,
+		t,
 		c,
 		env.clientID,
 		env.poolID,

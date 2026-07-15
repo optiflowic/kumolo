@@ -37,19 +37,18 @@ const nHex = "FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD1" +
 // N, G, and K are the SRP-6a group parameters: the safe prime modulus, the
 // generator, and the multiplier k = SHA256(PadHex(N) || PadHex(G)).
 var (
-	N *big.Int
 	G = big.NewInt(2)
-	K *big.Int
+	N = mustParseHex(nHex)
+	K = new(big.Int).SetBytes(SHA256Concat(PadHex(N), PadHex(G)))
 )
 
-func init() {
-	var ok bool
-	N, ok = new(big.Int).SetString(nHex, 16)
+func mustParseHex(hexStr string) *big.Int {
+	n, ok := new(big.Int).SetString(hexStr, 16)
 	if !ok {
 		// unreachable: nHex is a fixed, valid hex literal
 		panic("srpmath: invalid SRP N constant")
 	}
-	K = new(big.Int).SetBytes(SHA256Concat(PadHex(N), PadHex(G)))
+	return n
 }
 
 // PadHex returns the two's-complement-safe byte encoding of a non-negative

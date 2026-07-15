@@ -58,4 +58,5 @@ func TestGroupParameters(t *testing.T) {
 	assert.NotNil(t, G)
 	assert.NotNil(t, K)
 	assert.Equal(t, 0, G.Cmp(big.NewInt(2)))
+	assert.Equal(t, 3072, N.BitLen())
 }
