@@ -3,7 +3,7 @@
 - URL: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_GetUserPoolMfaConfig.html
 - SDK type: `cognitoidentityprovider.GetUserPoolMfaConfigInput` / `GetUserPoolMfaConfigOutput`
 - X-Amz-Target: `AWSCognitoIdentityProviderService.GetUserPoolMfaConfig`
-- Last verified: 2026-06-24
+- Last verified: 2026-07-16
 
 ## Request
 
@@ -31,6 +31,9 @@
 
 ## kumolo deviations
 
-- `SoftwareTokenMfaConfiguration.Enabled` is always `false` (TOTP not supported).
+- `SoftwareTokenMfaConfiguration.Enabled` is always `false` here — it reflects the *pool-level*
+  admin toggle, which kumolo doesn't persist. This is independent of per-user TOTP MFA, which
+  kumolo does support (see `associate_software_token.md`, `set_user_mfa_preference.md`): a user
+  can enroll and be challenged for `SOFTWARE_TOKEN_MFA` regardless of what this field reports.
 - `SmsMfaConfiguration`, `EmailMfaConfiguration`, `WebAuthnConfiguration` are omitted.
 - MfaConfiguration is read directly from the stored UserPoolMetadata.

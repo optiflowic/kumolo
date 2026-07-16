@@ -3,7 +3,7 @@
 - URL: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_SetUserPoolMfaConfig.html
 - SDK type: `cognitoidentityprovider.SetUserPoolMfaConfigInput` / `SetUserPoolMfaConfigOutput`
 - X-Amz-Target: `AWSCognitoIdentityProviderService.SetUserPoolMfaConfig`
-- Last verified: 2026-07-11
+- Last verified: 2026-07-16
 
 ## Request
 
@@ -39,8 +39,10 @@
   `CreateUserPool`/`UpdateUserPool`/`GetUserPoolMfaConfig`. No enum validation is performed (consistent with
   `UpdateUserPool`'s existing handling of this field).
 - `SoftwareTokenMfaConfiguration`, `SmsMfaConfiguration`, `EmailMfaConfiguration`, and `WebAuthnConfiguration` are
-  accepted (to avoid rejecting real-world SDK/Terraform payloads) but silently ignored — TOTP, SMS, email OTP, and
-  WebAuthn/passkey are not implemented. This mirrors `GetUserPoolMfaConfig`'s existing deviations.
+  accepted (to avoid rejecting real-world SDK/Terraform payloads) but silently ignored at the *pool* level — this
+  operation never gates per-user TOTP enrollment either way. This mirrors `GetUserPoolMfaConfig`'s existing
+  deviations. See `associate_software_token.md`/`set_user_mfa_preference.md` for kumolo's actual (user-level,
+  ungated) TOTP MFA support.
 - Primary motivation: `terraform-provider-aws`'s `aws_cognito_user_pool` resource calls this operation on every
   `apply` (even with no config changes) to reconcile `software_token_mfa_configuration`; previously kumolo returned
   `UnknownOperationException`, breaking any second `apply`.

@@ -406,5 +406,5 @@ func (ro *Router) handlePasswordVerifierChallenge(
 		return
 	}
 
-	ro.writeAuthResult(w, poolID, clientID, user, privateKey, keys.KeyID, true, "")
+	ro.completeAuth(w, poolID, clientID, user, privateKey, keys.KeyID)
 }

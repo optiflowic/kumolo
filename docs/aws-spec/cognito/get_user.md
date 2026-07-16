@@ -2,7 +2,7 @@
 
 **Official URL**: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_GetUser.html  
 **SDK struct**: `cognitoidentityprovider.GetUserInput` / `GetUserOutput`  
-**Last verified**: 2026-06-25
+**Last verified**: 2026-07-16
 
 ## Request
 
@@ -48,7 +48,9 @@
 
 ## kumolo Deviations
 
-- MFA fields (`MFAOptions`, `PreferredMfaSetting`, `UserMFASettingList`) are not returned.
+- MFA fields (`MFAOptions`, `PreferredMfaSetting`, `UserMFASettingList`) are not returned, even
+  though kumolo supports TOTP MFA enrollment (see `associate_software_token.md`,
+  `set_user_mfa_preference.md`) — `AdminGetUser`'s equivalent fields have the same limitation.
 - `PasswordResetRequiredException` is never returned — `RESET_REQUIRED` user status is not implemented.
 - Unknown pool IDs (no persisted RSA keys) return `NotAuthorizedException` rather than `ResourceNotFoundException`.
 - `exp` is checked with `<=` (expired at the exact expiry second), matching standard JWT semantics.

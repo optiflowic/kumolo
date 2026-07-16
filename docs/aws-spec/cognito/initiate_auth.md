@@ -2,7 +2,7 @@
 
 URL: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_InitiateAuth.html
 SDK: `cognitoidentityprovider.InitiateAuthInput` / `cognitoidentityprovider.InitiateAuthOutput`
-Last verified: 2026-07-13
+Last verified: 2026-07-16
 
 ## Request Parameters
 
@@ -23,6 +23,8 @@ AuthParameters required: `USERNAME`, `PASSWORD`
 
 Success response (normal user): `AuthenticationResult` with all three tokens.
 Success response (FORCE_CHANGE_PASSWORD user): `ChallengeName: "NEW_PASSWORD_REQUIRED"` with session.
+Success response (SOFTWARE_TOKEN_MFA enabled): `ChallengeName: "SOFTWARE_TOKEN_MFA"` with session
+— see `docs/aws-spec/cognito/respond_to_auth_challenge.md`.
 
 ### REFRESH_TOKEN_AUTH / REFRESH_TOKEN
 AuthParameters required: `REFRESH_TOKEN`
@@ -136,6 +138,10 @@ Presenting an expired token returns `NotAuthorizedException`.
 ## kumolo Deviations
 
 - Only USER_PASSWORD_AUTH, USER_SRP_AUTH, and REFRESH_TOKEN_AUTH/REFRESH_TOKEN flows supported.
+- No forced `MFA_SETUP` challenge: a pool's `MfaConfiguration` (`ON`/`OPTIONAL`) does not gate
+  sign-in. Only a user's own `SoftwareTokenMFAEnabled` flag (set via `SetUserMFAPreference`)
+  triggers a `SOFTWARE_TOKEN_MFA` challenge; REFRESH_TOKEN_AUTH/REFRESH_TOKEN never re-challenges
+  MFA, matching AWS.
 - USER_SRP_AUTH: no AWS-style anti-enumeration "fake verifier" trick — an
   unknown username fails fast with `UserNotFoundException`, consistent with
   USER_PASSWORD_AUTH. A user with no stored SRP verifier (e.g. created before

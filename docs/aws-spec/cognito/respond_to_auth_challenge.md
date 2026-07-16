@@ -2,7 +2,7 @@
 
 URL: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_RespondToAuthChallenge.html
 SDK: `cognitoidentityprovider.RespondToAuthChallengeInput` / `cognitoidentityprovider.RespondToAuthChallengeOutput`
-Last verified: 2026-07-13
+Last verified: 2026-07-16
 
 ## Request Parameters
 
@@ -35,7 +35,21 @@ Completes the `USER_SRP_AUTH` flow started by `InitiateAuth`. See
 `docs/aws-spec/cognito/srp_protocol.md` for the full protocol. On success:
 tokens are issued directly, unless the user is `FORCE_CHANGE_PASSWORD` — in
 which case the response is instead a `NEW_PASSWORD_REQUIRED` challenge
-(chaining into the existing NEW_PASSWORD_REQUIRED handling above).
+(chaining into the existing NEW_PASSWORD_REQUIRED handling above) — or the
+user has `SOFTWARE_TOKEN_MFA` enabled, in which case a `SOFTWARE_TOKEN_MFA`
+challenge is returned instead (see below).
+
+### SOFTWARE_TOKEN_MFA
+ChallengeResponses required: `SOFTWARE_TOKEN_MFA_CODE`
+`USERNAME` is optional — same fallback-to-Session-claim behavior as the other challenges.
+
+Issued instead of tokens whenever primary authentication (`USER_PASSWORD_AUTH`,
+`PASSWORD_VERIFIER`, or the post-`NEW_PASSWORD_REQUIRED` reset) succeeds for a user with
+`UserMetadata.SoftwareTokenMFAEnabled == true`. See
+`docs/aws-spec/cognito/set_user_mfa_preference.md` for how that flag is set.
+`SOFTWARE_TOKEN_MFA_CODE` is verified as a TOTP code (RFC 6238, ±1 step / ±30s clock skew)
+against `UserMetadata.TOTPSecret`. On success, tokens are issued exactly as for the
+non-MFA success path.
 
 ## Response
 
@@ -63,6 +77,7 @@ Same as InitiateAuth success: `AuthenticationResult` with AccessToken, IdToken, 
 | UserNotFoundException | 400 | Username in ChallengeResponses not found |
 | NotAuthorizedException | 400 | Session is invalid or expired, or (PASSWORD_VERIFIER) SRP signature verification failed |
 | InvalidPasswordException | 400 | NEW_PASSWORD doesn't meet requirements |
+| CodeMismatchException | 400 | (SOFTWARE_TOKEN_MFA) SOFTWARE_TOKEN_MFA_CODE doesn't match |
 | InternalErrorException | 500 | Storage or token generation failure |
 
 ## Session Format (kumolo-specific)
@@ -87,7 +102,11 @@ kumolo validates that:
 
 ## kumolo Deviations
 
-- Only NEW_PASSWORD_REQUIRED and PASSWORD_VERIFIER challenges are supported.
+- Only NEW_PASSWORD_REQUIRED, PASSWORD_VERIFIER, and SOFTWARE_TOKEN_MFA challenges are supported.
+- `MFA_SETUP` (forced enrollment during sign-in for pools that require MFA) is not implemented —
+  `InitiateAuth`/`RespondToAuthChallenge` never issue it, regardless of `MfaConfiguration`. MFA
+  enrollment only happens out-of-band via `AssociateSoftwareToken`/`VerifySoftwareToken` on an
+  already-authenticated access token.
 - Session is a kumolo-specific signed JWT (not the AWS opaque session token format).
 - Password policy enforcement: see `docs/aws-spec/cognito/password_policy.md`.
 - SecretHash, ClientMetadata, AnalyticsMetadata, UserContextData are accepted but ignored.

@@ -501,7 +501,7 @@ func (ro *Router) handleUserPasswordAuth(
 		return
 	}
 
-	ro.writeAuthResult(w, poolID, clientID, user, privateKey, keys.KeyID, true, "")
+	ro.completeAuth(w, poolID, clientID, user, privateKey, keys.KeyID)
 }
 
 func (ro *Router) handleRefreshTokenAuth(
@@ -650,6 +650,41 @@ func (ro *Router) writeAuthResult(
 	})
 }
 
+// completeAuth finishes primary authentication: it issues tokens directly, unless the user has
+// SOFTWARE_TOKEN_MFA enabled (see SetUserMFAPreference), in which case it returns a
+// SOFTWARE_TOKEN_MFA challenge instead. Called after USER_PASSWORD_AUTH, the PASSWORD_VERIFIER
+// SRP challenge, and the NEW_PASSWORD_REQUIRED challenge — never after a token refresh, which
+// AWS does not re-challenge for MFA.
+func (ro *Router) completeAuth(
+	w http.ResponseWriter,
+	poolID, clientID string,
+	user *UserMetadata,
+	privateKey *rsa.PrivateKey,
+	keyID string,
+) {
+	if !user.SoftwareTokenMFAEnabled {
+		ro.writeAuthResult(w, poolID, clientID, user, privateKey, keyID, true, "")
+		return
+	}
+
+	sessionToken, err := buildSessionToken(
+		privateKey, keyID, poolID, user.Username, "SOFTWARE_TOKEN_MFA", nil,
+	)
+	if err != nil {
+		// unreachable: buildJWT fails only if claims contain non-serializable types (all primitives here)
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to build session token")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ChallengeName": "SOFTWARE_TOKEN_MFA",
+		"ChallengeParameters": map[string]string{
+			"USER_ID_FOR_SRP": user.Username,
+		},
+		"Session": sessionToken,
+	})
+}
+
 // ──── RespondToAuthChallenge ─────────────────────────────────────────────────
 
 type respondToAuthChallengeRequest struct {
@@ -711,6 +746,14 @@ func (ro *Router) handleRespondToAuthChallenge(w http.ResponseWriter, body []byt
 		ro.handleNewPasswordRequired(w, poolID, req.ClientID, req.Session, req.ChallengeResponses)
 	case "PASSWORD_VERIFIER":
 		ro.handlePasswordVerifierChallenge(
+			w,
+			poolID,
+			req.ClientID,
+			req.Session,
+			req.ChallengeResponses,
+		)
+	case "SOFTWARE_TOKEN_MFA":
+		ro.handleSoftwareTokenMFAChallenge(
 			w,
 			poolID,
 			req.ClientID,
@@ -817,7 +860,7 @@ func (ro *Router) handleNewPasswordRequired(
 		return
 	}
 
-	ro.writeAuthResult(w, poolID, clientID, updatedUser, privateKey, keys.KeyID, true, "")
+	ro.completeAuth(w, poolID, clientID, updatedUser, privateKey, keys.KeyID)
 }
 
 // ──── ResendConfirmationCode ─────────────────────────────────────────────────
