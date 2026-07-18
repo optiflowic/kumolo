@@ -1001,6 +1001,38 @@ func TestSoftwareTokenMFA_RespondMFADisabledSinceChallengeIssued(t *testing.T) {
 	assertErrType(t, w, ErrTypeNotAuthorizedException)
 }
 
+// TestSoftwareTokenMFA_RespondUserDisabledSinceChallengeIssued ensures a user disabled
+// (AdminDisableUser) between InitiateAuth issuing the SOFTWARE_TOKEN_MFA challenge and
+// RespondToAuthChallenge cannot still complete authentication and receive tokens.
+func TestSoftwareTokenMFA_RespondUserDisabledSinceChallengeIssued(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID, clientID := setupPool(t, ro)
+	token := doAuth(t, ro, clientID, "alice", "Password123!")
+	secret := enableSoftwareTokenMFA(t, ro, token)
+
+	w := doInitAuth(t, ro, clientID, "alice", "Password123!")
+	require.Equal(t, http.StatusOK, w.Code)
+	var initResp map[string]any
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&initResp))
+	session := initResp["Session"].(string)
+
+	disableBody, _ := json.Marshal(map[string]any{"UserPoolId": poolID, "Username": "alice"})
+	require.Equal(t, http.StatusOK, doOp(t, ro, "AdminDisableUser", string(disableBody)).Code)
+
+	body, _ := json.Marshal(map[string]any{
+		"ClientId":      clientID,
+		"ChallengeName": "SOFTWARE_TOKEN_MFA",
+		"Session":       session,
+		"ChallengeResponses": map[string]string{
+			"USERNAME":                "alice",
+			"SOFTWARE_TOKEN_MFA_CODE": currentTOTPCode(t, secret),
+		},
+	})
+	w2 := doOp(t, ro, "RespondToAuthChallenge", string(body))
+	assert.Equal(t, http.StatusBadRequest, w2.Code)
+	assertErrType(t, w2, ErrTypeNotAuthorizedException)
+}
+
 func TestSoftwareTokenMFA_RespondGetUserStorageError(t *testing.T) {
 	key := testRSAKey(t)
 	keyID, _ := generateTokenID()

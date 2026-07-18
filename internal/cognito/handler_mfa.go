@@ -319,6 +319,10 @@ func (ro *Router) handleSoftwareTokenMFAChallenge(
 		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException, "Invalid session.")
 		return
 	}
+	if !user.Enabled {
+		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException, "User is disabled.")
+		return
+	}
 
 	if !verifyTOTP(user.TOTPSecret, code, time.Now().Unix()) {
 		writeError(w, http.StatusBadRequest, ErrTypeCodeMismatchException,
