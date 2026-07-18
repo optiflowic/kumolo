@@ -232,7 +232,7 @@ func (ro *Router) handleUserSRPAuth(
 	}
 
 	sessionToken, err := buildSessionToken(
-		privateKey, keys.KeyID, poolID, username, "PASSWORD_VERIFIER",
+		privateKey, keys.KeyID, poolID, clientID, username, "PASSWORD_VERIFIER",
 		map[string]any{
 			"srp_a":      hex.EncodeToString(srpmath.PadHex(A)),
 			"srp_b_priv": encryptedB,
@@ -292,12 +292,13 @@ func (ro *Router) handlePasswordVerifierChallenge(
 	}
 
 	claimPoolID, _ := claims["pool_id"].(string)
+	claimClientID, _ := claims["client_id"].(string)
 	claimChallenge, _ := claims["challenge"].(string)
 	claimUsername, _ := claims["username"].(string)
 	claimA, _ := claims["srp_a"].(string)
 	claimB, _ := claims["srp_b_priv"].(string)
 
-	if claimPoolID != poolID || claimChallenge != "PASSWORD_VERIFIER" {
+	if claimPoolID != poolID || claimClientID != clientID || claimChallenge != "PASSWORD_VERIFIER" {
 		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException, "Invalid session.")
 		return
 	}
@@ -386,7 +387,7 @@ func (ro *Router) handlePasswordVerifierChallenge(
 
 	if user.Status == userStatusForceChangePasswd {
 		newSession, serr := buildSessionToken(
-			privateKey, keys.KeyID, poolID, username, "NEW_PASSWORD_REQUIRED", nil,
+			privateKey, keys.KeyID, poolID, clientID, username, "NEW_PASSWORD_REQUIRED", nil,
 		)
 		if serr != nil {
 			// unreachable: buildJWT fails only if claims contain non-serializable types (all primitives here)

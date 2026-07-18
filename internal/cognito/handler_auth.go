@@ -481,7 +481,7 @@ func (ro *Router) handleUserPasswordAuth(
 
 	if user.Status == userStatusForceChangePasswd {
 		sessionToken, serr := buildSessionToken(
-			privateKey, keys.KeyID, poolID, username, "NEW_PASSWORD_REQUIRED", nil,
+			privateKey, keys.KeyID, poolID, clientID, username, "NEW_PASSWORD_REQUIRED", nil,
 		)
 		if serr != nil {
 			// unreachable: buildJWT fails only if claims contain non-serializable types (all primitives here)
@@ -668,7 +668,7 @@ func (ro *Router) completeAuth(
 	}
 
 	sessionToken, err := buildSessionToken(
-		privateKey, keyID, poolID, user.Username, "SOFTWARE_TOKEN_MFA", nil,
+		privateKey, keyID, poolID, clientID, user.Username, "SOFTWARE_TOKEN_MFA", nil,
 	)
 	if err != nil {
 		// unreachable: buildJWT fails only if claims contain non-serializable types (all primitives here)
@@ -786,10 +786,12 @@ func (ro *Router) handleNewPasswordRequired(
 	}
 
 	claimPoolID, _ := claims["pool_id"].(string)
+	claimClientID, _ := claims["client_id"].(string)
 	claimChallenge, _ := claims["challenge"].(string)
 	claimUsername, _ := claims["username"].(string)
 
-	if claimPoolID != poolID || claimChallenge != "NEW_PASSWORD_REQUIRED" {
+	if claimPoolID != poolID || claimClientID != clientID ||
+		claimChallenge != "NEW_PASSWORD_REQUIRED" {
 		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException, "Invalid session.")
 		return
 	}

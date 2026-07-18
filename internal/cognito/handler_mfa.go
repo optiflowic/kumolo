@@ -276,10 +276,12 @@ func (ro *Router) handleSoftwareTokenMFAChallenge(
 	}
 
 	claimPoolID, _ := claims["pool_id"].(string)
+	claimClientID, _ := claims["client_id"].(string)
 	claimChallenge, _ := claims["challenge"].(string)
 	claimUsername, _ := claims["username"].(string)
 
-	if claimPoolID != poolID || claimChallenge != "SOFTWARE_TOKEN_MFA" {
+	if claimPoolID != poolID || claimClientID != clientID ||
+		claimChallenge != "SOFTWARE_TOKEN_MFA" {
 		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException, "Invalid session.")
 		return
 	}

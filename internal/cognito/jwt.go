@@ -297,11 +297,13 @@ func issueTokens(
 }
 
 // buildSessionToken creates a signed session JWT for challenge flows.
+// clientID binds the session to the app client that started the challenge, so a
+// session issued for one client cannot be redeemed with another client's ClientId.
 // extraClaims, if non-nil, is merged into the claims map (e.g. SRP ephemeral
 // state for the PASSWORD_VERIFIER challenge); pass nil when not needed.
 func buildSessionToken(
 	privateKey *rsa.PrivateKey,
-	keyID, poolID, username, challengeName string,
+	keyID, poolID, clientID, username, challengeName string,
 	extraClaims map[string]any,
 ) (string, error) {
 	now := time.Now().Unix()
@@ -310,6 +312,7 @@ func buildSessionToken(
 		claims[k] = v
 	}
 	claims["pool_id"] = poolID
+	claims["client_id"] = clientID
 	claims["username"] = username
 	claims["challenge"] = challengeName
 	claims["iat"] = now

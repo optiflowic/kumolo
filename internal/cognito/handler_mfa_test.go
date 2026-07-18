@@ -824,6 +824,36 @@ func TestSoftwareTokenMFA_RespondUsernameMismatch(t *testing.T) {
 	assertErrType(t, w2, ErrTypeNotAuthorizedException)
 }
 
+// TestSoftwareTokenMFA_RespondClientIDMismatch ensures a SOFTWARE_TOKEN_MFA
+// session issued for one app client cannot be redeemed by another client in the
+// same pool.
+func TestSoftwareTokenMFA_RespondClientIDMismatch(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID, clientID := setupPool(t, ro)
+	otherClientID := createClient(t, ro, poolID, "other-client")
+	token := doAuth(t, ro, clientID, "alice", "Password123!")
+	secret := enableSoftwareTokenMFA(t, ro, token)
+
+	w := doInitAuth(t, ro, clientID, "alice", "Password123!")
+	require.Equal(t, http.StatusOK, w.Code)
+	var initResp map[string]any
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&initResp))
+	session := initResp["Session"].(string)
+
+	body, _ := json.Marshal(map[string]any{
+		"ClientId":      otherClientID,
+		"ChallengeName": "SOFTWARE_TOKEN_MFA",
+		"Session":       session,
+		"ChallengeResponses": map[string]string{
+			"USERNAME":                "alice",
+			"SOFTWARE_TOKEN_MFA_CODE": currentTOTPCode(t, secret),
+		},
+	})
+	w2 := doOp(t, ro, "RespondToAuthChallenge", string(body))
+	assert.Equal(t, http.StatusBadRequest, w2.Code)
+	assertErrType(t, w2, ErrTypeNotAuthorizedException)
+}
+
 func TestSoftwareTokenMFA_RespondMissingCode(t *testing.T) {
 	ro := newTestRouter(t)
 	_, clientID := setupPool(t, ro)
@@ -916,7 +946,7 @@ func TestSoftwareTokenMFA_RespondInvalidSession(t *testing.T) {
 func TestSoftwareTokenMFA_RespondUserNotFound(t *testing.T) {
 	key := testRSAKey(t)
 	keyID, _ := generateTokenID()
-	session, err := buildSessionToken(key, keyID, "pool-1", "ghost", "SOFTWARE_TOKEN_MFA", nil)
+	session, err := buildSessionToken(key, keyID, "pool-1", "c", "ghost", "SOFTWARE_TOKEN_MFA", nil)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{
@@ -942,7 +972,7 @@ func TestSoftwareTokenMFA_RespondUserNotFound(t *testing.T) {
 func TestSoftwareTokenMFA_RespondMFADisabledSinceChallengeIssued(t *testing.T) {
 	key := testRSAKey(t)
 	keyID, _ := generateTokenID()
-	session, err := buildSessionToken(key, keyID, "pool-1", "alice", "SOFTWARE_TOKEN_MFA", nil)
+	session, err := buildSessionToken(key, keyID, "pool-1", "c", "alice", "SOFTWARE_TOKEN_MFA", nil)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{
@@ -951,9 +981,13 @@ func TestSoftwareTokenMFA_RespondMFADisabledSinceChallengeIssued(t *testing.T) {
 			return &poolKeys{KeyID: keyID}, key, nil
 		},
 		getUserFn: func(string, string) (*UserMetadata, error) {
-			// Simulates a SetUserMFAPreference disabling MFA (clearing TOTPSecret
-			// and SoftwareTokenMFAEnabled) between challenge issuance and response.
-			return &UserMetadata{Username: "alice"}, nil
+			// Disabling MFA preserves the registered authenticator; only the enabled
+			// flag changes (see TestSetUserMFAPreference_DisableClearsPreferred).
+			return &UserMetadata{
+				Username:                "alice",
+				TOTPSecret:              "JBSWY3DPEHPK3PXP",
+				SoftwareTokenMFAEnabled: false,
+			}, nil
 		},
 	}}
 	body, _ := json.Marshal(map[string]any{
@@ -970,7 +1004,7 @@ func TestSoftwareTokenMFA_RespondMFADisabledSinceChallengeIssued(t *testing.T) {
 func TestSoftwareTokenMFA_RespondGetUserStorageError(t *testing.T) {
 	key := testRSAKey(t)
 	keyID, _ := generateTokenID()
-	session, err := buildSessionToken(key, keyID, "pool-1", "alice", "SOFTWARE_TOKEN_MFA", nil)
+	session, err := buildSessionToken(key, keyID, "pool-1", "c", "alice", "SOFTWARE_TOKEN_MFA", nil)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{

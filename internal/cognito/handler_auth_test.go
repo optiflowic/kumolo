@@ -976,7 +976,7 @@ func TestRespondToAuthChallenge_NewPasswordRequired_GetUserPoolStorageError(t *t
 	key := testRSAKey(t)
 	keyID, _ := generateTokenID()
 
-	session, err := buildSessionToken(key, keyID, "pool-1", "u", "NEW_PASSWORD_REQUIRED", nil)
+	session, err := buildSessionToken(key, keyID, "pool-1", "c", "u", "NEW_PASSWORD_REQUIRED", nil)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{
@@ -1480,7 +1480,7 @@ func TestRespondToAuthChallenge_UpdateUserNotFound(t *testing.T) {
 	keyID, _ := generateTokenID()
 
 	// Build a valid session token.
-	session, err := buildSessionToken(key, keyID, "pool-1", "u", "NEW_PASSWORD_REQUIRED", nil)
+	session, err := buildSessionToken(key, keyID, "pool-1", "c", "u", "NEW_PASSWORD_REQUIRED", nil)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{
@@ -1503,7 +1503,7 @@ func TestRespondToAuthChallenge_UpdateUserStorageError(t *testing.T) {
 	key := testRSAKey(t)
 	keyID, _ := generateTokenID()
 
-	session, err := buildSessionToken(key, keyID, "pool-1", "u", "NEW_PASSWORD_REQUIRED", nil)
+	session, err := buildSessionToken(key, keyID, "pool-1", "c", "u", "NEW_PASSWORD_REQUIRED", nil)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{
@@ -1604,7 +1604,7 @@ func TestRespondToAuthChallenge_WrongChallengeName(t *testing.T) {
 	keyID, _ := generateTokenID()
 
 	// Build a session token with a different challenge name.
-	session, err := buildSessionToken(key, keyID, "pool-1", "u", "SOME_OTHER_CHALLENGE", nil)
+	session, err := buildSessionToken(key, keyID, "pool-1", "c", "u", "SOME_OTHER_CHALLENGE", nil)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{
@@ -1628,7 +1628,7 @@ func TestRespondToAuthChallenge_WrongChallengeStatus(t *testing.T) {
 	key := testRSAKey(t)
 	keyID, _ := generateTokenID()
 
-	session, err := buildSessionToken(key, keyID, "pool-1", "u", "NEW_PASSWORD_REQUIRED", nil)
+	session, err := buildSessionToken(key, keyID, "pool-1", "c", "u", "NEW_PASSWORD_REQUIRED", nil)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{
@@ -1665,6 +1665,7 @@ func TestRespondToAuthChallenge_UserAlreadyConfirmed(t *testing.T) {
 		privateKey,
 		keys.KeyID,
 		poolID,
+		clientID,
 		"henry",
 		"NEW_PASSWORD_REQUIRED",
 		nil,
@@ -1678,6 +1679,37 @@ func TestRespondToAuthChallenge_UserAlreadyConfirmed(t *testing.T) {
 	w := doOp(t, ro, "RespondToAuthChallenge", string(body))
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assertErrType(t, w, ErrTypeNotAuthorizedException)
+}
+
+// TestRespondToAuthChallenge_ClientIDMismatch ensures a NEW_PASSWORD_REQUIRED
+// session issued for one app client cannot be redeemed by another client in the
+// same pool.
+func TestRespondToAuthChallenge_ClientIDMismatch(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID, clientID := setupPool(t, ro)
+	otherClientID := createClient(t, ro, poolID, "other-client")
+	storage := ro.storage.(*Storage)
+
+	insertFCPUser(t, storage, poolID, "mallory", "mallory-sub", "TempPass123!")
+
+	w := doInitAuth(t, ro, clientID, "mallory", "TempPass123!")
+	require.Equal(t, http.StatusOK, w.Code)
+	var initResp map[string]any
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&initResp))
+	session := initResp["Session"].(string)
+
+	body, _ := json.Marshal(map[string]any{
+		"ClientId":      otherClientID,
+		"ChallengeName": "NEW_PASSWORD_REQUIRED",
+		"Session":       session,
+		"ChallengeResponses": map[string]string{
+			"USERNAME":     "mallory",
+			"NEW_PASSWORD": "NewPass123!",
+		},
+	})
+	w2 := doOp(t, ro, "RespondToAuthChallenge", string(body))
+	assert.Equal(t, http.StatusBadRequest, w2.Code)
+	assertErrType(t, w2, ErrTypeNotAuthorizedException)
 }
 
 // ── generateConfirmationCodeFrom ──────────────────────────────────────────────
