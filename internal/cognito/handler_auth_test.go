@@ -1209,6 +1209,57 @@ func TestResendDeliveryDetails_EmailWinsOverPhone(t *testing.T) {
 	assert.Equal(t, "a***@example.com", got.Destination)
 }
 
+// TestCompleteAuth_MFAEnabledDuringAuth_ReturnsChallenge ensures a request that read the
+// user record before SetUserMFAPreference enabled SOFTWARE_TOKEN_MFA (e.g. during the
+// bcrypt comparison window) still gets an MFA challenge instead of tokens: completeAuth
+// reloads the current user record right before deciding, rather than trusting the
+// caller's earlier snapshot.
+func TestCompleteAuth_MFAEnabledDuringAuth_ReturnsChallenge(t *testing.T) {
+	key := testRSAKey(t)
+	keyID, _ := generateTokenID()
+
+	hash, err := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.MinCost)
+	require.NoError(t, err)
+
+	calls := 0
+	ro := &Router{storage: &mockStore{
+		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
+		getOrCreateKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: keyID}, key, nil
+		},
+		getUserFn: func(string, string) (*UserMetadata, error) {
+			calls++
+			if calls == 1 {
+				// Snapshot read by handleUserPasswordAuth before bcrypt comparison:
+				// MFA not yet enabled.
+				return &UserMetadata{
+					Username: "u", Sub: "sub-u", Status: userStatusConfirmed, Enabled: true,
+					PasswordHash: string(hash),
+				}, nil
+			}
+			// Reloaded by completeAuth: SetUserMFAPreference enabled MFA in the interim.
+			return &UserMetadata{
+				Username: "u", Sub: "sub-u", Status: userStatusConfirmed, Enabled: true,
+				PasswordHash:            string(hash),
+				TOTPSecret:              "JBSWY3DPEHPK3PXP",
+				SoftwareTokenMFAEnabled: true,
+			}, nil
+		},
+	}}
+	body, _ := json.Marshal(map[string]any{
+		"ClientId": "c", "AuthFlow": "USER_PASSWORD_AUTH",
+		"AuthParameters": map[string]string{"USERNAME": "u", "PASSWORD": "Password123!"},
+	})
+	w := doOp(t, ro, "InitiateAuth", string(body))
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp map[string]any
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, "SOFTWARE_TOKEN_MFA", resp["ChallengeName"])
+	_, hasResult := resp["AuthenticationResult"]
+	assert.False(t, hasResult)
+	assert.Equal(t, 2, calls)
+}
+
 // ── writeAuthResult error paths ───────────────────────────────────────────────
 
 func TestWriteAuthResult_CreateRefreshTokenError(t *testing.T) {

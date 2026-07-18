@@ -655,6 +655,10 @@ func (ro *Router) writeAuthResult(
 // SOFTWARE_TOKEN_MFA challenge instead. Called after USER_PASSWORD_AUTH, the PASSWORD_VERIFIER
 // SRP challenge, and the NEW_PASSWORD_REQUIRED challenge — never after a token refresh, which
 // AWS does not re-challenge for MFA.
+//
+// user is reloaded from storage immediately before the MFA check: the caller's copy may
+// have been read before password/SRP verification, and SetUserMFAPreference could have
+// enabled MFA in the interim.
 func (ro *Router) completeAuth(
 	w http.ResponseWriter,
 	poolID, clientID string,
@@ -662,6 +666,19 @@ func (ro *Router) completeAuth(
 	privateKey *rsa.PrivateKey,
 	keyID string,
 ) {
+	current, err := ro.storage.GetUser(poolID, user.Username)
+	if err != nil {
+		if errors.Is(err, errUserNotFound) {
+			writeError(w, http.StatusBadRequest, ErrTypeUserNotFoundException,
+				"User does not exist.")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to get user")
+		return
+	}
+	user = current
+
 	if !user.SoftwareTokenMFAEnabled {
 		ro.writeAuthResult(w, poolID, clientID, user, privateKey, keyID, true, "")
 		return
