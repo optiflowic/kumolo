@@ -939,6 +939,34 @@ func TestSoftwareTokenMFA_RespondUserNotFound(t *testing.T) {
 	assertErrType(t, w, ErrTypeUserNotFoundException)
 }
 
+func TestSoftwareTokenMFA_RespondMFADisabledSinceChallengeIssued(t *testing.T) {
+	key := testRSAKey(t)
+	keyID, _ := generateTokenID()
+	session, err := buildSessionToken(key, keyID, "pool-1", "alice", "SOFTWARE_TOKEN_MFA", nil)
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
+		getOrCreateKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: keyID}, key, nil
+		},
+		getUserFn: func(string, string) (*UserMetadata, error) {
+			// Simulates a SetUserMFAPreference disabling MFA (clearing TOTPSecret
+			// and SoftwareTokenMFAEnabled) between challenge issuance and response.
+			return &UserMetadata{Username: "alice"}, nil
+		},
+	}}
+	body, _ := json.Marshal(map[string]any{
+		"ClientId": "c", "ChallengeName": "SOFTWARE_TOKEN_MFA", "Session": session,
+		"ChallengeResponses": map[string]string{
+			"USERNAME": "alice", "SOFTWARE_TOKEN_MFA_CODE": "123456",
+		},
+	})
+	w := doOp(t, ro, "RespondToAuthChallenge", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeNotAuthorizedException)
+}
+
 func TestSoftwareTokenMFA_RespondGetUserStorageError(t *testing.T) {
 	key := testRSAKey(t)
 	keyID, _ := generateTokenID()

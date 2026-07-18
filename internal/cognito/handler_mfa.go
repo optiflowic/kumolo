@@ -311,10 +311,9 @@ func (ro *Router) handleSoftwareTokenMFAChallenge(
 		return
 	}
 	if user.TOTPSecret == "" || !user.SoftwareTokenMFAEnabled {
-		// unreachable in normal operation: this challenge is only ever issued (via completeAuth)
-		// for a user with SoftwareTokenMFAEnabled, which SetUserMFAPreference only allows once
-		// TOTPSecret is set. A concurrent SetUserMFAPreference disabling MFA between challenge
-		// issuance and response is the only way to reach this.
+		// Reached only if SetUserMFAPreference disables MFA between challenge
+		// issuance and response (this challenge is otherwise only issued, via
+		// completeAuth, for a user with SoftwareTokenMFAEnabled).
 		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException, "Invalid session.")
 		return
 	}
