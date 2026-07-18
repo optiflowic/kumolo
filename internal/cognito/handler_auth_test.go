@@ -1238,8 +1238,11 @@ func TestCompleteAuth_MFAEnabledDuringAuth_ReturnsChallenge(t *testing.T) {
 				}, nil
 			}
 			// Reloaded by completeAuth: SetUserMFAPreference enabled MFA in the interim.
-			return &UserMetadata{
-				Username: "u", Sub: "sub-u", Status: userStatusConfirmed, Enabled: true,
+			return &UserMetadata{ //nolint:gosec // G101 false positive: test fixture, not a credential
+				Username:                "u",
+				Sub:                     "sub-u",
+				Status:                  userStatusConfirmed,
+				Enabled:                 true,
 				PasswordHash:            string(hash),
 				TOTPSecret:              "JBSWY3DPEHPK3PXP",
 				SoftwareTokenMFAEnabled: true,

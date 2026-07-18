@@ -1008,7 +1008,7 @@ func TestSoftwareTokenMFA_RespondMFADisabledSinceChallengeIssued(t *testing.T) {
 		getUserFn: func(string, string) (*UserMetadata, error) {
 			// Disabling MFA preserves the registered authenticator; only the enabled
 			// flag changes (see TestSetUserMFAPreference_DisableClearsPreferred).
-			return &UserMetadata{
+			return &UserMetadata{ //nolint:gosec // G101 false positive: test fixture, not a credential
 				Username:                "alice",
 				TOTPSecret:              "JBSWY3DPEHPK3PXP",
 				SoftwareTokenMFAEnabled: false,
