@@ -35,7 +35,8 @@
 ```
 
 - `sub` is always the first element of `UserAttributes`; any existing `sub` in the stored attributes is removed and replaced at index 0.
-- `MFAOptions`, `PreferredMfaSetting`, `UserMFASettingList` are omitted (MFA not implemented).
+- `MFAOptions`, `PreferredMfaSetting`, `UserMFASettingList` are unsupported/omitted response
+  fields (see kumolo Deviations below).
 
 ## Errors
 

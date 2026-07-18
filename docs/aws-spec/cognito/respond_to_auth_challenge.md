@@ -40,6 +40,7 @@ user has `SOFTWARE_TOKEN_MFA` enabled, in which case a `SOFTWARE_TOKEN_MFA`
 challenge is returned instead (see below).
 
 ### SOFTWARE_TOKEN_MFA
+
 ChallengeResponses required: `SOFTWARE_TOKEN_MFA_CODE`
 `USERNAME` is optional — same fallback-to-Session-claim behavior as the other challenges.
 
