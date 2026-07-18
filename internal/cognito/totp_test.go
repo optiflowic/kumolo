@@ -115,3 +115,7 @@ func TestVerifyTOTP_NearEpochNoUnderflow(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, verifyTOTP(secret, code, 10))
 }
+
+func TestVerifyTOTP_InvalidSecretRejected(t *testing.T) {
+	assert.False(t, verifyTOTP("not-valid-base32!!!", "123456", 1_700_000_000))
+}

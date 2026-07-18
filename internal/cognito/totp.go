@@ -77,7 +77,8 @@ func verifyTOTP(secret string, userCode string, unixTime int64) bool {
 		}
 		code, err := totpCodeAt(secret, counter)
 		if err != nil {
-			// unreachable: secret is always written by generateTOTPSecret as valid base32
+			// In production secret is always written by generateTOTPSecret as valid
+			// base32; this only guards against a malformed value reaching verifyTOTP.
 			return false
 		}
 		if hmac.Equal([]byte(code), []byte(userCode)) {
