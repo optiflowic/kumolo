@@ -238,6 +238,12 @@ func (ro *Router) serveHTTP(w http.ResponseWriter, r *http.Request, op string) {
 		ro.handleAdminListGroupsForUser(w, body)
 	case "ListUsersInGroup":
 		ro.handleListUsersInGroup(w, body)
+	case "AssociateSoftwareToken":
+		ro.handleAssociateSoftwareToken(w, body)
+	case "VerifySoftwareToken":
+		ro.handleVerifySoftwareToken(w, body)
+	case "SetUserMFAPreference":
+		ro.handleSetUserMFAPreference(w, body)
 	case "RevokeToken":
 		ro.handleRevokeToken(w, body)
 	case "GlobalSignOut":

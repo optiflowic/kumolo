@@ -434,7 +434,7 @@ func TestPasswordVerifierChallenge_WrongChallengeInSession(t *testing.T) {
 	keys, privateKey, err := ro.storage.GetOrCreatePoolKeys(poolID)
 	require.NoError(t, err)
 	session, err := buildSessionToken(
-		privateKey, keys.KeyID, poolID, "karl", "NEW_PASSWORD_REQUIRED", nil,
+		privateKey, keys.KeyID, poolID, clientID, "karl", "NEW_PASSWORD_REQUIRED", nil,
 	)
 	require.NoError(t, err)
 
@@ -460,6 +460,36 @@ func TestPasswordVerifierChallenge_UsernameMismatch(t *testing.T) {
 		"PASSWORD_CLAIM_SECRET_BLOCK": resp.ChallengeParameters.SecretBlock,
 		"TIMESTAMP":                   srptest.NowString(),
 		"PASSWORD_CLAIM_SIGNATURE":    "AAAA",
+	})
+	assert.Equal(t, http.StatusBadRequest, w2.Code)
+	assertErrType(t, w2, ErrTypeNotAuthorizedException)
+}
+
+// TestPasswordVerifierChallenge_ClientIDMismatch ensures a PASSWORD_VERIFIER
+// session issued for one app client cannot be redeemed by another client in the
+// same pool, even with a correctly-computed SRP signature.
+func TestPasswordVerifierChallenge_ClientIDMismatch(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID, clientID := setupPool(t, ro)
+	otherClientID := createClient(t, ro, poolID, "other-client")
+	signUpUser(t, ro, clientID, "mallory", "Password123!")
+	confirmUser(t, ro, clientID, "mallory")
+
+	client, resp := initSRPChallenge(t, ro, clientID, "mallory")
+
+	timestamp := srptest.NowString()
+	sig, err := client.ComputeSignature(
+		strings.SplitN(poolID, "_", 2)[1], "mallory", "Password123!",
+		resp.ChallengeParameters.Salt, resp.ChallengeParameters.SRPB,
+		resp.ChallengeParameters.SecretBlock, timestamp,
+	)
+	require.NoError(t, err)
+
+	w2 := doPasswordVerifier(t, ro, otherClientID, resp.Session, map[string]string{
+		"USERNAME":                    "mallory",
+		"PASSWORD_CLAIM_SECRET_BLOCK": resp.ChallengeParameters.SecretBlock,
+		"TIMESTAMP":                   timestamp,
+		"PASSWORD_CLAIM_SIGNATURE":    sig,
 	})
 	assert.Equal(t, http.StatusBadRequest, w2.Code)
 	assertErrType(t, w2, ErrTypeNotAuthorizedException)

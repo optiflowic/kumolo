@@ -1532,6 +1532,184 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# MFA (TOTP): AssociateSoftwareToken, VerifySoftwareToken, SetUserMFAPreference,
+# and the SOFTWARE_TOKEN_MFA sign-in challenge
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- MFA (TOTP) ---"
+
+# Computes an RFC 6238 TOTP code for a base32 secret at the current time,
+# simulating an authenticator app. Mirrors internal/cognito/totp.go (HMAC-SHA1,
+# 6 digits, 30s step).
+totp_code() {
+  python3 - "$1" <<'PY'
+import base64, hashlib, hmac, struct, sys, time
+
+secret = sys.argv[1]
+padded = secret + "=" * ((8 - len(secret) % 8) % 8)
+key = base64.b32decode(padded, casefold=True)
+counter = int(time.time()) // 30
+msg = struct.pack(">Q", counter)
+digest = hmac.new(key, msg, hashlib.sha1).digest()
+offset = digest[-1] & 0x0f
+code = (int.from_bytes(digest[offset:offset + 4], "big") & 0x7fffffff) % 1_000_000
+print(f"{code:06d}")
+PY
+}
+
+MFA_USER="mfa-e2e@example.com"
+MFA_PASS="Password1!"
+
+MFA_SIGNUP_JSON=$($AWS sign-up \
+  --client-id "$CLIENT_ID" \
+  --username "$MFA_USER" \
+  --password "$MFA_PASS" \
+  --user-attributes "Name=email,Value=$MFA_USER" 2>&1)
+if echo "$MFA_SIGNUP_JSON" | grep -q '"UserSub"'; then
+  ok "SignUp (for MFA flow)"
+else
+  fail "SignUp (for MFA flow)"
+fi
+
+MFA_CODE="${E2E_COGNITO_MFA_CODE:-}"
+if [[ -z "$MFA_CODE" ]]; then
+  if command -v docker &>/dev/null && docker compose ps --services 2>/dev/null | grep -q .; then
+    MFA_CODE=$(docker compose logs 2>/dev/null \
+      | grep 'SignUp confirmation code' \
+      | grep "$MFA_USER" \
+      | tail -1 \
+      | grep -oE 'code=[0-9]+' \
+      | cut -d= -f2 || true)
+  fi
+fi
+
+if [[ -n "$MFA_CODE" ]]; then
+  run "ConfirmSignUp (for MFA flow)" \
+    $AWS confirm-sign-up \
+      --client-id "$CLIENT_ID" \
+      --username "$MFA_USER" \
+      --confirmation-code "$MFA_CODE"
+
+  MFA_AUTH_JSON=$($AWS initiate-auth \
+    --client-id "$CLIENT_ID" \
+    --auth-flow "USER_PASSWORD_AUTH" \
+    --auth-parameters "USERNAME=$MFA_USER,PASSWORD=$MFA_PASS" 2>&1)
+  MFA_ACCESS_TOKEN=$(echo "$MFA_AUTH_JSON" | jq -r '.AuthenticationResult.AccessToken // empty' 2>/dev/null || true)
+
+  if [[ -n "$MFA_ACCESS_TOKEN" ]] && command -v python3 &>/dev/null; then
+    # SetUserMFAPreference before any TOTP has been verified must fail.
+    MFA_UNVERIFIED_JSON=$($AWS set-user-mfa-preference \
+      --access-token "$MFA_ACCESS_TOKEN" \
+      --software-token-mfa-settings 'Enabled=true,PreferredMfa=true' 2>&1) || true
+    if echo "$MFA_UNVERIFIED_JSON" | grep -qi 'InvalidParameterException'; then
+      ok "SetUserMFAPreference — InvalidParameterException before TOTP is verified"
+    else
+      fail "SetUserMFAPreference — expected InvalidParameterException before TOTP is verified"
+    fi
+
+    MFA_ASSOC_JSON=$($AWS associate-software-token \
+      --access-token "$MFA_ACCESS_TOKEN" 2>&1)
+    MFA_SECRET=$(echo "$MFA_ASSOC_JSON" | jq -r '.SecretCode // empty' 2>/dev/null || true)
+    if [[ -n "$MFA_SECRET" ]]; then
+      ok "AssociateSoftwareToken — returns SecretCode"
+    else
+      fail "AssociateSoftwareToken — expected SecretCode"
+    fi
+
+    if [[ -n "$MFA_SECRET" ]]; then
+      MFA_WRONG_JSON=$($AWS verify-software-token \
+        --access-token "$MFA_ACCESS_TOKEN" \
+        --user-code "000000" 2>&1) || true
+      if echo "$MFA_WRONG_JSON" | grep -qi 'CodeMismatchException'; then
+        ok "VerifySoftwareToken — CodeMismatchException for wrong code"
+      else
+        fail "VerifySoftwareToken — expected CodeMismatchException for wrong code"
+      fi
+
+      MFA_VERIFY_JSON=$($AWS verify-software-token \
+        --access-token "$MFA_ACCESS_TOKEN" \
+        --user-code "$(totp_code "$MFA_SECRET")" 2>&1)
+      if echo "$MFA_VERIFY_JSON" | grep -q '"Status": "SUCCESS"'; then
+        ok "VerifySoftwareToken — SUCCESS for valid TOTP code"
+      else
+        fail "VerifySoftwareToken — expected SUCCESS for valid TOTP code"
+      fi
+
+      run "SetUserMFAPreference (enable + preferred, after verification)" \
+        $AWS set-user-mfa-preference \
+          --access-token "$MFA_ACCESS_TOKEN" \
+          --software-token-mfa-settings 'Enabled=true,PreferredMfa=true'
+
+      # Sign-in must now issue a SOFTWARE_TOKEN_MFA challenge instead of tokens.
+      MFA_CHALLENGE_JSON=$($AWS initiate-auth \
+        --client-id "$CLIENT_ID" \
+        --auth-flow "USER_PASSWORD_AUTH" \
+        --auth-parameters "USERNAME=$MFA_USER,PASSWORD=$MFA_PASS" 2>&1)
+      if echo "$MFA_CHALLENGE_JSON" | grep -q '"ChallengeName": "SOFTWARE_TOKEN_MFA"'; then
+        ok "InitiateAuth — SOFTWARE_TOKEN_MFA challenge after enabling MFA"
+      else
+        fail "InitiateAuth — expected SOFTWARE_TOKEN_MFA challenge"
+      fi
+      if echo "$MFA_CHALLENGE_JSON" | grep -q '"AuthenticationResult"'; then
+        fail "InitiateAuth — did not expect AuthenticationResult alongside MFA challenge"
+      else
+        ok "InitiateAuth — no AuthenticationResult alongside MFA challenge"
+      fi
+
+      MFA_SESSION=$(echo "$MFA_CHALLENGE_JSON" | jq -r '.Session // empty' 2>/dev/null || true)
+      if [[ -n "$MFA_SESSION" ]]; then
+        MFA_RESPOND_WRONG_JSON=$($AWS respond-to-auth-challenge \
+          --client-id "$CLIENT_ID" \
+          --challenge-name "SOFTWARE_TOKEN_MFA" \
+          --session "$MFA_SESSION" \
+          --challenge-responses "USERNAME=$MFA_USER,SOFTWARE_TOKEN_MFA_CODE=000000" 2>&1) || true
+        if echo "$MFA_RESPOND_WRONG_JSON" | grep -qi 'CodeMismatchException'; then
+          ok "RespondToAuthChallenge (SOFTWARE_TOKEN_MFA) — CodeMismatchException for wrong code"
+        else
+          fail "RespondToAuthChallenge (SOFTWARE_TOKEN_MFA) — expected CodeMismatchException for wrong code"
+        fi
+
+        MFA_RESPOND_JSON=$($AWS respond-to-auth-challenge \
+          --client-id "$CLIENT_ID" \
+          --challenge-name "SOFTWARE_TOKEN_MFA" \
+          --session "$MFA_SESSION" \
+          --challenge-responses "USERNAME=$MFA_USER,SOFTWARE_TOKEN_MFA_CODE=$(totp_code "$MFA_SECRET")" 2>&1)
+        if echo "$MFA_RESPOND_JSON" | grep -q '"AccessToken"'; then
+          ok "RespondToAuthChallenge (SOFTWARE_TOKEN_MFA) — AccessToken issued for valid TOTP code"
+        else
+          fail "RespondToAuthChallenge (SOFTWARE_TOKEN_MFA) — expected AccessToken for valid TOTP code"
+        fi
+      else
+        skip "RespondToAuthChallenge (SOFTWARE_TOKEN_MFA) — no Session returned"
+      fi
+
+      # Disabling the preference must restore direct sign-in (no challenge).
+      run "SetUserMFAPreference (disable)" \
+        $AWS set-user-mfa-preference \
+          --access-token "$MFA_ACCESS_TOKEN" \
+          --software-token-mfa-settings 'Enabled=false'
+
+      MFA_DISABLED_AUTH_JSON=$($AWS initiate-auth \
+        --client-id "$CLIENT_ID" \
+        --auth-flow "USER_PASSWORD_AUTH" \
+        --auth-parameters "USERNAME=$MFA_USER,PASSWORD=$MFA_PASS" 2>&1)
+      if echo "$MFA_DISABLED_AUTH_JSON" | grep -q '"AccessToken"'; then
+        ok "InitiateAuth — direct sign-in restored after disabling MFA preference"
+      else
+        fail "InitiateAuth — expected direct sign-in after disabling MFA preference"
+      fi
+    fi
+  elif [[ -z "$MFA_ACCESS_TOKEN" ]]; then
+    skip "MFA flow — could not obtain access token"
+  else
+    skip "MFA flow — python3 not available to compute TOTP codes"
+  fi
+else
+  skip "MFA flow — no confirmation code available"
+  echo "  Hint: set E2E_COGNITO_MFA_CODE=<code> from kumolo logs, or use Docker Compose"
+fi
+
+# ---------------------------------------------------------------------------
 # Cleanup
 # ---------------------------------------------------------------------------
 # Only clear CLIENT_ID / POOL_ID after a successful delete so the EXIT-trap

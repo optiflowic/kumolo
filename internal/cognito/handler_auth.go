@@ -481,7 +481,7 @@ func (ro *Router) handleUserPasswordAuth(
 
 	if user.Status == userStatusForceChangePasswd {
 		sessionToken, serr := buildSessionToken(
-			privateKey, keys.KeyID, poolID, username, "NEW_PASSWORD_REQUIRED", nil,
+			privateKey, keys.KeyID, poolID, clientID, username, "NEW_PASSWORD_REQUIRED", nil,
 		)
 		if serr != nil {
 			// unreachable: buildJWT fails only if claims contain non-serializable types (all primitives here)
@@ -501,7 +501,7 @@ func (ro *Router) handleUserPasswordAuth(
 		return
 	}
 
-	ro.writeAuthResult(w, poolID, clientID, user, privateKey, keys.KeyID, true, "")
+	ro.completeAuth(w, poolID, clientID, user, privateKey, keys.KeyID)
 }
 
 func (ro *Router) handleRefreshTokenAuth(
@@ -650,6 +650,63 @@ func (ro *Router) writeAuthResult(
 	})
 }
 
+// completeAuth finishes primary authentication: it issues tokens directly, unless the user has
+// SOFTWARE_TOKEN_MFA enabled (see SetUserMFAPreference), in which case it returns a
+// SOFTWARE_TOKEN_MFA challenge instead. Called after USER_PASSWORD_AUTH, the PASSWORD_VERIFIER
+// SRP challenge, and the NEW_PASSWORD_REQUIRED challenge — never after a token refresh, which
+// AWS does not re-challenge for MFA.
+//
+// user is reloaded from storage immediately before the MFA check: the caller's copy may
+// have been read before password/SRP verification, and SetUserMFAPreference could have
+// enabled MFA in the interim.
+func (ro *Router) completeAuth(
+	w http.ResponseWriter,
+	poolID, clientID string,
+	user *UserMetadata,
+	privateKey *rsa.PrivateKey,
+	keyID string,
+) {
+	current, err := ro.storage.GetUser(poolID, user.Username)
+	if err != nil {
+		if errors.Is(err, errUserNotFound) {
+			writeError(w, http.StatusBadRequest, ErrTypeUserNotFoundException,
+				"User does not exist.")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to get user")
+		return
+	}
+	user = current
+
+	if !user.Enabled {
+		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException, "User is disabled.")
+		return
+	}
+
+	if !user.SoftwareTokenMFAEnabled {
+		ro.writeAuthResult(w, poolID, clientID, user, privateKey, keyID, true, "")
+		return
+	}
+
+	sessionToken, err := buildSessionToken(
+		privateKey, keyID, poolID, clientID, user.Username, "SOFTWARE_TOKEN_MFA", nil,
+	)
+	if err != nil {
+		// unreachable: buildJWT fails only if claims contain non-serializable types (all primitives here)
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to build session token")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ChallengeName": "SOFTWARE_TOKEN_MFA",
+		"ChallengeParameters": map[string]string{
+			"USER_ID_FOR_SRP": user.Username,
+		},
+		"Session": sessionToken,
+	})
+}
+
 // ──── RespondToAuthChallenge ─────────────────────────────────────────────────
 
 type respondToAuthChallengeRequest struct {
@@ -717,6 +774,14 @@ func (ro *Router) handleRespondToAuthChallenge(w http.ResponseWriter, body []byt
 			req.Session,
 			req.ChallengeResponses,
 		)
+	case "SOFTWARE_TOKEN_MFA":
+		ro.handleSoftwareTokenMFAChallenge(
+			w,
+			poolID,
+			req.ClientID,
+			req.Session,
+			req.ChallengeResponses,
+		)
 	default:
 		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
 			"Unsupported ChallengeName: "+req.ChallengeName)
@@ -743,10 +808,12 @@ func (ro *Router) handleNewPasswordRequired(
 	}
 
 	claimPoolID, _ := claims["pool_id"].(string)
+	claimClientID, _ := claims["client_id"].(string)
 	claimChallenge, _ := claims["challenge"].(string)
 	claimUsername, _ := claims["username"].(string)
 
-	if claimPoolID != poolID || claimChallenge != "NEW_PASSWORD_REQUIRED" {
+	if claimPoolID != poolID || claimClientID != clientID ||
+		claimChallenge != "NEW_PASSWORD_REQUIRED" {
 		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException, "Invalid session.")
 		return
 	}
@@ -817,7 +884,7 @@ func (ro *Router) handleNewPasswordRequired(
 		return
 	}
 
-	ro.writeAuthResult(w, poolID, clientID, updatedUser, privateKey, keys.KeyID, true, "")
+	ro.completeAuth(w, poolID, clientID, updatedUser, privateKey, keys.KeyID)
 }
 
 // ──── ResendConfirmationCode ─────────────────────────────────────────────────

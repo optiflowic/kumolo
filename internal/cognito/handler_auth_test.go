@@ -976,7 +976,7 @@ func TestRespondToAuthChallenge_NewPasswordRequired_GetUserPoolStorageError(t *t
 	key := testRSAKey(t)
 	keyID, _ := generateTokenID()
 
-	session, err := buildSessionToken(key, keyID, "pool-1", "u", "NEW_PASSWORD_REQUIRED", nil)
+	session, err := buildSessionToken(key, keyID, "pool-1", "c", "u", "NEW_PASSWORD_REQUIRED", nil)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{
@@ -1207,6 +1207,173 @@ func TestResendDeliveryDetails_EmailWinsOverPhone(t *testing.T) {
 	assert.Equal(t, "email", got.AttributeName)
 	assert.Equal(t, "EMAIL", got.DeliveryMedium)
 	assert.Equal(t, "a***@example.com", got.Destination)
+}
+
+// TestCompleteAuth_MFAEnabledDuringAuth_ReturnsChallenge ensures a request that read the
+// user record before SetUserMFAPreference enabled SOFTWARE_TOKEN_MFA (e.g. during the
+// bcrypt comparison window) still gets an MFA challenge instead of tokens: completeAuth
+// reloads the current user record right before deciding, rather than trusting the
+// caller's earlier snapshot.
+func TestCompleteAuth_MFAEnabledDuringAuth_ReturnsChallenge(t *testing.T) {
+	key := testRSAKey(t)
+	keyID, _ := generateTokenID()
+
+	hash, err := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.MinCost)
+	require.NoError(t, err)
+
+	calls := 0
+	ro := &Router{storage: &mockStore{
+		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
+		getOrCreateKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: keyID}, key, nil
+		},
+		getUserFn: func(string, string) (*UserMetadata, error) {
+			calls++
+			if calls == 1 {
+				// Snapshot read by handleUserPasswordAuth before bcrypt comparison:
+				// MFA not yet enabled.
+				return &UserMetadata{
+					Username: "u", Sub: "sub-u", Status: userStatusConfirmed, Enabled: true,
+					PasswordHash: string(hash),
+				}, nil
+			}
+			// Reloaded by completeAuth: SetUserMFAPreference enabled MFA in the interim.
+			return &UserMetadata{ //nolint:gosec // G101 false positive: test fixture, not a credential
+				Username:                "u",
+				Sub:                     "sub-u",
+				Status:                  userStatusConfirmed,
+				Enabled:                 true,
+				PasswordHash:            string(hash),
+				TOTPSecret:              "JBSWY3DPEHPK3PXP",
+				SoftwareTokenMFAEnabled: true,
+			}, nil
+		},
+	}}
+	body, _ := json.Marshal(map[string]any{
+		"ClientId": "c", "AuthFlow": "USER_PASSWORD_AUTH",
+		"AuthParameters": map[string]string{"USERNAME": "u", "PASSWORD": "Password123!"},
+	})
+	w := doOp(t, ro, "InitiateAuth", string(body))
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp map[string]any
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, "SOFTWARE_TOKEN_MFA", resp["ChallengeName"])
+	_, hasResult := resp["AuthenticationResult"]
+	assert.False(t, hasResult)
+	assert.Equal(t, 2, calls)
+}
+
+// TestCompleteAuth_ReloadUserNotFound covers completeAuth's reload-before-MFA-check
+// GetUser call failing with errUserNotFound (e.g. the user was deleted between the
+// initial password check and completeAuth).
+func TestCompleteAuth_ReloadUserNotFound(t *testing.T) {
+	key := testRSAKey(t)
+	keyID, _ := generateTokenID()
+
+	hash, err := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.MinCost)
+	require.NoError(t, err)
+
+	calls := 0
+	ro := &Router{storage: &mockStore{
+		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
+		getOrCreateKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: keyID}, key, nil
+		},
+		getUserFn: func(string, string) (*UserMetadata, error) {
+			calls++
+			if calls == 1 {
+				return &UserMetadata{
+					Username: "u", Sub: "sub-u", Status: userStatusConfirmed, Enabled: true,
+					PasswordHash: string(hash),
+				}, nil
+			}
+			return nil, errUserNotFound
+		},
+	}}
+	body, _ := json.Marshal(map[string]any{
+		"ClientId": "c", "AuthFlow": "USER_PASSWORD_AUTH",
+		"AuthParameters": map[string]string{"USERNAME": "u", "PASSWORD": "Password123!"},
+	})
+	w := doOp(t, ro, "InitiateAuth", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeUserNotFoundException)
+	assert.Equal(t, 2, calls)
+}
+
+// TestCompleteAuth_ReloadStorageError covers completeAuth's reload-before-MFA-check
+// GetUser call failing with a non-errUserNotFound storage error.
+func TestCompleteAuth_ReloadStorageError(t *testing.T) {
+	key := testRSAKey(t)
+	keyID, _ := generateTokenID()
+
+	hash, err := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.MinCost)
+	require.NoError(t, err)
+
+	calls := 0
+	ro := &Router{storage: &mockStore{
+		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
+		getOrCreateKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: keyID}, key, nil
+		},
+		getUserFn: func(string, string) (*UserMetadata, error) {
+			calls++
+			if calls == 1 {
+				return &UserMetadata{
+					Username: "u", Sub: "sub-u", Status: userStatusConfirmed, Enabled: true,
+					PasswordHash: string(hash),
+				}, nil
+			}
+			return nil, errors.New("disk error")
+		},
+	}}
+	body, _ := json.Marshal(map[string]any{
+		"ClientId": "c", "AuthFlow": "USER_PASSWORD_AUTH",
+		"AuthParameters": map[string]string{"USERNAME": "u", "PASSWORD": "Password123!"},
+	})
+	w := doOp(t, ro, "InitiateAuth", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+	assert.Equal(t, 2, calls)
+}
+
+// TestCompleteAuth_UserDisabledSinceInitialLookup covers completeAuth's reload-before-MFA-check
+// rejecting a user who was disabled between the initial password check and completeAuth.
+func TestCompleteAuth_UserDisabledSinceInitialLookup(t *testing.T) {
+	key := testRSAKey(t)
+	keyID, _ := generateTokenID()
+
+	hash, err := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.MinCost)
+	require.NoError(t, err)
+
+	calls := 0
+	ro := &Router{storage: &mockStore{
+		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
+		getOrCreateKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: keyID}, key, nil
+		},
+		getUserFn: func(string, string) (*UserMetadata, error) {
+			calls++
+			if calls == 1 {
+				return &UserMetadata{
+					Username: "u", Sub: "sub-u", Status: userStatusConfirmed, Enabled: true,
+					PasswordHash: string(hash),
+				}, nil
+			}
+			// Reloaded by completeAuth: the user was disabled in the interim.
+			return &UserMetadata{
+				Username: "u", Sub: "sub-u", Status: userStatusConfirmed, Enabled: false,
+				PasswordHash: string(hash),
+			}, nil
+		},
+	}}
+	body, _ := json.Marshal(map[string]any{
+		"ClientId": "c", "AuthFlow": "USER_PASSWORD_AUTH",
+		"AuthParameters": map[string]string{"USERNAME": "u", "PASSWORD": "Password123!"},
+	})
+	w := doOp(t, ro, "InitiateAuth", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeNotAuthorizedException)
+	assert.Equal(t, 2, calls)
 }
 
 // ── writeAuthResult error paths ───────────────────────────────────────────────
@@ -1480,7 +1647,7 @@ func TestRespondToAuthChallenge_UpdateUserNotFound(t *testing.T) {
 	keyID, _ := generateTokenID()
 
 	// Build a valid session token.
-	session, err := buildSessionToken(key, keyID, "pool-1", "u", "NEW_PASSWORD_REQUIRED", nil)
+	session, err := buildSessionToken(key, keyID, "pool-1", "c", "u", "NEW_PASSWORD_REQUIRED", nil)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{
@@ -1503,7 +1670,7 @@ func TestRespondToAuthChallenge_UpdateUserStorageError(t *testing.T) {
 	key := testRSAKey(t)
 	keyID, _ := generateTokenID()
 
-	session, err := buildSessionToken(key, keyID, "pool-1", "u", "NEW_PASSWORD_REQUIRED", nil)
+	session, err := buildSessionToken(key, keyID, "pool-1", "c", "u", "NEW_PASSWORD_REQUIRED", nil)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{
@@ -1604,7 +1771,7 @@ func TestRespondToAuthChallenge_WrongChallengeName(t *testing.T) {
 	keyID, _ := generateTokenID()
 
 	// Build a session token with a different challenge name.
-	session, err := buildSessionToken(key, keyID, "pool-1", "u", "SOME_OTHER_CHALLENGE", nil)
+	session, err := buildSessionToken(key, keyID, "pool-1", "c", "u", "SOME_OTHER_CHALLENGE", nil)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{
@@ -1628,7 +1795,7 @@ func TestRespondToAuthChallenge_WrongChallengeStatus(t *testing.T) {
 	key := testRSAKey(t)
 	keyID, _ := generateTokenID()
 
-	session, err := buildSessionToken(key, keyID, "pool-1", "u", "NEW_PASSWORD_REQUIRED", nil)
+	session, err := buildSessionToken(key, keyID, "pool-1", "c", "u", "NEW_PASSWORD_REQUIRED", nil)
 	require.NoError(t, err)
 
 	ro := &Router{storage: &mockStore{
@@ -1665,6 +1832,7 @@ func TestRespondToAuthChallenge_UserAlreadyConfirmed(t *testing.T) {
 		privateKey,
 		keys.KeyID,
 		poolID,
+		clientID,
 		"henry",
 		"NEW_PASSWORD_REQUIRED",
 		nil,
@@ -1678,6 +1846,37 @@ func TestRespondToAuthChallenge_UserAlreadyConfirmed(t *testing.T) {
 	w := doOp(t, ro, "RespondToAuthChallenge", string(body))
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assertErrType(t, w, ErrTypeNotAuthorizedException)
+}
+
+// TestRespondToAuthChallenge_ClientIDMismatch ensures a NEW_PASSWORD_REQUIRED
+// session issued for one app client cannot be redeemed by another client in the
+// same pool.
+func TestRespondToAuthChallenge_ClientIDMismatch(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID, clientID := setupPool(t, ro)
+	otherClientID := createClient(t, ro, poolID, "other-client")
+	storage := ro.storage.(*Storage)
+
+	insertFCPUser(t, storage, poolID, "mallory", "mallory-sub", "TempPass123!")
+
+	w := doInitAuth(t, ro, clientID, "mallory", "TempPass123!")
+	require.Equal(t, http.StatusOK, w.Code)
+	var initResp map[string]any
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&initResp))
+	session := initResp["Session"].(string)
+
+	body, _ := json.Marshal(map[string]any{
+		"ClientId":      otherClientID,
+		"ChallengeName": "NEW_PASSWORD_REQUIRED",
+		"Session":       session,
+		"ChallengeResponses": map[string]string{
+			"USERNAME":     "mallory",
+			"NEW_PASSWORD": "NewPass123!",
+		},
+	})
+	w2 := doOp(t, ro, "RespondToAuthChallenge", string(body))
+	assert.Equal(t, http.StatusBadRequest, w2.Code)
+	assertErrType(t, w2, ErrTypeNotAuthorizedException)
 }
 
 // ── generateConfirmationCodeFrom ──────────────────────────────────────────────

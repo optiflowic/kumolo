@@ -8,19 +8,20 @@ import (
 )
 
 const (
-	ErrTypeInvalidParameterException = "InvalidParameterException"
-	ErrTypeResourceNotFoundException = "ResourceNotFoundException"
-	ErrTypeUserNotFoundException     = "UserNotFoundException"
-	ErrTypeUserNotConfirmedException = "UserNotConfirmedException"
-	ErrTypeNotAuthorizedException    = "NotAuthorizedException"
-	ErrTypeUsernameExistsException   = "UsernameExistsException"
-	ErrTypeCodeMismatchException     = "CodeMismatchException"
-	ErrTypeInvalidPasswordException  = "InvalidPasswordException"
-	ErrTypeInternalErrorException    = "InternalErrorException"
-	ErrTypeUnknownOperationException = "UnknownOperationException"
-	ErrTypeGroupExistsException      = "GroupExistsException"
-	ErrTypeUnauthorizedException     = "UnauthorizedException"
-	ErrTypeLimitExceededException    = "LimitExceededException"
+	ErrTypeInvalidParameterException         = "InvalidParameterException"
+	ErrTypeResourceNotFoundException         = "ResourceNotFoundException"
+	ErrTypeUserNotFoundException             = "UserNotFoundException"
+	ErrTypeUserNotConfirmedException         = "UserNotConfirmedException"
+	ErrTypeNotAuthorizedException            = "NotAuthorizedException"
+	ErrTypeUsernameExistsException           = "UsernameExistsException"
+	ErrTypeCodeMismatchException             = "CodeMismatchException"
+	ErrTypeInvalidPasswordException          = "InvalidPasswordException"
+	ErrTypeInternalErrorException            = "InternalErrorException"
+	ErrTypeUnknownOperationException         = "UnknownOperationException"
+	ErrTypeGroupExistsException              = "GroupExistsException"
+	ErrTypeUnauthorizedException             = "UnauthorizedException"
+	ErrTypeLimitExceededException            = "LimitExceededException"
+	ErrTypeSoftwareTokenMFANotFoundException = "SoftwareTokenMFANotFoundException"
 )
 
 type responseRecorder struct {
