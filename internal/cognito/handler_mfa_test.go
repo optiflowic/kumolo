@@ -529,6 +529,31 @@ func TestSetUserMFAPreference_EnableAfterVerify(t *testing.T) {
 	assert.Equal(t, "SOFTWARE_TOKEN_MFA", u.PreferredMfaSetting)
 }
 
+// TestSetUserMFAPreference_ClearsPreferredWhenNoLongerPreferred ensures that a
+// request with Enabled: true, PreferredMfa: false clears a previously-set
+// SOFTWARE_TOKEN_MFA preference rather than leaving it stale, while TOTP stays enabled.
+func TestSetUserMFAPreference_ClearsPreferredWhenNoLongerPreferred(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID, clientID := setupPool(t, ro)
+	token := doAuth(t, ro, clientID, "alice", "Password123!")
+	enrollTOTP(t, ro, token)
+
+	w := doSetUserMFAPreference(t, ro, token, map[string]any{
+		"Enabled": true, "PreferredMfa": true,
+	})
+	require.Equal(t, http.StatusOK, w.Code)
+
+	w = doSetUserMFAPreference(t, ro, token, map[string]any{
+		"Enabled": true, "PreferredMfa": false,
+	})
+	require.Equal(t, http.StatusOK, w.Code)
+
+	u, err := ro.storage.GetUser(poolID, "alice")
+	require.NoError(t, err)
+	assert.True(t, u.SoftwareTokenMFAEnabled)
+	assert.Empty(t, u.PreferredMfaSetting)
+}
+
 func TestSetUserMFAPreference_EnableWithoutVerifiedTOTP(t *testing.T) {
 	ro := newTestRouter(t)
 	poolID, clientID := setupPool(t, ro)

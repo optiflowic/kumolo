@@ -223,11 +223,11 @@ func (ro *Router) handleSetUserMFAPreference(w http.ResponseWriter, body []byte)
 		}
 		u.SoftwareTokenMFAEnabled = settings.Enabled
 		switch {
-		case !u.SoftwareTokenMFAEnabled:
+		case !u.SoftwareTokenMFAEnabled || !settings.PreferredMfa:
 			if u.PreferredMfaSetting == "SOFTWARE_TOKEN_MFA" {
 				u.PreferredMfaSetting = ""
 			}
-		case settings.PreferredMfa:
+		default:
 			u.PreferredMfaSetting = "SOFTWARE_TOKEN_MFA"
 		}
 		return nil
