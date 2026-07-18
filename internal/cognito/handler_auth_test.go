@@ -1263,6 +1263,79 @@ func TestCompleteAuth_MFAEnabledDuringAuth_ReturnsChallenge(t *testing.T) {
 	assert.Equal(t, 2, calls)
 }
 
+// TestCompleteAuth_ReloadUserNotFound covers completeAuth's reload-before-MFA-check
+// GetUser call failing with errUserNotFound (e.g. the user was deleted between the
+// initial password check and completeAuth).
+func TestCompleteAuth_ReloadUserNotFound(t *testing.T) {
+	key := testRSAKey(t)
+	keyID, _ := generateTokenID()
+
+	hash, err := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.MinCost)
+	require.NoError(t, err)
+
+	calls := 0
+	ro := &Router{storage: &mockStore{
+		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
+		getOrCreateKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: keyID}, key, nil
+		},
+		getUserFn: func(string, string) (*UserMetadata, error) {
+			calls++
+			if calls == 1 {
+				return &UserMetadata{
+					Username: "u", Sub: "sub-u", Status: userStatusConfirmed, Enabled: true,
+					PasswordHash: string(hash),
+				}, nil
+			}
+			return nil, errUserNotFound
+		},
+	}}
+	body, _ := json.Marshal(map[string]any{
+		"ClientId": "c", "AuthFlow": "USER_PASSWORD_AUTH",
+		"AuthParameters": map[string]string{"USERNAME": "u", "PASSWORD": "Password123!"},
+	})
+	w := doOp(t, ro, "InitiateAuth", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeUserNotFoundException)
+	assert.Equal(t, 2, calls)
+}
+
+// TestCompleteAuth_ReloadStorageError covers completeAuth's reload-before-MFA-check
+// GetUser call failing with a non-errUserNotFound storage error.
+func TestCompleteAuth_ReloadStorageError(t *testing.T) {
+	key := testRSAKey(t)
+	keyID, _ := generateTokenID()
+
+	hash, err := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.MinCost)
+	require.NoError(t, err)
+
+	calls := 0
+	ro := &Router{storage: &mockStore{
+		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
+		getOrCreateKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: keyID}, key, nil
+		},
+		getUserFn: func(string, string) (*UserMetadata, error) {
+			calls++
+			if calls == 1 {
+				return &UserMetadata{
+					Username: "u", Sub: "sub-u", Status: userStatusConfirmed, Enabled: true,
+					PasswordHash: string(hash),
+				}, nil
+			}
+			return nil, errors.New("disk error")
+		},
+	}}
+	body, _ := json.Marshal(map[string]any{
+		"ClientId": "c", "AuthFlow": "USER_PASSWORD_AUTH",
+		"AuthParameters": map[string]string{"USERNAME": "u", "PASSWORD": "Password123!"},
+	})
+	w := doOp(t, ro, "InitiateAuth", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+	assert.Equal(t, 2, calls)
+}
+
 // ── writeAuthResult error paths ───────────────────────────────────────────────
 
 func TestWriteAuthResult_CreateRefreshTokenError(t *testing.T) {
