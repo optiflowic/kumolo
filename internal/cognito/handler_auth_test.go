@@ -1336,6 +1336,46 @@ func TestCompleteAuth_ReloadStorageError(t *testing.T) {
 	assert.Equal(t, 2, calls)
 }
 
+// TestCompleteAuth_UserDisabledSinceInitialLookup covers completeAuth's reload-before-MFA-check
+// rejecting a user who was disabled between the initial password check and completeAuth.
+func TestCompleteAuth_UserDisabledSinceInitialLookup(t *testing.T) {
+	key := testRSAKey(t)
+	keyID, _ := generateTokenID()
+
+	hash, err := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.MinCost)
+	require.NoError(t, err)
+
+	calls := 0
+	ro := &Router{storage: &mockStore{
+		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
+		getOrCreateKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: keyID}, key, nil
+		},
+		getUserFn: func(string, string) (*UserMetadata, error) {
+			calls++
+			if calls == 1 {
+				return &UserMetadata{
+					Username: "u", Sub: "sub-u", Status: userStatusConfirmed, Enabled: true,
+					PasswordHash: string(hash),
+				}, nil
+			}
+			// Reloaded by completeAuth: the user was disabled in the interim.
+			return &UserMetadata{
+				Username: "u", Sub: "sub-u", Status: userStatusConfirmed, Enabled: false,
+				PasswordHash: string(hash),
+			}, nil
+		},
+	}}
+	body, _ := json.Marshal(map[string]any{
+		"ClientId": "c", "AuthFlow": "USER_PASSWORD_AUTH",
+		"AuthParameters": map[string]string{"USERNAME": "u", "PASSWORD": "Password123!"},
+	})
+	w := doOp(t, ro, "InitiateAuth", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeNotAuthorizedException)
+	assert.Equal(t, 2, calls)
+}
+
 // ── writeAuthResult error paths ───────────────────────────────────────────────
 
 func TestWriteAuthResult_CreateRefreshTokenError(t *testing.T) {

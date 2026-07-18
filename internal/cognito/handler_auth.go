@@ -679,6 +679,11 @@ func (ro *Router) completeAuth(
 	}
 	user = current
 
+	if !user.Enabled {
+		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException, "User is disabled.")
+		return
+	}
+
 	if !user.SoftwareTokenMFAEnabled {
 		ro.writeAuthResult(w, poolID, clientID, user, privateKey, keyID, true, "")
 		return
