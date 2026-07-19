@@ -66,7 +66,7 @@ func run() error {
 	_, noColorSet := os.LookupEnv("NO_COLOR")
 	stderrFd := int(os.Stderr.Fd()) //nolint:gosec // G115: fd is stderr (2), uintptr→int is safe
 	noColor := noColorSet || !term.IsTerminal(stderrFd)
-	slog.SetDefault(slog.New(tint.NewHandler(os.Stderr, &tint.Options{
+	slog.SetDefault(slog.New(tint.NewTextHandler(os.Stderr, &tint.Options{
 		Level:   level,
 		NoColor: noColor,
 	})))
