@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // ── MFA test helpers ────────────────────────────────────────────────────────
@@ -132,9 +133,28 @@ func TestAssociateSoftwareToken_MissingAccessToken(t *testing.T) {
 	assertErrType(t, w, ErrTypeInvalidParameterException)
 }
 
-func TestAssociateSoftwareToken_SessionOnlyRejected(t *testing.T) {
+func TestAssociateSoftwareToken_MalformedSessionRejected(t *testing.T) {
 	ro := newTestRouter(t)
 	w := doOp(t, ro, "AssociateSoftwareToken", `{"Session":"some-session-id-that-is-long-enough"}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeNotAuthorizedException)
+}
+
+func TestAssociateSoftwareToken_BothAccessTokenAndSessionRejected(t *testing.T) {
+	ro := newTestRouter(t)
+	w := doOp(
+		t,
+		ro,
+		"AssociateSoftwareToken",
+		`{"AccessToken":"tok","Session":"some-session-id-that-is-long-enough"}`,
+	)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeInvalidParameterException)
+}
+
+func TestAssociateSoftwareToken_NeitherAccessTokenNorSessionRejected(t *testing.T) {
+	ro := newTestRouter(t)
+	w := doOp(t, ro, "AssociateSoftwareToken", `{}`)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assertErrType(t, w, ErrTypeInvalidParameterException)
 }
@@ -1195,4 +1215,725 @@ func TestSoftwareTokenMFA_RefreshTokenAuthBypassesChallenge(t *testing.T) {
 	result, hasResult := refreshResp["AuthenticationResult"].(map[string]any)
 	require.True(t, hasResult)
 	assert.NotEmpty(t, result["AccessToken"])
+}
+
+// ── Forced MFA_SETUP enrollment challenge ───────────────────────────────────
+
+// createPoolWithMFA creates a pool with the given MfaConfiguration ("ON"/"OPTIONAL"/"OFF").
+func createPoolWithMFA(t *testing.T, ro *Router, name, mfaConfiguration string) string {
+	t.Helper()
+	body, _ := json.Marshal(map[string]any{
+		"PoolName":         name,
+		"MfaConfiguration": mfaConfiguration,
+	})
+	w := doOp(t, ro, "CreateUserPool", string(body))
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp struct {
+		UserPool struct {
+			Id string `json:"Id"`
+		} `json:"UserPool"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	require.NotEmpty(t, resp.UserPool.Id)
+	return resp.UserPool.Id
+}
+
+// setupMFARequiredPool creates a pool with MfaConfiguration ON, a client, and a confirmed
+// user with no MFA enrolled — the preconditions for a forced MFA_SETUP challenge.
+func setupMFARequiredPool(t *testing.T, ro *Router) (clientID string) {
+	t.Helper()
+	poolID := createPoolWithMFA(t, ro, "mfa-required-pool", "ON")
+	clientID = createClient(t, ro, poolID, "mfa-required-client")
+	signUpUser(t, ro, clientID, "alice", "Password123!")
+	confirmUser(t, ro, clientID, "alice")
+	return clientID
+}
+
+func TestMFASetup_InitiateAuthReturnsChallenge(t *testing.T) {
+	ro := newTestRouter(t)
+	clientID := setupMFARequiredPool(t, ro)
+
+	w := doInitAuth(t, ro, clientID, "alice", "Password123!")
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp map[string]any
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, "MFA_SETUP", resp["ChallengeName"])
+	assert.NotEmpty(t, resp["Session"])
+	params := resp["ChallengeParameters"].(map[string]any)
+	assert.Equal(t, "alice", params["USER_ID_FOR_SRP"])
+	assert.Equal(t, `["SOFTWARE_TOKEN_MFA"]`, params["MFAS_CAN_SETUP"])
+	_, hasResult := resp["AuthenticationResult"]
+	assert.False(t, hasResult)
+}
+
+func TestMFASetup_NotTriggeredWhenOptional(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPoolWithMFA(t, ro, "mfa-optional-pool", "OPTIONAL")
+	clientID := createClient(t, ro, poolID, "mfa-optional-client")
+	signUpUser(t, ro, clientID, "alice", "Password123!")
+	confirmUser(t, ro, clientID, "alice")
+
+	w := doInitAuth(t, ro, clientID, "alice", "Password123!")
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp map[string]any
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	_, hasResult := resp["AuthenticationResult"]
+	assert.True(t, hasResult)
+}
+
+func TestMFASetup_NotTriggeredWhenAlreadyEnrolled(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPoolWithMFA(t, ro, "mfa-pool", "OPTIONAL")
+	clientID := createClient(t, ro, poolID, "mfa-client")
+	token := doAuth(t, ro, clientID, "alice", "Password123!")
+	enableSoftwareTokenMFA(t, ro, token)
+
+	// Now flip the pool to require MFA; the already-enrolled user must get
+	// SOFTWARE_TOKEN_MFA, not MFA_SETUP.
+	body, _ := json.Marshal(map[string]any{
+		"UserPoolId":       poolID,
+		"MfaConfiguration": "ON",
+	})
+	wSet := doOp(t, ro, "SetUserPoolMfaConfig", string(body))
+	require.Equal(t, http.StatusOK, wSet.Code)
+
+	w := doInitAuth(t, ro, clientID, "alice", "Password123!")
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp map[string]any
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, "SOFTWARE_TOKEN_MFA", resp["ChallengeName"])
+}
+
+func TestMFASetup_FullFlowSuccess(t *testing.T) {
+	ro := newTestRouter(t)
+	clientID := setupMFARequiredPool(t, ro)
+
+	w := doInitAuth(t, ro, clientID, "alice", "Password123!")
+	require.Equal(t, http.StatusOK, w.Code)
+	var initResp map[string]any
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&initResp))
+	require.Equal(t, "MFA_SETUP", initResp["ChallengeName"])
+	session := initResp["Session"].(string)
+
+	// AssociateSoftwareToken with the MFA_SETUP session.
+	assocBody, _ := json.Marshal(map[string]string{"Session": session})
+	w2 := doOp(t, ro, "AssociateSoftwareToken", string(assocBody))
+	require.Equal(t, http.StatusOK, w2.Code)
+	var assocResp associateSoftwareTokenResponse
+	require.NoError(t, json.NewDecoder(w2.Body).Decode(&assocResp))
+	require.NotEmpty(t, assocResp.SecretCode)
+	require.NotEmpty(t, assocResp.Session)
+
+	// VerifySoftwareToken with the session AssociateSoftwareToken returned.
+	verifyBody, _ := json.Marshal(map[string]string{
+		"Session":  assocResp.Session,
+		"UserCode": currentTOTPCode(t, assocResp.SecretCode),
+	})
+	w3 := doOp(t, ro, "VerifySoftwareToken", string(verifyBody))
+	require.Equal(t, http.StatusOK, w3.Code)
+	var verifyResp verifySoftwareTokenResponse
+	require.NoError(t, json.NewDecoder(w3.Body).Decode(&verifyResp))
+	assert.Equal(t, "SUCCESS", verifyResp.Status)
+	require.NotEmpty(t, verifyResp.Session)
+
+	// RespondToAuthChallenge with the session VerifySoftwareToken returned completes sign-in.
+	respBody, _ := json.Marshal(map[string]any{
+		"ClientId":           clientID,
+		"ChallengeName":      "MFA_SETUP",
+		"Session":            verifyResp.Session,
+		"ChallengeResponses": map[string]string{"USERNAME": "alice"},
+	})
+	w4 := doOp(t, ro, "RespondToAuthChallenge", string(respBody))
+	require.Equal(t, http.StatusOK, w4.Code)
+	var authResp map[string]any
+	require.NoError(t, json.NewDecoder(w4.Body).Decode(&authResp))
+	result := authResp["AuthenticationResult"].(map[string]any)
+	assert.NotEmpty(t, result["AccessToken"])
+	assert.NotEmpty(t, result["RefreshToken"])
+
+	// A later sign-in must present SOFTWARE_TOKEN_MFA, not MFA_SETUP again.
+	w5 := doInitAuth(t, ro, clientID, "alice", "Password123!")
+	require.Equal(t, http.StatusOK, w5.Code)
+	var laterResp map[string]any
+	require.NoError(t, json.NewDecoder(w5.Body).Decode(&laterResp))
+	assert.Equal(t, "SOFTWARE_TOKEN_MFA", laterResp["ChallengeName"])
+}
+
+func TestMFASetup_GetUserPoolInternalError(t *testing.T) {
+	hash, err := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.MinCost)
+	require.NoError(t, err)
+	key := testRSAKey(t)
+	keyID, _ := generateTokenID()
+
+	ro := &Router{storage: &mockStore{
+		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
+		getUserFn: func(string, string) (*UserMetadata, error) {
+			return &UserMetadata{
+				Username:     "alice",
+				Status:       userStatusConfirmed,
+				Enabled:      true,
+				PasswordHash: string(hash),
+			}, nil
+		},
+		getOrCreateKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: keyID}, key, nil
+		},
+		getErr: errors.New("boom"),
+	}}
+
+	w := doInitAuth(t, ro, "client-1", "alice", "Password123!")
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestAssociateSoftwareTokenSession_InvalidJWT(t *testing.T) {
+	ro := newTestRouter(t)
+	body, _ := json.Marshal(map[string]string{"Session": "not-a-valid-jwt"})
+	w := doOp(t, ro, "AssociateSoftwareToken", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeNotAuthorizedException)
+}
+
+func TestAssociateSoftwareTokenSession_UnknownPool(t *testing.T) {
+	key := testRSAKey(t)
+	keyID, _ := generateTokenID()
+	session, err := buildSessionToken(
+		key,
+		keyID,
+		"pool-does-not-exist",
+		"c",
+		"alice",
+		"MFA_SETUP",
+		nil,
+	)
+	require.NoError(t, err)
+
+	ro := newTestRouter(t)
+	body, _ := json.Marshal(map[string]string{"Session": session})
+	w := doOp(t, ro, "AssociateSoftwareToken", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeNotAuthorizedException)
+}
+
+func TestAssociateSoftwareTokenSession_WrongChallengeInSession(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID, clientID := setupPool(t, ro)
+	storage := ro.storage.(*Storage)
+	insertFCPUser(t, storage, poolID, "charlie", "charlie-sub", "TempPass123!")
+
+	w := doInitAuth(t, ro, clientID, "charlie", "TempPass123!")
+	require.Equal(t, http.StatusOK, w.Code)
+	var initResp map[string]any
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&initResp))
+	session := initResp["Session"].(string) // a NEW_PASSWORD_REQUIRED session
+
+	body, _ := json.Marshal(map[string]string{"Session": session})
+	w2 := doOp(t, ro, "AssociateSoftwareToken", string(body))
+	assert.Equal(t, http.StatusBadRequest, w2.Code)
+	assertErrType(t, w2, ErrTypeNotAuthorizedException)
+}
+
+func TestAssociateSoftwareTokenSession_UserNotFound(t *testing.T) {
+	key := testRSAKey(t)
+	keyID, _ := generateTokenID()
+	session, err := buildSessionToken(key, keyID, "pool-1", "c", "ghost", "MFA_SETUP", nil)
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: keyID}, key, nil
+		},
+		getUserFn: func(string, string) (*UserMetadata, error) {
+			return nil, errUserNotFound
+		},
+	}}
+	body, _ := json.Marshal(map[string]string{"Session": session})
+	w := doOp(t, ro, "AssociateSoftwareToken", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeUserNotFoundException)
+}
+
+func TestAssociateSoftwareTokenSession_EmptyPoolIDClaim(t *testing.T) {
+	key := testRSAKey(t)
+	token, err := buildJWT(
+		key,
+		"kid",
+		map[string]any{"challenge": "MFA_SETUP", "username": "alice"},
+	)
+	require.NoError(t, err)
+
+	ro := newTestRouter(t)
+	body, _ := json.Marshal(map[string]string{"Session": token})
+	w := doOp(t, ro, "AssociateSoftwareToken", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeNotAuthorizedException)
+}
+
+func TestAssociateSoftwareTokenSession_SignatureMismatch(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID, _ := setupPool(t, ro)
+	storage := ro.storage.(*Storage)
+	_, _, err := storage.GetOrCreatePoolKeys(poolID)
+	require.NoError(t, err)
+
+	foreignKey := testRSAKey(t)
+	keyID, _ := generateTokenID()
+	session, err := buildSessionToken(foreignKey, keyID, poolID, "c", "alice", "MFA_SETUP", nil)
+	require.NoError(t, err)
+
+	body, _ := json.Marshal(map[string]string{"Session": session})
+	w := doOp(t, ro, "AssociateSoftwareToken", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeNotAuthorizedException)
+}
+
+func TestAssociateSoftwareTokenSession_GetUserInternalError(t *testing.T) {
+	key := testRSAKey(t)
+	keyID, _ := generateTokenID()
+	session, err := buildSessionToken(key, keyID, "pool-1", "c", "alice", "MFA_SETUP", nil)
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: keyID}, key, nil
+		},
+		getUserFn: func(string, string) (*UserMetadata, error) {
+			return nil, errors.New("boom")
+		},
+	}}
+	body, _ := json.Marshal(map[string]string{"Session": session})
+	w := doOp(t, ro, "AssociateSoftwareToken", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestAssociateSoftwareTokenSession_PoolKeysInternalError(t *testing.T) {
+	key := testRSAKey(t)
+	keyID, _ := generateTokenID()
+	session, err := buildSessionToken(key, keyID, "pool-1", "c", "alice", "MFA_SETUP", nil)
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return nil, nil, errors.New("boom")
+		},
+	}}
+	body, _ := json.Marshal(map[string]string{"Session": session})
+	w := doOp(t, ro, "AssociateSoftwareToken", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestVerifySoftwareTokenSession_BothAccessTokenAndSessionRejected(t *testing.T) {
+	ro := newTestRouter(t)
+	body, _ := json.Marshal(map[string]string{
+		"AccessToken": "tok",
+		"Session":     "some-session-id-that-is-long-enough",
+		"UserCode":    "123456",
+	})
+	w := doOp(t, ro, "VerifySoftwareToken", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeInvalidParameterException)
+}
+
+func TestVerifySoftwareTokenSession_NeitherAccessTokenNorSessionRejected(t *testing.T) {
+	ro := newTestRouter(t)
+	body, _ := json.Marshal(map[string]string{"UserCode": "123456"})
+	w := doOp(t, ro, "VerifySoftwareToken", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeInvalidParameterException)
+}
+
+func TestVerifySoftwareTokenSession_InvalidSession(t *testing.T) {
+	ro := newTestRouter(t)
+	body, _ := json.Marshal(map[string]string{"Session": "not-a-valid-jwt", "UserCode": "123456"})
+	w := doOp(t, ro, "VerifySoftwareToken", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeNotAuthorizedException)
+}
+
+func TestVerifySoftwareTokenSession_GetUserInternalError(t *testing.T) {
+	key := testRSAKey(t)
+	keyID, _ := generateTokenID()
+	session, err := buildSessionToken(
+		key, keyID, "pool-1", "c", "alice", "MFA_SETUP",
+		map[string]any{"pending_totp_secret": "JBSWY3DPEHPK3PXP"},
+	)
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: keyID}, key, nil
+		},
+		getUserFn: func(string, string) (*UserMetadata, error) {
+			return nil, errors.New("boom")
+		},
+	}}
+	body, _ := json.Marshal(map[string]string{"Session": session, "UserCode": "123456"})
+	w := doOp(t, ro, "VerifySoftwareToken", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestVerifySoftwareTokenSession_NoPendingSecret(t *testing.T) {
+	ro := newTestRouter(t)
+	clientID := setupMFARequiredPool(t, ro)
+
+	w := doInitAuth(t, ro, clientID, "alice", "Password123!")
+	require.Equal(t, http.StatusOK, w.Code)
+	var initResp map[string]any
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&initResp))
+	session := initResp["Session"].(string) // MFA_SETUP session with no pending secret yet
+
+	body, _ := json.Marshal(map[string]string{"Session": session, "UserCode": "123456"})
+	w2 := doOp(t, ro, "VerifySoftwareToken", string(body))
+	assert.Equal(t, http.StatusBadRequest, w2.Code)
+	assertErrType(t, w2, ErrTypeSoftwareTokenMFANotFoundException)
+}
+
+func TestVerifySoftwareTokenSession_WrongCode(t *testing.T) {
+	ro := newTestRouter(t)
+	clientID := setupMFARequiredPool(t, ro)
+
+	w := doInitAuth(t, ro, clientID, "alice", "Password123!")
+	require.Equal(t, http.StatusOK, w.Code)
+	var initResp map[string]any
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&initResp))
+	session := initResp["Session"].(string)
+
+	assocBody, _ := json.Marshal(map[string]string{"Session": session})
+	w2 := doOp(t, ro, "AssociateSoftwareToken", string(assocBody))
+	require.Equal(t, http.StatusOK, w2.Code)
+	var assocResp associateSoftwareTokenResponse
+	require.NoError(t, json.NewDecoder(w2.Body).Decode(&assocResp))
+
+	verifyBody, _ := json.Marshal(map[string]string{
+		"Session": assocResp.Session, "UserCode": "000000",
+	})
+	w3 := doOp(t, ro, "VerifySoftwareToken", string(verifyBody))
+	assert.Equal(t, http.StatusBadRequest, w3.Code)
+	assertErrType(t, w3, ErrTypeCodeMismatchException)
+}
+
+func TestVerifySoftwareTokenSession_UserNotFound(t *testing.T) {
+	key := testRSAKey(t)
+	keyID, _ := generateTokenID()
+	session, err := buildSessionToken(
+		key, keyID, "pool-1", "c", "ghost", "MFA_SETUP",
+		map[string]any{"pending_totp_secret": "JBSWY3DPEHPK3PXP"},
+	)
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: keyID}, key, nil
+		},
+		getUserFn: func(string, string) (*UserMetadata, error) {
+			return nil, errUserNotFound
+		},
+	}}
+	body, _ := json.Marshal(map[string]string{"Session": session, "UserCode": "123456"})
+	w := doOp(t, ro, "VerifySoftwareToken", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeUserNotFoundException)
+}
+
+func TestMFASetupChallenge_PoolKeysInternalError(t *testing.T) {
+	ro := &Router{storage: &mockStore{
+		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
+		getOrCreateKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return nil, nil, errors.New("boom")
+		},
+	}}
+	body, _ := json.Marshal(map[string]any{
+		"ClientId": "c", "ChallengeName": "MFA_SETUP", "Session": "irrelevant",
+		"ChallengeResponses": map[string]string{"USERNAME": "alice"},
+	})
+	w := doOp(t, ro, "RespondToAuthChallenge", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestMFASetupChallenge_GetUserInternalError(t *testing.T) {
+	key := testRSAKey(t)
+	keyID, _ := generateTokenID()
+	session, err := buildSessionToken(
+		key, keyID, "pool-1", "c", "alice", "MFA_SETUP",
+		map[string]any{"verified_totp_secret": "JBSWY3DPEHPK3PXP"},
+	)
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
+		getOrCreateKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: keyID}, key, nil
+		},
+		getUserFn: func(string, string) (*UserMetadata, error) {
+			return nil, errors.New("boom")
+		},
+	}}
+	body, _ := json.Marshal(map[string]any{
+		"ClientId": "c", "ChallengeName": "MFA_SETUP", "Session": session,
+		"ChallengeResponses": map[string]string{"USERNAME": "alice"},
+	})
+	w := doOp(t, ro, "RespondToAuthChallenge", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+func TestMFASetupChallenge_RespondUsernameFromSession(t *testing.T) {
+	ro := newTestRouter(t)
+	clientID := setupMFARequiredPool(t, ro)
+
+	w := doInitAuth(t, ro, clientID, "alice", "Password123!")
+	require.Equal(t, http.StatusOK, w.Code)
+	var initResp map[string]any
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&initResp))
+	session := initResp["Session"].(string)
+
+	assocBody, _ := json.Marshal(map[string]string{"Session": session})
+	w2 := doOp(t, ro, "AssociateSoftwareToken", string(assocBody))
+	require.Equal(t, http.StatusOK, w2.Code)
+	var assocResp associateSoftwareTokenResponse
+	require.NoError(t, json.NewDecoder(w2.Body).Decode(&assocResp))
+
+	verifyBody, _ := json.Marshal(map[string]string{
+		"Session": assocResp.Session, "UserCode": currentTOTPCode(t, assocResp.SecretCode),
+	})
+	w3 := doOp(t, ro, "VerifySoftwareToken", string(verifyBody))
+	require.Equal(t, http.StatusOK, w3.Code)
+	var verifyResp verifySoftwareTokenResponse
+	require.NoError(t, json.NewDecoder(w3.Body).Decode(&verifyResp))
+
+	respBody, _ := json.Marshal(map[string]any{
+		"ClientId":           clientID,
+		"ChallengeName":      "MFA_SETUP",
+		"Session":            verifyResp.Session,
+		"ChallengeResponses": map[string]string{},
+	})
+	w4 := doOp(t, ro, "RespondToAuthChallenge", string(respBody))
+	assert.Equal(t, http.StatusOK, w4.Code)
+}
+
+func TestMFASetupChallenge_MissingVerifiedSecret(t *testing.T) {
+	ro := newTestRouter(t)
+	clientID := setupMFARequiredPool(t, ro)
+
+	w := doInitAuth(t, ro, clientID, "alice", "Password123!")
+	require.Equal(t, http.StatusOK, w.Code)
+	var initResp map[string]any
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&initResp))
+	session := initResp["Session"].(string)
+
+	// Skip AssociateSoftwareToken/VerifySoftwareToken: try to complete the challenge
+	// with the raw InitiateAuth session, which carries no verified_totp_secret.
+	body, _ := json.Marshal(map[string]any{
+		"ClientId":           clientID,
+		"ChallengeName":      "MFA_SETUP",
+		"Session":            session,
+		"ChallengeResponses": map[string]string{"USERNAME": "alice"},
+	})
+	w2 := doOp(t, ro, "RespondToAuthChallenge", string(body))
+	assert.Equal(t, http.StatusBadRequest, w2.Code)
+	assertErrType(t, w2, ErrTypeNotAuthorizedException)
+}
+
+func TestMFASetupChallenge_InvalidSession(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	body, _ := json.Marshal(map[string]any{
+		"ClientId":           clientID,
+		"ChallengeName":      "MFA_SETUP",
+		"Session":            "not-a-valid-jwt",
+		"ChallengeResponses": map[string]string{"USERNAME": "alice"},
+	})
+	w := doOp(t, ro, "RespondToAuthChallenge", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeNotAuthorizedException)
+}
+
+func TestMFASetupChallenge_ClientIDMismatch(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPoolWithMFA(t, ro, "mfa-pool", "ON")
+	clientID := createClient(t, ro, poolID, "mfa-client")
+	otherClientID := createClient(t, ro, poolID, "other-client")
+	signUpUser(t, ro, clientID, "alice", "Password123!")
+	confirmUser(t, ro, clientID, "alice")
+
+	w := doInitAuth(t, ro, clientID, "alice", "Password123!")
+	require.Equal(t, http.StatusOK, w.Code)
+	var initResp map[string]any
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&initResp))
+	session := initResp["Session"].(string)
+
+	assocBody, _ := json.Marshal(map[string]string{"Session": session})
+	w2 := doOp(t, ro, "AssociateSoftwareToken", string(assocBody))
+	require.Equal(t, http.StatusOK, w2.Code)
+	var assocResp associateSoftwareTokenResponse
+	require.NoError(t, json.NewDecoder(w2.Body).Decode(&assocResp))
+
+	verifyBody, _ := json.Marshal(map[string]string{
+		"Session": assocResp.Session, "UserCode": currentTOTPCode(t, assocResp.SecretCode),
+	})
+	w3 := doOp(t, ro, "VerifySoftwareToken", string(verifyBody))
+	require.Equal(t, http.StatusOK, w3.Code)
+	var verifyResp verifySoftwareTokenResponse
+	require.NoError(t, json.NewDecoder(w3.Body).Decode(&verifyResp))
+
+	respBody, _ := json.Marshal(map[string]any{
+		"ClientId":           otherClientID,
+		"ChallengeName":      "MFA_SETUP",
+		"Session":            verifyResp.Session,
+		"ChallengeResponses": map[string]string{"USERNAME": "alice"},
+	})
+	w4 := doOp(t, ro, "RespondToAuthChallenge", string(respBody))
+	assert.Equal(t, http.StatusBadRequest, w4.Code)
+	assertErrType(t, w4, ErrTypeNotAuthorizedException)
+}
+
+func TestMFASetupChallenge_UsernameMismatch(t *testing.T) {
+	ro := newTestRouter(t)
+	clientID := setupMFARequiredPool(t, ro)
+
+	w := doInitAuth(t, ro, clientID, "alice", "Password123!")
+	require.Equal(t, http.StatusOK, w.Code)
+	var initResp map[string]any
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&initResp))
+	session := initResp["Session"].(string)
+
+	assocBody, _ := json.Marshal(map[string]string{"Session": session})
+	w2 := doOp(t, ro, "AssociateSoftwareToken", string(assocBody))
+	require.Equal(t, http.StatusOK, w2.Code)
+	var assocResp associateSoftwareTokenResponse
+	require.NoError(t, json.NewDecoder(w2.Body).Decode(&assocResp))
+
+	verifyBody, _ := json.Marshal(map[string]string{
+		"Session": assocResp.Session, "UserCode": currentTOTPCode(t, assocResp.SecretCode),
+	})
+	w3 := doOp(t, ro, "VerifySoftwareToken", string(verifyBody))
+	require.Equal(t, http.StatusOK, w3.Code)
+	var verifyResp verifySoftwareTokenResponse
+	require.NoError(t, json.NewDecoder(w3.Body).Decode(&verifyResp))
+
+	respBody, _ := json.Marshal(map[string]any{
+		"ClientId":           clientID,
+		"ChallengeName":      "MFA_SETUP",
+		"Session":            verifyResp.Session,
+		"ChallengeResponses": map[string]string{"USERNAME": "someone-else"},
+	})
+	w4 := doOp(t, ro, "RespondToAuthChallenge", string(respBody))
+	assert.Equal(t, http.StatusBadRequest, w4.Code)
+	assertErrType(t, w4, ErrTypeNotAuthorizedException)
+}
+
+func TestMFASetupChallenge_UserNotFound(t *testing.T) {
+	key := testRSAKey(t)
+	keyID, _ := generateTokenID()
+	session, err := buildSessionToken(
+		key, keyID, "pool-1", "c", "ghost", "MFA_SETUP",
+		map[string]any{"verified_totp_secret": "JBSWY3DPEHPK3PXP"},
+	)
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
+		getOrCreateKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: keyID}, key, nil
+		},
+		getUserFn: func(string, string) (*UserMetadata, error) {
+			return nil, errUserNotFound
+		},
+	}}
+	body, _ := json.Marshal(map[string]any{
+		"ClientId": "c", "ChallengeName": "MFA_SETUP", "Session": session,
+		"ChallengeResponses": map[string]string{"USERNAME": "ghost"},
+	})
+	w := doOp(t, ro, "RespondToAuthChallenge", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeUserNotFoundException)
+}
+
+func TestMFASetupChallenge_UserDisabled(t *testing.T) {
+	key := testRSAKey(t)
+	keyID, _ := generateTokenID()
+	session, err := buildSessionToken(
+		key, keyID, "pool-1", "c", "alice", "MFA_SETUP",
+		map[string]any{"verified_totp_secret": "JBSWY3DPEHPK3PXP"},
+	)
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
+		getOrCreateKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: keyID}, key, nil
+		},
+		getUserFn: func(string, string) (*UserMetadata, error) {
+			return &UserMetadata{Username: "alice", Enabled: false}, nil
+		},
+	}}
+	body, _ := json.Marshal(map[string]any{
+		"ClientId": "c", "ChallengeName": "MFA_SETUP", "Session": session,
+		"ChallengeResponses": map[string]string{"USERNAME": "alice"},
+	})
+	w := doOp(t, ro, "RespondToAuthChallenge", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeNotAuthorizedException)
+}
+
+func TestMFASetupChallenge_UpdateUserRaceUserNotFound(t *testing.T) {
+	key := testRSAKey(t)
+	keyID, _ := generateTokenID()
+	session, err := buildSessionToken(
+		key, keyID, "pool-1", "c", "alice", "MFA_SETUP",
+		map[string]any{"verified_totp_secret": "JBSWY3DPEHPK3PXP"},
+	)
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
+		getOrCreateKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: keyID}, key, nil
+		},
+		getUserFn: func(string, string) (*UserMetadata, error) {
+			return &UserMetadata{Username: "alice", Enabled: true}, nil
+		},
+		updateUserFn: func(string, string, func(*UserMetadata) error) error {
+			return errUserNotFound
+		},
+	}}
+	body, _ := json.Marshal(map[string]any{
+		"ClientId": "c", "ChallengeName": "MFA_SETUP", "Session": session,
+		"ChallengeResponses": map[string]string{"USERNAME": "alice"},
+	})
+	w := doOp(t, ro, "RespondToAuthChallenge", string(body))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeUserNotFoundException)
+}
+
+func TestMFASetupChallenge_UpdateUserError(t *testing.T) {
+	key := testRSAKey(t)
+	keyID, _ := generateTokenID()
+	session, err := buildSessionToken(
+		key, keyID, "pool-1", "c", "alice", "MFA_SETUP",
+		map[string]any{"verified_totp_secret": "JBSWY3DPEHPK3PXP"},
+	)
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
+		getOrCreateKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: keyID}, key, nil
+		},
+		getUserFn: func(string, string) (*UserMetadata, error) {
+			return &UserMetadata{Username: "alice", Enabled: true}, nil
+		},
+		updateUserErr: errors.New("storage failure"),
+	}}
+	body, _ := json.Marshal(map[string]any{
+		"ClientId": "c", "ChallengeName": "MFA_SETUP", "Session": session,
+		"ChallengeResponses": map[string]string{"USERNAME": "alice"},
+	})
+	w := doOp(t, ro, "RespondToAuthChallenge", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
 }
