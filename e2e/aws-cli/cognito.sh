@@ -1849,7 +1849,7 @@ if [[ -n "$FORCED_MFA_CODE" ]]; then
               fail "SetUserMFAPreference — expected InvalidParameterException disabling MFA in MfaConfiguration=ON pool"
             fi
           else
-            skip "SetUserMFAPreference (disable rejection) — no AccessToken available"
+            fail "RespondToAuthChallenge (MFA_SETUP) — expected AuthenticationResult.AccessToken"
           fi
 
           # A later sign-in must now get SOFTWARE_TOKEN_MFA, not MFA_SETUP again.
