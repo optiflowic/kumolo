@@ -23,7 +23,7 @@ Empty body, matching AWS.
 
 | Error type                 | HTTP | Condition                                                                 |
 |------------------------------|------|-----------------------------------------------------------------------------|
-| InvalidParameterException   | 400  | Invalid request body; `SoftwareTokenMfaSettings.Enabled: true` while the user has no verified TOTP secret; or `Enabled: false` while the user's pool has `MfaConfiguration: "ON"` (both kumolo-specific — see deviations) |
+| InvalidParameterException   | 400  | Invalid request body; `SoftwareTokenMfaSettings.Enabled: true` while the user has no verified TOTP secret; or `Enabled: false` while the user's pool has `MfaConfiguration: "ON"` and the user has `SoftwareTokenMFAEnabled == true` (both kumolo-specific — see deviations) |
 | NotAuthorizedException      | 400  | Invalid, expired, or revoked access token                                 |
 | UserNotFoundException       | 400  | Token's `sub` does not resolve to a stored user                            |
 | InternalErrorException      | 500  | Storage failure                                                             |
