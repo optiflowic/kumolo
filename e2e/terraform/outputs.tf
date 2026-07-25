@@ -112,3 +112,11 @@ output "cognito_user_pool_tags" {
 output "cognito_user_pool_account_recovery_setting" {
   value = aws_cognito_user_pool.main.account_recovery_setting
 }
+
+output "cognito_mfa_required_pool_id" {
+  value = aws_cognito_user_pool.mfa_required.id
+}
+
+output "cognito_mfa_required_pool_mfa_configuration" {
+  value = aws_cognito_user_pool.mfa_required.mfa_configuration
+}

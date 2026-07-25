@@ -23,8 +23,9 @@ AuthParameters required: `USERNAME`, `PASSWORD`
 
 Success response (normal user): `AuthenticationResult` with all three tokens.
 Success response (FORCE_CHANGE_PASSWORD user): `ChallengeName: "NEW_PASSWORD_REQUIRED"` with session.
-Success response (SOFTWARE_TOKEN_MFA enabled): `ChallengeName: "SOFTWARE_TOKEN_MFA"` with session
-— see `docs/aws-spec/cognito/respond_to_auth_challenge.md`.
+Success response (SOFTWARE_TOKEN_MFA enabled): `ChallengeName: "SOFTWARE_TOKEN_MFA"` with session.
+Success response (pool requires MFA, user has none enrolled): `ChallengeName: "MFA_SETUP"` with
+session — see `docs/aws-spec/cognito/respond_to_auth_challenge.md`.
 
 ### REFRESH_TOKEN_AUTH / REFRESH_TOKEN
 AuthParameters required: `REFRESH_TOKEN`
@@ -138,10 +139,14 @@ Presenting an expired token returns `NotAuthorizedException`.
 ## kumolo Deviations
 
 - Only USER_PASSWORD_AUTH, USER_SRP_AUTH, and REFRESH_TOKEN_AUTH/REFRESH_TOKEN flows supported.
-- No forced `MFA_SETUP` challenge: a pool's `MfaConfiguration` (`ON`/`OPTIONAL`) does not gate
-  sign-in. Only a user's own `SoftwareTokenMFAEnabled` flag (set via `SetUserMFAPreference`)
-  triggers a `SOFTWARE_TOKEN_MFA` challenge; REFRESH_TOKEN_AUTH/REFRESH_TOKEN never re-challenges
-  MFA, matching AWS.
+- Forced `MFA_SETUP`: when the pool's `MfaConfiguration` is `"ON"` and the authenticating user has
+  no MFA method enrolled (`SoftwareTokenMFAEnabled == false`), primary auth succeeds into a
+  `ChallengeName: "MFA_SETUP"` response instead of tokens, with
+  `ChallengeParameters.MFAS_CAN_SETUP` always `["SOFTWARE_TOKEN_MFA"]` (kumolo only supports TOTP).
+  `MfaConfiguration: "OPTIONAL"` does not gate sign-in. A user's own `SoftwareTokenMFAEnabled` flag
+  (set via `SetUserMFAPreference`, or by completing the `MFA_SETUP` challenge — see
+  `respond_to_auth_challenge.md`) takes precedence and triggers `SOFTWARE_TOKEN_MFA` instead.
+  REFRESH_TOKEN_AUTH/REFRESH_TOKEN never re-challenges MFA, matching AWS.
 - USER_SRP_AUTH: no AWS-style anti-enumeration "fake verifier" trick — an
   unknown username fails fast with `UserNotFoundException`, consistent with
   USER_PASSWORD_AUTH. A user with no stored SRP verifier (e.g. created before

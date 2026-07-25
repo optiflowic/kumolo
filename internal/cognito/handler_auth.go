@@ -684,13 +684,54 @@ func (ro *Router) completeAuth(
 		return
 	}
 
-	if !user.SoftwareTokenMFAEnabled {
-		ro.writeAuthResult(w, poolID, clientID, user, privateKey, keyID, true, "")
+	if user.SoftwareTokenMFAEnabled {
+		writeChallengeResponse(
+			w,
+			privateKey,
+			keyID,
+			poolID,
+			clientID,
+			user.Username,
+			challengeSoftwareTokenMFA,
+			nil,
+		)
 		return
 	}
 
+	pool, err := ro.storage.GetUserPool(poolID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to get user pool")
+		return
+	}
+	if pool.MfaConfiguration == mfaConfigurationOn {
+		writeChallengeResponse(
+			w,
+			privateKey,
+			keyID,
+			poolID,
+			clientID,
+			user.Username,
+			challengeMFASetup,
+			map[string]string{"MFAS_CAN_SETUP": fmt.Sprintf(`["%s"]`, mfaSettingSoftwareToken)},
+		)
+		return
+	}
+
+	ro.writeAuthResult(w, poolID, clientID, user, privateKey, keyID, true, "")
+}
+
+// writeChallengeResponse builds a Session JWT carrying challenge as its "challenge" claim
+// and writes the InitiateAuth/RespondToAuthChallenge challenge response shape. extraParams
+// is merged into ChallengeParameters alongside the always-present USER_ID_FOR_SRP.
+func writeChallengeResponse(
+	w http.ResponseWriter,
+	privateKey *rsa.PrivateKey,
+	keyID, poolID, clientID, username, challenge string,
+	extraParams map[string]string,
+) {
 	sessionToken, err := buildSessionToken(
-		privateKey, keyID, poolID, clientID, user.Username, "SOFTWARE_TOKEN_MFA", nil,
+		privateKey, keyID, poolID, clientID, username, challenge, nil,
 	)
 	if err != nil {
 		// unreachable: buildJWT fails only if claims contain non-serializable types (all primitives here)
@@ -698,12 +739,16 @@ func (ro *Router) completeAuth(
 			"failed to build session token")
 		return
 	}
+	challengeParameters := map[string]string{
+		"USER_ID_FOR_SRP": username,
+	}
+	for k, v := range extraParams {
+		challengeParameters[k] = v
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ChallengeName": "SOFTWARE_TOKEN_MFA",
-		"ChallengeParameters": map[string]string{
-			"USER_ID_FOR_SRP": user.Username,
-		},
-		"Session": sessionToken,
+		"ChallengeName":       challenge,
+		"ChallengeParameters": challengeParameters,
+		"Session":             sessionToken,
 	})
 }
 
@@ -774,8 +819,16 @@ func (ro *Router) handleRespondToAuthChallenge(w http.ResponseWriter, body []byt
 			req.Session,
 			req.ChallengeResponses,
 		)
-	case "SOFTWARE_TOKEN_MFA":
+	case challengeSoftwareTokenMFA:
 		ro.handleSoftwareTokenMFAChallenge(
+			w,
+			poolID,
+			req.ClientID,
+			req.Session,
+			req.ChallengeResponses,
+		)
+	case challengeMFASetup:
+		ro.handleMFASetupChallenge(
 			w,
 			poolID,
 			req.ClientID,

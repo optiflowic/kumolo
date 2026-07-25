@@ -52,6 +52,29 @@ Issued instead of tokens whenever primary authentication (`USER_PASSWORD_AUTH`,
 against `UserMetadata.TOTPSecret`. On success, tokens are issued exactly as for the
 non-MFA success path.
 
+### MFA_SETUP
+
+ChallengeResponses required: none beyond the optional `USERNAME` fallback below.
+`USERNAME` is optional — same fallback-to-Session-claim behavior as the other challenges.
+
+Issued instead of tokens whenever primary authentication succeeds for a user in a pool with
+`MfaConfiguration: "ON"` who has no MFA method enrolled (see `initiate_auth.md`). Completing it
+requires the Session-authenticated `AssociateSoftwareToken`/`VerifySoftwareToken` flow first (see
+`docs/aws-spec/cognito/associate_software_token.md` and
+`docs/aws-spec/cognito/verify_software_token.md`):
+
+1. `AssociateSoftwareToken` with the `MFA_SETUP` Session from `InitiateAuth` — returns a
+   `SecretCode` and a new Session carrying the pending secret.
+2. `VerifySoftwareToken` with that Session and the user's TOTP code — returns `Status: "SUCCESS"`
+   and a new Session carrying the verified secret.
+3. `RespondToAuthChallenge` with `ChallengeName: "MFA_SETUP"` and that Session — commits the
+   secret to the user (`TOTPSecret`), sets `SoftwareTokenMFAEnabled = true` and
+   `PreferredMfaSetting = "SOFTWARE_TOKEN_MFA"`, and issues tokens. Later sign-ins get a
+   `SOFTWARE_TOKEN_MFA` challenge instead of `MFA_SETUP`.
+
+A Session that has not been through both `AssociateSoftwareToken` and `VerifySoftwareToken` (i.e.
+carries no verified secret) is rejected with `NotAuthorizedException`.
+
 ## Response
 
 Same as InitiateAuth success: `AuthenticationResult` with AccessToken, IdToken, RefreshToken, ExpiresIn, TokenType.
@@ -103,11 +126,10 @@ kumolo validates that:
 
 ## kumolo Deviations
 
-- Only NEW_PASSWORD_REQUIRED, PASSWORD_VERIFIER, and SOFTWARE_TOKEN_MFA challenges are supported.
-- `MFA_SETUP` (forced enrollment during sign-in for pools that require MFA) is not implemented —
-  `InitiateAuth`/`RespondToAuthChallenge` never issue it, regardless of `MfaConfiguration`. MFA
-  enrollment only happens out-of-band via `AssociateSoftwareToken`/`VerifySoftwareToken` on an
-  already-authenticated access token.
+- Only NEW_PASSWORD_REQUIRED, PASSWORD_VERIFIER, SOFTWARE_TOKEN_MFA, and MFA_SETUP challenges are
+  supported.
+- `MFA_SETUP` only supports TOTP enrollment (`SOFTWARE_TOKEN_MFA`); SMS/email MFA setup is not
+  implemented, matching kumolo's lack of SMS/email MFA support elsewhere.
 - Session is a kumolo-specific signed JWT (not the AWS opaque session token format).
 - Password policy enforcement: see `docs/aws-spec/cognito/password_policy.md`.
 - SecretHash, ClientMetadata, AnalyticsMetadata, UserContextData are accepted but ignored.
