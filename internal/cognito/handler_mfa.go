@@ -11,6 +11,17 @@ import (
 
 var errNoPendingTOTPSecret = errors.New("no pending TOTP secret")
 
+// challengeMFASetup and challengeSoftwareTokenMFA are the "challenge" claim values minted
+// into Session JWTs by handler_auth.go and validated against here; mfaSettingSoftwareToken
+// is the corresponding UserMetadata.PreferredMfaSetting value. All three cross the
+// handler_auth.go/handler_mfa.go boundary as a string contract, so a typo in any one
+// spelling would otherwise fail open into a generic error with no compile-time signal.
+const (
+	challengeMFASetup         = "MFA_SETUP"
+	challengeSoftwareTokenMFA = "SOFTWARE_TOKEN_MFA"
+	mfaSettingSoftwareToken   = "SOFTWARE_TOKEN_MFA"
+)
+
 // ──── AssociateSoftwareToken ──────────────────────────────────────────────────
 
 type associateSoftwareTokenRequest struct {
@@ -250,7 +261,7 @@ func (ro *Router) resolveMFASetupSession(
 		)
 		return "", nil, nil, nil, false
 	}
-	if challenge, _ := claims["challenge"].(string); challenge != "MFA_SETUP" {
+	if challenge, _ := claims["challenge"].(string); challenge != challengeMFASetup {
 		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException, "Invalid session.")
 		return "", nil, nil, nil, false
 	}
@@ -294,7 +305,7 @@ func (ro *Router) handleAssociateSoftwareTokenSession(w http.ResponseWriter, ses
 	}
 
 	newSession, err := buildSessionToken(
-		privateKey, keys.KeyID, poolID, clientID, username, "MFA_SETUP",
+		privateKey, keys.KeyID, poolID, clientID, username, challengeMFASetup,
 		map[string]any{"pending_totp_secret": secret},
 	)
 	if err != nil {
@@ -353,7 +364,7 @@ func (ro *Router) handleVerifySoftwareTokenSession(
 	}
 
 	newSession, err := buildSessionToken(
-		privateKey, keys.KeyID, poolID, clientID, username, "MFA_SETUP",
+		privateKey, keys.KeyID, poolID, clientID, username, challengeMFASetup,
 		map[string]any{"verified_totp_secret": pendingSecret},
 	)
 	if err != nil {
@@ -367,6 +378,40 @@ func (ro *Router) handleVerifySoftwareTokenSession(
 }
 
 // ──── RespondToAuthChallenge: MFA_SETUP ────────────────────────────────────────
+
+// validateMFASetupChallengeClaims checks the Session JWT's claims against the pool/client
+// from the RespondToAuthChallenge request and reconciles the ChallengeResponses USERNAME (if
+// provided) against the session's username, mirroring resolveMFASetupSession's validation for
+// the RespondToAuthChallenge entry point. Writes the appropriate error response and returns
+// ok=false on any mismatch.
+func (ro *Router) validateMFASetupChallengeClaims(
+	w http.ResponseWriter,
+	claims map[string]any,
+	poolID, clientID string,
+	responses map[string]string,
+) (username, verifiedSecret string, ok bool) {
+	claimPoolID, _ := claims["pool_id"].(string)
+	claimClientID, _ := claims["client_id"].(string)
+	claimChallenge, _ := claims["challenge"].(string)
+	claimUsername, _ := claims["username"].(string)
+	verifiedSecret, _ = claims["verified_totp_secret"].(string)
+
+	if claimPoolID != poolID || claimClientID != clientID ||
+		claimChallenge != challengeMFASetup || verifiedSecret == "" {
+		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException, "Invalid session.")
+		return "", "", false
+	}
+
+	username = responses["USERNAME"]
+	if username == "" {
+		username = claimUsername
+	} else if username != claimUsername {
+		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException, "Invalid session.")
+		return "", "", false
+	}
+
+	return username, verifiedSecret, true
+}
 
 // handleMFASetupChallenge completes the forced MFA_SETUP challenge using the Session
 // returned by handleVerifySoftwareTokenSession. It commits the verified TOTP secret to the
@@ -391,23 +436,10 @@ func (ro *Router) handleMFASetupChallenge(
 		return
 	}
 
-	claimPoolID, _ := claims["pool_id"].(string)
-	claimClientID, _ := claims["client_id"].(string)
-	claimChallenge, _ := claims["challenge"].(string)
-	claimUsername, _ := claims["username"].(string)
-	verifiedSecret, _ := claims["verified_totp_secret"].(string)
-
-	if claimPoolID != poolID || claimClientID != clientID ||
-		claimChallenge != "MFA_SETUP" || verifiedSecret == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException, "Invalid session.")
-		return
-	}
-
-	username := responses["USERNAME"]
-	if username == "" {
-		username = claimUsername
-	} else if username != claimUsername {
-		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException, "Invalid session.")
+	username, verifiedSecret, ok := ro.validateMFASetupChallengeClaims(
+		w, claims, poolID, clientID, responses,
+	)
+	if !ok {
 		return
 	}
 
@@ -439,7 +471,7 @@ func (ro *Router) handleMFASetupChallenge(
 	updateErr := ro.storage.UpdateUser(poolID, username, func(u *UserMetadata) error {
 		u.TOTPSecret = verifiedSecret
 		u.SoftwareTokenMFAEnabled = true
-		u.PreferredMfaSetting = "SOFTWARE_TOKEN_MFA"
+		u.PreferredMfaSetting = mfaSettingSoftwareToken
 		updatedUser = u
 		return nil
 	})
@@ -519,11 +551,11 @@ func (ro *Router) handleSetUserMFAPreference(w http.ResponseWriter, body []byte)
 		u.SoftwareTokenMFAEnabled = settings.Enabled
 		switch {
 		case !u.SoftwareTokenMFAEnabled || !settings.PreferredMfa:
-			if u.PreferredMfaSetting == "SOFTWARE_TOKEN_MFA" {
+			if u.PreferredMfaSetting == mfaSettingSoftwareToken {
 				u.PreferredMfaSetting = ""
 			}
 		default:
-			u.PreferredMfaSetting = "SOFTWARE_TOKEN_MFA"
+			u.PreferredMfaSetting = mfaSettingSoftwareToken
 		}
 		return nil
 	})
@@ -576,7 +608,7 @@ func (ro *Router) handleSoftwareTokenMFAChallenge(
 	claimUsername, _ := claims["username"].(string)
 
 	if claimPoolID != poolID || claimClientID != clientID ||
-		claimChallenge != "SOFTWARE_TOKEN_MFA" {
+		claimChallenge != challengeSoftwareTokenMFA {
 		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException, "Invalid session.")
 		return
 	}

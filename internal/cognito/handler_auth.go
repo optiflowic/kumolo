@@ -686,7 +686,7 @@ func (ro *Router) completeAuth(
 
 	if user.SoftwareTokenMFAEnabled {
 		sessionToken, err := buildSessionToken(
-			privateKey, keyID, poolID, clientID, user.Username, "SOFTWARE_TOKEN_MFA", nil,
+			privateKey, keyID, poolID, clientID, user.Username, challengeSoftwareTokenMFA, nil,
 		)
 		if err != nil {
 			// unreachable: buildJWT fails only if claims contain non-serializable types (all primitives here)
@@ -695,7 +695,7 @@ func (ro *Router) completeAuth(
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"ChallengeName": "SOFTWARE_TOKEN_MFA",
+			"ChallengeName": challengeSoftwareTokenMFA,
 			"ChallengeParameters": map[string]string{
 				"USER_ID_FOR_SRP": user.Username,
 			},
@@ -712,7 +712,7 @@ func (ro *Router) completeAuth(
 	}
 	if pool.MfaConfiguration == "ON" {
 		sessionToken, err := buildSessionToken(
-			privateKey, keyID, poolID, clientID, user.Username, "MFA_SETUP", nil,
+			privateKey, keyID, poolID, clientID, user.Username, challengeMFASetup, nil,
 		)
 		if err != nil {
 			// unreachable: buildJWT fails only if claims contain non-serializable types (all primitives here)
@@ -721,10 +721,10 @@ func (ro *Router) completeAuth(
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"ChallengeName": "MFA_SETUP",
+			"ChallengeName": challengeMFASetup,
 			"ChallengeParameters": map[string]string{
 				"USER_ID_FOR_SRP": user.Username,
-				"MFAS_CAN_SETUP":  `["SOFTWARE_TOKEN_MFA"]`,
+				"MFAS_CAN_SETUP":  fmt.Sprintf(`["%s"]`, mfaSettingSoftwareToken),
 			},
 			"Session": sessionToken,
 		})
@@ -801,7 +801,7 @@ func (ro *Router) handleRespondToAuthChallenge(w http.ResponseWriter, body []byt
 			req.Session,
 			req.ChallengeResponses,
 		)
-	case "SOFTWARE_TOKEN_MFA":
+	case challengeSoftwareTokenMFA:
 		ro.handleSoftwareTokenMFAChallenge(
 			w,
 			poolID,
@@ -809,7 +809,7 @@ func (ro *Router) handleRespondToAuthChallenge(w http.ResponseWriter, body []byt
 			req.Session,
 			req.ChallengeResponses,
 		)
-	case "MFA_SETUP":
+	case challengeMFASetup:
 		ro.handleMFASetupChallenge(
 			w,
 			poolID,

@@ -228,12 +228,16 @@ func newForcedMFATestEnv(t *testing.T, name string) mfaTestEnv {
 	cl, err := c.CreateUserPoolClient(ctx, &awscognito.CreateUserPoolClientInput{
 		UserPoolId: aws.String(poolID),
 		ClientName: aws.String(name + "-client"),
+		ExplicitAuthFlows: []types.ExplicitAuthFlowsType{
+			types.ExplicitAuthFlowsTypeAllowUserPasswordAuth,
+			types.ExplicitAuthFlowsTypeAllowRefreshTokenAuth,
+		},
 	})
 	require.NoError(t, err)
 	clientID := aws.ToString(cl.UserPoolClient.ClientId)
 
 	const username = "forced-mfa-user"
-	const password = "Password1!"
+	const password = "Password1!" //nolint:gosec // test fixture, not a real credential
 	_, err = c.SignUp(ctx, &awscognito.SignUpInput{
 		ClientId: aws.String(clientID),
 		Username: aws.String(username),
@@ -256,11 +260,15 @@ func newForcedMFATestEnv(t *testing.T, name string) mfaTestEnv {
 	return mfaTestEnv{c: c, clientID: clientID, username: username, password: password}
 }
 
-func TestCognitoIntegration_MFA_ForcedSetup_SignInFlow(t *testing.T) {
-	env := newForcedMFATestEnv(t, "mfa-forced-setup-pool")
-	ctx := context.Background()
-
-	// First sign-in for a pool with MfaConfiguration "ON" must issue MFA_SETUP, not tokens.
+// mustInitiateForcedMfaSetup runs the password-auth InitiateAuth call against a forced-MFA
+// pool and asserts it issues an MFA_SETUP challenge (not tokens), returning the output so
+// callers can continue the flow with their own distinguishing steps.
+func mustInitiateForcedMfaSetup(
+	t *testing.T,
+	ctx context.Context,
+	env mfaTestEnv,
+) *awscognito.InitiateAuthOutput {
+	t.Helper()
 	initAuth, err := env.c.InitiateAuth(ctx, &awscognito.InitiateAuthInput{
 		ClientId: aws.String(env.clientID),
 		AuthFlow: types.AuthFlowTypeUserPasswordAuth,
@@ -273,6 +281,15 @@ func TestCognitoIntegration_MFA_ForcedSetup_SignInFlow(t *testing.T) {
 	require.Nil(t, initAuth.AuthenticationResult)
 	assert.Equal(t, types.ChallengeNameTypeMfaSetup, initAuth.ChallengeName)
 	require.NotNil(t, initAuth.Session)
+	return initAuth
+}
+
+func TestCognitoIntegration_MFA_ForcedSetup_SignInFlow(t *testing.T) {
+	env := newForcedMFATestEnv(t, "mfa-forced-setup-pool")
+	ctx := context.Background()
+
+	// First sign-in for a pool with MfaConfiguration "ON" must issue MFA_SETUP, not tokens.
+	initAuth := mustInitiateForcedMfaSetup(t, ctx, env)
 
 	assoc, err := env.c.AssociateSoftwareToken(ctx, &awscognito.AssociateSoftwareTokenInput{
 		Session: initAuth.Session,
@@ -334,16 +351,7 @@ func TestCognitoIntegration_MFA_ForcedSetup_VerifySoftwareToken_WrongCode(t *tes
 	env := newForcedMFATestEnv(t, "mfa-forced-wrongcode-pool")
 	ctx := context.Background()
 
-	initAuth, err := env.c.InitiateAuth(ctx, &awscognito.InitiateAuthInput{
-		ClientId: aws.String(env.clientID),
-		AuthFlow: types.AuthFlowTypeUserPasswordAuth,
-		AuthParameters: map[string]string{
-			"USERNAME": env.username,
-			"PASSWORD": env.password,
-		},
-	})
-	require.NoError(t, err)
-	assert.Equal(t, types.ChallengeNameTypeMfaSetup, initAuth.ChallengeName)
+	initAuth := mustInitiateForcedMfaSetup(t, ctx, env)
 
 	assoc, err := env.c.AssociateSoftwareToken(ctx, &awscognito.AssociateSoftwareTokenInput{
 		Session: initAuth.Session,
@@ -362,20 +370,11 @@ func TestCognitoIntegration_MFA_ForcedSetup_RespondWithoutVerify(t *testing.T) {
 	env := newForcedMFATestEnv(t, "mfa-forced-unverified-pool")
 	ctx := context.Background()
 
-	initAuth, err := env.c.InitiateAuth(ctx, &awscognito.InitiateAuthInput{
-		ClientId: aws.String(env.clientID),
-		AuthFlow: types.AuthFlowTypeUserPasswordAuth,
-		AuthParameters: map[string]string{
-			"USERNAME": env.username,
-			"PASSWORD": env.password,
-		},
-	})
-	require.NoError(t, err)
-	assert.Equal(t, types.ChallengeNameTypeMfaSetup, initAuth.ChallengeName)
+	initAuth := mustInitiateForcedMfaSetup(t, ctx, env)
 
 	// Responding directly with the InitiateAuth session (no AssociateSoftwareToken/
 	// VerifySoftwareToken in between) carries no verified secret and must be rejected.
-	_, err = env.c.RespondToAuthChallenge(ctx, &awscognito.RespondToAuthChallengeInput{
+	_, err := env.c.RespondToAuthChallenge(ctx, &awscognito.RespondToAuthChallengeInput{
 		ClientId:      aws.String(env.clientID),
 		ChallengeName: types.ChallengeNameTypeMfaSetup,
 		Session:       initAuth.Session,

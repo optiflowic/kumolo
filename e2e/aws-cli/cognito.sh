@@ -1740,8 +1740,14 @@ fi
 
 FORCED_MFA_CLIENT_JSON=$($AWS create-user-pool-client \
   --user-pool-id "$FORCED_MFA_POOL_ID" \
-  --client-name "e2e-forced-mfa-client" 2>&1)
+  --client-name "e2e-forced-mfa-client" \
+  --explicit-auth-flows "ALLOW_USER_PASSWORD_AUTH" "ALLOW_REFRESH_TOKEN_AUTH" 2>&1)
 FORCED_MFA_CLIENT_ID=$(echo "$FORCED_MFA_CLIENT_JSON" | jq -r '.UserPoolClient.ClientId // empty' 2>/dev/null || true)
+if [[ -n "$FORCED_MFA_CLIENT_ID" ]]; then
+  ok "CreateUserPoolClient (forced MFA_SETUP)"
+else
+  fail "CreateUserPoolClient (forced MFA_SETUP)"
+fi
 
 FORCED_MFA_USER="forced-mfa-e2e@example.com"
 FORCED_MFA_PASS="Password1!"

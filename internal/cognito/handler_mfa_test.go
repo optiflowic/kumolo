@@ -130,37 +130,32 @@ func TestAssociateSoftwareToken_OverwritesPreviousPending(t *testing.T) {
 	assert.Equal(t, resp2.SecretCode, u.PendingTOTPSecret)
 }
 
-func TestAssociateSoftwareToken_MissingAccessToken(t *testing.T) {
-	ro := newTestRouter(t)
-	w := doOp(t, ro, "AssociateSoftwareToken", `{}`)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrType(t, w, ErrTypeInvalidParameterException)
-}
-
-func TestAssociateSoftwareToken_MalformedSessionRejected(t *testing.T) {
-	ro := newTestRouter(t)
-	w := doOp(t, ro, "AssociateSoftwareToken", `{"Session":"some-session-id-that-is-long-enough"}`)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrType(t, w, ErrTypeNotAuthorizedException)
-}
-
-func TestAssociateSoftwareToken_BothAccessTokenAndSessionRejected(t *testing.T) {
-	ro := newTestRouter(t)
-	w := doOp(
-		t,
-		ro,
-		"AssociateSoftwareToken",
-		`{"AccessToken":"tok","Session":"some-session-id-that-is-long-enough"}`,
-	)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrType(t, w, ErrTypeInvalidParameterException)
-}
-
-func TestAssociateSoftwareToken_NeitherAccessTokenNorSessionRejected(t *testing.T) {
-	ro := newTestRouter(t)
-	w := doOp(t, ro, "AssociateSoftwareToken", `{}`)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrType(t, w, ErrTypeInvalidParameterException)
+func TestAssociateSoftwareToken_RequestValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    string
+		errType string
+	}{
+		{"neither AccessToken nor Session", `{}`, ErrTypeInvalidParameterException},
+		{
+			"both AccessToken and Session",
+			`{"AccessToken":"tok","Session":"some-session-id-that-is-long-enough"}`,
+			ErrTypeInvalidParameterException,
+		},
+		{
+			"malformed Session",
+			`{"Session":"some-session-id-that-is-long-enough"}`,
+			ErrTypeNotAuthorizedException,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ro := newTestRouter(t)
+			w := doOp(t, ro, "AssociateSoftwareToken", tt.body)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assertErrType(t, w, tt.errType)
+		})
+	}
 }
 
 func TestAssociateSoftwareToken_InvalidJSON(t *testing.T) {
@@ -1845,114 +1840,87 @@ func TestMFASetupChallenge_UsernameMismatch(t *testing.T) {
 	assertErrType(t, w4, ErrTypeNotAuthorizedException)
 }
 
-func TestMFASetupChallenge_UserNotFound(t *testing.T) {
-	key := testRSAKey(t)
-	keyID, _ := generateTokenID()
-	session, err := buildSessionToken(
-		key, keyID, "pool-1", "c", "ghost", "MFA_SETUP",
-		map[string]any{"verified_totp_secret": testTOTPSecret},
-	)
-	require.NoError(t, err)
+// TestMFASetupChallenge_UserAndUpdateFailures covers RespondToAuthChallenge(MFA_SETUP)
+// failures that surface after the Session has already been validated: the user record
+// vanishing or being disabled between challenge issuance and response, and the subsequent
+// UpdateUser call racing a deletion or hitting a storage error.
+func TestMFASetupChallenge_UserAndUpdateFailures(t *testing.T) {
+	tests := []struct {
+		name          string
+		username      string
+		getUserFn     func(string, string) (*UserMetadata, error)
+		updateUserFn  func(string, string, func(*UserMetadata) error) error
+		updateUserErr error
+		wantStatus    int
+		wantErrType   string
+	}{
+		{
+			name:     "user deleted after challenge issued",
+			username: "ghost",
+			getUserFn: func(string, string) (*UserMetadata, error) {
+				return nil, errUserNotFound
+			},
+			wantStatus:  http.StatusBadRequest,
+			wantErrType: ErrTypeUserNotFoundException,
+		},
+		{
+			name:     "user disabled since challenge issued",
+			username: "alice",
+			getUserFn: func(string, string) (*UserMetadata, error) {
+				return &UserMetadata{Username: "alice", Enabled: false}, nil
+			},
+			wantStatus:  http.StatusBadRequest,
+			wantErrType: ErrTypeNotAuthorizedException,
+		},
+		{
+			name:     "update races user deletion",
+			username: "alice",
+			getUserFn: func(string, string) (*UserMetadata, error) {
+				return &UserMetadata{Username: "alice", Enabled: true}, nil
+			},
+			updateUserFn: func(string, string, func(*UserMetadata) error) error {
+				return errUserNotFound
+			},
+			wantStatus:  http.StatusBadRequest,
+			wantErrType: ErrTypeUserNotFoundException,
+		},
+		{
+			name:     "update fails with storage error",
+			username: "alice",
+			getUserFn: func(string, string) (*UserMetadata, error) {
+				return &UserMetadata{Username: "alice", Enabled: true}, nil
+			},
+			updateUserErr: errors.New("storage failure"),
+			wantStatus:    http.StatusInternalServerError,
+			wantErrType:   ErrTypeInternalErrorException,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			key := testRSAKey(t)
+			keyID, _ := generateTokenID()
+			session, err := buildSessionToken(
+				key, keyID, "pool-1", "c", tt.username, challengeMFASetup,
+				map[string]any{"verified_totp_secret": testTOTPSecret},
+			)
+			require.NoError(t, err)
 
-	ro := &Router{storage: &mockStore{
-		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
-		getOrCreateKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
-			return &poolKeys{KeyID: keyID}, key, nil
-		},
-		getUserFn: func(string, string) (*UserMetadata, error) {
-			return nil, errUserNotFound
-		},
-	}}
-	body, _ := json.Marshal(map[string]any{
-		"ClientId": "c", "ChallengeName": "MFA_SETUP", "Session": session,
-		"ChallengeResponses": map[string]string{"USERNAME": "ghost"},
-	})
-	w := doOp(t, ro, "RespondToAuthChallenge", string(body))
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrType(t, w, ErrTypeUserNotFoundException)
-}
-
-func TestMFASetupChallenge_UserDisabled(t *testing.T) {
-	key := testRSAKey(t)
-	keyID, _ := generateTokenID()
-	session, err := buildSessionToken(
-		key, keyID, "pool-1", "c", "alice", "MFA_SETUP",
-		map[string]any{"verified_totp_secret": testTOTPSecret},
-	)
-	require.NoError(t, err)
-
-	ro := &Router{storage: &mockStore{
-		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
-		getOrCreateKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
-			return &poolKeys{KeyID: keyID}, key, nil
-		},
-		getUserFn: func(string, string) (*UserMetadata, error) {
-			return &UserMetadata{Username: "alice", Enabled: false}, nil
-		},
-	}}
-	body, _ := json.Marshal(map[string]any{
-		"ClientId": "c", "ChallengeName": "MFA_SETUP", "Session": session,
-		"ChallengeResponses": map[string]string{"USERNAME": "alice"},
-	})
-	w := doOp(t, ro, "RespondToAuthChallenge", string(body))
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrType(t, w, ErrTypeNotAuthorizedException)
-}
-
-func TestMFASetupChallenge_UpdateUserRaceUserNotFound(t *testing.T) {
-	key := testRSAKey(t)
-	keyID, _ := generateTokenID()
-	session, err := buildSessionToken(
-		key, keyID, "pool-1", "c", "alice", "MFA_SETUP",
-		map[string]any{"verified_totp_secret": testTOTPSecret},
-	)
-	require.NoError(t, err)
-
-	ro := &Router{storage: &mockStore{
-		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
-		getOrCreateKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
-			return &poolKeys{KeyID: keyID}, key, nil
-		},
-		getUserFn: func(string, string) (*UserMetadata, error) {
-			return &UserMetadata{Username: "alice", Enabled: true}, nil
-		},
-		updateUserFn: func(string, string, func(*UserMetadata) error) error {
-			return errUserNotFound
-		},
-	}}
-	body, _ := json.Marshal(map[string]any{
-		"ClientId": "c", "ChallengeName": "MFA_SETUP", "Session": session,
-		"ChallengeResponses": map[string]string{"USERNAME": "alice"},
-	})
-	w := doOp(t, ro, "RespondToAuthChallenge", string(body))
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrType(t, w, ErrTypeUserNotFoundException)
-}
-
-func TestMFASetupChallenge_UpdateUserError(t *testing.T) {
-	key := testRSAKey(t)
-	keyID, _ := generateTokenID()
-	session, err := buildSessionToken(
-		key, keyID, "pool-1", "c", "alice", "MFA_SETUP",
-		map[string]any{"verified_totp_secret": testTOTPSecret},
-	)
-	require.NoError(t, err)
-
-	ro := &Router{storage: &mockStore{
-		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
-		getOrCreateKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
-			return &poolKeys{KeyID: keyID}, key, nil
-		},
-		getUserFn: func(string, string) (*UserMetadata, error) {
-			return &UserMetadata{Username: "alice", Enabled: true}, nil
-		},
-		updateUserErr: errors.New("storage failure"),
-	}}
-	body, _ := json.Marshal(map[string]any{
-		"ClientId": "c", "ChallengeName": "MFA_SETUP", "Session": session,
-		"ChallengeResponses": map[string]string{"USERNAME": "alice"},
-	})
-	w := doOp(t, ro, "RespondToAuthChallenge", string(body))
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assertErrType(t, w, ErrTypeInternalErrorException)
+			ro := &Router{storage: &mockStore{
+				getPoolForClient: func(string) (string, error) { return "pool-1", nil },
+				getOrCreateKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+					return &poolKeys{KeyID: keyID}, key, nil
+				},
+				getUserFn:     tt.getUserFn,
+				updateUserFn:  tt.updateUserFn,
+				updateUserErr: tt.updateUserErr,
+			}}
+			body, _ := json.Marshal(map[string]any{
+				"ClientId": "c", "ChallengeName": "MFA_SETUP", "Session": session,
+				"ChallengeResponses": map[string]string{"USERNAME": tt.username},
+			})
+			w := doOp(t, ro, "RespondToAuthChallenge", string(body))
+			assert.Equal(t, tt.wantStatus, w.Code)
+			assertErrType(t, w, tt.wantErrType)
+		})
+	}
 }
