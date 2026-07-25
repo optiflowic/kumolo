@@ -51,6 +51,9 @@ Empty body, matching AWS.
   users enable or disable MFA methods — only the preferred method can be changed — so kumolo
   rejects the disable attempt instead of silently accepting a state that would force the user
   back through `MFA_SETUP` on their next sign-in (see `initiate_auth.md` and
-  `respond_to_auth_challenge.md`).
+  `respond_to_auth_challenge.md`). kumolo only enforces the *disable* side of that rule: setting
+  `Enabled: true` remains allowed even in an `"ON"` pool (e.g. a user pre-registering TOTP via
+  `AccessToken` before ever signing in with MFA), since that path can't reproduce the MFA_SETUP
+  regression this deviation guards against.
 - `ForbiddenException`, `OperationNotEnabledException`, `PasswordResetRequiredException`,
   `UserNotConfirmedException` are not returned.
