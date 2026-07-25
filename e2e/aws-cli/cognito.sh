@@ -1835,6 +1835,23 @@ if [[ -n "$FORCED_MFA_CODE" ]]; then
             fail "RespondToAuthChallenge (MFA_SETUP) — expected AccessToken after enrollment"
           fi
 
+          FORCED_MFA_ACCESS_TOKEN=$(echo "$FORCED_MFA_RESPOND_JSON" | \
+            jq -r '.AuthenticationResult.AccessToken // empty' 2>/dev/null || true)
+          if [[ -n "$FORCED_MFA_ACCESS_TOKEN" ]]; then
+            # A pool with MfaConfiguration=ON must not let an enrolled user disable MFA —
+            # doing so would force them back through MFA_SETUP on their next sign-in.
+            FORCED_MFA_DISABLE_JSON=$($AWS set-user-mfa-preference \
+              --access-token "$FORCED_MFA_ACCESS_TOKEN" \
+              --software-token-mfa-settings 'Enabled=false' 2>&1) || true
+            if echo "$FORCED_MFA_DISABLE_JSON" | grep -qi 'InvalidParameterException'; then
+              ok "SetUserMFAPreference — InvalidParameterException disabling MFA in MfaConfiguration=ON pool"
+            else
+              fail "SetUserMFAPreference — expected InvalidParameterException disabling MFA in MfaConfiguration=ON pool"
+            fi
+          else
+            skip "SetUserMFAPreference (disable rejection) — no AccessToken available"
+          fi
+
           # A later sign-in must now get SOFTWARE_TOKEN_MFA, not MFA_SETUP again.
           FORCED_MFA_REAUTH_JSON=$($AWS initiate-auth \
             --client-id "$FORCED_MFA_CLIENT_ID" \
