@@ -1708,6 +1708,41 @@ if [[ -n "$MFA_CODE" ]]; then
       else
         fail "InitiateAuth — expected direct sign-in after disabling MFA preference"
       fi
+
+      # #502: a user who disabled MFA while the pool still allowed it must not be forced
+      # through MFA_SETUP re-enrollment once the pool later switches to MfaConfiguration=ON —
+      # their existing verified TOTP secret must be reused via SOFTWARE_TOKEN_MFA instead.
+      run "UpdateUserPool (MfaConfiguration=ON, after disable)" \
+        $AWS update-user-pool --user-pool-id "$POOL_ID" --mfa-configuration "ON"
+
+      MFA_POOLON_AUTH_JSON=$($AWS initiate-auth \
+        --client-id "$CLIENT_ID" \
+        --auth-flow "USER_PASSWORD_AUTH" \
+        --auth-parameters "USERNAME=$MFA_USER,PASSWORD=$MFA_PASS" 2>&1)
+      if echo "$MFA_POOLON_AUTH_JSON" | grep -q '"ChallengeName": "SOFTWARE_TOKEN_MFA"'; then
+        ok "InitiateAuth — SOFTWARE_TOKEN_MFA (not MFA_SETUP) for disabled-but-registered user after pool switches to ON"
+      else
+        fail "InitiateAuth — expected SOFTWARE_TOKEN_MFA, not MFA_SETUP, for a user with an existing TOTP secret"
+      fi
+
+      MFA_POOLON_SESSION=$(echo "$MFA_POOLON_AUTH_JSON" | jq -r '.Session // empty' 2>/dev/null || true)
+      if [[ -n "$MFA_POOLON_SESSION" ]]; then
+        MFA_POOLON_RESPOND_JSON=$($AWS respond-to-auth-challenge \
+          --client-id "$CLIENT_ID" \
+          --challenge-name "SOFTWARE_TOKEN_MFA" \
+          --session "$MFA_POOLON_SESSION" \
+          --challenge-responses "USERNAME=$MFA_USER,SOFTWARE_TOKEN_MFA_CODE=$(totp_code "$MFA_SECRET")" 2>&1)
+        if echo "$MFA_POOLON_RESPOND_JSON" | grep -q '"AccessToken"'; then
+          ok "RespondToAuthChallenge (SOFTWARE_TOKEN_MFA) — reuses existing secret, no re-enrollment needed"
+        else
+          fail "RespondToAuthChallenge (SOFTWARE_TOKEN_MFA) — expected AccessToken using the pre-existing TOTP secret"
+        fi
+      else
+        skip "RespondToAuthChallenge (SOFTWARE_TOKEN_MFA, pool ON) — no Session returned"
+      fi
+
+      run "UpdateUserPool (MfaConfiguration=OFF, restore)" \
+        $AWS update-user-pool --user-pool-id "$POOL_ID" --mfa-configuration "OFF"
     fi
   elif [[ -z "$MFA_ACCESS_TOKEN" ]]; then
     skip "MFA flow — could not obtain access token"

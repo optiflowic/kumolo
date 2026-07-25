@@ -46,11 +46,16 @@ ChallengeResponses required: `SOFTWARE_TOKEN_MFA_CODE`
 
 Issued instead of tokens whenever primary authentication (`USER_PASSWORD_AUTH`,
 `PASSWORD_VERIFIER`, or the post-`NEW_PASSWORD_REQUIRED` reset) succeeds for a user with
-`UserMetadata.SoftwareTokenMFAEnabled == true`. See
-`docs/aws-spec/cognito/set_user_mfa_preference.md` for how that flag is set.
+`UserMetadata.SoftwareTokenMFAEnabled == true`, or — in a pool with `MfaConfiguration: "ON"` — for
+a user with a registered TOTP secret whose `SoftwareTokenMFAEnabled` is currently `false` (see
+`initiate_auth.md` deviations and #502). See `docs/aws-spec/cognito/set_user_mfa_preference.md`
+for how that flag is set.
 `SOFTWARE_TOKEN_MFA_CODE` is verified as a TOTP code (RFC 6238, ±1 step / ±30s clock skew)
 against `UserMetadata.TOTPSecret`. On success, tokens are issued exactly as for the
-non-MFA success path.
+non-MFA success path. If the challenge was reached via the disabled-but-registered `"ON"`-pool
+case above, success also self-heals the user record: `SoftwareTokenMFAEnabled` is set back to
+`true` and `PreferredMfaSetting` to `"SOFTWARE_TOKEN_MFA"`, converging to the invariant
+`SetUserMFAPreference` already enforces going forward for `"ON"` pools.
 
 ### MFA_SETUP
 

@@ -140,16 +140,25 @@ Presenting an expired token returns `NotAuthorizedException`.
 
 - Only USER_PASSWORD_AUTH, USER_SRP_AUTH, and REFRESH_TOKEN_AUTH/REFRESH_TOKEN flows supported.
 - Forced `MFA_SETUP`: when the pool's `MfaConfiguration` is `"ON"` and the authenticating user has
-  no MFA method enrolled (`SoftwareTokenMFAEnabled == false`), primary auth succeeds into a
+  no TOTP secret registered (`UserMetadata.TOTPSecret == ""`), primary auth succeeds into a
   `ChallengeName: "MFA_SETUP"` response instead of tokens, with
   `ChallengeParameters.MFAS_CAN_SETUP` always `["SOFTWARE_TOKEN_MFA"]` (kumolo only supports TOTP).
   `MfaConfiguration: "OPTIONAL"` does not gate sign-in. A user's own `SoftwareTokenMFAEnabled` flag
   (set via `SetUserMFAPreference`, or by completing the `MFA_SETUP` challenge — see
-  `respond_to_auth_challenge.md`) takes precedence and triggers `SOFTWARE_TOKEN_MFA` instead.
+  `respond_to_auth_challenge.md`) takes precedence and triggers `SOFTWARE_TOKEN_MFA` instead. In an
+  `"ON"` pool, a registered-but-currently-disabled TOTP secret (`SoftwareTokenMFAEnabled == false`
+  with `TOTPSecret != ""` — reachable when a user enrolled and then disabled MFA while the pool
+  still allowed it) also triggers `SOFTWARE_TOKEN_MFA` rather than `MFA_SETUP`: kumolo reuses the
+  existing authenticator instead of forcing re-enrollment, matching the decision tree in AWS's
+  "Details of MFA logic at user runtime" guide (a registered TOTP authenticator is challenged for
+  directly once the pool requires MFA, regardless of the per-user enabled flag). See
+  `respond_to_auth_challenge.md` for how completing that challenge self-heals
+  `SoftwareTokenMFAEnabled` back to `true`.
   In a pool with `MfaConfiguration: "ON"`, `SetUserMFAPreference` refuses to flip an enrolled
-  user's `SoftwareTokenMFAEnabled` back to `false` (see `set_user_mfa_preference.md`), so an
-  already-enrolled user can never fall back into `MFA_SETUP` on a later sign-in — matching AWS,
-  which doesn't let users disable MFA methods once the pool requires MFA.
+  user's `SoftwareTokenMFAEnabled` back to `false` (see `set_user_mfa_preference.md`), so this
+  disabled-but-registered state can only arise from a disable that happened before the pool
+  switched to `"ON"` — matching AWS, which doesn't let users disable MFA methods once the pool
+  requires MFA.
   REFRESH_TOKEN_AUTH/REFRESH_TOKEN never re-challenges MFA, matching AWS.
 - USER_SRP_AUTH: no AWS-style anti-enumeration "fake verifier" trick — an
   unknown username fails fast with `UserNotFoundException`, consistent with

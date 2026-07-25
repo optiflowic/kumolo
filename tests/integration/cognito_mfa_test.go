@@ -45,6 +45,7 @@ func totpCode(t *testing.T, secret string, at time.Time) string {
 // mfaTestEnv provisions a pool, client, and a confirmed+authenticated user for MFA tests.
 type mfaTestEnv struct {
 	c           *awscognito.Client
+	poolID      string
 	clientID    string
 	username    string
 	password    string
@@ -104,6 +105,7 @@ func newMFATestEnv(t *testing.T, name string) mfaTestEnv {
 
 	return mfaTestEnv{
 		c:           c,
+		poolID:      poolID,
 		clientID:    clientID,
 		username:    username,
 		password:    password,
@@ -257,7 +259,13 @@ func newForcedMFATestEnv(t *testing.T, name string) mfaTestEnv {
 	})
 	require.NoError(t, err)
 
-	return mfaTestEnv{c: c, clientID: clientID, username: username, password: password}
+	return mfaTestEnv{
+		c:        c,
+		poolID:   poolID,
+		clientID: clientID,
+		username: username,
+		password: password,
+	}
 }
 
 // mustInitiateForcedMfaSetup runs the password-auth InitiateAuth call against a forced-MFA
@@ -478,4 +486,62 @@ func TestCognitoIntegration_MFA_DisablePreference_RestoresDirectSignIn(t *testin
 	require.NoError(t, err)
 	require.NotNil(t, auth.AuthenticationResult)
 	assert.NotEmpty(t, aws.ToString(auth.AuthenticationResult.AccessToken))
+}
+
+// TestCognitoIntegration_MFA_DisableThenPoolOn_ReusesExistingSecret reproduces #502: a user who
+// enrolled and then disabled SOFTWARE_TOKEN_MFA while the pool still allowed OPTIONAL MFA must
+// not be forced through MFA_SETUP re-enrollment once the pool later switches to "ON" — sign-in
+// must reuse their existing verified TOTP secret via a SOFTWARE_TOKEN_MFA challenge instead.
+func TestCognitoIntegration_MFA_DisableThenPoolOn_ReusesExistingSecret(t *testing.T) {
+	env := newMFATestEnv(t, "mfa-disable-then-on-pool")
+	ctx := context.Background()
+	secret := enrollTOTP(t, env)
+
+	_, err := env.c.SetUserMFAPreference(ctx, &awscognito.SetUserMFAPreferenceInput{
+		AccessToken: aws.String(env.accessToken),
+		SoftwareTokenMfaSettings: &types.SoftwareTokenMfaSettingsType{
+			Enabled:      true,
+			PreferredMfa: true,
+		},
+	})
+	require.NoError(t, err)
+
+	_, err = env.c.SetUserMFAPreference(ctx, &awscognito.SetUserMFAPreferenceInput{
+		AccessToken: aws.String(env.accessToken),
+		SoftwareTokenMfaSettings: &types.SoftwareTokenMfaSettingsType{
+			Enabled: false,
+		},
+	})
+	require.NoError(t, err)
+
+	_, err = env.c.SetUserPoolMfaConfig(ctx, &awscognito.SetUserPoolMfaConfigInput{
+		UserPoolId:       aws.String(env.poolID),
+		MfaConfiguration: types.UserPoolMfaTypeOn,
+	})
+	require.NoError(t, err)
+
+	auth, err := env.c.InitiateAuth(ctx, &awscognito.InitiateAuthInput{
+		ClientId: aws.String(env.clientID),
+		AuthFlow: types.AuthFlowTypeUserPasswordAuth,
+		AuthParameters: map[string]string{
+			"USERNAME": env.username,
+			"PASSWORD": env.password,
+		},
+	})
+	require.NoError(t, err)
+	require.Nil(t, auth.AuthenticationResult)
+	assert.Equal(t, types.ChallengeNameTypeSoftwareTokenMfa, auth.ChallengeName)
+
+	complete, err := env.c.RespondToAuthChallenge(ctx, &awscognito.RespondToAuthChallengeInput{
+		ClientId:      aws.String(env.clientID),
+		ChallengeName: types.ChallengeNameTypeSoftwareTokenMfa,
+		Session:       auth.Session,
+		ChallengeResponses: map[string]string{
+			"USERNAME":                env.username,
+			"SOFTWARE_TOKEN_MFA_CODE": totpCode(t, secret, time.Now()),
+		},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, complete.AuthenticationResult)
+	assert.NotEmpty(t, aws.ToString(complete.AuthenticationResult.AccessToken))
 }
