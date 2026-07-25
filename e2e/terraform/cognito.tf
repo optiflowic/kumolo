@@ -92,3 +92,25 @@ resource "aws_cognito_user_in_group" "admin_in_admins" {
   group_name   = aws_cognito_user_group.admins.name
   username     = aws_cognito_user.admin.username
 }
+
+# Separate pool exercising MfaConfiguration = "ON" (forced MFA_SETUP enrollment
+# on sign-in), distinct from aws_cognito_user_pool.main which leaves MFA off.
+resource "aws_cognito_user_pool" "mfa_required" {
+  name = "kumolo-tf-mfa-required-pool"
+
+  # software_token_mfa_configuration is intentionally omitted: kumolo does not
+  # model it (CreateUserPool/DescribeUserPool always report Enabled: false),
+  # so setting it here would show as perpetual apply drift. Forced MFA_SETUP
+  # in kumolo depends only on mfa_configuration = "ON" (see handler_auth.go).
+  mfa_configuration = "ON"
+}
+
+resource "aws_cognito_user_pool_client" "mfa_required" {
+  name         = "kumolo-tf-mfa-required-client"
+  user_pool_id = aws_cognito_user_pool.mfa_required.id
+
+  explicit_auth_flows = [
+    "ALLOW_USER_PASSWORD_AUTH",
+    "ALLOW_REFRESH_TOKEN_AUTH",
+  ]
+}

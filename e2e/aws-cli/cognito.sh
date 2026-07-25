@@ -29,6 +29,8 @@ echo "=== Cognito ==="
 POOL_ID=""
 CLIENT_ID=""
 DP_POOL_ID=""
+FORCED_MFA_POOL_ID=""
+FORCED_MFA_CLIENT_ID=""
 
 cleanup() {
   if [[ -n "$CLIENT_ID" && "$CLIENT_ID" != "UNKNOWN" ]]; then
@@ -42,6 +44,14 @@ cleanup() {
   if [[ -n "$DP_POOL_ID" ]]; then
     $AWS update-user-pool --user-pool-id "$DP_POOL_ID" --deletion-protection "INACTIVE" >/dev/null 2>&1 || true
     $AWS delete-user-pool --user-pool-id "$DP_POOL_ID" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "$FORCED_MFA_CLIENT_ID" ]]; then
+    $AWS delete-user-pool-client \
+      --user-pool-id "$FORCED_MFA_POOL_ID" \
+      --client-id "$FORCED_MFA_CLIENT_ID" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "$FORCED_MFA_POOL_ID" ]]; then
+    $AWS delete-user-pool --user-pool-id "$FORCED_MFA_POOL_ID" >/dev/null 2>&1 || true
   fi
 }
 trap cleanup EXIT
@@ -1706,6 +1716,143 @@ if [[ -n "$MFA_CODE" ]]; then
   fi
 else
   skip "MFA flow — no confirmation code available"
+  echo "  Hint: set E2E_COGNITO_MFA_CODE=<code> from kumolo logs, or use Docker Compose"
+fi
+
+# ---------------------------------------------------------------------------
+# Forced MFA_SETUP: a pool with MfaConfiguration=ON must challenge every
+# unenrolled user's sign-in with MFA_SETUP instead of issuing tokens directly.
+# Uses its own pool/client since this is a pool-level setting, unlike the
+# per-user SetUserMFAPreference flow exercised above.
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- Forced MFA_SETUP (MfaConfiguration=ON) ---"
+
+FORCED_MFA_POOL_JSON=$($AWS create-user-pool \
+  --pool-name "e2e-forced-mfa-pool" \
+  --mfa-configuration "ON" 2>&1)
+FORCED_MFA_POOL_ID=$(echo "$FORCED_MFA_POOL_JSON" | jq -r '.UserPool.Id // empty' 2>/dev/null || true)
+if [[ -n "$FORCED_MFA_POOL_ID" ]]; then
+  ok "CreateUserPool (MfaConfiguration=ON)"
+else
+  fail "CreateUserPool (MfaConfiguration=ON)"
+fi
+
+FORCED_MFA_CLIENT_JSON=$($AWS create-user-pool-client \
+  --user-pool-id "$FORCED_MFA_POOL_ID" \
+  --client-name "e2e-forced-mfa-client" 2>&1)
+FORCED_MFA_CLIENT_ID=$(echo "$FORCED_MFA_CLIENT_JSON" | jq -r '.UserPoolClient.ClientId // empty' 2>/dev/null || true)
+
+FORCED_MFA_USER="forced-mfa-e2e@example.com"
+FORCED_MFA_PASS="Password1!"
+
+FORCED_MFA_SIGNUP_JSON=$($AWS sign-up \
+  --client-id "$FORCED_MFA_CLIENT_ID" \
+  --username "$FORCED_MFA_USER" \
+  --password "$FORCED_MFA_PASS" \
+  --user-attributes "Name=email,Value=$FORCED_MFA_USER" 2>&1)
+if echo "$FORCED_MFA_SIGNUP_JSON" | grep -q '"UserSub"'; then
+  ok "SignUp (for forced MFA_SETUP flow)"
+else
+  fail "SignUp (for forced MFA_SETUP flow)"
+fi
+
+FORCED_MFA_CODE="${E2E_COGNITO_MFA_CODE:-}"
+if [[ -z "$FORCED_MFA_CODE" ]]; then
+  if command -v docker &>/dev/null && docker compose ps --services 2>/dev/null | grep -q .; then
+    FORCED_MFA_CODE=$(docker compose logs 2>/dev/null \
+      | grep 'SignUp confirmation code' \
+      | grep "$FORCED_MFA_USER" \
+      | tail -1 \
+      | grep -oE 'code=[0-9]+' \
+      | cut -d= -f2 || true)
+  fi
+fi
+
+if [[ -n "$FORCED_MFA_CODE" ]]; then
+  run "ConfirmSignUp (for forced MFA_SETUP flow)" \
+    $AWS confirm-sign-up \
+      --client-id "$FORCED_MFA_CLIENT_ID" \
+      --username "$FORCED_MFA_USER" \
+      --confirmation-code "$FORCED_MFA_CODE"
+
+  if command -v python3 &>/dev/null; then
+    # First sign-in for an unenrolled user must be challenged with MFA_SETUP, not tokens.
+    FORCED_MFA_INIT_JSON=$($AWS initiate-auth \
+      --client-id "$FORCED_MFA_CLIENT_ID" \
+      --auth-flow "USER_PASSWORD_AUTH" \
+      --auth-parameters "USERNAME=$FORCED_MFA_USER,PASSWORD=$FORCED_MFA_PASS" 2>&1)
+    if echo "$FORCED_MFA_INIT_JSON" | grep -q '"ChallengeName": "MFA_SETUP"'; then
+      ok "InitiateAuth — MFA_SETUP challenge for unenrolled user in MfaConfiguration=ON pool"
+    else
+      fail "InitiateAuth — expected MFA_SETUP challenge"
+    fi
+    if echo "$FORCED_MFA_INIT_JSON" | grep -q '"AuthenticationResult"'; then
+      fail "InitiateAuth — did not expect AuthenticationResult alongside MFA_SETUP challenge"
+    else
+      ok "InitiateAuth — no AuthenticationResult alongside MFA_SETUP challenge"
+    fi
+    FORCED_MFA_SESSION=$(echo "$FORCED_MFA_INIT_JSON" | jq -r '.Session // empty' 2>/dev/null || true)
+
+    if [[ -n "$FORCED_MFA_SESSION" ]]; then
+      FORCED_MFA_ASSOC_JSON=$($AWS associate-software-token \
+        --session "$FORCED_MFA_SESSION" 2>&1)
+      FORCED_MFA_SECRET=$(echo "$FORCED_MFA_ASSOC_JSON" | jq -r '.SecretCode // empty' 2>/dev/null || true)
+      FORCED_MFA_ASSOC_SESSION=$(echo "$FORCED_MFA_ASSOC_JSON" | jq -r '.Session // empty' 2>/dev/null || true)
+      if [[ -n "$FORCED_MFA_SECRET" && -n "$FORCED_MFA_ASSOC_SESSION" ]]; then
+        ok "AssociateSoftwareToken (Session-authenticated, MFA_SETUP)"
+      else
+        fail "AssociateSoftwareToken (Session-authenticated, MFA_SETUP)"
+      fi
+
+      if [[ -n "$FORCED_MFA_SECRET" && -n "$FORCED_MFA_ASSOC_SESSION" ]]; then
+        FORCED_MFA_VERIFY_JSON=$($AWS verify-software-token \
+          --session "$FORCED_MFA_ASSOC_SESSION" \
+          --user-code "$(totp_code "$FORCED_MFA_SECRET")" 2>&1)
+        FORCED_MFA_VERIFY_SESSION=$(echo "$FORCED_MFA_VERIFY_JSON" | jq -r '.Session // empty' 2>/dev/null || true)
+        if echo "$FORCED_MFA_VERIFY_JSON" | grep -q '"Status": "SUCCESS"' && \
+           [[ -n "$FORCED_MFA_VERIFY_SESSION" ]]; then
+          ok "VerifySoftwareToken (Session-authenticated, MFA_SETUP)"
+        else
+          fail "VerifySoftwareToken (Session-authenticated, MFA_SETUP)"
+        fi
+
+        if [[ -n "$FORCED_MFA_VERIFY_SESSION" ]]; then
+          FORCED_MFA_RESPOND_JSON=$($AWS respond-to-auth-challenge \
+            --client-id "$FORCED_MFA_CLIENT_ID" \
+            --challenge-name "MFA_SETUP" \
+            --session "$FORCED_MFA_VERIFY_SESSION" \
+            --challenge-responses "USERNAME=$FORCED_MFA_USER" 2>&1)
+          if echo "$FORCED_MFA_RESPOND_JSON" | grep -q '"AccessToken"'; then
+            ok "RespondToAuthChallenge (MFA_SETUP) — AccessToken issued after enrollment"
+          else
+            fail "RespondToAuthChallenge (MFA_SETUP) — expected AccessToken after enrollment"
+          fi
+
+          # A later sign-in must now get SOFTWARE_TOKEN_MFA, not MFA_SETUP again.
+          FORCED_MFA_REAUTH_JSON=$($AWS initiate-auth \
+            --client-id "$FORCED_MFA_CLIENT_ID" \
+            --auth-flow "USER_PASSWORD_AUTH" \
+            --auth-parameters "USERNAME=$FORCED_MFA_USER,PASSWORD=$FORCED_MFA_PASS" 2>&1)
+          if echo "$FORCED_MFA_REAUTH_JSON" | grep -q '"ChallengeName": "SOFTWARE_TOKEN_MFA"'; then
+            ok "InitiateAuth — SOFTWARE_TOKEN_MFA challenge after MFA_SETUP enrollment"
+          else
+            fail "InitiateAuth — expected SOFTWARE_TOKEN_MFA challenge after MFA_SETUP enrollment"
+          fi
+        else
+          skip "RespondToAuthChallenge (MFA_SETUP) — no verified Session available"
+        fi
+      else
+        skip "VerifySoftwareToken (Session-authenticated, MFA_SETUP) — no secret/Session available"
+      fi
+    else
+      skip "Forced MFA_SETUP flow — no Session returned by InitiateAuth"
+    fi
+  else
+    skip "Forced MFA_SETUP flow — python3 not available to compute TOTP codes"
+  fi
+else
+  skip "Forced MFA_SETUP flow — no confirmation code available"
   echo "  Hint: set E2E_COGNITO_MFA_CODE=<code> from kumolo logs, or use Docker Compose"
 fi
 
