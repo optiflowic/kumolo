@@ -2,7 +2,7 @@
 
 URL: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_InitiateAuth.html
 SDK: `cognitoidentityprovider.InitiateAuthInput` / `cognitoidentityprovider.InitiateAuthOutput`
-Last verified: 2026-07-16
+Last verified: 2026-07-25
 
 ## Request Parameters
 
@@ -146,6 +146,10 @@ Presenting an expired token returns `NotAuthorizedException`.
   `MfaConfiguration: "OPTIONAL"` does not gate sign-in. A user's own `SoftwareTokenMFAEnabled` flag
   (set via `SetUserMFAPreference`, or by completing the `MFA_SETUP` challenge — see
   `respond_to_auth_challenge.md`) takes precedence and triggers `SOFTWARE_TOKEN_MFA` instead.
+  In a pool with `MfaConfiguration: "ON"`, `SetUserMFAPreference` refuses to flip an enrolled
+  user's `SoftwareTokenMFAEnabled` back to `false` (see `set_user_mfa_preference.md`), so an
+  already-enrolled user can never fall back into `MFA_SETUP` on a later sign-in — matching AWS,
+  which doesn't let users disable MFA methods once the pool requires MFA.
   REFRESH_TOKEN_AUTH/REFRESH_TOKEN never re-challenges MFA, matching AWS.
 - USER_SRP_AUTH: no AWS-style anti-enumeration "fake verifier" trick — an
   unknown username fails fast with `UserNotFoundException`, consistent with

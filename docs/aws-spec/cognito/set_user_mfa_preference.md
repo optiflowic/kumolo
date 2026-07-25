@@ -3,7 +3,7 @@
 - URL: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_SetUserMFAPreference.html
 - SDK type: `cognitoidentityprovider.SetUserMFAPreferenceInput` / `SetUserMFAPreferenceOutput`
 - X-Amz-Target: `AWSCognitoIdentityProviderService.SetUserMFAPreference`
-- Last verified: 2026-07-16
+- Last verified: 2026-07-25
 
 ## Request
 
@@ -23,7 +23,7 @@ Empty body, matching AWS.
 
 | Error type                 | HTTP | Condition                                                                 |
 |------------------------------|------|-----------------------------------------------------------------------------|
-| InvalidParameterException   | 400  | Invalid request body, or `SoftwareTokenMfaSettings.Enabled: true` while the user has no verified TOTP secret (kumolo-specific — see deviations) |
+| InvalidParameterException   | 400  | Invalid request body; `SoftwareTokenMfaSettings.Enabled: true` while the user has no verified TOTP secret; or `Enabled: false` while the user's pool has `MfaConfiguration: "ON"` and the user has `SoftwareTokenMFAEnabled == true` (both kumolo-specific — see deviations) |
 | NotAuthorizedException      | 400  | Invalid, expired, or revoked access token                                 |
 | UserNotFoundException       | 400  | Token's `sub` does not resolve to a stored user                            |
 | InternalErrorException      | 500  | Storage failure                                                             |
@@ -45,5 +45,15 @@ Empty body, matching AWS.
   `AssociateSoftwareToken`/`VerifySoftwareToken` round trip, matching AWS's statement that this
   operation "doesn't reset an existing TOTP MFA".
 - `PreferredMfa: true` is only honored when `Enabled: true` in the same request.
+- Setting `Enabled: false` is rejected with `InvalidParameterException` when the user's pool has
+  `MfaConfiguration: "ON"` and the user currently has `SoftwareTokenMFAEnabled == true`. Per the
+  AWS user guide ("Details of MFA logic at user runtime"), a pool with MFA required doesn't let
+  users enable or disable MFA methods — only the preferred method can be changed — so kumolo
+  rejects the disable attempt instead of silently accepting a state that would force the user
+  back through `MFA_SETUP` on their next sign-in (see `initiate_auth.md` and
+  `respond_to_auth_challenge.md`). kumolo only enforces the *disable* side of that rule: setting
+  `Enabled: true` remains allowed even in an `"ON"` pool (e.g. a user pre-registering TOTP via
+  `AccessToken` before ever signing in with MFA), since that path can't reproduce the MFA_SETUP
+  regression this deviation guards against.
 - `ForbiddenException`, `OperationNotEnabledException`, `PasswordResetRequiredException`,
   `UserNotConfirmedException` are not returned.

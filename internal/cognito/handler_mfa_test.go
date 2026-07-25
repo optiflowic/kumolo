@@ -684,6 +684,29 @@ func TestSetUserMFAPreference_StorageUpdateError(t *testing.T) {
 	assertErrType(t, w, ErrTypeInternalErrorException)
 }
 
+func TestSetUserMFAPreference_GetUserPoolStorageError(t *testing.T) {
+	key := testRSAKey(t)
+	poolID := "us-east-1_TestPool"
+	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
+	token, _, _, _, _, err := issueTokens(
+		key, "kid", poolID, "client-1", user, nil, "", accessTokenExpiry, accessTokenExpiry,
+	)
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: "kid"}, key, nil
+		},
+		getUserBySubFn: func(string, string) (*UserMetadata, error) {
+			return user, nil
+		},
+		getErr: errors.New("storage failure"),
+	}}
+	w := doSetUserMFAPreference(t, ro, token, map[string]any{"Enabled": false})
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
 func TestSetUserMFAPreference_KeysStorageError(t *testing.T) {
 	privKey := testRSAKey(t)
 	poolID := "us-east-1_FakePool1"
@@ -1301,6 +1324,68 @@ func TestMFASetup_NotTriggeredWhenAlreadyEnrolled(t *testing.T) {
 	var resp map[string]any
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
 	assert.Equal(t, "SOFTWARE_TOKEN_MFA", resp["ChallengeName"])
+}
+
+// TestSetUserMFAPreference_DisableRejectedInMFARequiredPool guards against a regression where
+// an already-enrolled user could call SetUserMFAPreference to disable SOFTWARE_TOKEN_MFA in a
+// pool with MfaConfiguration "ON", which forced them back through MFA_SETUP on their next
+// sign-in even though they still had a registered TOTP secret. Real AWS doesn't let users
+// disable an MFA method once the pool enforces MFA (see docs/aws-spec/cognito/initiate_auth.md),
+// so the disable attempt itself must be rejected up front.
+func TestSetUserMFAPreference_DisableRejectedInMFARequiredPool(t *testing.T) {
+	ro := newTestRouter(t)
+	clientID := setupMFARequiredPool(t, ro)
+
+	w := doInitAuth(t, ro, clientID, "alice", "Password123!")
+	require.Equal(t, http.StatusOK, w.Code)
+	var initResp map[string]any
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&initResp))
+	session := initResp["Session"].(string)
+
+	assocBody, _ := json.Marshal(map[string]string{"Session": session})
+	w2 := doOp(t, ro, "AssociateSoftwareToken", string(assocBody))
+	require.Equal(t, http.StatusOK, w2.Code)
+	var assocResp associateSoftwareTokenResponse
+	require.NoError(t, json.NewDecoder(w2.Body).Decode(&assocResp))
+
+	verifyBody, _ := json.Marshal(map[string]string{
+		"Session":  assocResp.Session,
+		"UserCode": currentTOTPCode(t, assocResp.SecretCode),
+	})
+	w3 := doOp(t, ro, "VerifySoftwareToken", string(verifyBody))
+	require.Equal(t, http.StatusOK, w3.Code)
+	var verifyResp verifySoftwareTokenResponse
+	require.NoError(t, json.NewDecoder(w3.Body).Decode(&verifyResp))
+
+	respBody, _ := json.Marshal(map[string]any{
+		"ClientId":           clientID,
+		"ChallengeName":      "MFA_SETUP",
+		"Session":            verifyResp.Session,
+		"ChallengeResponses": map[string]string{"USERNAME": "alice"},
+	})
+	w4 := doOp(t, ro, "RespondToAuthChallenge", string(respBody))
+	require.Equal(t, http.StatusOK, w4.Code)
+	var authResp map[string]any
+	require.NoError(t, json.NewDecoder(w4.Body).Decode(&authResp))
+	token := authResp["AuthenticationResult"].(map[string]any)["AccessToken"].(string)
+
+	wDisable := doSetUserMFAPreference(t, ro, token, map[string]any{"Enabled": false})
+	assert.Equal(t, http.StatusBadRequest, wDisable.Code)
+	assertErrType(t, wDisable, ErrTypeInvalidParameterException)
+
+	poolID, err := ro.storage.GetPoolIDForClient(clientID)
+	require.NoError(t, err)
+	u, err := ro.storage.GetUser(poolID, "alice")
+	require.NoError(t, err)
+	assert.True(t, u.SoftwareTokenMFAEnabled)
+	assert.NotEmpty(t, u.TOTPSecret)
+
+	// A later sign-in must still present SOFTWARE_TOKEN_MFA, not MFA_SETUP again.
+	wInit := doInitAuth(t, ro, clientID, "alice", "Password123!")
+	require.Equal(t, http.StatusOK, wInit.Code)
+	var laterResp map[string]any
+	require.NoError(t, json.NewDecoder(wInit.Body).Decode(&laterResp))
+	assert.Equal(t, "SOFTWARE_TOKEN_MFA", laterResp["ChallengeName"])
 }
 
 func TestMFASetup_FullFlowSuccess(t *testing.T) {

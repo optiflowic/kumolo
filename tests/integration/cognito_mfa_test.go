@@ -347,6 +347,65 @@ func TestCognitoIntegration_MFA_ForcedSetup_SignInFlow(t *testing.T) {
 	assert.NotEmpty(t, aws.ToString(reResp.AuthenticationResult.AccessToken))
 }
 
+// TestCognitoIntegration_MFA_ForcedSetup_DisableRejected guards against a regression where an
+// already-enrolled user could disable SOFTWARE_TOKEN_MFA in a pool with MfaConfiguration "ON",
+// forcing them back through MFA_SETUP on their next sign-in despite still having a registered
+// TOTP secret. Real AWS doesn't let users disable an MFA method once the pool requires MFA.
+func TestCognitoIntegration_MFA_ForcedSetup_DisableRejected(t *testing.T) {
+	env := newForcedMFATestEnv(t, "mfa-forced-disable-pool")
+	ctx := context.Background()
+
+	initAuth := mustInitiateForcedMfaSetup(ctx, t, env)
+
+	assoc, err := env.c.AssociateSoftwareToken(ctx, &awscognito.AssociateSoftwareTokenInput{
+		Session: initAuth.Session,
+	})
+	require.NoError(t, err)
+	secret := aws.ToString(assoc.SecretCode)
+
+	verify, err := env.c.VerifySoftwareToken(ctx, &awscognito.VerifySoftwareTokenInput{
+		Session:  assoc.Session,
+		UserCode: aws.String(totpCode(t, secret, time.Now())),
+	})
+	require.NoError(t, err)
+
+	complete, err := env.c.RespondToAuthChallenge(ctx, &awscognito.RespondToAuthChallengeInput{
+		ClientId:      aws.String(env.clientID),
+		ChallengeName: types.ChallengeNameTypeMfaSetup,
+		Session:       verify.Session,
+		ChallengeResponses: map[string]string{
+			"USERNAME": env.username,
+		},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, complete.AuthenticationResult)
+	accessToken := aws.ToString(complete.AuthenticationResult.AccessToken)
+	require.NotEmpty(t, accessToken)
+
+	_, err = env.c.SetUserMFAPreference(ctx, &awscognito.SetUserMFAPreferenceInput{
+		AccessToken: aws.String(accessToken),
+		SoftwareTokenMfaSettings: &types.SoftwareTokenMfaSettingsType{
+			Enabled: false,
+		},
+	})
+	require.Error(t, err)
+	assert.Equal(t, "InvalidParameterException", apiErrorCode(err))
+
+	// The rejected disable attempt must not have changed anything: a later sign-in still
+	// gets SOFTWARE_TOKEN_MFA, not MFA_SETUP.
+	reAuth, err := env.c.InitiateAuth(ctx, &awscognito.InitiateAuthInput{
+		ClientId: aws.String(env.clientID),
+		AuthFlow: types.AuthFlowTypeUserPasswordAuth,
+		AuthParameters: map[string]string{
+			"USERNAME": env.username,
+			"PASSWORD": env.password,
+		},
+	})
+	require.NoError(t, err)
+	require.Nil(t, reAuth.AuthenticationResult)
+	assert.Equal(t, types.ChallengeNameTypeSoftwareTokenMfa, reAuth.ChallengeName)
+}
+
 func TestCognitoIntegration_MFA_ForcedSetup_VerifySoftwareToken_WrongCode(t *testing.T) {
 	env := newForcedMFATestEnv(t, "mfa-forced-wrongcode-pool")
 	ctx := context.Background()

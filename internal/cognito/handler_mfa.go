@@ -506,7 +506,10 @@ type setUserMFAPreferenceRequest struct {
 	SoftwareTokenMfaSettings *mfaSettingsType `json:"SoftwareTokenMfaSettings"`
 }
 
-var errTOTPNotVerified = errors.New("TOTP not verified")
+var (
+	errTOTPNotVerified  = errors.New("TOTP not verified")
+	errMFACannotDisable = errors.New("cannot disable MFA while pool requires it")
+)
 
 func (ro *Router) handleSetUserMFAPreference(w http.ResponseWriter, body []byte) {
 	var req setUserMFAPreferenceRequest
@@ -540,14 +543,26 @@ func (ro *Router) handleSetUserMFAPreference(w http.ResponseWriter, body []byte)
 	if !ok {
 		return
 	}
+	pool, err := ro.storage.GetUserPool(poolID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to get user pool")
+		return
+	}
 
-	err := ro.storage.UpdateUser(poolID, user.Username, func(u *UserMetadata) error {
+	err = ro.storage.UpdateUser(poolID, user.Username, func(u *UserMetadata) error {
 		settings := req.SoftwareTokenMfaSettings
 		if settings == nil {
 			return nil
 		}
 		if settings.Enabled && u.TOTPSecret == "" {
 			return errTOTPNotVerified
+		}
+		if !settings.Enabled && u.SoftwareTokenMFAEnabled &&
+			pool.MfaConfiguration == mfaConfigurationOn {
+			// Real AWS doesn't let a user disable an MFA method once the pool's
+			// MfaConfiguration is "ON" — only the preferred method can be changed.
+			return errMFACannotDisable
 		}
 		u.SoftwareTokenMFAEnabled = settings.Enabled
 		switch {
@@ -571,6 +586,13 @@ func (ro *Router) handleSetUserMFAPreference(w http.ResponseWriter, body []byte)
 				http.StatusBadRequest,
 				ErrTypeInvalidParameterException,
 				"Cannot enable SOFTWARE_TOKEN_MFA before verifying a software token via VerifySoftwareToken.",
+			)
+		case errors.Is(err, errMFACannotDisable):
+			writeError(
+				w,
+				http.StatusBadRequest,
+				ErrTypeInvalidParameterException,
+				"Cannot disable SOFTWARE_TOKEN_MFA: this user pool's MfaConfiguration is \"ON\".",
 			)
 		default:
 			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
