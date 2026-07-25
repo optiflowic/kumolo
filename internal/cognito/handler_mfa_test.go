@@ -16,6 +16,10 @@ import (
 
 // ── MFA test helpers ────────────────────────────────────────────────────────
 
+// testTOTPSecret is an arbitrary base32 TOTP secret used to build session/user fixtures
+// directly (bypassing generateTOTPSecret) in tests that don't exercise the code's own value.
+const testTOTPSecret = "JBSWY3DPEHPK3PXP" //nolint:gosec // G101 false positive: test fixture, not a credential
+
 func doAssociateSoftwareToken(
 	t *testing.T,
 	ro *Router,
@@ -1030,7 +1034,7 @@ func TestSoftwareTokenMFA_RespondMFADisabledSinceChallengeIssued(t *testing.T) {
 			// flag changes (see TestSetUserMFAPreference_DisableClearsPreferred).
 			return &UserMetadata{ //nolint:gosec // G101 false positive: test fixture, not a credential
 				Username:                "alice",
-				TOTPSecret:              "JBSWY3DPEHPK3PXP",
+				TOTPSecret:              testTOTPSecret,
 				SoftwareTokenMFAEnabled: false,
 			}, nil
 		},
@@ -1556,8 +1560,13 @@ func TestVerifySoftwareTokenSession_GetUserInternalError(t *testing.T) {
 	key := testRSAKey(t)
 	keyID, _ := generateTokenID()
 	session, err := buildSessionToken(
-		key, keyID, "pool-1", "c", "alice", "MFA_SETUP",
-		map[string]any{"pending_totp_secret": "JBSWY3DPEHPK3PXP"},
+		key,
+		keyID,
+		"pool-1",
+		"c",
+		"alice",
+		"MFA_SETUP",
+		map[string]any{"pending_totp_secret": testTOTPSecret},
 	)
 	require.NoError(t, err)
 
@@ -1619,8 +1628,13 @@ func TestVerifySoftwareTokenSession_UserNotFound(t *testing.T) {
 	key := testRSAKey(t)
 	keyID, _ := generateTokenID()
 	session, err := buildSessionToken(
-		key, keyID, "pool-1", "c", "ghost", "MFA_SETUP",
-		map[string]any{"pending_totp_secret": "JBSWY3DPEHPK3PXP"},
+		key,
+		keyID,
+		"pool-1",
+		"c",
+		"ghost",
+		"MFA_SETUP",
+		map[string]any{"pending_totp_secret": testTOTPSecret},
 	)
 	require.NoError(t, err)
 
@@ -1658,8 +1672,13 @@ func TestMFASetupChallenge_GetUserInternalError(t *testing.T) {
 	key := testRSAKey(t)
 	keyID, _ := generateTokenID()
 	session, err := buildSessionToken(
-		key, keyID, "pool-1", "c", "alice", "MFA_SETUP",
-		map[string]any{"verified_totp_secret": "JBSWY3DPEHPK3PXP"},
+		key,
+		keyID,
+		"pool-1",
+		"c",
+		"alice",
+		"MFA_SETUP",
+		map[string]any{"verified_totp_secret": testTOTPSecret},
 	)
 	require.NoError(t, err)
 
@@ -1831,7 +1850,7 @@ func TestMFASetupChallenge_UserNotFound(t *testing.T) {
 	keyID, _ := generateTokenID()
 	session, err := buildSessionToken(
 		key, keyID, "pool-1", "c", "ghost", "MFA_SETUP",
-		map[string]any{"verified_totp_secret": "JBSWY3DPEHPK3PXP"},
+		map[string]any{"verified_totp_secret": testTOTPSecret},
 	)
 	require.NoError(t, err)
 
@@ -1858,7 +1877,7 @@ func TestMFASetupChallenge_UserDisabled(t *testing.T) {
 	keyID, _ := generateTokenID()
 	session, err := buildSessionToken(
 		key, keyID, "pool-1", "c", "alice", "MFA_SETUP",
-		map[string]any{"verified_totp_secret": "JBSWY3DPEHPK3PXP"},
+		map[string]any{"verified_totp_secret": testTOTPSecret},
 	)
 	require.NoError(t, err)
 
@@ -1885,7 +1904,7 @@ func TestMFASetupChallenge_UpdateUserRaceUserNotFound(t *testing.T) {
 	keyID, _ := generateTokenID()
 	session, err := buildSessionToken(
 		key, keyID, "pool-1", "c", "alice", "MFA_SETUP",
-		map[string]any{"verified_totp_secret": "JBSWY3DPEHPK3PXP"},
+		map[string]any{"verified_totp_secret": testTOTPSecret},
 	)
 	require.NoError(t, err)
 
@@ -1915,7 +1934,7 @@ func TestMFASetupChallenge_UpdateUserError(t *testing.T) {
 	keyID, _ := generateTokenID()
 	session, err := buildSessionToken(
 		key, keyID, "pool-1", "c", "alice", "MFA_SETUP",
-		map[string]any{"verified_totp_secret": "JBSWY3DPEHPK3PXP"},
+		map[string]any{"verified_totp_secret": testTOTPSecret},
 	)
 	require.NoError(t, err)
 
