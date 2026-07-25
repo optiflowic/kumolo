@@ -264,8 +264,8 @@ func newForcedMFATestEnv(t *testing.T, name string) mfaTestEnv {
 // pool and asserts it issues an MFA_SETUP challenge (not tokens), returning the output so
 // callers can continue the flow with their own distinguishing steps.
 func mustInitiateForcedMfaSetup(
-	t *testing.T,
 	ctx context.Context,
+	t *testing.T,
 	env mfaTestEnv,
 ) *awscognito.InitiateAuthOutput {
 	t.Helper()
@@ -289,7 +289,7 @@ func TestCognitoIntegration_MFA_ForcedSetup_SignInFlow(t *testing.T) {
 	ctx := context.Background()
 
 	// First sign-in for a pool with MfaConfiguration "ON" must issue MFA_SETUP, not tokens.
-	initAuth := mustInitiateForcedMfaSetup(t, ctx, env)
+	initAuth := mustInitiateForcedMfaSetup(ctx, t, env)
 
 	assoc, err := env.c.AssociateSoftwareToken(ctx, &awscognito.AssociateSoftwareTokenInput{
 		Session: initAuth.Session,
@@ -351,7 +351,7 @@ func TestCognitoIntegration_MFA_ForcedSetup_VerifySoftwareToken_WrongCode(t *tes
 	env := newForcedMFATestEnv(t, "mfa-forced-wrongcode-pool")
 	ctx := context.Background()
 
-	initAuth := mustInitiateForcedMfaSetup(t, ctx, env)
+	initAuth := mustInitiateForcedMfaSetup(ctx, t, env)
 
 	assoc, err := env.c.AssociateSoftwareToken(ctx, &awscognito.AssociateSoftwareTokenInput{
 		Session: initAuth.Session,
@@ -370,7 +370,7 @@ func TestCognitoIntegration_MFA_ForcedSetup_RespondWithoutVerify(t *testing.T) {
 	env := newForcedMFATestEnv(t, "mfa-forced-unverified-pool")
 	ctx := context.Background()
 
-	initAuth := mustInitiateForcedMfaSetup(t, ctx, env)
+	initAuth := mustInitiateForcedMfaSetup(ctx, t, env)
 
 	// Responding directly with the InitiateAuth session (no AssociateSoftwareToken/
 	// VerifySoftwareToken in between) carries no verified secret and must be rejected.

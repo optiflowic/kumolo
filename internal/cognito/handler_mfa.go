@@ -20,6 +20,7 @@ const (
 	challengeMFASetup         = "MFA_SETUP"
 	challengeSoftwareTokenMFA = "SOFTWARE_TOKEN_MFA"
 	mfaSettingSoftwareToken   = "SOFTWARE_TOKEN_MFA"
+	mfaConfigurationOn        = "ON"
 )
 
 // ──── AssociateSoftwareToken ──────────────────────────────────────────────────
