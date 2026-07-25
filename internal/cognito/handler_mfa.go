@@ -662,10 +662,25 @@ func (ro *Router) handleSoftwareTokenMFAChallenge(
 			"failed to get user")
 		return
 	}
-	if user.TOTPSecret == "" || !user.SoftwareTokenMFAEnabled {
-		// Reached only if SetUserMFAPreference disables MFA between challenge
-		// issuance and response (this challenge is otherwise only issued, via
-		// completeAuth, for a user with SoftwareTokenMFAEnabled).
+
+	// Normally this challenge is only issued, via completeAuth, for a user with
+	// SoftwareTokenMFAEnabled. The exception is a pool with MfaConfiguration "ON": completeAuth
+	// also issues it for a user with a verified TOTPSecret but SoftwareTokenMFAEnabled == false
+	// (enrolled and later disabled while the pool still allowed it), reusing the existing
+	// authenticator instead of forcing MFA_SETUP re-enrollment. Re-derive that same allowance
+	// here rather than trusting the session, since SetUserMFAPreference could have disabled MFA
+	// between challenge issuance and response.
+	allowed := user.SoftwareTokenMFAEnabled
+	if !allowed {
+		pool, err := ro.storage.GetUserPool(poolID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+				"failed to get user pool")
+			return
+		}
+		allowed = pool.MfaConfiguration == mfaConfigurationOn
+	}
+	if user.TOTPSecret == "" || !allowed {
 		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException, "Invalid session.")
 		return
 	}
@@ -678,6 +693,29 @@ func (ro *Router) handleSoftwareTokenMFAChallenge(
 		writeError(w, http.StatusBadRequest, ErrTypeCodeMismatchException,
 			"Invalid verification code provided, please try again.")
 		return
+	}
+
+	if !user.SoftwareTokenMFAEnabled {
+		// Self-heal the enrolled-but-disabled state now that the user has proven possession of
+		// the authenticator in a pool that mandates MFA: converges to the invariant
+		// SetUserMFAPreference already enforces going forward (can't disable MFA once "ON").
+		updateErr := ro.storage.UpdateUser(poolID, username, func(u *UserMetadata) error {
+			u.SoftwareTokenMFAEnabled = true
+			u.PreferredMfaSetting = mfaSettingSoftwareToken
+			return nil
+		})
+		if updateErr != nil {
+			if errors.Is(updateErr, errUserNotFound) {
+				writeError(w, http.StatusBadRequest, ErrTypeUserNotFoundException,
+					"User does not exist.")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+				"failed to activate software token MFA")
+			return
+		}
+		user.SoftwareTokenMFAEnabled = true
+		user.PreferredMfaSetting = mfaSettingSoftwareToken
 	}
 
 	ro.writeAuthResult(w, poolID, clientID, user, privateKey, keys.KeyID, true, "")

@@ -3,7 +3,7 @@
 - URL: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_AssociateSoftwareToken.html
 - SDK type: `cognitoidentityprovider.AssociateSoftwareTokenInput` / `AssociateSoftwareTokenOutput`
 - X-Amz-Target: `AWSCognitoIdentityProviderService.AssociateSoftwareToken`
-- Last verified: 2026-07-22
+- Last verified: 2026-07-25
 
 ## Request
 
@@ -43,7 +43,10 @@
     completion path). The generated secret travels in the *response* Session's own claims
     (`pending_totp_secret`) rather than in user storage — nothing is persisted until
     `RespondToAuthChallenge` commits it. A malformed, expired, or wrong-challenge Session returns
-    `NotAuthorizedException`.
+    `NotAuthorizedException`. Per `initiate_auth.md` deviations, `MFA_SETUP` is only issued to a
+    user with no registered TOTP secret, so this flow never discards an existing verified secret
+    (see #502) — a user who already has one gets a `SOFTWARE_TOKEN_MFA` challenge instead and
+    never reaches `AssociateSoftwareToken`.
 - `ConcurrentModificationException`, `ForbiddenException`, `OperationNotEnabledException`,
   `ResourceNotFoundException`, and `SoftwareTokenMFANotFoundException` are not returned — kumolo
   does not gate TOTP setup on user pool MFA configuration beyond the `MFA_SETUP` challenge itself

@@ -188,6 +188,7 @@ type mockStore struct {
 	deleteClientErr           error
 	listClientErr             error
 	getPoolForClient          func(string) (string, error)
+	getUserPoolFn             func(string) (*UserPoolMetadata, error)
 	createUserErr             error
 	getUserFn                 func(string, string) (*UserMetadata, error)
 	getUserBySubFn            func(string, string) (*UserMetadata, error)
@@ -208,7 +209,10 @@ type mockStore struct {
 }
 
 func (m *mockStore) CreateUserPool(*UserPoolMetadata) error { return m.createErr }
-func (m *mockStore) GetUserPool(string) (*UserPoolMetadata, error) {
+func (m *mockStore) GetUserPool(poolID string) (*UserPoolMetadata, error) {
+	if m.getUserPoolFn != nil {
+		return m.getUserPoolFn(poolID)
+	}
 	if m.getErr != nil {
 		return nil, m.getErr
 	}

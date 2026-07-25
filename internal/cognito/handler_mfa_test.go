@@ -1068,6 +1068,107 @@ func TestSoftwareTokenMFA_RespondMFADisabledSinceChallengeIssued(t *testing.T) {
 	assertErrType(t, w, ErrTypeNotAuthorizedException)
 }
 
+func TestSoftwareTokenMFA_RespondGetUserPoolStorageError(t *testing.T) {
+	key := testRSAKey(t)
+	keyID, _ := generateTokenID()
+	session, err := buildSessionToken(key, keyID, "pool-1", "c", "alice", "SOFTWARE_TOKEN_MFA", nil)
+	require.NoError(t, err)
+
+	ro := &Router{storage: &mockStore{
+		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
+		getOrCreateKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+			return &poolKeys{KeyID: keyID}, key, nil
+		},
+		getUserFn: func(string, string) (*UserMetadata, error) {
+			return &UserMetadata{ //nolint:gosec // G101 false positive: test fixture, not a credential
+				Username:                "alice",
+				Enabled:                 true,
+				TOTPSecret:              testTOTPSecret,
+				SoftwareTokenMFAEnabled: false,
+			}, nil
+		},
+		getErr: errors.New("storage failure"),
+	}}
+	body, _ := json.Marshal(map[string]any{
+		"ClientId": "c", "ChallengeName": "SOFTWARE_TOKEN_MFA", "Session": session,
+		"ChallengeResponses": map[string]string{
+			"USERNAME": "alice", "SOFTWARE_TOKEN_MFA_CODE": "123456",
+		},
+	})
+	w := doOp(t, ro, "RespondToAuthChallenge", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrType(t, w, ErrTypeInternalErrorException)
+}
+
+// TestSoftwareTokenMFA_RespondSelfHealFailures covers RespondToAuthChallenge(SOFTWARE_TOKEN_MFA)
+// for a user with a verified TOTPSecret whose SoftwareTokenMFAEnabled is false in a pool with
+// MfaConfiguration "ON" (see #502): the challenge is allowed, but the self-heal UpdateUser call
+// that re-activates SoftwareTokenMFAEnabled can still race a deletion or hit a storage error.
+func TestSoftwareTokenMFA_RespondSelfHealFailures(t *testing.T) {
+	tests := []struct {
+		name          string
+		updateUserFn  func(string, string, func(*UserMetadata) error) error
+		updateUserErr error
+		wantStatus    int
+		wantErrType   string
+	}{
+		{
+			name: "self-heal update races user deletion",
+			updateUserFn: func(string, string, func(*UserMetadata) error) error {
+				return errUserNotFound
+			},
+			wantStatus:  http.StatusBadRequest,
+			wantErrType: ErrTypeUserNotFoundException,
+		},
+		{
+			name:          "self-heal update fails with storage error",
+			updateUserErr: errors.New("storage failure"),
+			wantStatus:    http.StatusInternalServerError,
+			wantErrType:   ErrTypeInternalErrorException,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			key := testRSAKey(t)
+			keyID, _ := generateTokenID()
+			session, err := buildSessionToken(
+				key, keyID, "pool-1", "c", "alice", "SOFTWARE_TOKEN_MFA", nil,
+			)
+			require.NoError(t, err)
+
+			ro := &Router{storage: &mockStore{
+				getPoolForClient: func(string) (string, error) { return "pool-1", nil },
+				getOrCreateKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {
+					return &poolKeys{KeyID: keyID}, key, nil
+				},
+				getUserFn: func(string, string) (*UserMetadata, error) {
+					return &UserMetadata{ //nolint:gosec // G101 false positive: test fixture, not a credential
+						Username:                "alice",
+						Enabled:                 true,
+						TOTPSecret:              testTOTPSecret,
+						SoftwareTokenMFAEnabled: false,
+					}, nil
+				},
+				getUserPoolFn: func(string) (*UserPoolMetadata, error) {
+					return &UserPoolMetadata{MfaConfiguration: "ON"}, nil
+				},
+				updateUserFn:  tt.updateUserFn,
+				updateUserErr: tt.updateUserErr,
+			}}
+			body, _ := json.Marshal(map[string]any{
+				"ClientId": "c", "ChallengeName": "SOFTWARE_TOKEN_MFA", "Session": session,
+				"ChallengeResponses": map[string]string{
+					"USERNAME":                "alice",
+					"SOFTWARE_TOKEN_MFA_CODE": currentTOTPCode(t, testTOTPSecret),
+				},
+			})
+			w := doOp(t, ro, "RespondToAuthChallenge", string(body))
+			assert.Equal(t, tt.wantStatus, w.Code)
+			assertErrType(t, w, tt.wantErrType)
+		})
+	}
+}
+
 // TestSoftwareTokenMFA_RespondUserDisabledSinceChallengeIssued ensures a user disabled
 // (AdminDisableUser) between InitiateAuth issuing the SOFTWARE_TOKEN_MFA challenge and
 // RespondToAuthChallenge cannot still complete authentication and receive tokens.
@@ -1324,6 +1425,63 @@ func TestMFASetup_NotTriggeredWhenAlreadyEnrolled(t *testing.T) {
 	var resp map[string]any
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
 	assert.Equal(t, "SOFTWARE_TOKEN_MFA", resp["ChallengeName"])
+}
+
+// TestMFASetup_NotForcedForDisabledButRegisteredUser guards against the regression in #502: a
+// user who enrolled and then disabled SOFTWARE_TOKEN_MFA while the pool still allowed it
+// (permitted per TestSetUserMFAPreference_DisableClearsPreferred) must not be forced through
+// MFA_SETUP re-enrollment once the pool later switches to "ON" — their existing verified TOTP
+// secret must be reused via a SOFTWARE_TOKEN_MFA challenge instead, and completing it must
+// self-heal SoftwareTokenMFAEnabled back to true without generating a new secret.
+func TestMFASetup_NotForcedForDisabledButRegisteredUser(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPoolWithMFA(t, ro, "mfa-pool", "OPTIONAL")
+	clientID := createClient(t, ro, poolID, "mfa-client")
+	token := doAuth(t, ro, clientID, "alice", "Password123!")
+	secret := enableSoftwareTokenMFA(t, ro, token)
+
+	w := doSetUserMFAPreference(t, ro, token, map[string]any{"Enabled": false})
+	require.Equal(t, http.StatusOK, w.Code)
+
+	body, _ := json.Marshal(map[string]any{
+		"UserPoolId":       poolID,
+		"MfaConfiguration": "ON",
+	})
+	wSet := doOp(t, ro, "SetUserPoolMfaConfig", string(body))
+	require.Equal(t, http.StatusOK, wSet.Code)
+
+	wInit := doInitAuth(t, ro, clientID, "alice", "Password123!")
+	require.Equal(t, http.StatusOK, wInit.Code)
+	var initResp map[string]any
+	require.NoError(t, json.NewDecoder(wInit.Body).Decode(&initResp))
+	require.Equal(t, "SOFTWARE_TOKEN_MFA", initResp["ChallengeName"])
+	session := initResp["Session"].(string)
+
+	respBody, _ := json.Marshal(map[string]any{
+		"ClientId":      clientID,
+		"ChallengeName": "SOFTWARE_TOKEN_MFA",
+		"Session":       session,
+		"ChallengeResponses": map[string]string{
+			"USERNAME":                "alice",
+			"SOFTWARE_TOKEN_MFA_CODE": currentTOTPCode(t, secret),
+		},
+	})
+	wResp := doOp(t, ro, "RespondToAuthChallenge", string(respBody))
+	require.Equal(t, http.StatusOK, wResp.Code)
+	var authResp map[string]any
+	require.NoError(t, json.NewDecoder(wResp.Body).Decode(&authResp))
+	result := authResp["AuthenticationResult"].(map[string]any)
+	assert.NotEmpty(t, result["AccessToken"])
+
+	u, err := ro.storage.GetUser(poolID, "alice")
+	require.NoError(t, err)
+	assert.Equal(t, secret, u.TOTPSecret, "existing verified secret must not be replaced")
+	assert.True(
+		t,
+		u.SoftwareTokenMFAEnabled,
+		"successful sign-in must self-heal the disabled preference",
+	)
+	assert.Equal(t, mfaSettingSoftwareToken, u.PreferredMfaSetting)
 }
 
 // TestSetUserMFAPreference_DisableRejectedInMFARequiredPool guards against a regression where
