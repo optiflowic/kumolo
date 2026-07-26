@@ -593,7 +593,8 @@ func TestInitiateAuth_ForceChangePassword_ReturnsChallenge(t *testing.T) {
 }
 
 func TestInitiateAuth_GetPoolKeysError(t *testing.T) {
-	hash, _ := hashPassword("Password123!", bcrypt.MinCost)
+	hash, err := hashPassword("Password123!", bcrypt.MinCost)
+	require.NoError(t, err)
 	confirmedUser := &UserMetadata{
 		Username: "u", Sub: "sub-u", Status: userStatusConfirmed, Enabled: true,
 		PasswordHash: hash, Attributes: nil,
@@ -1399,7 +1400,8 @@ func TestWriteAuthResult_CreateRefreshTokenError(t *testing.T) {
 	key := testRSAKey(t)
 	keyID, _ := generateTokenID()
 
-	hash, _ := hashPassword("Password123!", bcrypt.MinCost)
+	hash, err := hashPassword("Password123!", bcrypt.MinCost)
+	require.NoError(t, err)
 	confirmedUser := &UserMetadata{
 		Username: "u", Sub: "sub-u", Status: userStatusConfirmed, Enabled: true,
 		PasswordHash: hash,
