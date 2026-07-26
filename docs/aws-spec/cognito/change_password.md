@@ -3,7 +3,7 @@
 - **URL**: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_ChangePassword.html
 - **Target**: `AWSCognitoIdentityProviderService.ChangePassword`
 - **SDK**: `cognitoidentityprovider.ChangePasswordInput` / `ChangePasswordOutput`
-- **Last verified**: 2026-07-11
+- **Last verified**: 2026-07-26
 
 ## Request
 
@@ -19,12 +19,14 @@
   from the token issuer, verify the JWT signature/expiry/`token_use`, check revocation, then
   look up the user by `sub`.
 - If the user has a stored password hash, `PreviousPassword` is required and must match via
-  `bcrypt.CompareHashAndPassword`; a missing or wrong value returns `NotAuthorizedException`
-  ("Incorrect username or password.", matching `InitiateAuth`'s `USER_PASSWORD_AUTH` message).
+  `verifyPassword` (SHA-256 prehash + `bcrypt.CompareHashAndPassword`, see
+  `docs/aws-spec/cognito/password_policy.md` Implementation); a missing or wrong value returns
+  `NotAuthorizedException` ("Incorrect username or password.", matching `InitiateAuth`'s
+  `USER_PASSWORD_AUTH` message).
 - Validates `ProposedPassword` against the pool's password policy (see
   `docs/aws-spec/cognito/password_policy.md`) before touching any state.
-- On success: bcrypt-hashes `ProposedPassword` and replaces the user's password hash. `Status`
-  is left unchanged.
+- On success: hashes `ProposedPassword` via `hashPassword` (SHA-256 prehash + bcrypt) and
+  replaces the user's password hash. `Status` is left unchanged.
 
 ## Response
 

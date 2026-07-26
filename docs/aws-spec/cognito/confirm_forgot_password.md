@@ -3,7 +3,7 @@
 - **URL**: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_ConfirmForgotPassword.html
 - **Target**: `AWSCognitoIdentityProviderService.ConfirmForgotPassword`
 - **SDK**: `cognitoidentityprovider.ConfirmForgotPasswordInput` / `ConfirmForgotPasswordOutput`
-- **Last verified**: 2026-07-11
+- **Last verified**: 2026-07-26
 
 ## Request
 
@@ -28,8 +28,9 @@
   pending code (empty) never matches.
 - Validates `Password` against the pool's password policy (see
   `docs/aws-spec/cognito/password_policy.md`) before touching any state.
-- On success: bcrypt-hashes `Password`, replaces the user's password hash, and clears the
-  pending reset code. User `Status` is left unchanged.
+- On success: hashes `Password` via `hashPassword` (SHA-256 prehash + bcrypt, see
+  `docs/aws-spec/cognito/password_policy.md` Implementation), replaces the user's password
+  hash, and clears the pending reset code. User `Status` is left unchanged.
 
 ## Response
 
