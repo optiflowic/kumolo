@@ -2,8 +2,9 @@
 
 URL: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_PasswordPolicyType.html
 URL: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_InvalidPasswordException.html
+URL: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_SignUp.html
 SDK: `cognitoidentityprovider.types.PasswordPolicyType`
-Last verified: 2026-07-11
+Last verified: 2026-07-26
 
 ## Scope
 
@@ -23,6 +24,7 @@ accepts a plaintext password:
 | Field | Type | Default when pool's Policies is unset | Enforcement |
 |-------|------|------------------------------------|-------------|
 | MinimumLength | int (6-99) | 8 | `utf8.RuneCountInString(password) < MinimumLength` (character count, not bytes) |
+| MaximumLength | fixed at 256 | 256 | `utf8.RuneCountInString(password) > 256` (character count, matches AWS's `Password` field length constraint documented on `SignUp`) |
 | RequireUppercase | bool | true | at least one Unicode uppercase rune |
 | RequireLowercase | bool | true | at least one Unicode lowercase rune |
 | RequireNumbers | bool | true | at least one Unicode digit rune |
@@ -37,7 +39,7 @@ kumolo checks rules in this order and returns on the first violation (matches ob
 reporting a single failing rule per response):
 
 1. MinimumLength
-2. MaximumLength (72 bytes, kumolo-specific bcrypt limit — see Deviations)
+2. MaximumLength (256 characters, fixed — see Implementation for how kumolo avoids bcrypt's 72-byte input cap)
 3. RequireUppercase
 4. RequireLowercase
 5. RequireNumbers
@@ -67,15 +69,18 @@ if a consuming test asserts on exact message text.
   falls back to the default when present but non-positive.
 - `validatePassword(policy, password)` returns the formatted message and `ok=false` on the first violated
   rule.
+- `internal/cognito/handler_password.go`: `prehashPassword` (SHA-256, then base64-standard-encoded, 44
+  bytes) runs on every plaintext password before it reaches bcrypt, at both hash-generation
+  (`hashPassword`) and verification (`verifyPassword`) call sites. This keeps every possible input
+  (up to the 256-character/1024-byte worst case for 4-byte UTF-8 runes) under bcrypt's 72-byte cap without
+  truncating or rejecting policy-valid passwords. Hashing and verification always go through these two
+  helpers so the prehash step stays consistent on both sides.
 
 ## kumolo Deviations
 
 - No `PasswordHistorySize` enforcement (no password history tracking).
 - Symbol detection is a general "not letter/digit/whitespace" Unicode check rather than AWS's documented
   allowed-symbol character set.
-- Maximum length is enforced at 72 bytes, not AWS's documented 256 characters. kumolo hashes passwords with
-  bcrypt (`golang.org/x/crypto/bcrypt`), which errors on inputs over 72 bytes; `validatePassword` rejects
-  such passwords up front as `InvalidPasswordException` rather than letting a policy-valid password fail
-  hashing later as `InternalErrorException`. A password over 72 bytes that is still within AWS's
-  256-character limit — which a multi-byte (e.g. non-ASCII) password can reach well under 256 bytes — is
-  therefore rejected by kumolo even though real AWS would accept it.
+- The SHA-256 prehash step described in Implementation is a kumolo-internal storage detail to work around
+  bcrypt's 72-byte input cap; it is not part of the AWS API contract and produces no user-visible
+  difference from real AWS.

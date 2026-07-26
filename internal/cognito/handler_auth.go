@@ -12,8 +12,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-
-	"golang.org/x/crypto/bcrypt"
 )
 
 const (
@@ -464,9 +462,7 @@ func (ro *Router) handleUserPasswordAuth(
 		return
 	}
 
-	if err := bcrypt.CompareHashAndPassword(
-		[]byte(user.PasswordHash), []byte(password),
-	); err != nil {
+	if !verifyPassword(user.PasswordHash, password) {
 		writeError(w, http.StatusBadRequest, ErrTypeNotAuthorizedException,
 			"Incorrect username or password.")
 		return

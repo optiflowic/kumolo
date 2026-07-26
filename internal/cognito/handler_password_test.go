@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -556,6 +557,28 @@ func TestChangePassword_Success(t *testing.T) {
 	assert.Equal(t, http.StatusOK, newW.Code)
 	oldW := doInitAuth(t, ro, clientID, "alice", "Password123!")
 	assertErrType(t, oldW, ErrTypeNotAuthorizedException)
+}
+
+// TestChangePassword_LongPassword_Success covers a password over bcrypt's
+// 72-byte cap but within AWS's 256-character maximum, exercising the
+// SHA-256-prehash-then-bcrypt path (see docs/aws-spec/cognito/password_policy.md)
+// through both hashPassword (change) and verifyPassword (re-authenticate).
+func TestChangePassword_LongPassword_Success(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	token := doAuth(t, ro, clientID, "alice", "Password123!")
+
+	longPassword := "Aa1!" + strings.Repeat("x", 200) // 204 chars, well over 72 bytes
+	body, _ := json.Marshal(map[string]string{
+		"AccessToken":      token,
+		"PreviousPassword": "Password123!",
+		"ProposedPassword": longPassword,
+	})
+	w := doOp(t, ro, "ChangePassword", string(body))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	newW := doInitAuth(t, ro, clientID, "alice", longPassword)
+	assert.Equal(t, http.StatusOK, newW.Code)
 }
 
 func TestChangePassword_MissingAccessToken(t *testing.T) {

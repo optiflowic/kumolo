@@ -1,7 +1,9 @@
 package cognito
 
 import (
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,13 +16,29 @@ import (
 
 var errPreviousPassword = errors.New("previous password required or incorrect")
 
+// prehashPassword SHA-256-hashes password and base64-encodes the digest (44
+// bytes), keeping every input under bcrypt's 72-byte cap regardless of the
+// AWS-permitted password length (up to 256 characters). Both hashPassword and
+// verifyPassword apply this step so hashing and verification stay consistent.
+func prehashPassword(password string) []byte {
+	sum := sha256.Sum256([]byte(password))
+	encoded := base64.StdEncoding.EncodeToString(sum[:])
+	return []byte(encoded)
+}
+
 // hashPassword bcrypt-hashes password at the given cost.
 func hashPassword(password string, cost int) (string, error) {
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), cost)
+	hash, err := bcrypt.GenerateFromPassword(prehashPassword(password), cost)
 	if err != nil {
 		return "", err
 	}
 	return string(hash), nil
+}
+
+// verifyPassword reports whether password matches hash, a bcrypt hash
+// produced by hashPassword.
+func verifyPassword(hash, password string) bool {
+	return bcrypt.CompareHashAndPassword([]byte(hash), prehashPassword(password)) == nil
 }
 
 // derivePasswordCredentials bcrypt-hashes password and derives its SRP-6a
@@ -381,9 +399,7 @@ func (ro *Router) handleChangePassword(w http.ResponseWriter, body []byte) {
 			if req.PreviousPassword == "" {
 				return errPreviousPassword
 			}
-			if bcrypt.CompareHashAndPassword(
-				[]byte(u.PasswordHash), []byte(req.PreviousPassword),
-			) != nil {
+			if !verifyPassword(u.PasswordHash, req.PreviousPassword) {
 				return errPreviousPassword
 			}
 		}

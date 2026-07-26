@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -91,7 +92,7 @@ func insertFCPUser(
 	poolID, username, sub, tempPassword string,
 ) {
 	t.Helper()
-	hash, err := bcrypt.GenerateFromPassword([]byte(tempPassword), bcrypt.MinCost)
+	hash, err := hashPassword(tempPassword, bcrypt.MinCost)
 	require.NoError(t, err)
 	ts := nowUnix()
 	user := &UserMetadata{
@@ -99,7 +100,7 @@ func insertFCPUser(
 		Sub:              sub,
 		Status:           userStatusForceChangePasswd,
 		Enabled:          true,
-		PasswordHash:     string(hash),
+		PasswordHash:     hash,
 		Attributes:       nil,
 		ConfirmationCode: "",
 		CreatedAt:        ts,
@@ -139,6 +140,22 @@ func TestSignUp_Success(t *testing.T) {
 	assert.False(t, resp.UserConfirmed)
 	assert.Equal(t, "EMAIL", resp.CodeDeliveryDetails.DeliveryMedium)
 	assert.Contains(t, resp.CodeDeliveryDetails.Destination, "@example.com")
+}
+
+// TestSignUp_LongPassword_Success covers a password over bcrypt's 72-byte cap
+// but within AWS's 256-character maximum, exercising the SHA-256-prehash-then-bcrypt
+// path (see docs/aws-spec/cognito/password_policy.md) end-to-end: SignUp hashes it,
+// then USER_PASSWORD_AUTH must verify it successfully.
+func TestSignUp_LongPassword_Success(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	longPassword := "Aa1!" + strings.Repeat("x", 200) // 204 chars, well over 72 bytes
+
+	signUpUser(t, ro, clientID, "alice", longPassword)
+	confirmUser(t, ro, clientID, "alice")
+
+	w := doInitAuth(t, ro, clientID, "alice", longPassword)
+	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 func TestSignUp_NoEmail_MasksDestination(t *testing.T) {
@@ -576,10 +593,10 @@ func TestInitiateAuth_ForceChangePassword_ReturnsChallenge(t *testing.T) {
 }
 
 func TestInitiateAuth_GetPoolKeysError(t *testing.T) {
-	hash, _ := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.MinCost)
+	hash, _ := hashPassword("Password123!", bcrypt.MinCost)
 	confirmedUser := &UserMetadata{
 		Username: "u", Sub: "sub-u", Status: userStatusConfirmed, Enabled: true,
-		PasswordHash: string(hash), Attributes: nil,
+		PasswordHash: hash, Attributes: nil,
 	}
 	ro := &Router{storage: &mockStore{
 		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
@@ -1218,7 +1235,7 @@ func TestCompleteAuth_MFAEnabledDuringAuth_ReturnsChallenge(t *testing.T) {
 	key := testRSAKey(t)
 	keyID, _ := generateTokenID()
 
-	hash, err := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.MinCost)
+	hash, err := hashPassword("Password123!", bcrypt.MinCost)
 	require.NoError(t, err)
 
 	calls := 0
@@ -1234,7 +1251,7 @@ func TestCompleteAuth_MFAEnabledDuringAuth_ReturnsChallenge(t *testing.T) {
 				// MFA not yet enabled.
 				return &UserMetadata{
 					Username: "u", Sub: "sub-u", Status: userStatusConfirmed, Enabled: true,
-					PasswordHash: string(hash),
+					PasswordHash: hash,
 				}, nil
 			}
 			// Reloaded by completeAuth: SetUserMFAPreference enabled MFA in the interim.
@@ -1243,7 +1260,7 @@ func TestCompleteAuth_MFAEnabledDuringAuth_ReturnsChallenge(t *testing.T) {
 				Sub:                     "sub-u",
 				Status:                  userStatusConfirmed,
 				Enabled:                 true,
-				PasswordHash:            string(hash),
+				PasswordHash:            hash,
 				TOTPSecret:              "JBSWY3DPEHPK3PXP",
 				SoftwareTokenMFAEnabled: true,
 			}, nil
@@ -1270,7 +1287,7 @@ func TestCompleteAuth_ReloadUserNotFound(t *testing.T) {
 	key := testRSAKey(t)
 	keyID, _ := generateTokenID()
 
-	hash, err := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.MinCost)
+	hash, err := hashPassword("Password123!", bcrypt.MinCost)
 	require.NoError(t, err)
 
 	calls := 0
@@ -1284,7 +1301,7 @@ func TestCompleteAuth_ReloadUserNotFound(t *testing.T) {
 			if calls == 1 {
 				return &UserMetadata{
 					Username: "u", Sub: "sub-u", Status: userStatusConfirmed, Enabled: true,
-					PasswordHash: string(hash),
+					PasswordHash: hash,
 				}, nil
 			}
 			return nil, errUserNotFound
@@ -1306,7 +1323,7 @@ func TestCompleteAuth_ReloadStorageError(t *testing.T) {
 	key := testRSAKey(t)
 	keyID, _ := generateTokenID()
 
-	hash, err := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.MinCost)
+	hash, err := hashPassword("Password123!", bcrypt.MinCost)
 	require.NoError(t, err)
 
 	calls := 0
@@ -1320,7 +1337,7 @@ func TestCompleteAuth_ReloadStorageError(t *testing.T) {
 			if calls == 1 {
 				return &UserMetadata{
 					Username: "u", Sub: "sub-u", Status: userStatusConfirmed, Enabled: true,
-					PasswordHash: string(hash),
+					PasswordHash: hash,
 				}, nil
 			}
 			return nil, errors.New("disk error")
@@ -1342,7 +1359,7 @@ func TestCompleteAuth_UserDisabledSinceInitialLookup(t *testing.T) {
 	key := testRSAKey(t)
 	keyID, _ := generateTokenID()
 
-	hash, err := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.MinCost)
+	hash, err := hashPassword("Password123!", bcrypt.MinCost)
 	require.NoError(t, err)
 
 	calls := 0
@@ -1356,13 +1373,13 @@ func TestCompleteAuth_UserDisabledSinceInitialLookup(t *testing.T) {
 			if calls == 1 {
 				return &UserMetadata{
 					Username: "u", Sub: "sub-u", Status: userStatusConfirmed, Enabled: true,
-					PasswordHash: string(hash),
+					PasswordHash: hash,
 				}, nil
 			}
 			// Reloaded by completeAuth: the user was disabled in the interim.
 			return &UserMetadata{
 				Username: "u", Sub: "sub-u", Status: userStatusConfirmed, Enabled: false,
-				PasswordHash: string(hash),
+				PasswordHash: hash,
 			}, nil
 		},
 	}}
@@ -1382,10 +1399,10 @@ func TestWriteAuthResult_CreateRefreshTokenError(t *testing.T) {
 	key := testRSAKey(t)
 	keyID, _ := generateTokenID()
 
-	hash, _ := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.MinCost)
+	hash, _ := hashPassword("Password123!", bcrypt.MinCost)
 	confirmedUser := &UserMetadata{
 		Username: "u", Sub: "sub-u", Status: userStatusConfirmed, Enabled: true,
-		PasswordHash: string(hash),
+		PasswordHash: hash,
 	}
 	ro := &Router{storage: &mockStore{
 		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
@@ -1408,11 +1425,11 @@ func TestWriteAuthResult_GetUserPoolClientError_ReturnsInternalError(t *testing.
 	keyID, err := generateTokenID()
 	require.NoError(t, err)
 
-	hash, err := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.MinCost)
+	hash, err := hashPassword("Password123!", bcrypt.MinCost)
 	require.NoError(t, err)
 	confirmedUser := &UserMetadata{
 		Username: "u", Sub: "sub-u", Status: userStatusConfirmed, Enabled: true,
-		PasswordHash: string(hash),
+		PasswordHash: hash,
 	}
 	ro := &Router{storage: &mockStore{
 		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
