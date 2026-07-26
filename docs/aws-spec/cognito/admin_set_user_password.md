@@ -3,7 +3,7 @@
 - **URL**: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_AdminSetUserPassword.html
 - **Target**: `AWSCognitoIdentityProviderService.AdminSetUserPassword`
 - **SDK**: `cognitoidentityprovider.AdminSetUserPasswordInput` / `AdminSetUserPasswordOutput`
-- **Last verified**: 2026-07-11
+- **Last verified**: 2026-07-26
 
 ## Request
 
@@ -20,8 +20,9 @@ HTTP 200 + empty body `{}`
 
 ## Behavior
 
-- `Permanent=true`: bcrypt-hash the new password, set user status to `CONFIRMED`.
-- `Permanent=false` (default): bcrypt-hash the new password, set user status to `FORCE_CHANGE_PASSWORD`.
+- `Permanent=true`: hash the new password via `hashPassword` (SHA-256 prehash + bcrypt, see
+  `docs/aws-spec/cognito/password_policy.md` Implementation), set user status to `CONFIRMED`.
+- `Permanent=false` (default): same hashing, set user status to `FORCE_CHANGE_PASSWORD`.
 - Password history policy not enforced (PasswordHistoryPolicyViolationException not returned).
 
 ## Errors implemented

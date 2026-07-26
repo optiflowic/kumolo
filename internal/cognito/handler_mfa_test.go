@@ -1602,7 +1602,7 @@ func TestMFASetup_FullFlowSuccess(t *testing.T) {
 }
 
 func TestMFASetup_GetUserPoolInternalError(t *testing.T) {
-	hash, err := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.MinCost)
+	hash, err := hashPassword("Password123!", bcrypt.MinCost)
 	require.NoError(t, err)
 	key := testRSAKey(t)
 	keyID, _ := generateTokenID()
@@ -1614,7 +1614,7 @@ func TestMFASetup_GetUserPoolInternalError(t *testing.T) {
 				Username:     "alice",
 				Status:       userStatusConfirmed,
 				Enabled:      true,
-				PasswordHash: string(hash),
+				PasswordHash: hash,
 			}, nil
 		},
 		getOrCreateKeysFn: func(string) (*poolKeys, *rsa.PrivateKey, error) {

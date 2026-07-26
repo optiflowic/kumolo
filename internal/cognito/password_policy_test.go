@@ -85,11 +85,23 @@ func TestValidatePassword(t *testing.T) {
 			wantMsg:  "Password did not conform with policy: Password not long enough",
 		},
 		{ //nolint:gosec // G101 false positive: test fixture, not a credential
-			name:     "exceeds bcrypt's 72-byte maximum",
+			name:     "at 256-character maximum is accepted",
 			policy:   fullPolicy,
-			password: "Aa1!" + strings.Repeat("x", bcryptMaxPasswordBytes),
+			password: "Aa1!" + strings.Repeat("x", 256-4),
+			wantOK:   true,
+		},
+		{ //nolint:gosec // G101 false positive: test fixture, not a credential
+			name:     "exceeds 256-character maximum",
+			policy:   fullPolicy,
+			password: "Aa1!" + strings.Repeat("x", 256-4+1),
 			wantOK:   false,
 			wantMsg:  "Password did not conform with policy: Password too long",
+		},
+		{ //nolint:gosec // G101 false positive: test fixture, not a credential
+			name:     "between 73 and 256 bytes is accepted (bcrypt's 72-byte cap doesn't apply)",
+			policy:   fullPolicy,
+			password: "Aa1!" + strings.Repeat("x", 100),
+			wantOK:   true,
 		},
 	}
 

@@ -86,10 +86,12 @@ func passwordPolicyFromPool(meta *UserPoolMetadata) passwordPolicy {
 	return policy
 }
 
-// bcryptMaxPasswordBytes is bcrypt's hard input cap (golang.org/x/crypto/bcrypt
-// rejects longer inputs with an error); validatePassword enforces this so
-// password-policy checks never accept a password that hashing would reject.
-const bcryptMaxPasswordBytes = 72
+// maxPasswordLen is AWS's fixed maximum password length (character count),
+// documented on SignUp's Password field. It applies regardless of the pool's
+// PasswordPolicy. kumolo avoids bcrypt's 72-byte input cap by SHA-256
+// prehashing before bcrypt (see prehashPassword), so this limit is enforced
+// purely to match AWS, not to work around bcrypt.
+const maxPasswordLen = 256
 
 // validatePassword checks password against policy, returning the
 // AWS-formatted InvalidPasswordException message and ok=false on the first
@@ -102,11 +104,7 @@ func validatePassword(policy passwordPolicy, password string) (message string, o
 	switch {
 	case utf8.RuneCountInString(password) < minLen:
 		return "Password did not conform with policy: Password not long enough", false
-	// Real AWS allows up to 256 characters, but kumolo hashes passwords with
-	// bcrypt, which silently caps input at 72 bytes; enforcing that limit here
-	// keeps rejection consistent (InvalidPasswordException) instead of letting
-	// policy-valid passwords fail hashing later with InternalErrorException.
-	case len(password) > bcryptMaxPasswordBytes:
+	case utf8.RuneCountInString(password) > maxPasswordLen:
 		return "Password did not conform with policy: Password too long", false
 	case policy.RequireUppercase && !containsRune(password, unicode.IsUpper):
 		return "Password did not conform with policy: Password must have uppercase characters", false

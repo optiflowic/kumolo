@@ -2,7 +2,7 @@
 
 URL: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_SignUp.html
 SDK: `cognitoidentityprovider.SignUpInput` / `cognitoidentityprovider.SignUpOutput`
-Last verified: 2026-07-11
+Last verified: 2026-07-26
 
 ## Request Parameters
 
@@ -47,7 +47,8 @@ Last verified: 2026-07-11
 - User is created in `UNCONFIRMED` state and must call ConfirmSignUp to activate.
 - kumolo does not deliver email/SMS. A random 6-digit confirmation code is generated per SignUp call and logged at INFO level (`pool_id`, `username`, `code`) so developers can retrieve it from server logs.
 - `CodeDeliveryDetails.Destination` is masked: for email, the full email value is stored but masked as `"***"` in the response.
-- Password is hashed with bcrypt (cost 10).
+- Password is hashed via `hashPassword` (SHA-256 prehash + bcrypt, cost 10; see
+  `docs/aws-spec/cognito/password_policy.md` Implementation).
 - A UUID sub is generated and returned as `UserSub`.
 
 ## kumolo Deviations
