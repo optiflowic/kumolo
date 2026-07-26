@@ -651,6 +651,20 @@ if [[ -n "$PW_POOL_ID" && -n "$PW_CLIENT_ID" ]]; then
     fail "SignUp — expected InvalidPasswordException for password shorter than 10"
   fi
 
+  # 204 chars, well over bcrypt's 72-byte input cap but within AWS's documented
+  # 256-character maximum. kumolo SHA-256-prehashes before bcrypt (see
+  # docs/aws-spec/cognito/password_policy.md), so this must succeed.
+  LONG_PW="Aa1!$(printf 'x%.0s' $(seq 1 200))"
+  PW_LONG_JSON=$($AWS sign-up \
+    --client-id "$PW_CLIENT_ID" \
+    --username "pwpolicy-longpw-user" \
+    --password "$LONG_PW" 2>&1)
+  if echo "$PW_LONG_JSON" | grep -q '"UserSub"'; then
+    ok "SignUp — password over bcrypt's 72-byte cap (204 chars) accepted"
+  else
+    fail "SignUp — expected a 204-char password within the 256-char maximum to be accepted"
+  fi
+
   $AWS delete-user-pool-client \
     --user-pool-id "$PW_POOL_ID" \
     --client-id "$PW_CLIENT_ID" >/dev/null 2>&1 || true

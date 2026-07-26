@@ -2370,6 +2370,30 @@ func TestCognitoIntegration_PasswordPolicy(t *testing.T) {
 		require.NoError(t, err)
 	})
 
+	// Covers a password over bcrypt's 72-byte input cap but within AWS's
+	// documented 256-character maximum (see docs/aws-spec/cognito/password_policy.md):
+	// kumolo SHA-256-prehashes before bcrypt so this must succeed end-to-end
+	// through the real SDK, not just be accepted internally.
+	t.Run("SignUp_DefaultPolicy_AcceptsPasswordOverBcryptByteCap", func(t *testing.T) {
+		env := newPasswordPolicyTestEnv(t, c, "pwpolicy-long-pw-pool", nil)
+		longPassword := "Aa1!" + strings.Repeat("x", 200) // 204 chars, well over 72 bytes
+
+		_, err := c.SignUp(ctx, &awscognito.SignUpInput{
+			ClientId: aws.String(env.clientID),
+			Username: aws.String("long-pw-user"),
+			Password: aws.String(longPassword),
+		})
+		require.NoError(t, err)
+
+		_, err = c.AdminSetUserPassword(ctx, &awscognito.AdminSetUserPasswordInput{
+			UserPoolId: aws.String(env.poolID),
+			Username:   aws.String("long-pw-user"),
+			Password:   aws.String(longPassword),
+			Permanent:  true,
+		})
+		require.NoError(t, err)
+	})
+
 	t.Run("SignUp_DefaultPolicy_MinimumLengthCountsRunesNotBytes", func(t *testing.T) {
 		env := newPasswordPolicyTestEnv(t, c, "pwpolicy-multibyte-pool", nil)
 
