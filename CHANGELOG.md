@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-07-26
+
+### Added
+
+#### Cognito
+
+- `USER_SRP_AUTH` flow (`InitiateAuth` + `RespondToAuthChallenge` `PASSWORD_VERIFIER`), used by AWS Amplify by default
+- Password management flows: `ForgotPassword`, `ConfirmForgotPassword`, `ChangePassword`
+- Extended user management: `ListUsers`, `UpdateUserAttributes`, `AdminUpdateUserAttributes`, `AdminDisableUser`, `AdminEnableUser`, `DeleteUser`
+- `PasswordPolicy` complexity enforcement (`RequireUppercase`, `RequireLowercase`, `RequireNumbers`, `RequireSymbols`)
+- `DeletionProtection` enforcement on `DeleteUserPool`
+- `AccountRecoverySetting` support on `CreateUserPool`/`UpdateUserPool`, consumed by `ForgotPassword`'s recovery-mechanism selection
+- TOTP MFA enrollment and challenge (`AssociateSoftwareToken`, `VerifySoftwareToken`, `SOFTWARE_TOKEN_MFA`)
+- Forced `MFA_SETUP` enrollment challenge on `MfaConfiguration: "ON"` pools
+- `TokenValidityUnits`/`AccessTokenValidity`/`IdTokenValidity` honored instead of a fixed 1-hour TTL
+
+### Fixed
+
+#### Cognito
+
+- `SetUserPoolMfaConfig` implemented, fixing `terraform-provider-aws` re-apply failures on `aws_cognito_user_pool`
+- Passwords up to 256 characters are now accepted; previously any password over 72 bytes hard-failed with a `500 InternalErrorException` due to bcrypt's input cap
+
 ## [0.3.0] - 2026-07-09
 
 ### Added
