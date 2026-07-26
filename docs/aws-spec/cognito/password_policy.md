@@ -82,5 +82,6 @@ if a consuming test asserts on exact message text.
 - Symbol detection is a general "not letter/digit/whitespace" Unicode check rather than AWS's documented
   allowed-symbol character set.
 - The SHA-256 prehash step described in Implementation is a kumolo-internal storage detail to work around
-  bcrypt's 72-byte input cap; it is not part of the AWS API contract and produces no user-visible
-  difference from real AWS.
+  bcrypt's 72-byte input cap; it is not part of the AWS API contract. Password hashes created before
+  this scheme was introduced are incompatible and will fail to verify; affected users require a
+  password reset.
