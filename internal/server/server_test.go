@@ -266,6 +266,41 @@ func TestNewMux_WithCORSAllowOrigin(t *testing.T) {
 		assert.Equal(t, "http://localhost:5173", w.Header().Get("Access-Control-Allow-Origin"))
 	})
 
+	t.Run(
+		"adds Access-Control-Allow-Origin to the actual DynamoDB Streams response",
+		func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{}`))
+			req.Header.Set("X-Amz-Target", "DynamoDBStreams_20120810.ListStreams")
+			req.Header.Set("Origin", "http://localhost:5173")
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, req)
+			assert.Equal(t, "http://localhost:5173", w.Header().Get("Access-Control-Allow-Origin"))
+		},
+	)
+
+	t.Run("adds Access-Control-Allow-Origin to the actual STS response", func(t *testing.T) {
+		req := httptest.NewRequest(
+			http.MethodPost,
+			"/",
+			strings.NewReader("Action=GetCallerIdentity&Version=2011-06-15"),
+		)
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=utf-8")
+		req.Header.Set("Origin", "http://localhost:5173")
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		assert.Equal(t, "http://localhost:5173", w.Header().Get("Access-Control-Allow-Origin"))
+	})
+
+	t.Run("adds Access-Control-Allow-Origin to the actual KMS response", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{}`))
+		req.Header.Set("X-Amz-Target", "TrentService.ListKeys")
+		req.Header.Set("Content-Type", "application/x-amz-json-1.1")
+		req.Header.Set("Origin", "http://localhost:5173")
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		assert.Equal(t, "http://localhost:5173", w.Header().Get("Access-Control-Allow-Origin"))
+	})
+
 	t.Run("adds Access-Control-Allow-Origin to the actual Cognito response", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{}`))
 		req.Header.Set("X-Amz-Target", "AWSCognitoIdentityProviderService.InitiateAuth")
