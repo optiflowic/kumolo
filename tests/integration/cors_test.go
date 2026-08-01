@@ -10,10 +10,10 @@ import (
 )
 
 // TestCORSIntegration_PreflightAndActualResponses exercises the CORS opt-in
-// (#515) over a real HTTP round trip against a fully-wired server (all
-// routers, not just the bare mux), unlike the internal/server unit tests
-// which call ServeHTTP directly. AWS SDK clients never issue CORS preflight
-// requests themselves (that's a browser-only mechanism), so this uses a raw
+// over a real HTTP round trip against a fully-wired server (all routers, not
+// just the bare mux), unlike the internal/server unit tests which call
+// ServeHTTP directly. AWS SDK clients never issue CORS preflight requests
+// themselves (that's a browser-only mechanism), so this uses a raw
 // http.Client to simulate what a browser sends.
 func TestCORSIntegration_PreflightAndActualResponses(t *testing.T) {
 	clients, _ := newServerAt(t, t.TempDir(), server.WithCORSAllowOrigin("http://localhost:5173"))

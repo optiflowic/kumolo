@@ -9,7 +9,7 @@ FAIL=0
 ok()   { echo "  PASS: $*"; PASS=$((PASS + 1)); }
 fail() { echo "  FAIL: $*"; FAIL=$((FAIL + 1)); }
 
-echo "=== CORS (browser preflight, #515) ==="
+echo "=== CORS ==="
 
 # The AWS CLI never issues a CORS preflight (that's a browser-only mechanism),
 # so this uses curl to simulate what a browser sends before a cross-origin
