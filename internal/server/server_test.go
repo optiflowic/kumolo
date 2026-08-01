@@ -213,4 +213,108 @@ func TestNewMux(t *testing.T) {
 		mux.ServeHTTP(w, req)
 		assert.Equal(t, "application/xml", w.Header().Get("Content-Type"))
 	})
+
+	t.Run(
+		"OPTIONS preflight to root falls through to S3 when CORS is disabled",
+		func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodOptions, "/", nil)
+			req.Header.Set("Origin", "http://localhost:5173")
+			req.Header.Set("Access-Control-Request-Method", "POST")
+			req.Header.Set("Access-Control-Request-Headers", "content-type,x-amz-target")
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+			assert.Empty(t, w.Header().Get("Access-Control-Allow-Origin"))
+		},
+	)
+}
+
+func TestNewMux_WithCORSAllowOrigin(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	mux, cleanup, err := NewMux(
+		ctx,
+		t.TempDir(),
+		time.Minute,
+		WithCORSAllowOrigin("http://localhost:5173"),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, mux)
+	t.Cleanup(cleanup)
+
+	t.Run("answers root OPTIONS preflight without dispatching to any router", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodOptions, "/", nil)
+		req.Header.Set("Origin", "http://localhost:5173")
+		req.Header.Set("Access-Control-Request-Method", "POST")
+		req.Header.Set("Access-Control-Request-Headers", "content-type,x-amz-target")
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "http://localhost:5173", w.Header().Get("Access-Control-Allow-Origin"))
+		assert.Equal(t, "POST", w.Header().Get("Access-Control-Allow-Methods"))
+		assert.Equal(t, "content-type,x-amz-target", w.Header().Get("Access-Control-Allow-Headers"))
+		assert.Equal(t, "Origin", w.Header().Get("Vary"))
+		assert.NotEmpty(t, w.Header().Get("Access-Control-Max-Age"))
+	})
+
+	t.Run("adds Access-Control-Allow-Origin to the actual DynamoDB response", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{}`))
+		req.Header.Set("X-Amz-Target", "DynamoDB_20120810.ListTables")
+		req.Header.Set("Origin", "http://localhost:5173")
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		assert.Equal(t, "http://localhost:5173", w.Header().Get("Access-Control-Allow-Origin"))
+	})
+
+	t.Run("adds Access-Control-Allow-Origin to the actual Cognito response", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{}`))
+		req.Header.Set("X-Amz-Target", "AWSCognitoIdentityProviderService.InitiateAuth")
+		req.Header.Set("Origin", "http://localhost:5173")
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		assert.Equal(t, "http://localhost:5173", w.Header().Get("Access-Control-Allow-Origin"))
+	})
+
+	t.Run("does not affect S3 bucket-scoped requests", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodOptions, "/my-bucket/my-key", nil)
+		req.Header.Set("Origin", "http://localhost:5173")
+		req.Header.Set("Access-Control-Request-Method", "GET")
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		assert.Empty(t, w.Header().Get("Access-Control-Allow-Origin"))
+	})
+}
+
+func TestWriteCORSHeaders(t *testing.T) {
+	t.Run("no-op when allowOrigin is empty", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodOptions, "/", nil)
+		w := httptest.NewRecorder()
+		writeCORSHeaders(w, req, "")
+		assert.Empty(t, w.Header().Get("Access-Control-Allow-Origin"))
+	})
+
+	t.Run("wildcard origin omits Vary", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodOptions, "/", nil)
+		w := httptest.NewRecorder()
+		writeCORSHeaders(w, req, "*")
+		assert.Equal(t, "*", w.Header().Get("Access-Control-Allow-Origin"))
+		assert.Empty(t, w.Header().Get("Vary"))
+	})
+
+	t.Run("non-OPTIONS request skips preflight-specific headers", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req.Header.Set("Access-Control-Request-Method", "POST")
+		w := httptest.NewRecorder()
+		writeCORSHeaders(w, req, "http://localhost:5173")
+		assert.Equal(t, "http://localhost:5173", w.Header().Get("Access-Control-Allow-Origin"))
+		assert.Empty(t, w.Header().Get("Access-Control-Allow-Methods"))
+	})
+
+	t.Run("OPTIONS without Access-Control-Request-* headers omits them", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodOptions, "/", nil)
+		w := httptest.NewRecorder()
+		writeCORSHeaders(w, req, "http://localhost:5173")
+		assert.Empty(t, w.Header().Get("Access-Control-Allow-Methods"))
+		assert.Empty(t, w.Header().Get("Access-Control-Allow-Headers"))
+	})
 }

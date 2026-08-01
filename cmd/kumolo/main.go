@@ -89,7 +89,12 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	mux, cleanup, err := server.NewMux(ctx, dataDir, cfg.LifecycleInterval)
+	mux, cleanup, err := server.NewMux(
+		ctx,
+		dataDir,
+		cfg.LifecycleInterval,
+		server.WithCORSAllowOrigin(cfg.CORSAllowOrigin),
+	)
 	if err != nil {
 		return fmt.Errorf("initialize storage: %w", err)
 	}

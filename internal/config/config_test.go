@@ -12,7 +12,13 @@ import (
 func TestRegisterFlags(t *testing.T) {
 	t.Run("uses env values as defaults", func(t *testing.T) {
 		fs := flag.NewFlagSet("test", flag.ContinueOnError)
-		env := Env{Port: "5566", DataDir: "", LogLevel: "info", LifecycleInterval: time.Minute}
+		env := Env{
+			Port:              "5566",
+			DataDir:           "",
+			LogLevel:          "info",
+			LifecycleInterval: time.Minute,
+			CORSAllowOrigin:   "http://localhost:5173",
+		}
 		build := RegisterFlags(fs, env)
 		require.NoError(t, fs.Parse([]string{}))
 
@@ -21,6 +27,7 @@ func TestRegisterFlags(t *testing.T) {
 		assert.Equal(t, "", cfg.DataDir)
 		assert.Equal(t, "info", cfg.LogLevel)
 		assert.Equal(t, time.Minute, cfg.LifecycleInterval)
+		assert.Equal(t, "http://localhost:5173", cfg.CORSAllowOrigin)
 	})
 
 	t.Run("explicit flags override env defaults", func(t *testing.T) {
@@ -33,12 +40,14 @@ func TestRegisterFlags(t *testing.T) {
 			"-port", "9000",
 			"-data-dir", "/var/kumolo",
 			"-log-level", "debug",
+			"-cors-allow-origin", "*",
 		}))
 
 		cfg := build()
 		assert.Equal(t, "9000", cfg.Port)
 		assert.Equal(t, "/var/kumolo", cfg.DataDir)
 		assert.Equal(t, "debug", cfg.LogLevel)
+		assert.Equal(t, "*", cfg.CORSAllowOrigin)
 	})
 
 	t.Run("flag value takes precedence over env default", func(t *testing.T) {
