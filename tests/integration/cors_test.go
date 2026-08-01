@@ -27,7 +27,7 @@ func TestCORSIntegration_PreflightAndActualResponses(t *testing.T) {
 
 		resp, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)
-		defer resp.Body.Close()
+		t.Cleanup(func() { _ = resp.Body.Close() })
 
 		require.Equal(t, http.StatusOK, resp.StatusCode)
 		require.Equal(t, "http://localhost:5173", resp.Header.Get("Access-Control-Allow-Origin"))
@@ -48,7 +48,7 @@ func TestCORSIntegration_PreflightAndActualResponses(t *testing.T) {
 
 		resp, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)
-		defer resp.Body.Close()
+		t.Cleanup(func() { _ = resp.Body.Close() })
 
 		require.Equal(t, "http://localhost:5173", resp.Header.Get("Access-Control-Allow-Origin"))
 	})
@@ -61,7 +61,7 @@ func TestCORSIntegration_PreflightAndActualResponses(t *testing.T) {
 
 		resp, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)
-		defer resp.Body.Close()
+		t.Cleanup(func() { _ = resp.Body.Close() })
 
 		require.Empty(t, resp.Header.Get("Access-Control-Allow-Origin"))
 	})
@@ -80,7 +80,7 @@ func TestCORSIntegration_DisabledByDefault(t *testing.T) {
 
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	t.Cleanup(func() { _ = resp.Body.Close() })
 
 	require.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
 	require.Empty(t, resp.Header.Get("Access-Control-Allow-Origin"))
