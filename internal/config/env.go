@@ -15,6 +15,7 @@ type Env struct {
 	DataDir           string
 	LogLevel          string
 	LifecycleInterval time.Duration
+	CORSAllowOrigin   string
 }
 
 // LoadEnv loads .env if present and returns the resolved environment values.
@@ -51,6 +52,7 @@ func loadEnv(dotenvLoader func(...string) error) Env {
 		DataDir:           getEnv("KUMOLO_DATA_DIR", ""),
 		LogLevel:          getEnv("KUMOLO_LOG_LEVEL", "info"),
 		LifecycleInterval: lifecycleInterval,
+		CORSAllowOrigin:   getEnv("KUMOLO_CORS_ALLOW_ORIGIN", ""),
 	}
 }
 

@@ -47,12 +47,17 @@ func apiErrorCode(err error) string {
 // an explicit stop function. The stop function is idempotent and is also
 // registered as a t.Cleanup safety net. Callers that need to simulate a
 // process restart should call stop() explicitly before creating a second server.
-func newServerAt(t *testing.T, dataDir string) (testClients, func()) {
+func newServerAt(
+	t *testing.T,
+	dataDir string,
+	extraOpts ...server.Option,
+) (testClients, func()) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	mux, cleanup, err := server.NewMux(ctx, dataDir, time.Minute,
+	opts := append([]server.Option{
 		server.WithCognitoOptions(cognito.WithBcryptCost(bcrypt.MinCost)),
-	)
+	}, extraOpts...)
+	mux, cleanup, err := server.NewMux(ctx, dataDir, time.Minute, opts...)
 	require.NoError(t, err)
 	srv := httptest.NewServer(mux)
 

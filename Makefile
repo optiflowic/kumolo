@@ -52,6 +52,7 @@ e2e:
 	./e2e/aws-cli/kms.sh
 	./e2e/aws-cli/sts.sh
 	./e2e/aws-cli/cognito.sh
+	./e2e/aws-cli/cors.sh
 
 # e2e-terraform applies three times: initial create, then a toggle of
 # admin_user_enabled/admin_given_name to exercise AdminUpdateUserAttributes/

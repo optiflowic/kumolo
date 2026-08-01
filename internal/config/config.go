@@ -10,6 +10,7 @@ type Config struct {
 	DataDir           string
 	LogLevel          string
 	LifecycleInterval time.Duration
+	CORSAllowOrigin   string
 }
 
 // RegisterFlags registers flags on fs and returns a builder.
@@ -26,12 +27,18 @@ func RegisterFlags(fs *flag.FlagSet, env Env) func() Config {
 		env.LogLevel,
 		"Log verbosity (debug, info, warn, error)",
 	)
+	corsAllowOrigin := fs.String(
+		"cors-allow-origin",
+		env.CORSAllowOrigin,
+		"Value for Access-Control-Allow-Origin on non-S3 endpoints (DynamoDB, KMS, Cognito, STS); empty disables CORS support",
+	)
 	return func() Config {
 		return Config{
 			Port:              *port,
 			DataDir:           *dataDir,
 			LogLevel:          *logLevel,
 			LifecycleInterval: env.LifecycleInterval,
+			CORSAllowOrigin:   *corsAllowOrigin,
 		}
 	}
 }
