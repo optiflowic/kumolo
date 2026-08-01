@@ -118,34 +118,26 @@ func NewMux(
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		if r.Method == http.MethodPost &&
-			strings.Contains(r.Header.Get("Content-Type"), "application/x-www-form-urlencoded") {
-			writeCORSHeaders(w, r, o.corsAllowOrigin)
-			stsRouter.ServeHTTP(w, r)
+		var target http.Handler
+		switch {
+		case r.Method == http.MethodPost &&
+			strings.Contains(r.Header.Get("Content-Type"), "application/x-www-form-urlencoded"):
+			target = stsRouter
+		case strings.HasPrefix(r.Header.Get("X-Amz-Target"), "DynamoDBStreams_"):
+			target = dynamoStreamsRouter
+		case strings.HasPrefix(r.Header.Get("X-Amz-Target"), "DynamoDB_"):
+			target = dynamoRouter
+		case strings.HasPrefix(r.Header.Get("X-Amz-Target"), "TrentService."):
+			target = kmsRouter
+		case strings.HasPrefix(r.Header.Get("X-Amz-Target"), "AWSCognitoIdentityProviderService.") ||
+			strings.HasSuffix(r.URL.Path, "/.well-known/jwks.json"):
+			target = cognitoRouter
+		default:
+			s3Router.ServeHTTP(w, r)
 			return
 		}
-		if strings.HasPrefix(r.Header.Get("X-Amz-Target"), "DynamoDBStreams_") {
-			writeCORSHeaders(w, r, o.corsAllowOrigin)
-			dynamoStreamsRouter.ServeHTTP(w, r)
-			return
-		}
-		if strings.HasPrefix(r.Header.Get("X-Amz-Target"), "DynamoDB_") {
-			writeCORSHeaders(w, r, o.corsAllowOrigin)
-			dynamoRouter.ServeHTTP(w, r)
-			return
-		}
-		if strings.HasPrefix(r.Header.Get("X-Amz-Target"), "TrentService.") {
-			writeCORSHeaders(w, r, o.corsAllowOrigin)
-			kmsRouter.ServeHTTP(w, r)
-			return
-		}
-		if strings.HasPrefix(r.Header.Get("X-Amz-Target"), "AWSCognitoIdentityProviderService.") ||
-			strings.HasSuffix(r.URL.Path, "/.well-known/jwks.json") {
-			writeCORSHeaders(w, r, o.corsAllowOrigin)
-			cognitoRouter.ServeHTTP(w, r)
-			return
-		}
-		s3Router.ServeHTTP(w, r)
+		writeCORSHeaders(w, r, o.corsAllowOrigin)
+		target.ServeHTTP(w, r)
 	}))
 
 	cleanup := func() {
