@@ -10,6 +10,52 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// ── Region derivation ────────────────────────────────────────────────────────
+
+func TestRegionFromPoolID(t *testing.T) {
+	tests := []struct {
+		name       string
+		poolID     string
+		wantRegion string
+	}{
+		{"us-east-1 pool", "us-east-1_EXAMPLE123", "us-east-1"},
+		{"non-default region", "ap-northeast-1_EXAMPLE123", "ap-northeast-1"},
+		{"multi-segment region", "us-gov-west-1_EXAMPLE123", "us-gov-west-1"},
+		{"no underscore falls back to default", "malformedpoolid", poolRegion},
+		{"empty region segment falls back to default", "_EXAMPLE123", poolRegion},
+		{"empty pool ID falls back to default", "", poolRegion},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.wantRegion, regionFromPoolID(tt.poolID))
+		})
+	}
+}
+
+func TestPoolARN_ReflectsPoolIDRegion(t *testing.T) {
+	tests := []struct {
+		name    string
+		poolID  string
+		wantARN string
+	}{
+		{
+			"standard partition",
+			"ap-northeast-1_EXAMPLE123",
+			"arn:aws:cognito-idp:ap-northeast-1:000000000000:userpool/ap-northeast-1_EXAMPLE123",
+		},
+		{
+			"us-gov partition",
+			"us-gov-west-1_EXAMPLE123",
+			"arn:aws-us-gov:cognito-idp:us-gov-west-1:000000000000:userpool/us-gov-west-1_EXAMPLE123",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.wantARN, poolARN(tt.poolID))
+		})
+	}
+}
+
 // ── DeleteUserPool error paths ────────────────────────────────────────────────
 
 func TestDeleteUserPool_PoolNotFound(t *testing.T) {

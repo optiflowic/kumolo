@@ -16,6 +16,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/optiflowic/kumolo/internal/sigv4"
 )
 
 const (
@@ -61,11 +63,10 @@ const (
 	amzACL = "X-Amz-Acl"
 
 	// Presigned URL query parameter names.
-	amzQSignature  = "X-Amz-Signature"
-	amzQAlgorithm  = "X-Amz-Algorithm"
-	amzQDate       = "X-Amz-Date"
-	amzQExpires    = "X-Amz-Expires"
-	amzQCredential = "X-Amz-Credential" // #nosec G101 -- presigned URL query parameter name, not a credential value
+	amzQSignature = "X-Amz-Signature"
+	amzQAlgorithm = "X-Amz-Algorithm"
+	amzQDate      = "X-Amz-Date"
+	amzQExpires   = "X-Amz-Expires"
 
 	presignedURLMaxExpiry = 7 * 24 * 60 * 60 // 604800 seconds; AWS S3 maximum
 	maxPartNumber         = 10000            // AWS S3 maximum part number
@@ -1214,7 +1215,7 @@ func (ro *Router) handleListBuckets(w http.ResponseWriter, r *http.Request) {
 }
 
 func (ro *Router) handleCreateBucket(w http.ResponseWriter, r *http.Request, bucket string) {
-	region := ParseSigV4(r).Region
+	region := sigv4.ParseSigV4(r).Region
 	objectLockEnabled := strings.EqualFold(r.Header.Get(amzBucketObjectLockEnabled), "true")
 	if err := ro.storage.CreateBucket(bucket, region, objectLockEnabled); err != nil {
 		if errors.Is(err, os.ErrExist) {

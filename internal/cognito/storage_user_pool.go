@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -17,10 +18,18 @@ var (
 )
 
 const (
+	// poolRegion is the default region used when a caller does not specify one (no SigV4
+	// credential scope, no AWS_REGION/AWS_DEFAULT_REGION env var) and as a fallback when
+	// deriving a region from a malformed pool ID.
 	poolRegion  = "us-east-1"
 	poolAccount = "000000000000"
 
 	deletionProtectionActive = "ACTIVE"
+
+	// govRegionPrefix identifies AWS GovCloud regions, which use a distinct ARN partition.
+	govRegionPrefix = "us-gov-"
+	partitionAWS    = "aws"
+	partitionAWSGov = "aws-us-gov"
 )
 
 // UserPoolMetadata stores the full state of a Cognito user pool.
@@ -59,7 +68,33 @@ type UserPoolMetadata struct {
 }
 
 func poolARN(poolID string) string {
-	return fmt.Sprintf("arn:aws:cognito-idp:%s:%s:userpool/%s", poolRegion, poolAccount, poolID)
+	region := regionFromPoolID(poolID)
+	return fmt.Sprintf(
+		"arn:%s:cognito-idp:%s:%s:userpool/%s",
+		arnPartition(region),
+		region,
+		poolAccount,
+		poolID,
+	)
+}
+
+// arnPartition returns the ARN partition for a region, matching AWS's own
+// partition scheme (e.g. us-gov-west-1 belongs to aws-us-gov, not aws).
+func arnPartition(region string) string {
+	if strings.HasPrefix(region, govRegionPrefix) {
+		return partitionAWSGov
+	}
+	return partitionAWS
+}
+
+// regionFromPoolID extracts the region segment from a pool ID (format: {region}_{suffix}),
+// falling back to poolRegion for malformed IDs that lack the separator.
+func regionFromPoolID(poolID string) string {
+	region, _, ok := strings.Cut(poolID, "_")
+	if !ok || region == "" {
+		return poolRegion
+	}
+	return region
 }
 
 func nowUnix() float64 {

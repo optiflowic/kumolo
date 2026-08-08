@@ -6,7 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"regexp"
+
+	"github.com/optiflowic/kumolo/internal/sigv4"
 )
 
 const (
@@ -16,7 +19,23 @@ const (
 
 var rePoolName = regexp.MustCompile(`^[\w\s+=,.@-]{1,128}$`)
 
-func generatePoolID() (string, error) {
+// resolveRegion determines the region for a new user pool. Fallback order: the SigV4
+// credential scope on the request (reflects the caller's SDK/CLI configuration) →
+// AWS_REGION/AWS_DEFAULT_REGION env vars → poolRegion.
+func resolveRegion(r *http.Request) string {
+	if region := sigv4.ParseSigV4(r).Region; region != "" {
+		return region
+	}
+	if region := os.Getenv("AWS_REGION"); region != "" {
+		return region
+	}
+	if region := os.Getenv("AWS_DEFAULT_REGION"); region != "" {
+		return region
+	}
+	return poolRegion
+}
+
+func generatePoolID(region string) (string, error) {
 	const n = len(poolIDChars)
 	const limit = byte((256 / n) * n) // reject values ≥ limit to eliminate modular bias
 	b := make([]byte, poolIDLen)
@@ -32,7 +51,7 @@ func generatePoolID() (string, error) {
 			}
 		}
 	}
-	return poolRegion + "_" + string(b), nil
+	return region + "_" + string(b), nil
 }
 
 type schemaAttr struct {
@@ -209,7 +228,7 @@ type updateUserPoolRequest struct {
 	SmsVerificationMessage      string            `json:"SmsVerificationMessage"`
 }
 
-func (ro *Router) handleCreateUserPool(w http.ResponseWriter, body []byte) {
+func (ro *Router) handleCreateUserPool(w http.ResponseWriter, r *http.Request, body []byte) {
 	var req createUserPoolRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(
@@ -239,7 +258,7 @@ func (ro *Router) handleCreateUserPool(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	poolID, err := generatePoolID()
+	poolID, err := generatePoolID(resolveRegion(r))
 	if err != nil {
 		// untestable: crypto/rand.Read only fails on OS-level entropy source errors
 		writeError(

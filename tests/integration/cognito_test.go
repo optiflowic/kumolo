@@ -314,6 +314,80 @@ func TestCognitoIntegration_UserPool(t *testing.T) {
 	})
 }
 
+// TestCognitoIntegration_UserPoolRegion verifies #508: CreateUserPool derives the pool
+// ID/ARN region from the caller's SigV4 credential scope (the AWS SDK client's configured
+// region) instead of hardcoding us-east-1, and that JWT issuance for that pool reflects the
+// same region end-to-end.
+func TestCognitoIntegration_UserPoolRegion(t *testing.T) {
+	cap := withCodeCapture(t)
+	clients := newTestClients(t)
+	ctx := context.Background()
+	regionClient := newCognitoClientWithRegion(t, clients.baseURL, "ap-northeast-1")
+
+	pool, err := regionClient.CreateUserPool(ctx, &awscognito.CreateUserPoolInput{
+		PoolName: aws.String("region-test-pool"),
+	})
+	require.NoError(t, err)
+	poolID := aws.ToString(pool.UserPool.Id)
+	assert.True(t, strings.HasPrefix(poolID, "ap-northeast-1_"),
+		"pool ID must reflect the client's configured region, got %q", poolID)
+	assert.Equal(t,
+		"arn:aws:cognito-idp:ap-northeast-1:000000000000:userpool/"+poolID,
+		aws.ToString(pool.UserPool.Arn),
+	)
+
+	// DescribeUserPool via the default us-east-1 client must resolve the pool and report the
+	// same ARN, since region is parsed from the pool ID rather than tied to the caller.
+	describeOut, err := clients.cognito.DescribeUserPool(ctx, &awscognito.DescribeUserPoolInput{
+		UserPoolId: aws.String(poolID),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, aws.ToString(pool.UserPool.Arn), aws.ToString(describeOut.UserPool.Arn))
+
+	// Sign up + confirm + log in against this pool and verify the issued ID token's "iss"
+	// claim reflects ap-northeast-1, not the hardcoded us-east-1 default.
+	client, err := clients.cognito.CreateUserPoolClient(ctx, &awscognito.CreateUserPoolClientInput{
+		UserPoolId: aws.String(poolID),
+		ClientName: aws.String("region-test-client"),
+	})
+	require.NoError(t, err)
+	clientID := aws.ToString(client.UserPoolClient.ClientId)
+
+	const (
+		username = "region-test-user"
+		password = "Password1!"
+	)
+	_, err = clients.cognito.SignUp(ctx, &awscognito.SignUpInput{
+		ClientId: aws.String(clientID),
+		Username: aws.String(username),
+		Password: aws.String(password),
+	})
+	require.NoError(t, err)
+
+	code := cap.get(username)
+	require.NotEmpty(t, code, "confirmation code should be captured from slog output")
+	_, err = clients.cognito.ConfirmSignUp(ctx, &awscognito.ConfirmSignUpInput{
+		ClientId:         aws.String(clientID),
+		Username:         aws.String(username),
+		ConfirmationCode: aws.String(code),
+	})
+	require.NoError(t, err)
+
+	auth, err := clients.cognito.InitiateAuth(ctx, &awscognito.InitiateAuthInput{
+		ClientId: aws.String(clientID),
+		AuthFlow: types.AuthFlowTypeUserPasswordAuth,
+		AuthParameters: map[string]string{
+			"USERNAME": username,
+			"PASSWORD": password,
+		},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, auth.AuthenticationResult)
+
+	iss := decodeJWTIssClaim(t, aws.ToString(auth.AuthenticationResult.IdToken))
+	assert.Equal(t, "https://cognito-idp.ap-northeast-1.amazonaws.com/"+poolID, iss)
+}
+
 // ── UserPoolClient CRUD ───────────────────────────────────────────────────────
 
 func TestCognitoIntegration_UserPoolClient(t *testing.T) {
@@ -1778,6 +1852,21 @@ func decodeJWTExpClaim(t *testing.T, token string) float64 {
 	}
 	require.NoError(t, json.Unmarshal(payload, &claims))
 	return claims.Exp
+}
+
+// decodeJWTIssClaim decodes a JWT's payload and returns its "iss" claim, without verifying
+// the signature. Used to assert the issuer URL's region segment (see #508).
+func decodeJWTIssClaim(t *testing.T, token string) string {
+	t.Helper()
+	parts := strings.Split(token, ".")
+	require.Len(t, parts, 3)
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	require.NoError(t, err)
+	var claims struct {
+		Iss string `json:"iss"`
+	}
+	require.NoError(t, json.Unmarshal(payload, &claims))
+	return claims.Iss
 }
 
 // ── TokenValidityUnits ───────────────────────────────────────────────────────
