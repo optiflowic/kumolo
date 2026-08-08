@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -17,6 +18,9 @@ var (
 )
 
 const (
+	// poolRegion is the default region used when a caller does not specify one (no SigV4
+	// credential scope, no AWS_REGION/AWS_DEFAULT_REGION env var) and as a fallback when
+	// deriving a region from a malformed pool ID.
 	poolRegion  = "us-east-1"
 	poolAccount = "000000000000"
 
@@ -59,7 +63,22 @@ type UserPoolMetadata struct {
 }
 
 func poolARN(poolID string) string {
-	return fmt.Sprintf("arn:aws:cognito-idp:%s:%s:userpool/%s", poolRegion, poolAccount, poolID)
+	return fmt.Sprintf(
+		"arn:aws:cognito-idp:%s:%s:userpool/%s",
+		regionFromPoolID(poolID),
+		poolAccount,
+		poolID,
+	)
+}
+
+// regionFromPoolID extracts the region segment from a pool ID (format: {region}_{suffix}),
+// falling back to poolRegion for malformed IDs that lack the separator.
+func regionFromPoolID(poolID string) string {
+	region, _, ok := strings.Cut(poolID, "_")
+	if !ok || region == "" {
+		return poolRegion
+	}
+	return region
 }
 
 func nowUnix() float64 {

@@ -102,9 +102,10 @@ func resolveValiditySeconds(value int, unit, defaultUnit string, fallbackSeconds
 	return int64(value) * unitSeconds(unit, defaultUnit)
 }
 
-// issuerURL returns the AWS-format issuer URL for a user pool.
+// issuerURL returns the AWS-format issuer URL for a user pool, deriving the region from
+// the pool ID (format: {region}_{suffix}) rather than a fixed constant.
 func issuerURL(poolID string) string {
-	return "https://cognito-idp." + poolRegion + ".amazonaws.com/" + poolID
+	return "https://cognito-idp." + regionFromPoolID(poolID) + ".amazonaws.com/" + poolID
 }
 
 // b64url encodes data using base64 URL encoding (no padding), as required by JWT spec.

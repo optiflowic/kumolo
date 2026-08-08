@@ -153,7 +153,7 @@ func (ro *Router) serveHTTP(w http.ResponseWriter, r *http.Request, op string) {
 	}
 	switch op {
 	case "CreateUserPool":
-		ro.handleCreateUserPool(w, body)
+		ro.handleCreateUserPool(w, r, body)
 	case "DescribeUserPool":
 		ro.handleDescribeUserPool(w, body)
 	case "UpdateUserPool":

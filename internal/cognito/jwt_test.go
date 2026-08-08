@@ -33,6 +33,21 @@ func buildRawJWT(t *testing.T, key *rsa.PrivateKey, header, payload string) stri
 	return sigInput + "." + b64url(sig)
 }
 
+// ── issuerURL ─────────────────────────────────────────────────────────────────
+
+func TestIssuerURL_ReflectsPoolIDRegion(t *testing.T) {
+	assert.Equal(
+		t,
+		"https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_EXAMPLE123",
+		issuerURL("ap-northeast-1_EXAMPLE123"),
+	)
+	assert.Equal(
+		t,
+		"https://cognito-idp.us-east-1.amazonaws.com/us-east-1_EXAMPLE123",
+		issuerURL("us-east-1_EXAMPLE123"),
+	)
+}
+
 // ── buildJWT / verifyJWT ──────────────────────────────────────────────────────
 
 func TestBuildAndVerifyJWT_RoundTrip(t *testing.T) {
