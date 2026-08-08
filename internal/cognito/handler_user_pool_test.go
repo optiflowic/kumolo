@@ -55,6 +55,10 @@ func doOpWithRegion(t *testing.T, ro *Router, op, body, region string) *httptest
 
 func TestResolveRegion(t *testing.T) {
 	t.Run("uses SigV4 credential scope when present", func(t *testing.T) {
+		// AWS_REGION/AWS_DEFAULT_REGION are set to conflicting values to confirm
+		// the SigV4 credential scope takes precedence over both.
+		t.Setenv("AWS_REGION", "sa-east-1")
+		t.Setenv("AWS_DEFAULT_REGION", "eu-central-1")
 		req := httptest.NewRequest(http.MethodPost, "/", nil)
 		req.Header.Set(
 			"Authorization",
@@ -65,8 +69,10 @@ func TestResolveRegion(t *testing.T) {
 	})
 
 	t.Run("falls back to AWS_REGION when no SigV4 credential", func(t *testing.T) {
+		// AWS_DEFAULT_REGION is set to a conflicting value to confirm AWS_REGION
+		// takes precedence over it.
 		t.Setenv("AWS_REGION", "sa-east-1")
-		t.Setenv("AWS_DEFAULT_REGION", "")
+		t.Setenv("AWS_DEFAULT_REGION", "eu-central-1")
 		req := httptest.NewRequest(http.MethodPost, "/", nil)
 		assert.Equal(t, "sa-east-1", resolveRegion(req))
 	})
