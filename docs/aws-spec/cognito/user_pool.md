@@ -2,7 +2,7 @@
 
 URL: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/
 SDK: github.com/aws/aws-sdk-go-v2/service/cognitoidentityprovider
-Last verified: 2026-07-12
+Last verified: 2026-08-09
 
 ## Operations
 
@@ -17,12 +17,16 @@ pool ID for the life of the pool.
 
 ## ARN Format
 
-`arn:aws:cognito-idp:{region}:000000000000:userpool/{poolId}`
+`arn:{partition}:cognito-idp:{region}:000000000000:userpool/{poolId}`
 
 `{region}` is derived from the pool ID's `{region}_` prefix (not stored separately), so it
 always matches the region the pool was created with. `DescribeUserPool` and the JWT `iss`
 claim (`https://cognito-idp.{region}.amazonaws.com/{poolId}`) derive their region the same
 way.
+
+`{partition}` matches AWS's own ARN partition scheme: `aws-us-gov` for GovCloud (US) regions
+(`us-gov-west-1`, `us-gov-east-1`), `aws` for everything else. kumolo does not support the
+`aws-cn` partition (no China region emulation).
 
 ## Region resolution
 
