@@ -25,6 +25,11 @@ const (
 	poolAccount = "000000000000"
 
 	deletionProtectionActive = "ACTIVE"
+
+	// govRegionPrefix identifies AWS GovCloud regions, which use a distinct ARN partition.
+	govRegionPrefix = "us-gov-"
+	partitionAWS    = "aws"
+	partitionAWSGov = "aws-us-gov"
 )
 
 // UserPoolMetadata stores the full state of a Cognito user pool.
@@ -76,10 +81,10 @@ func poolARN(poolID string) string {
 // arnPartition returns the ARN partition for a region, matching AWS's own
 // partition scheme (e.g. us-gov-west-1 belongs to aws-us-gov, not aws).
 func arnPartition(region string) string {
-	if strings.HasPrefix(region, "us-gov-") {
-		return "aws-us-gov"
+	if strings.HasPrefix(region, govRegionPrefix) {
+		return partitionAWSGov
 	}
-	return "aws"
+	return partitionAWS
 }
 
 // regionFromPoolID extracts the region segment from a pool ID (format: {region}_{suffix}),
