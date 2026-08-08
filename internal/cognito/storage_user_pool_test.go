@@ -33,11 +33,27 @@ func TestRegionFromPoolID(t *testing.T) {
 }
 
 func TestPoolARN_ReflectsPoolIDRegion(t *testing.T) {
-	assert.Equal(
-		t,
-		"arn:aws:cognito-idp:ap-northeast-1:000000000000:userpool/ap-northeast-1_EXAMPLE123",
-		poolARN("ap-northeast-1_EXAMPLE123"),
-	)
+	tests := []struct {
+		name    string
+		poolID  string
+		wantARN string
+	}{
+		{
+			"standard partition",
+			"ap-northeast-1_EXAMPLE123",
+			"arn:aws:cognito-idp:ap-northeast-1:000000000000:userpool/ap-northeast-1_EXAMPLE123",
+		},
+		{
+			"us-gov partition",
+			"us-gov-west-1_EXAMPLE123",
+			"arn:aws-us-gov:cognito-idp:us-gov-west-1:000000000000:userpool/us-gov-west-1_EXAMPLE123",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.wantARN, poolARN(tt.poolID))
+		})
+	}
 }
 
 // ── DeleteUserPool error paths ────────────────────────────────────────────────

@@ -63,12 +63,23 @@ type UserPoolMetadata struct {
 }
 
 func poolARN(poolID string) string {
+	region := regionFromPoolID(poolID)
 	return fmt.Sprintf(
-		"arn:aws:cognito-idp:%s:%s:userpool/%s",
-		regionFromPoolID(poolID),
+		"arn:%s:cognito-idp:%s:%s:userpool/%s",
+		arnPartition(region),
+		region,
 		poolAccount,
 		poolID,
 	)
+}
+
+// arnPartition returns the ARN partition for a region, matching AWS's own
+// partition scheme (e.g. us-gov-west-1 belongs to aws-us-gov, not aws).
+func arnPartition(region string) string {
+	if strings.HasPrefix(region, "us-gov-") {
+		return "aws-us-gov"
+	}
+	return "aws"
 }
 
 // regionFromPoolID extracts the region segment from a pool ID (format: {region}_{suffix}),
