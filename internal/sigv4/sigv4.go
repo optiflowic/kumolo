@@ -1,9 +1,15 @@
-package s3
+// Package sigv4 extracts identity information (access key, region, service) from an
+// AWS SigV4-signed request without verifying the signature. It is shared by services
+// (s3, cognito) that need to know which region a caller's SDK/CLI is configured for.
+package sigv4
 
 import (
 	"net/http"
 	"strings"
 )
+
+// amzQCredential is the presigned URL query parameter name, not a credential value.
+const amzQCredential = "X-Amz-Credential" // #nosec G101
 
 type RequestContext struct {
 	AccessKeyID string
