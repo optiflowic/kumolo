@@ -100,3 +100,21 @@ func newTestClients(t *testing.T) testClients {
 	clients, _ := newServerAt(t, t.TempDir())
 	return clients
 }
+
+// newCognitoClientWithRegion builds a Cognito client pointed at baseURL but configured for
+// a specific region, so tests can verify that CreateUserPool derives the pool's region from
+// the caller's SigV4 credential scope (i.e. the AWS SDK client's configured region) instead
+// of a hardcoded default. See docs/aws-spec/cognito/user_pool.md.
+func newCognitoClientWithRegion(t *testing.T, baseURL, region string) *awscognito.Client {
+	t.Helper()
+	cfg, err := config.LoadDefaultConfig(
+		context.Background(),
+		config.WithRegion(region),
+		config.WithCredentialsProvider(
+			credentials.NewStaticCredentialsProvider("test", "test", ""),
+		),
+		config.WithBaseEndpoint(baseURL),
+	)
+	require.NoError(t, err)
+	return awscognito.NewFromConfig(cfg)
+}

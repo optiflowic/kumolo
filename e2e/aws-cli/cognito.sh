@@ -73,6 +73,12 @@ else
   POOL_ARN=""
 fi
 
+if [[ "$POOL_ID" == us-east-1_* && "$POOL_ARN" == arn:aws:cognito-idp:us-east-1:*:userpool/"$POOL_ID" ]]; then
+  ok "CreateUserPool — pool ID/ARN reflect client's configured region (us-east-1)"
+else
+  fail "CreateUserPool — expected us-east-1 pool ID/ARN, got id=$POOL_ID arn=$POOL_ARN"
+fi
+
 run "DescribeUserPool" \
   $AWS describe-user-pool --user-pool-id "$POOL_ID"
 
@@ -89,6 +95,30 @@ fi
 
 run "UpdateUserPool" \
   $AWS update-user-pool --user-pool-id "$POOL_ID" --mfa-configuration "OFF"
+
+# ---------------------------------------------------------------------------
+# Region derivation (#508): pool ID / ARN / JWT issuer follow the caller's
+# configured region rather than a hardcoded us-east-1.
+# ---------------------------------------------------------------------------
+REGION_POOL_JSON=$($AWS create-user-pool --region ap-northeast-1 --pool-name "e2e-region-pool" 2>&1)
+REGION_POOL_ID=$(echo "$REGION_POOL_JSON" | jq -r '.UserPool.Id // empty' 2>/dev/null || true)
+REGION_POOL_ARN=$(echo "$REGION_POOL_JSON" | jq -r '.UserPool.Arn // empty' 2>/dev/null || true)
+if [[ "$REGION_POOL_ID" == ap-northeast-1_* && \
+      "$REGION_POOL_ARN" == arn:aws:cognito-idp:ap-northeast-1:*:userpool/"$REGION_POOL_ID" ]]; then
+  ok "CreateUserPool --region ap-northeast-1 — pool ID/ARN reflect ap-northeast-1"
+else
+  fail "CreateUserPool --region ap-northeast-1 — expected ap-northeast-1 pool ID/ARN, got id=$REGION_POOL_ID arn=$REGION_POOL_ARN"
+fi
+
+if [[ -n "$REGION_POOL_ID" ]]; then
+  REGION_DESCRIBE_JSON=$($AWS describe-user-pool --region ap-northeast-1 --user-pool-id "$REGION_POOL_ID" 2>&1)
+  if echo "$REGION_DESCRIBE_JSON" | jq -e --arg arn "$REGION_POOL_ARN" '.UserPool.Arn == $arn' >/dev/null 2>&1; then
+    ok "DescribeUserPool — ap-northeast-1 pool ARN unchanged from CreateUserPool"
+  else
+    fail "DescribeUserPool — ARN mismatch for ap-northeast-1 pool"
+  fi
+  $AWS delete-user-pool --region ap-northeast-1 --user-pool-id "$REGION_POOL_ID" >/dev/null 2>&1 || true
+fi
 
 # ListUserPools
 LIST_JSON=$($AWS list-user-pools --max-results 10 2>&1)

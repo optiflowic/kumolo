@@ -114,3 +114,23 @@ resource "aws_cognito_user_pool_client" "mfa_required" {
     "ALLOW_REFRESH_TOKEN_AUTH",
   ]
 }
+
+# Created via the aws.ap_northeast_1 provider alias (provider.tf) to verify
+# that CreateUserPool derives the pool ID/ARN region from the caller's
+# configured region instead of hardcoding us-east-1 (#508). The postconditions
+# fail terraform apply if that regresses.
+resource "aws_cognito_user_pool" "region_test" {
+  provider = aws.ap_northeast_1
+  name     = "kumolo-tf-region-test-pool"
+
+  lifecycle {
+    postcondition {
+      condition     = startswith(self.id, "ap-northeast-1_")
+      error_message = "Pool ID must reflect the provider's configured region (ap-northeast-1); got ${self.id}."
+    }
+    postcondition {
+      condition     = startswith(self.arn, "arn:aws:cognito-idp:ap-northeast-1:")
+      error_message = "Pool ARN must reflect the provider's configured region (ap-northeast-1); got ${self.arn}."
+    }
+  }
+}

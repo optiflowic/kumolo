@@ -120,3 +120,11 @@ output "cognito_mfa_required_pool_id" {
 output "cognito_mfa_required_pool_mfa_configuration" {
   value = aws_cognito_user_pool.mfa_required.mfa_configuration
 }
+
+output "cognito_region_test_pool_id" {
+  value = aws_cognito_user_pool.region_test.id
+}
+
+output "cognito_region_test_pool_arn" {
+  value = aws_cognito_user_pool.region_test.arn
+}
