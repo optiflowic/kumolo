@@ -31,6 +31,7 @@ CLIENT_ID=""
 DP_POOL_ID=""
 FORCED_MFA_POOL_ID=""
 FORCED_MFA_CLIENT_ID=""
+REGION_POOL_ID=""
 
 cleanup() {
   if [[ -n "$CLIENT_ID" && "$CLIENT_ID" != "UNKNOWN" ]]; then
@@ -40,6 +41,9 @@ cleanup() {
   fi
   if [[ -n "$POOL_ID" && "$POOL_ID" != "us-east-1_UNKNOWN" ]]; then
     $AWS delete-user-pool --user-pool-id "$POOL_ID" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "$REGION_POOL_ID" ]]; then
+    $AWS delete-user-pool --region ap-northeast-1 --user-pool-id "$REGION_POOL_ID" >/dev/null 2>&1 || true
   fi
   if [[ -n "$DP_POOL_ID" ]]; then
     $AWS update-user-pool --user-pool-id "$DP_POOL_ID" --deletion-protection "INACTIVE" >/dev/null 2>&1 || true
@@ -111,14 +115,18 @@ else
 fi
 
 if [[ -n "$REGION_POOL_ID" ]]; then
-  REGION_DESCRIBE_JSON=$($AWS describe-user-pool --region ap-northeast-1 --user-pool-id "$REGION_POOL_ID" 2>&1)
-  if echo "$REGION_DESCRIBE_JSON" | jq -e --arg arn "$REGION_POOL_ARN" '.UserPool.Arn == $arn' >/dev/null 2>&1; then
-    ok "DescribeUserPool — ap-northeast-1 pool ARN unchanged from CreateUserPool"
+  if REGION_DESCRIBE_JSON=$($AWS describe-user-pool --region ap-northeast-1 --user-pool-id "$REGION_POOL_ID" 2>&1); then
+    if echo "$REGION_DESCRIBE_JSON" | jq -e --arg arn "$REGION_POOL_ARN" '.UserPool.Arn == $arn' >/dev/null 2>&1; then
+      ok "DescribeUserPool — ap-northeast-1 pool ARN unchanged from CreateUserPool"
+    else
+      fail "DescribeUserPool — ARN mismatch for ap-northeast-1 pool"
+    fi
   else
-    fail "DescribeUserPool — ARN mismatch for ap-northeast-1 pool"
+    fail "DescribeUserPool — ap-northeast-1 describe-user-pool call failed"
   fi
-  $AWS delete-user-pool --region ap-northeast-1 --user-pool-id "$REGION_POOL_ID" >/dev/null 2>&1 || true
 fi
+# Deletion is handled by the cleanup trap so REGION_POOL_ID is still removed
+# even if the describe-user-pool call above fails.
 
 # ListUserPools
 LIST_JSON=$($AWS list-user-pools --max-results 10 2>&1)
