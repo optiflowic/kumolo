@@ -11,11 +11,31 @@ CreateUserPool, DescribeUserPool, UpdateUserPool, DeleteUserPool, ListUserPools
 ## Pool ID Format
 
 `{region}_{alphanumeric}` — e.g., `us-east-1_EXAMPLE123`
-kumolo generates: `us-east-1_` + 9 random alphanumeric chars (A-Z, a-z, 0-9).
+kumolo generates: `{region}_` + 9 random alphanumeric chars (A-Z, a-z, 0-9). `region` is
+resolved once at `CreateUserPool` time — see "Region resolution" below — and baked into the
+pool ID for the life of the pool.
 
 ## ARN Format
 
-`arn:aws:cognito-idp:us-east-1:000000000000:userpool/{poolId}`
+`arn:aws:cognito-idp:{region}:000000000000:userpool/{poolId}`
+
+`{region}` is derived from the pool ID's `{region}_` prefix (not stored separately), so it
+always matches the region the pool was created with. `DescribeUserPool` and the JWT `iss`
+claim (`https://cognito-idp.{region}.amazonaws.com/{poolId}`) derive their region the same
+way.
+
+## Region resolution
+
+`CreateUserPool` resolves the region for a new pool in this order:
+
+1. The region segment of the caller's SigV4 credential scope (`Credential=.../{region}/...`
+   in the `Authorization` header or a presigned URL's `X-Amz-Credential`) — reflects the
+   AWS SDK/CLI/Terraform provider's configured region, matching real AWS.
+2. `AWS_REGION` env var, then `AWS_DEFAULT_REGION` env var, on the kumolo process.
+3. `us-east-1`, if none of the above are set.
+
+Pools created before this resolution existed keep their `us-east-1_...` IDs and continue to
+work unchanged, since the region is parsed from the ID rather than tracked separately.
 
 ## CreateUserPool
 
@@ -104,7 +124,9 @@ JSON on `CreateUserPool`/`UpdateUserPool`/`DescribeUserPool`, and consumed by `F
 
 ## kumolo Deviations
 
-- Fixed region: `us-east-1`, fixed account: `000000000000`
+- Region reflects the caller's SigV4 credential scope at `CreateUserPool` time (see "Region
+  resolution" above), not a real AWS availability constraint — kumolo does not validate that
+  the region is a real AWS region name. Fixed account: `000000000000`.
 - No SMS/email delivery; no Lambda trigger invocation
 - `EstimatedNumberOfUsers` always returns 0 (user counting not yet implemented)
 - `Policies.PasswordPolicy` enforcement: see `docs/aws-spec/cognito/password_policy.md`
