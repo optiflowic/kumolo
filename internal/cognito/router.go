@@ -92,10 +92,12 @@ type groupStore interface {
 
 // Router handles Cognito User Pools API requests dispatched via the X-Amz-Target header.
 type Router struct {
-	storage    store
-	groups     groupStore
-	codeReader io.Reader // injectable for testing; defaults to crypto/rand.Reader
-	bcryptCost int       // injectable for testing; defaults to bcrypt.DefaultCost
+	storage          store
+	groups           groupStore
+	codeReader       io.Reader // injectable for testing; defaults to crypto/rand.Reader
+	bcryptCost       int       // injectable for testing; defaults to bcrypt.DefaultCost
+	awsRegion        string    // from config.Env.AWSRegion; see resolveRegion
+	awsDefaultRegion string    // from config.Env.AWSDefaultRegion; see resolveRegion
 }
 
 // Option configures a Router at construction time.
@@ -107,6 +109,18 @@ type Option func(*Router)
 func WithBcryptCost(cost int) Option {
 	return func(ro *Router) {
 		ro.bcryptCost = cost
+	}
+}
+
+// WithAWSRegion supplies the process-level AWS_REGION/AWS_DEFAULT_REGION values
+// (resolved once via config.Env at startup) used as a fallback in resolveRegion
+// when a request carries no SigV4 credential scope. Cognito does not read these
+// environment variables itself, so production callers must pass config.Env's
+// values through here explicitly.
+func WithAWSRegion(region, defaultRegion string) Option {
+	return func(ro *Router) {
+		ro.awsRegion = region
+		ro.awsDefaultRegion = defaultRegion
 	}
 }
 

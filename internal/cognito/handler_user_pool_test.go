@@ -55,40 +55,36 @@ func doOpWithRegion(t *testing.T, ro *Router, op, body, region string) *httptest
 
 func TestResolveRegion(t *testing.T) {
 	t.Run("uses SigV4 credential scope when present", func(t *testing.T) {
-		// AWS_REGION/AWS_DEFAULT_REGION are set to conflicting values to confirm
+		// awsRegion/awsDefaultRegion are set to conflicting values to confirm
 		// the SigV4 credential scope takes precedence over both.
-		t.Setenv("AWS_REGION", "sa-east-1")
-		t.Setenv("AWS_DEFAULT_REGION", "eu-central-1")
+		ro := newTestRouter(t, WithAWSRegion("sa-east-1", "eu-central-1"))
 		req := httptest.NewRequest(http.MethodPost, "/", nil)
 		req.Header.Set(
 			"Authorization",
 			"AWS4-HMAC-SHA256 Credential=AKIAEXAMPLE/20240101/eu-west-1/cognito-idp/aws4_request, "+
 				"SignedHeaders=host, Signature=abc",
 		)
-		assert.Equal(t, "eu-west-1", resolveRegion(req))
+		assert.Equal(t, "eu-west-1", ro.resolveRegion(req))
 	})
 
-	t.Run("falls back to AWS_REGION when no SigV4 credential", func(t *testing.T) {
-		// AWS_DEFAULT_REGION is set to a conflicting value to confirm AWS_REGION
+	t.Run("falls back to awsRegion when no SigV4 credential", func(t *testing.T) {
+		// awsDefaultRegion is set to a conflicting value to confirm awsRegion
 		// takes precedence over it.
-		t.Setenv("AWS_REGION", "sa-east-1")
-		t.Setenv("AWS_DEFAULT_REGION", "eu-central-1")
+		ro := newTestRouter(t, WithAWSRegion("sa-east-1", "eu-central-1"))
 		req := httptest.NewRequest(http.MethodPost, "/", nil)
-		assert.Equal(t, "sa-east-1", resolveRegion(req))
+		assert.Equal(t, "sa-east-1", ro.resolveRegion(req))
 	})
 
-	t.Run("falls back to AWS_DEFAULT_REGION when AWS_REGION unset", func(t *testing.T) {
-		t.Setenv("AWS_REGION", "")
-		t.Setenv("AWS_DEFAULT_REGION", "eu-central-1")
+	t.Run("falls back to awsDefaultRegion when awsRegion unset", func(t *testing.T) {
+		ro := newTestRouter(t, WithAWSRegion("", "eu-central-1"))
 		req := httptest.NewRequest(http.MethodPost, "/", nil)
-		assert.Equal(t, "eu-central-1", resolveRegion(req))
+		assert.Equal(t, "eu-central-1", ro.resolveRegion(req))
 	})
 
 	t.Run("falls back to default region when nothing is set", func(t *testing.T) {
-		t.Setenv("AWS_REGION", "")
-		t.Setenv("AWS_DEFAULT_REGION", "")
+		ro := newTestRouter(t)
 		req := httptest.NewRequest(http.MethodPost, "/", nil)
-		assert.Equal(t, poolRegion, resolveRegion(req))
+		assert.Equal(t, poolRegion, ro.resolveRegion(req))
 	})
 }
 

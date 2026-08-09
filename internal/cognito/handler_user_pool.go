@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"regexp"
 
 	"github.com/optiflowic/kumolo/internal/sigv4"
@@ -21,16 +20,17 @@ var rePoolName = regexp.MustCompile(`^[\w\s+=,.@-]{1,128}$`)
 
 // resolveRegion determines the region for a new user pool. Fallback order: the SigV4
 // credential scope on the request (reflects the caller's SDK/CLI configuration) →
-// AWS_REGION/AWS_DEFAULT_REGION env vars → poolRegion.
-func resolveRegion(r *http.Request) string {
+// AWS_REGION/AWS_DEFAULT_REGION (as resolved into config.Env and passed via
+// WithAWSRegion) → poolRegion.
+func (ro *Router) resolveRegion(r *http.Request) string {
 	if region := sigv4.ParseSigV4(r).Region; region != "" {
 		return region
 	}
-	if region := os.Getenv("AWS_REGION"); region != "" {
-		return region
+	if ro.awsRegion != "" {
+		return ro.awsRegion
 	}
-	if region := os.Getenv("AWS_DEFAULT_REGION"); region != "" {
-		return region
+	if ro.awsDefaultRegion != "" {
+		return ro.awsDefaultRegion
 	}
 	return poolRegion
 }
@@ -258,7 +258,7 @@ func (ro *Router) handleCreateUserPool(w http.ResponseWriter, r *http.Request, b
 		return
 	}
 
-	poolID, err := generatePoolID(resolveRegion(r))
+	poolID, err := generatePoolID(ro.resolveRegion(r))
 	if err != nil {
 		// untestable: crypto/rand.Read only fails on OS-level entropy source errors
 		writeError(
