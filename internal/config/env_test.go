@@ -17,6 +17,8 @@ func TestLoadEnv(t *testing.T) {
 		require.NoError(t, os.Unsetenv("KUMOLO_LOG_LEVEL"))
 		require.NoError(t, os.Unsetenv("KUMOLO_LIFECYCLE_INTERVAL"))
 		require.NoError(t, os.Unsetenv("KUMOLO_CORS_ALLOW_ORIGIN"))
+		require.NoError(t, os.Unsetenv("AWS_REGION"))
+		require.NoError(t, os.Unsetenv("AWS_DEFAULT_REGION"))
 
 		env := LoadEnv()
 		assert.Equal(t, "5566", env.Port)
@@ -24,6 +26,8 @@ func TestLoadEnv(t *testing.T) {
 		assert.Equal(t, "info", env.LogLevel)
 		assert.Equal(t, time.Minute, env.LifecycleInterval)
 		assert.Equal(t, "", env.CORSAllowOrigin)
+		assert.Equal(t, "", env.AWSRegion)
+		assert.Equal(t, "", env.AWSDefaultRegion)
 	})
 
 	t.Run("reads values from environment variables", func(t *testing.T) {
@@ -31,12 +35,16 @@ func TestLoadEnv(t *testing.T) {
 		t.Setenv("KUMOLO_DATA_DIR", "/env/kumolo")
 		t.Setenv("KUMOLO_LOG_LEVEL", "warn")
 		t.Setenv("KUMOLO_CORS_ALLOW_ORIGIN", "http://localhost:5173")
+		t.Setenv("AWS_REGION", "ap-northeast-1")
+		t.Setenv("AWS_DEFAULT_REGION", "us-west-2")
 
 		env := LoadEnv()
 		assert.Equal(t, "8080", env.Port)
 		assert.Equal(t, "/env/kumolo", env.DataDir)
 		assert.Equal(t, "warn", env.LogLevel)
 		assert.Equal(t, "http://localhost:5173", env.CORSAllowOrigin)
+		assert.Equal(t, "ap-northeast-1", env.AWSRegion)
+		assert.Equal(t, "us-west-2", env.AWSDefaultRegion)
 	})
 
 	t.Run("reads KUMOLO_LIFECYCLE_INTERVAL", func(t *testing.T) {

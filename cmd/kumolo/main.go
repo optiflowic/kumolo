@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/lmittmann/tint"
+	"github.com/optiflowic/kumolo/internal/cognito"
 	"github.com/optiflowic/kumolo/internal/config"
 	"github.com/optiflowic/kumolo/internal/server"
 	"golang.org/x/term"
@@ -94,6 +95,7 @@ func run() error {
 		dataDir,
 		cfg.LifecycleInterval,
 		server.WithCORSAllowOrigin(cfg.CORSAllowOrigin),
+		server.WithCognitoOptions(cognito.WithAWSRegion(env.AWSRegion, env.AWSDefaultRegion)),
 	)
 	if err != nil {
 		return fmt.Errorf("initialize storage: %w", err)

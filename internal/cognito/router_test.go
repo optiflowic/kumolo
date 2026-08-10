@@ -33,10 +33,10 @@ type failWriteCloser struct{}
 func (f *failWriteCloser) Write([]byte) (int, error) { return 0, errors.New("write failed") }
 func (f *failWriteCloser) Close() error              { return nil }
 
-func newTestRouter(t *testing.T) *Router {
+func newTestRouter(t *testing.T, opts ...Option) *Router {
 	t.Helper()
 	storage := newTestStorage(t)
-	ro := NewRouter(storage)
+	ro := NewRouter(storage, opts...)
 	ro.bcryptCost = bcrypt.MinCost
 	return ro
 }
@@ -51,6 +51,13 @@ func TestNewRouter_WithBcryptCost(t *testing.T) {
 	storage := newTestStorage(t)
 	ro := NewRouter(storage, WithBcryptCost(bcrypt.MinCost))
 	assert.Equal(t, bcrypt.MinCost, ro.bcryptCost)
+}
+
+func TestNewRouter_WithAWSRegion(t *testing.T) {
+	storage := newTestStorage(t)
+	ro := NewRouter(storage, WithAWSRegion("ap-northeast-1", "us-west-2"))
+	assert.Equal(t, "ap-northeast-1", ro.awsRegion)
+	assert.Equal(t, "us-west-2", ro.awsDefaultRegion)
 }
 
 func TestRouter_UnknownOperation(t *testing.T) {

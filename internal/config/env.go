@@ -16,6 +16,8 @@ type Env struct {
 	LogLevel          string
 	LifecycleInterval time.Duration
 	CORSAllowOrigin   string
+	AWSRegion         string
+	AWSDefaultRegion  string
 }
 
 // LoadEnv loads .env if present and returns the resolved environment values.
@@ -53,6 +55,8 @@ func loadEnv(dotenvLoader func(...string) error) Env {
 		LogLevel:          getEnv("KUMOLO_LOG_LEVEL", "info"),
 		LifecycleInterval: lifecycleInterval,
 		CORSAllowOrigin:   getEnv("KUMOLO_CORS_ALLOW_ORIGIN", ""),
+		AWSRegion:         getEnv("AWS_REGION", ""),
+		AWSDefaultRegion:  getEnv("AWS_DEFAULT_REGION", ""),
 	}
 }
 

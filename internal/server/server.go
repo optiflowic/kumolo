@@ -43,9 +43,9 @@ type options struct {
 	corsAllowOrigin string
 }
 
-// WithCognitoOptions passes through options to cognito.NewRouter. Intended
-// for tests that need to override internals such as bcrypt cost; production
-// code should not need this.
+// WithCognitoOptions passes through options to cognito.NewRouter. Used by
+// tests to override internals such as bcrypt cost, and by production code
+// (cmd/kumolo/main.go) to supply cognito.WithAWSRegion.
 func WithCognitoOptions(opts ...cognito.Option) Option {
 	return func(o *options) {
 		o.cognitoOpts = append(o.cognitoOpts, opts...)
