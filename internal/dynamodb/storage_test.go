@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -84,6 +85,34 @@ func TestNewStorage(t *testing.T) {
 		require.NoError(t, os.WriteFile(dir+"/dynamodb", []byte("x"), 0o600))
 		_, err := NewStorage(dir)
 		assert.Error(t, err)
+	})
+
+	// storage.go:97-109: on restart, seqNum must be bumped past any restored stream
+	// record so the next Add(1) cannot collide with a persisted SeqNum.
+	t.Run("restores seqNum beyond a persisted stream record", func(t *testing.T) {
+		dir := t.TempDir()
+
+		s1, err := newStorage(dir, os.OpenRoot)
+		require.NoError(t, err)
+		mustCreateStreamTable(t, s1, "seq-restore-test", "NEW_IMAGE")
+		mustPutItem(t, s1, "seq-restore-test", map[string]any{"pk": map[string]any{"S": "k1"}})
+
+		// Inflate the persisted record's SeqNum far beyond what a fresh instance
+		// would derive from the current wall clock, then persist it to disk.
+		buf := s1.getStreamBuffer("seq-restore-test")
+		require.NotNil(t, buf)
+		buf.mu.Lock()
+		require.Len(t, buf.records, 1)
+		const inflatedSeq = math.MaxUint64 - 1
+		buf.records[0].SeqNum = inflatedSeq
+		s1.rewriteStreamFile("seq-restore-test", buf.records)
+		buf.mu.Unlock()
+		require.NoError(t, s1.Close())
+
+		s2, err := newStorage(dir, os.OpenRoot)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = s2.Close() })
+		assert.Equal(t, uint64(inflatedSeq), s2.seqNum.Load())
 	})
 }
 
