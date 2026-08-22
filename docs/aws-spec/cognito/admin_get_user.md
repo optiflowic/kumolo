@@ -25,7 +25,7 @@ HTTP 200:
   "Enabled": true,
   "UserStatus": "UNCONFIRMED | CONFIRMED | FORCE_CHANGE_PASSWORD | RESET_REQUIRED | EXTERNAL_PROVIDER",
   "MFAOptions": [],
-  "UserMFASettingList": [],
+  "UserMFASettingList": ["SOFTWARE_TOKEN_MFA"],
   "PreferredMfaSetting": "SOFTWARE_TOKEN_MFA"
 }
 ```

@@ -32,7 +32,7 @@
     { "Name": "email", "Value": "alice@example.com" }
   ],
   "MFAOptions": [],
-  "UserMFASettingList": [],
+  "UserMFASettingList": ["SOFTWARE_TOKEN_MFA"],
   "PreferredMfaSetting": "SOFTWARE_TOKEN_MFA"
 }
 ```
