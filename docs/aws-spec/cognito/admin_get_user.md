@@ -26,7 +26,7 @@ HTTP 200:
   "UserStatus": "UNCONFIRMED | CONFIRMED | FORCE_CHANGE_PASSWORD | RESET_REQUIRED | EXTERNAL_PROVIDER",
   "MFAOptions": [],
   "UserMFASettingList": [],
-  "PreferredMfaSetting": ""
+  "PreferredMfaSetting": "SOFTWARE_TOKEN_MFA"
 }
 ```
 
@@ -34,6 +34,8 @@ HTTP 200:
 - `MFAOptions` is always `[]` (see kumolo deviations below).
 - `UserMFASettingList`/`PreferredMfaSetting` reflect the user's `SoftwareTokenMFAEnabled` state:
   `["SOFTWARE_TOKEN_MFA"]`/`"SOFTWARE_TOKEN_MFA"` when TOTP MFA is enabled, empty otherwise.
+  `PreferredMfaSetting` is omitted from the response entirely (not sent as `""`) when the user
+  has no MFA preference, matching `AdminGetUserOutput.PreferredMfaSetting *string` in the SDK.
 
 ## Errors implemented
 

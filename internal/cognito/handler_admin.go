@@ -181,7 +181,7 @@ type adminGetUserResponse struct {
 	UserStatus           string          `json:"UserStatus"`
 	MFAOptions           []any           `json:"MFAOptions"`
 	UserMFASettingList   []string        `json:"UserMFASettingList"`
-	PreferredMfaSetting  string          `json:"PreferredMfaSetting"`
+	PreferredMfaSetting  string          `json:"PreferredMfaSetting,omitempty"`
 }
 
 func (ro *Router) handleAdminGetUser(w http.ResponseWriter, body []byte) {

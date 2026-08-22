@@ -30,7 +30,10 @@
   "UserAttributes": [
     { "Name": "sub", "Value": "<uuid>" },
     { "Name": "email", "Value": "alice@example.com" }
-  ]
+  ],
+  "MFAOptions": [],
+  "UserMFASettingList": [],
+  "PreferredMfaSetting": "SOFTWARE_TOKEN_MFA"
 }
 ```
 
@@ -40,6 +43,8 @@
 - `PreferredMfaSetting` and `UserMFASettingList` reflect the user's `SoftwareTokenMFAEnabled`
   state: `["SOFTWARE_TOKEN_MFA"]`/`"SOFTWARE_TOKEN_MFA"` when TOTP MFA is enabled, empty
   otherwise. Set by `SetUserMFAPreference` (see `set_user_mfa_preference.md`).
+  `PreferredMfaSetting` is omitted from the response entirely (not sent as `""`) when the user
+  has no MFA preference, matching `GetUserOutput.PreferredMfaSetting *string` in the SDK.
 
 ## Errors
 
