@@ -1702,6 +1702,28 @@ if [[ -n "$MFA_CODE" ]]; then
           --access-token "$MFA_ACCESS_TOKEN" \
           --software-token-mfa-settings 'Enabled=true,PreferredMfa=true'
 
+      # #506: GetUser/AdminGetUser must surface the enrollment via UserMFASettingList /
+      # PreferredMfaSetting once SOFTWARE_TOKEN_MFA is enabled.
+      MFA_GETUSER_JSON=$($AWS get-user --access-token "$MFA_ACCESS_TOKEN" 2>&1)
+      MFA_GETUSER_SETTINGLIST=$(echo "$MFA_GETUSER_JSON" | jq -r '.UserMFASettingList | join(",")' 2>/dev/null)
+      MFA_GETUSER_PREFERRED=$(echo "$MFA_GETUSER_JSON" | jq -r '.PreferredMfaSetting // empty' 2>/dev/null)
+      if [[ "$MFA_GETUSER_SETTINGLIST" == "SOFTWARE_TOKEN_MFA" && "$MFA_GETUSER_PREFERRED" == "SOFTWARE_TOKEN_MFA" ]]; then
+        ok "GetUser — reflects SOFTWARE_TOKEN_MFA enrollment"
+      else
+        fail "GetUser — expected SOFTWARE_TOKEN_MFA in UserMFASettingList/PreferredMfaSetting"
+      fi
+
+      MFA_ADMINGETUSER_JSON=$($AWS admin-get-user \
+        --user-pool-id "$POOL_ID" \
+        --username "$MFA_USER" 2>&1)
+      MFA_ADMINGETUSER_SETTINGLIST=$(echo "$MFA_ADMINGETUSER_JSON" | jq -r '.UserMFASettingList | join(",")' 2>/dev/null)
+      MFA_ADMINGETUSER_PREFERRED=$(echo "$MFA_ADMINGETUSER_JSON" | jq -r '.PreferredMfaSetting // empty' 2>/dev/null)
+      if [[ "$MFA_ADMINGETUSER_SETTINGLIST" == "SOFTWARE_TOKEN_MFA" && "$MFA_ADMINGETUSER_PREFERRED" == "SOFTWARE_TOKEN_MFA" ]]; then
+        ok "AdminGetUser — reflects SOFTWARE_TOKEN_MFA enrollment"
+      else
+        fail "AdminGetUser — expected SOFTWARE_TOKEN_MFA in UserMFASettingList/PreferredMfaSetting"
+      fi
+
       # Sign-in must now issue a SOFTWARE_TOKEN_MFA challenge instead of tokens.
       MFA_CHALLENGE_JSON=$($AWS initiate-auth \
         --client-id "$CLIENT_ID" \

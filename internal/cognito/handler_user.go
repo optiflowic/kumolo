@@ -20,8 +20,11 @@ type getUserRequest struct {
 }
 
 type getUserResponse struct {
-	Username       string          `json:"Username"`
-	UserAttributes []AttributeType `json:"UserAttributes"`
+	Username            string          `json:"Username"`
+	UserAttributes      []AttributeType `json:"UserAttributes"`
+	MFAOptions          []any           `json:"MFAOptions"`
+	UserMFASettingList  []string        `json:"UserMFASettingList"`
+	PreferredMfaSetting string          `json:"PreferredMfaSetting,omitempty"`
 }
 
 func (ro *Router) handleGetUser(w http.ResponseWriter, body []byte) {
@@ -49,8 +52,11 @@ func (ro *Router) handleGetUser(w http.ResponseWriter, body []byte) {
 		return
 	}
 	writeJSON(w, http.StatusOK, getUserResponse{
-		Username:       user.Username,
-		UserAttributes: prependSub(user.Attributes, user.Sub),
+		Username:            user.Username,
+		UserAttributes:      prependSub(user.Attributes, user.Sub),
+		MFAOptions:          []any{},
+		UserMFASettingList:  userMFASettingList(user),
+		PreferredMfaSetting: user.PreferredMfaSetting,
 	})
 }
 

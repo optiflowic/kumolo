@@ -245,8 +245,8 @@ func (ro *Router) handleAdminGetUser(w http.ResponseWriter, body []byte) {
 		Enabled:              user.Enabled,
 		UserStatus:           user.Status,
 		MFAOptions:           []any{},
-		UserMFASettingList:   []string{},
-		PreferredMfaSetting:  "",
+		UserMFASettingList:   userMFASettingList(user),
+		PreferredMfaSetting:  user.PreferredMfaSetting,
 	})
 }
 

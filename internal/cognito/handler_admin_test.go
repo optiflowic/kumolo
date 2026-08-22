@@ -232,6 +232,25 @@ func TestAdminGetUser_Success(t *testing.T) {
 	assert.NotNil(t, resp.UserMFASettingList)
 }
 
+// TestAdminGetUser_ReturnsMFAState verifies AdminGetUser reflects SOFTWARE_TOKEN_MFA
+// enrollment (issue #506), mirroring TestGetUser_ReturnsMFAState.
+func TestAdminGetUser_ReturnsMFAState(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID, clientID := setupPool(t, ro)
+	token := doAuth(t, ro, clientID, "alice", "Password123!")
+	enableSoftwareTokenMFA(t, ro, token)
+
+	body, _ := json.Marshal(map[string]any{"UserPoolId": poolID, "Username": "alice"})
+	w := doOp(t, ro, "AdminGetUser", string(body))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp adminGetUserResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, []string{mfaSettingSoftwareToken}, resp.UserMFASettingList)
+	assert.Equal(t, mfaSettingSoftwareToken, resp.PreferredMfaSetting)
+	assert.Empty(t, resp.MFAOptions)
+}
+
 func TestAdminGetUser_ValidationErrors(t *testing.T) {
 	ro := newTestRouter(t)
 	poolID := createPool(t, ro, "test-pool")

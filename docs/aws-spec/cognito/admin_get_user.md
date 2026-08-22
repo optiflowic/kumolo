@@ -3,7 +3,7 @@
 - **URL**: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_AdminGetUser.html
 - **Target**: `AWSCognitoIdentityProviderService.AdminGetUser`
 - **SDK**: `cognitoidentityprovider.AdminGetUserInput` / `AdminGetUserOutput`
-- **Last verified**: 2026-06-25
+- **Last verified**: 2026-08-22
 
 ## Request
 
@@ -31,7 +31,9 @@ HTTP 200:
 ```
 
 - `UserAttributes` includes `sub` as first entry.
-- `MFAOptions`, `UserMFASettingList`, `PreferredMfaSetting` always empty (MFA not implemented).
+- `MFAOptions` is always `[]` (see kumolo deviations below).
+- `UserMFASettingList`/`PreferredMfaSetting` reflect the user's `SoftwareTokenMFAEnabled` state:
+  `["SOFTWARE_TOKEN_MFA"]`/`"SOFTWARE_TOKEN_MFA"` when TOTP MFA is enabled, empty otherwise.
 
 ## Errors implemented
 
@@ -44,4 +46,5 @@ HTTP 200:
 
 ## kumolo deviations
 
-- `MFAOptions`, `UserMFASettingList`, `PreferredMfaSetting` always empty.
+- `MFAOptions` is always `[]`, matching AWS's own deprecation of the field for SMS-only MFA,
+  which kumolo doesn't implement — not a deviation from current AWS behavior.

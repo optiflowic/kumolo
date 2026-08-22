@@ -69,6 +69,32 @@ func TestGetUser_Success(t *testing.T) {
 	assert.Equal(t, "alice@example.com", email)
 }
 
+// TestGetUser_ReturnsMFAState verifies GetUser reflects SOFTWARE_TOKEN_MFA enrollment
+// (issue #506): before enrollment MFA fields are empty, after enableSoftwareTokenMFA
+// both UserMFASettingList and PreferredMfaSetting surface it.
+func TestGetUser_ReturnsMFAState(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	token := doAuth(t, ro, clientID, "alice", "Password123!")
+
+	w := doGetUserDirect(t, ro, token)
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp getUserResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Empty(t, resp.UserMFASettingList)
+	assert.Empty(t, resp.PreferredMfaSetting)
+	assert.Empty(t, resp.MFAOptions)
+
+	enableSoftwareTokenMFA(t, ro, token)
+
+	w = doGetUserDirect(t, ro, token)
+	require.Equal(t, http.StatusOK, w.Code)
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, []string{mfaSettingSoftwareToken}, resp.UserMFASettingList)
+	assert.Equal(t, mfaSettingSoftwareToken, resp.PreferredMfaSetting)
+	assert.Empty(t, resp.MFAOptions)
+}
+
 func TestGetUser_MissingAccessToken(t *testing.T) {
 	ro := newTestRouter(t)
 	w := doOp(t, ro, "GetUser", `{}`)
