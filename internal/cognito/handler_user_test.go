@@ -79,11 +79,17 @@ func TestGetUser_ReturnsMFAState(t *testing.T) {
 
 	w := doGetUserDirect(t, ro, token)
 	require.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.Bytes()
 	var resp getUserResponse
-	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	require.NoError(t, json.Unmarshal(body, &resp))
 	assert.Empty(t, resp.UserMFASettingList)
 	assert.Empty(t, resp.PreferredMfaSetting)
 	assert.Empty(t, resp.MFAOptions)
+
+	var raw map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(body, &raw))
+	_, hasPreferredMfaSetting := raw["PreferredMfaSetting"]
+	assert.False(t, hasPreferredMfaSetting, "PreferredMfaSetting must be omitted, not sent as \"\"")
 
 	enableSoftwareTokenMFA(t, ro, token)
 

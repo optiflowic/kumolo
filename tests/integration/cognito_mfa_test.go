@@ -191,7 +191,11 @@ func TestCognitoIntegration_MFA_GetUser_ReflectsEnrollment(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Empty(t, before.UserMFASettingList)
-	assert.Empty(t, aws.ToString(before.PreferredMfaSetting))
+	assert.Nil(
+		t,
+		before.PreferredMfaSetting,
+		"PreferredMfaSetting must be omitted, not sent as \"\"",
+	)
 
 	enrollTOTP(t, env)
 	_, err = env.c.SetUserMFAPreference(ctx, &awscognito.SetUserMFAPreferenceInput{

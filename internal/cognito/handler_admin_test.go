@@ -238,13 +238,27 @@ func TestAdminGetUser_ReturnsMFAState(t *testing.T) {
 	ro := newTestRouter(t)
 	poolID, clientID := setupPool(t, ro)
 	token := doAuth(t, ro, clientID, "alice", "Password123!")
-	enableSoftwareTokenMFA(t, ro, token)
 
 	body, _ := json.Marshal(map[string]any{"UserPoolId": poolID, "Username": "alice"})
 	w := doOp(t, ro, "AdminGetUser", string(body))
 
 	require.Equal(t, http.StatusOK, w.Code)
+	rawBody := w.Body.Bytes()
 	var resp adminGetUserResponse
+	require.NoError(t, json.Unmarshal(rawBody, &resp))
+	assert.Empty(t, resp.UserMFASettingList)
+	assert.Empty(t, resp.PreferredMfaSetting)
+	assert.Empty(t, resp.MFAOptions)
+
+	var raw map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(rawBody, &raw))
+	_, hasPreferredMfaSetting := raw["PreferredMfaSetting"]
+	assert.False(t, hasPreferredMfaSetting, "PreferredMfaSetting must be omitted, not sent as \"\"")
+
+	enableSoftwareTokenMFA(t, ro, token)
+
+	w = doOp(t, ro, "AdminGetUser", string(body))
+	require.Equal(t, http.StatusOK, w.Code)
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
 	assert.Equal(t, []string{mfaSettingSoftwareToken}, resp.UserMFASettingList)
 	assert.Equal(t, mfaSettingSoftwareToken, resp.PreferredMfaSetting)
