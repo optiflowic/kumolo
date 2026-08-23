@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-08-24
+
+### Changed
+
+#### Cognito
+
+- Pool ID / JWT issuer / ARN now reflect the region resolved from the caller's SigV4 credential scope (falling back to `AWS_REGION`/`AWS_DEFAULT_REGION`, then `us-east-1`) instead of a hardcoded `us-east-1`
+
+### Fixed
+
+#### Cognito
+
+- `GetUser`/`AdminGetUser` now report MFA enrollment state (`MFAOptions`/`PreferredMfaSetting`/`UserMFASettingList`) instead of always returning empty
+- CORS preflight (`OPTIONS`) requests are now handled by the request dispatcher instead of falling through to the S3 router
+
 ## [0.4.0] - 2026-07-26
 
 ### Added
