@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Cognito
 
-- `GetUser`/`AdminGetUser` now report MFA enrollment state (`MFAOptions`/`PreferredMfaSetting`/`UserMFASettingList`) instead of always returning empty
+- `GetUser`/`AdminGetUser` now report MFA enrollment state (`UserMFASettingList`/`PreferredMfaSetting`) instead of always returning empty; `MFAOptions` remains permanently empty, matching AWS's own deprecation of that field (SMS-only, which kumolo doesn't implement)
 - CORS preflight (`OPTIONS`) requests are now handled by the request dispatcher instead of falling through to the S3 router
 
 ## [0.4.0] - 2026-07-26
