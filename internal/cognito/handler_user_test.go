@@ -69,6 +69,60 @@ func TestGetUser_Success(t *testing.T) {
 	assert.Equal(t, "alice@example.com", email)
 }
 
+// TestGetUser_ReturnsMFAState verifies GetUser reflects SOFTWARE_TOKEN_MFA enrollment
+// (issue #506): before enrollment MFA fields are empty, after enableSoftwareTokenMFA
+// both UserMFASettingList and PreferredMfaSetting surface it.
+func TestGetUser_ReturnsMFAState(t *testing.T) {
+	ro := newTestRouter(t)
+	_, clientID := setupPool(t, ro)
+	token := doAuth(t, ro, clientID, "alice", "Password123!")
+
+	w := doGetUserDirect(t, ro, token)
+	require.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.Bytes()
+	var resp getUserResponse
+	require.NoError(t, json.Unmarshal(body, &resp))
+	assert.Empty(t, resp.UserMFASettingList)
+	assert.Empty(t, resp.PreferredMfaSetting)
+	assert.Empty(t, resp.MFAOptions)
+
+	var raw map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(body, &raw))
+	assert.JSONEq(
+		t,
+		"[]",
+		string(raw["UserMFASettingList"]),
+		"UserMFASettingList must serialize as an empty array, not null",
+	)
+	assert.JSONEq(
+		t,
+		"[]",
+		string(raw["MFAOptions"]),
+		"MFAOptions must serialize as an empty array, not null",
+	)
+	_, hasPreferredMfaSetting := raw["PreferredMfaSetting"]
+	assert.False(t, hasPreferredMfaSetting, "PreferredMfaSetting must be omitted, not sent as \"\"")
+
+	enableSoftwareTokenMFA(t, ro, token)
+
+	w = doGetUserDirect(t, ro, token)
+	require.Equal(t, http.StatusOK, w.Code)
+	body = w.Body.Bytes()
+	require.NoError(t, json.Unmarshal(body, &resp))
+	assert.Equal(t, []string{mfaSettingSoftwareToken}, resp.UserMFASettingList)
+	assert.Equal(t, mfaSettingSoftwareToken, resp.PreferredMfaSetting)
+	assert.Empty(t, resp.MFAOptions)
+
+	raw = nil
+	require.NoError(t, json.Unmarshal(body, &raw))
+	assert.JSONEq(
+		t,
+		"[]",
+		string(raw["MFAOptions"]),
+		"MFAOptions must serialize as an empty array, not null",
+	)
+}
+
 func TestGetUser_MissingAccessToken(t *testing.T) {
 	ro := newTestRouter(t)
 	w := doOp(t, ro, "GetUser", `{}`)

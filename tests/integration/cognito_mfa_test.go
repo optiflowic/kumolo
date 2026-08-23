@@ -179,6 +179,50 @@ func TestCognitoIntegration_MFA_EnrollmentFlow(t *testing.T) {
 	assert.NotEmpty(t, aws.ToString(resp.AuthenticationResult.RefreshToken))
 }
 
+// TestCognitoIntegration_MFA_GetUser_ReflectsEnrollment covers issue #506: GetUser and
+// AdminGetUser must surface SOFTWARE_TOKEN_MFA enrollment via UserMFASettingList /
+// PreferredMfaSetting, both before and after SetUserMFAPreference enables it.
+func TestCognitoIntegration_MFA_GetUser_ReflectsEnrollment(t *testing.T) {
+	env := newMFATestEnv(t, "mfa-getuser-pool")
+	ctx := context.Background()
+
+	before, err := env.c.GetUser(ctx, &awscognito.GetUserInput{
+		AccessToken: aws.String(env.accessToken),
+	})
+	require.NoError(t, err)
+	assert.Empty(t, before.UserMFASettingList)
+	assert.Nil(
+		t,
+		before.PreferredMfaSetting,
+		"PreferredMfaSetting must be omitted, not sent as \"\"",
+	)
+
+	enrollTOTP(t, env)
+	_, err = env.c.SetUserMFAPreference(ctx, &awscognito.SetUserMFAPreferenceInput{
+		AccessToken: aws.String(env.accessToken),
+		SoftwareTokenMfaSettings: &types.SoftwareTokenMfaSettingsType{
+			Enabled:      true,
+			PreferredMfa: true,
+		},
+	})
+	require.NoError(t, err)
+
+	after, err := env.c.GetUser(ctx, &awscognito.GetUserInput{
+		AccessToken: aws.String(env.accessToken),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"SOFTWARE_TOKEN_MFA"}, after.UserMFASettingList)
+	assert.Equal(t, "SOFTWARE_TOKEN_MFA", aws.ToString(after.PreferredMfaSetting))
+
+	admin, err := env.c.AdminGetUser(ctx, &awscognito.AdminGetUserInput{
+		UserPoolId: aws.String(env.poolID),
+		Username:   aws.String(env.username),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"SOFTWARE_TOKEN_MFA"}, admin.UserMFASettingList)
+	assert.Equal(t, "SOFTWARE_TOKEN_MFA", aws.ToString(admin.PreferredMfaSetting))
+}
+
 func TestCognitoIntegration_MFA_VerifySoftwareToken_WrongCode(t *testing.T) {
 	env := newMFATestEnv(t, "mfa-wrongcode-pool")
 	ctx := context.Background()

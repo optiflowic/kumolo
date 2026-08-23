@@ -23,6 +23,16 @@ const (
 	mfaConfigurationOn        = "ON"
 )
 
+// userMFASettingList builds the UserMFASettingList value returned by GetUser/AdminGetUser.
+// kumolo only supports SOFTWARE_TOKEN_MFA (no SMS_MFA/EMAIL_OTP), so the list is either empty
+// or a single element, mirroring user.SoftwareTokenMFAEnabled.
+func userMFASettingList(u *UserMetadata) []string {
+	if u.SoftwareTokenMFAEnabled {
+		return []string{mfaSettingSoftwareToken}
+	}
+	return []string{}
+}
+
 // ──── AssociateSoftwareToken ──────────────────────────────────────────────────
 
 type associateSoftwareTokenRequest struct {

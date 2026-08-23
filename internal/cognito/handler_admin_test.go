@@ -232,6 +232,61 @@ func TestAdminGetUser_Success(t *testing.T) {
 	assert.NotNil(t, resp.UserMFASettingList)
 }
 
+// TestAdminGetUser_ReturnsMFAState verifies AdminGetUser reflects SOFTWARE_TOKEN_MFA
+// enrollment (issue #506), mirroring TestGetUser_ReturnsMFAState.
+func TestAdminGetUser_ReturnsMFAState(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID, clientID := setupPool(t, ro)
+	token := doAuth(t, ro, clientID, "alice", "Password123!")
+
+	body, _ := json.Marshal(map[string]any{"UserPoolId": poolID, "Username": "alice"})
+	w := doOp(t, ro, "AdminGetUser", string(body))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	rawBody := w.Body.Bytes()
+	var resp adminGetUserResponse
+	require.NoError(t, json.Unmarshal(rawBody, &resp))
+	assert.Empty(t, resp.UserMFASettingList)
+	assert.Empty(t, resp.PreferredMfaSetting)
+	assert.Empty(t, resp.MFAOptions)
+
+	var raw map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(rawBody, &raw))
+	assert.JSONEq(
+		t,
+		"[]",
+		string(raw["UserMFASettingList"]),
+		"UserMFASettingList must serialize as an empty array, not null",
+	)
+	assert.JSONEq(
+		t,
+		"[]",
+		string(raw["MFAOptions"]),
+		"MFAOptions must serialize as an empty array, not null",
+	)
+	_, hasPreferredMfaSetting := raw["PreferredMfaSetting"]
+	assert.False(t, hasPreferredMfaSetting, "PreferredMfaSetting must be omitted, not sent as \"\"")
+
+	enableSoftwareTokenMFA(t, ro, token)
+
+	w = doOp(t, ro, "AdminGetUser", string(body))
+	require.Equal(t, http.StatusOK, w.Code)
+	rawBody = w.Body.Bytes()
+	require.NoError(t, json.Unmarshal(rawBody, &resp))
+	assert.Equal(t, []string{mfaSettingSoftwareToken}, resp.UserMFASettingList)
+	assert.Equal(t, mfaSettingSoftwareToken, resp.PreferredMfaSetting)
+	assert.Empty(t, resp.MFAOptions)
+
+	raw = nil
+	require.NoError(t, json.Unmarshal(rawBody, &raw))
+	assert.JSONEq(
+		t,
+		"[]",
+		string(raw["MFAOptions"]),
+		"MFAOptions must serialize as an empty array, not null",
+	)
+}
+
 func TestAdminGetUser_ValidationErrors(t *testing.T) {
 	ro := newTestRouter(t)
 	poolID := createPool(t, ro, "test-pool")

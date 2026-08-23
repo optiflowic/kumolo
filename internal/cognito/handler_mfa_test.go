@@ -529,6 +529,25 @@ func TestVerifySoftwareToken_UpdateUserRaceNotFound(t *testing.T) {
 	assertErrType(t, w, ErrTypeUserNotFoundException)
 }
 
+// ── userMFASettingList ───────────────────────────────────────────────────────
+
+func TestUserMFASettingList(t *testing.T) {
+	tests := []struct {
+		name    string
+		enabled bool
+		want    []string
+	}{
+		{"disabled", false, []string{}},
+		{"enabled", true, []string{mfaSettingSoftwareToken}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			u := &UserMetadata{SoftwareTokenMFAEnabled: tt.enabled}
+			assert.Equal(t, tt.want, userMFASettingList(u))
+		})
+	}
+}
+
 // ── SetUserMFAPreference ─────────────────────────────────────────────────────
 
 func TestSetUserMFAPreference_EnableAfterVerify(t *testing.T) {

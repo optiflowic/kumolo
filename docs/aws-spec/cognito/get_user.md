@@ -2,7 +2,7 @@
 
 **Official URL**: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_GetUser.html  
 **SDK struct**: `cognitoidentityprovider.GetUserInput` / `GetUserOutput`  
-**Last verified**: 2026-07-16
+**Last verified**: 2026-08-22
 
 ## Request
 
@@ -30,13 +30,21 @@
   "UserAttributes": [
     { "Name": "sub", "Value": "<uuid>" },
     { "Name": "email", "Value": "alice@example.com" }
-  ]
+  ],
+  "MFAOptions": [],
+  "UserMFASettingList": ["SOFTWARE_TOKEN_MFA"],
+  "PreferredMfaSetting": "SOFTWARE_TOKEN_MFA"
 }
 ```
 
 - `sub` is always the first element of `UserAttributes`; any existing `sub` in the stored attributes is removed and replaced at index 0.
-- `MFAOptions`, `PreferredMfaSetting`, `UserMFASettingList` are unsupported/omitted response
-  fields (see kumolo Deviations below).
+- `MFAOptions` is always `[]` — AWS itself deprecated this field (SMS MFA only, never reflects
+  TOTP), and kumolo doesn't implement SMS MFA.
+- `PreferredMfaSetting` and `UserMFASettingList` reflect the user's `SoftwareTokenMFAEnabled`
+  state: `["SOFTWARE_TOKEN_MFA"]`/`"SOFTWARE_TOKEN_MFA"` when TOTP MFA is enabled, empty
+  otherwise. Set by `SetUserMFAPreference` (see `set_user_mfa_preference.md`).
+  `PreferredMfaSetting` is omitted from the response entirely (not sent as `""`) when the user
+  has no MFA preference, matching `GetUserOutput.PreferredMfaSetting *string` in the SDK.
 
 ## Errors
 
@@ -49,9 +57,8 @@
 
 ## kumolo Deviations
 
-- MFA fields (`MFAOptions`, `PreferredMfaSetting`, `UserMFASettingList`) are not returned, even
-  though kumolo supports TOTP MFA enrollment (see `associate_software_token.md`,
-  `set_user_mfa_preference.md`) — `AdminGetUser`'s equivalent fields have the same limitation.
+- `MFAOptions` is always `[]`, matching AWS's own deprecation of the field for SMS-only MFA,
+  which kumolo doesn't implement — not a deviation from current AWS behavior.
 - `PasswordResetRequiredException` is never returned — `RESET_REQUIRED` user status is not implemented.
 - Unknown pool IDs (no persisted RSA keys) return `NotAuthorizedException` rather than `ResourceNotFoundException`.
 - `exp` is checked with `<=` (expired at the exact expiry second), matching standard JWT semantics.
