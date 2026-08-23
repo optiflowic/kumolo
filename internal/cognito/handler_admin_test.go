@@ -252,6 +252,18 @@ func TestAdminGetUser_ReturnsMFAState(t *testing.T) {
 
 	var raw map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(rawBody, &raw))
+	assert.JSONEq(
+		t,
+		"[]",
+		string(raw["UserMFASettingList"]),
+		"UserMFASettingList must serialize as an empty array, not null",
+	)
+	assert.JSONEq(
+		t,
+		"[]",
+		string(raw["MFAOptions"]),
+		"MFAOptions must serialize as an empty array, not null",
+	)
 	_, hasPreferredMfaSetting := raw["PreferredMfaSetting"]
 	assert.False(t, hasPreferredMfaSetting, "PreferredMfaSetting must be omitted, not sent as \"\"")
 
@@ -259,10 +271,19 @@ func TestAdminGetUser_ReturnsMFAState(t *testing.T) {
 
 	w = doOp(t, ro, "AdminGetUser", string(body))
 	require.Equal(t, http.StatusOK, w.Code)
-	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	rawBody = w.Body.Bytes()
+	require.NoError(t, json.Unmarshal(rawBody, &resp))
 	assert.Equal(t, []string{mfaSettingSoftwareToken}, resp.UserMFASettingList)
 	assert.Equal(t, mfaSettingSoftwareToken, resp.PreferredMfaSetting)
 	assert.Empty(t, resp.MFAOptions)
+
+	require.NoError(t, json.Unmarshal(rawBody, &raw))
+	assert.JSONEq(
+		t,
+		"[]",
+		string(raw["MFAOptions"]),
+		"MFAOptions must serialize as an empty array, not null",
+	)
 }
 
 func TestAdminGetUser_ValidationErrors(t *testing.T) {
