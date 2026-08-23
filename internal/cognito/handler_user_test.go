@@ -113,6 +113,7 @@ func TestGetUser_ReturnsMFAState(t *testing.T) {
 	assert.Equal(t, mfaSettingSoftwareToken, resp.PreferredMfaSetting)
 	assert.Empty(t, resp.MFAOptions)
 
+	raw = nil
 	require.NoError(t, json.Unmarshal(body, &raw))
 	assert.JSONEq(
 		t,
