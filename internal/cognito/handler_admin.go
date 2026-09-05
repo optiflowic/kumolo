@@ -389,7 +389,8 @@ func (ro *Router) handleAdminConfirmSignUp(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	if _, err := ro.storage.GetUserPool(req.UserPoolID); err != nil {
+	pool, err := ro.storage.GetUserPool(req.UserPoolID)
+	if err != nil {
 		if errors.Is(err, errUserPoolNotFound) {
 			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException,
 				"User pool not found.")
@@ -400,9 +401,10 @@ func (ro *Router) handleAdminConfirmSignUp(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	err := ro.storage.UpdateUser(req.UserPoolID, req.Username, func(u *UserMetadata) error {
+	err = ro.storage.UpdateUser(req.UserPoolID, req.Username, func(u *UserMetadata) error {
 		if u.Status == userStatusUnconfirmed {
 			u.Status = userStatusConfirmed
+			u.Attributes = autoVerifyAttrs(u.Attributes, pool.AutoVerifiedAttributes)
 		}
 		return nil
 	})

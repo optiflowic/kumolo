@@ -31,6 +31,27 @@ func setupPool(t *testing.T, ro *Router) (string, string) {
 	return poolID, clientID
 }
 
+// setupPoolWithAutoVerify creates a pool with the given AutoVerifiedAttributes
+// and a client, returning (poolID, clientID).
+func setupPoolWithAutoVerify(t *testing.T, ro *Router, autoVerified []string) (string, string) {
+	t.Helper()
+	attrs, err := json.Marshal(autoVerified)
+	require.NoError(t, err)
+	w := doOp(t, ro, "CreateUserPool", fmt.Sprintf(
+		`{"PoolName":"test-pool","AutoVerifiedAttributes":%s}`, attrs,
+	))
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp struct {
+		UserPool struct {
+			Id string `json:"Id"`
+		} `json:"UserPool"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	poolID := resp.UserPool.Id
+	clientID := createClient(t, ro, poolID, "test-client")
+	return poolID, clientID
+}
+
 // signUpUser registers a new user and returns the UserSub.
 func signUpUser(t *testing.T, ro *Router, clientID, username, password string) string {
 	t.Helper()
@@ -296,6 +317,58 @@ func TestSignUp_ConfirmationCodeEntropyError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }
 
+func TestSignUp_DefaultsEmailVerifiedFalse(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID, clientID := setupPool(t, ro)
+	signUpUser(t, ro, clientID, "alice", "Password123!")
+
+	u, err := ro.storage.GetUser(poolID, "alice")
+	require.NoError(t, err)
+	verified, ok := getAttr(u.Attributes, "email_verified")
+	require.True(t, ok)
+	assert.Equal(t, "false", verified)
+}
+
+func TestSignUp_DefaultsPhoneNumberVerifiedFalse(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID, clientID := setupPool(t, ro)
+
+	body, _ := json.Marshal(map[string]any{
+		"ClientId": clientID,
+		"Username": "bob",
+		"Password": "Password123!",
+		"UserAttributes": []map[string]string{
+			{"Name": "phone_number", "Value": "+15551234567"},
+		},
+	})
+	require.Equal(t, http.StatusOK, doOp(t, ro, "SignUp", string(body)).Code)
+
+	u, err := ro.storage.GetUser(poolID, "bob")
+	require.NoError(t, err)
+	verified, ok := getAttr(u.Attributes, "phone_number_verified")
+	require.True(t, ok)
+	assert.Equal(t, "false", verified)
+}
+
+func TestSignUp_NoContactAttributes_NoVerifiedAttrs(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID, clientID := setupPool(t, ro)
+
+	body, _ := json.Marshal(map[string]any{
+		"ClientId": clientID,
+		"Username": "carol",
+		"Password": "Password123!",
+	})
+	require.Equal(t, http.StatusOK, doOp(t, ro, "SignUp", string(body)).Code)
+
+	u, err := ro.storage.GetUser(poolID, "carol")
+	require.NoError(t, err)
+	_, ok := getAttr(u.Attributes, "email_verified")
+	assert.False(t, ok)
+	_, ok = getAttr(u.Attributes, "phone_number_verified")
+	assert.False(t, ok)
+}
+
 // ── ConfirmSignUp ─────────────────────────────────────────────────────────────
 
 func TestConfirmSignUp_Success(t *testing.T) {
@@ -395,6 +468,56 @@ func TestConfirmSignUp_UpdateStorageError(t *testing.T) {
 	})
 	w := doOp(t, ro, "ConfirmSignUp", string(body))
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+func TestConfirmSignUp_GetUserPoolError(t *testing.T) {
+	ro := &Router{storage: &mockStore{
+		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
+		getErr:           errors.New("db error"),
+	}}
+	body, _ := json.Marshal(map[string]string{
+		"ClientId": "c", "Username": "u", "ConfirmationCode": "000000",
+	})
+	w := doOp(t, ro, "ConfirmSignUp", string(body))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+func TestConfirmSignUp_AutoVerifiesEmailAttribute(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID, clientID := setupPoolWithAutoVerify(t, ro, []string{"email"})
+	signUpUser(t, ro, clientID, "alice", "Password123!")
+	confirmUser(t, ro, clientID, "alice")
+
+	u, err := ro.storage.GetUser(poolID, "alice")
+	require.NoError(t, err)
+	verified, ok := getAttr(u.Attributes, "email_verified")
+	require.True(t, ok)
+	assert.Equal(t, "true", verified)
+}
+
+func TestConfirmSignUp_NoAutoVerify_EmailStaysUnverified(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID, clientID := setupPool(t, ro)
+	signUpUser(t, ro, clientID, "alice", "Password123!")
+	confirmUser(t, ro, clientID, "alice")
+
+	u, err := ro.storage.GetUser(poolID, "alice")
+	require.NoError(t, err)
+	verified, ok := getAttr(u.Attributes, "email_verified")
+	require.True(t, ok)
+	assert.Equal(t, "false", verified)
+}
+
+func TestConfirmSignUp_AutoVerifyIgnoresMissingContactAttribute(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID, clientID := setupPoolWithAutoVerify(t, ro, []string{"phone_number"})
+	signUpUser(t, ro, clientID, "alice", "Password123!")
+	confirmUser(t, ro, clientID, "alice")
+
+	u, err := ro.storage.GetUser(poolID, "alice")
+	require.NoError(t, err)
+	_, ok := getAttr(u.Attributes, "phone_number_verified")
+	assert.False(t, ok)
 }
 
 // ── InitiateAuth ──────────────────────────────────────────────────────────────

@@ -166,7 +166,7 @@ func (ro *Router) handleSignUp(w http.ResponseWriter, body []byte) {
 		PasswordHash:     passwordHash,
 		SRPSalt:          srpSalt,
 		SRPVerifier:      srpVerifier,
-		Attributes:       req.UserAttributes,
+		Attributes:       defaultVerifiedAttrs(req.UserAttributes),
 		ConfirmationCode: code,
 		CreatedAt:        ts,
 		UpdatedAt:        ts,
@@ -307,6 +307,13 @@ func (ro *Router) handleConfirmSignUp(w http.ResponseWriter, body []byte) {
 		return
 	}
 
+	pool, err := ro.storage.GetUserPool(poolID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
+			"failed to get user pool")
+		return
+	}
+
 	err = ro.storage.UpdateUser(poolID, req.Username, func(u *UserMetadata) error {
 		if u.Status != userStatusUnconfirmed {
 			return errNotUnconfirmed
@@ -319,6 +326,7 @@ func (ro *Router) handleConfirmSignUp(w http.ResponseWriter, body []byte) {
 		}
 		u.Status = userStatusConfirmed
 		u.ConfirmationCode = ""
+		u.Attributes = autoVerifyAttrs(u.Attributes, pool.AutoVerifiedAttributes)
 		return nil
 	})
 	if err != nil {

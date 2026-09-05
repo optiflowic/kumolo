@@ -49,6 +49,26 @@ func TestForgotPassword_Success_EmailVerified(t *testing.T) {
 	assert.NotEmpty(t, user.PasswordResetCode)
 }
 
+// TestForgotPassword_Success_AutoVerifiedOnSignUp is a regression test for #554:
+// on a pool with AutoVerifiedAttributes=["email"], ConfirmSignUp must flip
+// email_verified to "true" on its own so self-service ForgotPassword works
+// without an explicit verification step.
+func TestForgotPassword_Success_AutoVerifiedOnSignUp(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID, clientID := setupPoolWithAutoVerify(t, ro, []string{"email"})
+	signUpUser(t, ro, clientID, "alice", "Password123!")
+	confirmUser(t, ro, clientID, "alice")
+
+	body, _ := json.Marshal(map[string]string{"ClientId": clientID, "Username": "alice"})
+	w := doOp(t, ro, "ForgotPassword", string(body))
+
+	require.Equal(t, http.StatusOK, w.Code)
+
+	user, err := ro.storage.GetUser(poolID, "alice")
+	require.NoError(t, err)
+	assert.NotEmpty(t, user.PasswordResetCode)
+}
+
 func TestForgotPassword_Success_PhoneVerifiedOnly(t *testing.T) {
 	ro := newTestRouter(t)
 	poolID, clientID := setupPool(t, ro)

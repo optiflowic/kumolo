@@ -3,7 +3,7 @@
 - **URL**: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_AdminConfirmSignUp.html
 - **Target**: `AWSCognitoIdentityProviderService.AdminConfirmSignUp`
 - **SDK**: `cognitoidentityprovider.AdminConfirmSignUpInput` / `AdminConfirmSignUpOutput`
-- **Last verified**: 2026-06-25
+- **Last verified**: 2026-09-06
 
 ## Request
 
@@ -20,8 +20,12 @@ HTTP 200 + empty body `{}`
 ## Behavior
 
 - Transitions user status from `UNCONFIRMED` to `CONFIRMED` without requiring a verification code.
-- If user is already `CONFIRMED`, returns 200 (no-op).
+- If user is already `CONFIRMED`, returns 200 (no-op) — attribute verification below does not re-run.
 - No confirmation code consumed.
+- On the `UNCONFIRMED` → `CONFIRMED` transition, for each attribute name in the
+  pool's `AutoVerifiedAttributes` (`email`, `phone_number`), if the user has
+  that contact attribute set, kumolo also sets `<attribute>_verified = "true"`
+  (see `confirm_sign_up.md`).
 
 ## Errors implemented
 

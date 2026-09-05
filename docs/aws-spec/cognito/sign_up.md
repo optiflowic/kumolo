@@ -2,7 +2,7 @@
 
 URL: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_SignUp.html
 SDK: `cognitoidentityprovider.SignUpInput` / `cognitoidentityprovider.SignUpOutput`
-Last verified: 2026-07-26
+Last verified: 2026-09-06
 
 ## Request Parameters
 
@@ -51,9 +51,18 @@ Last verified: 2026-07-26
   `docs/aws-spec/cognito/password_policy.md` Implementation).
 - A UUID sub is generated and returned as `UserSub`.
 
+- If `UserAttributes` includes `email` or `phone_number`, kumolo also stores a
+  matching `email_verified` / `phone_number_verified` attribute defaulting to
+  `"false"` (unless the caller already supplied one), matching AWS's "present
+  but false" state. ConfirmSignUp / AdminConfirmSignUp flip it to `"true"` for
+  attributes named in the pool's `AutoVerifiedAttributes` (see
+  `confirm_sign_up.md`).
+
 ## kumolo Deviations
 
 - Confirmation code is a random 6-digit number logged at INFO level on the server — no email/SMS delivery.
 - SecretHash, ValidationData, ClientMetadata, AnalyticsMetadata, UserContextData are accepted but ignored.
 - Password policy enforcement: see `docs/aws-spec/cognito/password_policy.md`.
 - Usernames are treated as case-insensitive: `"Alice"` and `"alice"` map to the same user. On real AWS the default pool configuration is case-sensitive.
+- `AdminCreateUser` does not default `email_verified`/`phone_number_verified`
+  when the caller omits them — the attribute is left absent, unlike `SignUp`.
