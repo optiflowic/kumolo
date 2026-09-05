@@ -15,14 +15,15 @@
     flake-utils.lib.eachDefaultSystem (
       system:
       let
-        # Temporary overlay: pin go_1_26 to 1.26.6 (fixes GO-2026-6088/GO-2026-6089/GO-2026-6090/GO-2026-5972).
-        # Remove once nixpkgs-unstable ships 1.26.6 natively.
+        # Temporary overlay: pin go_1_26 to 1.26.8 (latest point release; picks up
+        # accumulated cgo/compiler/runtime/debug/elf/os fixes from 1.26.7 and 1.26.8).
+        # Remove once nixpkgs-unstable ships 1.26.8 natively.
         goOverlay = final: prev: {
           go_1_26 = prev.go_1_26.overrideAttrs (_: {
-            version = "1.26.6";
+            version = "1.26.8";
             src = prev.fetchurl {
-              url = "https://go.dev/dl/go1.26.6.src.tar.gz";
-              hash = "sha256-oHIcVMaIkBRI13rZs+x+p8R0cwdV/4kTgukuy5P/LLE=";
+              url = "https://go.dev/dl/go1.26.8.src.tar.gz";
+              hash = "sha256-Tjm5jkL5RvoFrIvFtxh335fb23y7Gnd7VBZnrXEX/S4=";
             };
           });
         };
