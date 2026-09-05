@@ -721,9 +721,9 @@ func defaultVerifiedAttrs(attrs []AttributeType) []AttributeType {
 		if _, ok := getAttr(attrs, contact); !ok {
 			continue
 		}
-		verifiedName := contact + "_verified"
+		verifiedName := contact + verifiedSuffix
 		if _, ok := getAttr(attrs, verifiedName); !ok {
-			attrs = setAttr(attrs, verifiedName, "false")
+			attrs = setAttr(attrs, verifiedName, verifiedFalse)
 		}
 	}
 	return attrs
@@ -740,7 +740,7 @@ func autoVerifyAttrs(attrs []AttributeType, autoVerified []string) []AttributeTy
 		if _, ok := getAttr(attrs, name); !ok {
 			continue
 		}
-		attrs = setAttr(attrs, name+"_verified", "true")
+		attrs = setAttr(attrs, name+verifiedSuffix, verifiedTrue)
 	}
 	return attrs
 }

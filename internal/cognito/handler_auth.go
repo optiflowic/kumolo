@@ -27,6 +27,12 @@ const (
 	deliverySMS     = "SMS"
 	maskFallback    = "***"
 	maskPhoneMinLen = 5
+
+	// verifiedSuffix is appended to a contact attribute name (attrEmail,
+	// attrPhoneNumber) to get its "*_verified" companion attribute.
+	verifiedSuffix = "_verified"
+	verifiedTrue   = "true"
+	verifiedFalse  = "false"
 )
 
 // randReader is the default entropy source; overridden in tests via Router.codeReader.
