@@ -520,6 +520,24 @@ func TestConfirmSignUp_AutoVerifyIgnoresMissingContactAttribute(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func TestConfirmSignUp_AutoVerifyIgnoresMissingEmailAttribute(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID, clientID := setupPoolWithAutoVerify(t, ro, []string{"email"})
+	body, _ := json.Marshal(map[string]any{
+		"ClientId": clientID,
+		"Username": "alice",
+		"Password": "Password123!",
+	})
+	w := doOp(t, ro, "SignUp", string(body))
+	require.Equal(t, http.StatusOK, w.Code)
+	confirmUser(t, ro, clientID, "alice")
+
+	u, err := ro.storage.GetUser(poolID, "alice")
+	require.NoError(t, err)
+	_, ok := getAttr(u.Attributes, "email_verified")
+	assert.False(t, ok)
+}
+
 func TestConfirmSignUp_AutoVerifiesPhoneNumberAttribute(t *testing.T) {
 	ro := newTestRouter(t)
 	poolID, clientID := setupPoolWithAutoVerify(t, ro, []string{"phone_number"})

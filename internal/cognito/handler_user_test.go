@@ -1964,3 +1964,109 @@ func TestUpdateUserAttributes_UserNotFoundOnUpdate(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assertErrType(t, w, ErrTypeUserNotFoundException)
 }
+
+func TestDefaultVerifiedAttrs(t *testing.T) {
+	tests := []struct {
+		name  string
+		attrs []AttributeType
+		want  []AttributeType
+	}{
+		{
+			name:  "no contact attributes",
+			attrs: []AttributeType{{Name: "given_name", Value: "Alice"}},
+			want:  []AttributeType{{Name: "given_name", Value: "Alice"}},
+		},
+		{
+			name:  "email present without verified attribute defaults to false",
+			attrs: []AttributeType{{Name: "email", Value: "a@example.com"}},
+			want: []AttributeType{
+				{Name: "email", Value: "a@example.com"},
+				{Name: "email_verified", Value: "false"},
+			},
+		},
+		{
+			name: "phone_number present without verified attribute defaults to false",
+			attrs: []AttributeType{
+				{Name: "phone_number", Value: "+15555550100"},
+			},
+			want: []AttributeType{
+				{Name: "phone_number", Value: "+15555550100"},
+				{Name: "phone_number_verified", Value: "false"},
+			},
+		},
+		{
+			name: "existing verified attribute is left unchanged",
+			attrs: []AttributeType{
+				{Name: "email", Value: "a@example.com"},
+				{Name: "email_verified", Value: "true"},
+			},
+			want: []AttributeType{
+				{Name: "email", Value: "a@example.com"},
+				{Name: "email_verified", Value: "true"},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := defaultVerifiedAttrs(tt.attrs)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestAutoVerifyAttrs(t *testing.T) {
+	tests := []struct {
+		name         string
+		attrs        []AttributeType
+		autoVerified []string
+		want         []AttributeType
+	}{
+		{
+			name:         "no auto-verified attributes configured",
+			attrs:        []AttributeType{{Name: "email", Value: "a@example.com"}},
+			autoVerified: nil,
+			want:         []AttributeType{{Name: "email", Value: "a@example.com"}},
+		},
+		{
+			name:         "auto-verified contact not present on user is ignored",
+			attrs:        []AttributeType{{Name: "given_name", Value: "Alice"}},
+			autoVerified: []string{"email"},
+			want:         []AttributeType{{Name: "given_name", Value: "Alice"}},
+		},
+		{
+			name:         "unsupported attribute name is ignored",
+			attrs:        []AttributeType{{Name: "given_name", Value: "Alice"}},
+			autoVerified: []string{"given_name"},
+			want:         []AttributeType{{Name: "given_name", Value: "Alice"}},
+		},
+		{
+			name: "present email attribute is marked verified",
+			attrs: []AttributeType{
+				{Name: "email", Value: "a@example.com"},
+				{Name: "email_verified", Value: "false"},
+			},
+			autoVerified: []string{"email"},
+			want: []AttributeType{
+				{Name: "email", Value: "a@example.com"},
+				{Name: "email_verified", Value: "true"},
+			},
+		},
+		{
+			name: "present phone_number attribute is marked verified",
+			attrs: []AttributeType{
+				{Name: "phone_number", Value: "+15555550100"},
+			},
+			autoVerified: []string{"phone_number"},
+			want: []AttributeType{
+				{Name: "phone_number", Value: "+15555550100"},
+				{Name: "phone_number_verified", Value: "true"},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := autoVerifyAttrs(tt.attrs, tt.autoVerified)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
