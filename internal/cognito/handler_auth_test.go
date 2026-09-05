@@ -520,6 +520,41 @@ func TestConfirmSignUp_AutoVerifyIgnoresMissingContactAttribute(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func TestConfirmSignUp_AutoVerifiesPhoneNumberAttribute(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID, clientID := setupPoolWithAutoVerify(t, ro, []string{"phone_number"})
+
+	body, _ := json.Marshal(map[string]any{
+		"ClientId": clientID,
+		"Username": "alice",
+		"Password": "Password123!",
+		"UserAttributes": []map[string]string{
+			{"Name": "phone_number", "Value": "+15551234567"},
+		},
+	})
+	require.Equal(t, http.StatusOK, doOp(t, ro, "SignUp", string(body)).Code)
+	confirmUser(t, ro, clientID, "alice")
+
+	u, err := ro.storage.GetUser(poolID, "alice")
+	require.NoError(t, err)
+	verified, ok := getAttr(u.Attributes, "phone_number_verified")
+	require.True(t, ok)
+	assert.Equal(t, "true", verified)
+}
+
+func TestConfirmSignUp_AutoVerifyIgnoresUnknownAttributeName(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID, clientID := setupPoolWithAutoVerify(t, ro, []string{"custom:foo"})
+	signUpUser(t, ro, clientID, "alice", "Password123!")
+	confirmUser(t, ro, clientID, "alice")
+
+	u, err := ro.storage.GetUser(poolID, "alice")
+	require.NoError(t, err)
+	verified, ok := getAttr(u.Attributes, "email_verified")
+	require.True(t, ok)
+	assert.Equal(t, "false", verified)
+}
+
 // ── InitiateAuth ──────────────────────────────────────────────────────────────
 
 func TestInitiateAuth_UserPasswordAuth_Success(t *testing.T) {

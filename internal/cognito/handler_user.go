@@ -713,9 +713,9 @@ func deleteAttr(attrs []AttributeType, name string) []AttributeType {
 
 // defaultVerifiedAttrs ensures each contact attribute present in attrs (email,
 // phone_number) has a corresponding "*_verified" attribute, defaulting it to
-// "false" when the caller did not supply one. Matches AWS: SignUp and
-// AdminCreateUser always report email_verified/phone_number_verified as
-// present, never absent.
+// "false" when the caller did not supply one. Matches AWS SignUp: the
+// attribute is always present, never absent. Not used by AdminCreateUser —
+// see the "kumolo Deviations" note in docs/aws-spec/cognito/sign_up.md.
 func defaultVerifiedAttrs(attrs []AttributeType) []AttributeType {
 	for _, contact := range []string{attrEmail, attrPhoneNumber} {
 		if _, ok := getAttr(attrs, contact); !ok {
