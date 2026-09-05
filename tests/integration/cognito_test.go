@@ -2680,6 +2680,82 @@ func TestCognitoIntegration_PasswordManagement(t *testing.T) {
 		assert.Equal(t, "NotAuthorizedException", apiErrorCode(err))
 	})
 
+	t.Run("ForgotPassword_Success_AutoVerifiedAttributesOnSignUp", func(t *testing.T) {
+		// Regression test for #554: on a pool with AutoVerifiedAttributes,
+		// ConfirmSignUp must flip email_verified to true on its own, so
+		// self-service ForgotPassword works without an explicit
+		// AdminUpdateUserAttributes step.
+		const (
+			username = "forgotpw-autoverify-user"
+			password = "Password1!"
+		)
+		pool, err := c.CreateUserPool(ctx, &awscognito.CreateUserPoolInput{
+			PoolName:               aws.String("forgotpw-autoverify-pool"),
+			AutoVerifiedAttributes: []types.VerifiedAttributeType{types.VerifiedAttributeTypeEmail},
+		})
+		require.NoError(t, err)
+		poolID := aws.ToString(pool.UserPool.Id)
+
+		client, err := c.CreateUserPoolClient(ctx, &awscognito.CreateUserPoolClientInput{
+			UserPoolId: aws.String(poolID),
+			ClientName: aws.String("forgotpw-autoverify-client"),
+		})
+		require.NoError(t, err)
+		clientID := aws.ToString(client.UserPoolClient.ClientId)
+
+		_, err = c.SignUp(ctx, &awscognito.SignUpInput{
+			ClientId: aws.String(clientID),
+			Username: aws.String(username),
+			Password: aws.String(password),
+			UserAttributes: []types.AttributeType{
+				{Name: aws.String("email"), Value: aws.String("autoverify@example.com")},
+			},
+		})
+		require.NoError(t, err)
+
+		beforeConfirm, err := c.AdminGetUser(ctx, &awscognito.AdminGetUserInput{
+			UserPoolId: aws.String(poolID),
+			Username:   aws.String(username),
+		})
+		require.NoError(t, err)
+		verifiedAttr := func(attrs []types.AttributeType) (string, bool) {
+			for _, a := range attrs {
+				if aws.ToString(a.Name) == "email_verified" {
+					return aws.ToString(a.Value), true
+				}
+			}
+			return "", false
+		}
+		verified, ok := verifiedAttr(beforeConfirm.UserAttributes)
+		require.True(t, ok, "email_verified should be present (but false) right after SignUp")
+		assert.Equal(t, "false", verified)
+
+		code := cap.get(username)
+		require.NotEmpty(t, code)
+		_, err = c.ConfirmSignUp(ctx, &awscognito.ConfirmSignUpInput{
+			ClientId:         aws.String(clientID),
+			Username:         aws.String(username),
+			ConfirmationCode: aws.String(code),
+		})
+		require.NoError(t, err)
+
+		afterConfirm, err := c.AdminGetUser(ctx, &awscognito.AdminGetUserInput{
+			UserPoolId: aws.String(poolID),
+			Username:   aws.String(username),
+		})
+		require.NoError(t, err)
+		verified, ok = verifiedAttr(afterConfirm.UserAttributes)
+		require.True(t, ok)
+		assert.Equal(t, "true", verified)
+
+		fpOut, err := c.ForgotPassword(ctx, &awscognito.ForgotPasswordInput{
+			ClientId: aws.String(clientID),
+			Username: aws.String(username),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, "email", aws.ToString(fpOut.CodeDeliveryDetails.AttributeName))
+	})
+
 	t.Run("ForgotPassword_NoVerifiedContact_InvalidParameterException", func(t *testing.T) {
 		const (
 			username = "forgotpw-noverified-user"
