@@ -32,6 +32,8 @@ DP_POOL_ID=""
 FORCED_MFA_POOL_ID=""
 FORCED_MFA_CLIENT_ID=""
 REGION_POOL_ID=""
+AUTOVERIFY_POOL_ID=""
+AUTOVERIFY_CLIENT_ID=""
 
 cleanup() {
   if [[ -n "$CLIENT_ID" && "$CLIENT_ID" != "UNKNOWN" ]]; then
@@ -56,6 +58,14 @@ cleanup() {
   fi
   if [[ -n "$FORCED_MFA_POOL_ID" ]]; then
     $AWS delete-user-pool --user-pool-id "$FORCED_MFA_POOL_ID" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "$AUTOVERIFY_CLIENT_ID" ]]; then
+    $AWS delete-user-pool-client \
+      --user-pool-id "$AUTOVERIFY_POOL_ID" \
+      --client-id "$AUTOVERIFY_CLIENT_ID" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "$AUTOVERIFY_POOL_ID" ]]; then
+    $AWS delete-user-pool --user-pool-id "$AUTOVERIFY_POOL_ID" >/dev/null 2>&1 || true
   fi
 }
 trap cleanup EXIT
@@ -1575,6 +1585,84 @@ if [[ -n "$PW_CODE" ]]; then
 else
   skip "Password management tests — no confirmation code available"
   echo "  Hint: set E2E_COGNITO_PW_CODE=<code> from kumolo logs, or use Docker Compose"
+fi
+
+# ---------------------------------------------------------------------------
+# Regression test for #554: on a pool with AutoVerifiedAttributes=["email"],
+# ConfirmSignUp must flip email_verified to true on its own, so self-service
+# ForgotPassword works without an explicit AdminUpdateUserAttributes bypass.
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- Auto-Verified Attributes on SignUp/ConfirmSignUp ---"
+
+AUTOVERIFY_POOL_JSON=$($AWS create-user-pool \
+  --pool-name "e2e-autoverify-pool" \
+  --auto-verified-attributes email 2>&1)
+AUTOVERIFY_POOL_ID=$(echo "$AUTOVERIFY_POOL_JSON" | jq -r '.UserPool.Id // "us-east-1_UNKNOWN"')
+
+AUTOVERIFY_CLIENT_JSON=$($AWS create-user-pool-client \
+  --user-pool-id "$AUTOVERIFY_POOL_ID" \
+  --client-name "e2e-autoverify-client" 2>&1)
+AUTOVERIFY_CLIENT_ID=$(echo "$AUTOVERIFY_CLIENT_JSON" | jq -r '.UserPoolClient.ClientId // "UNKNOWN"')
+
+AV_USER="autoverify-e2e@example.com"
+AV_PASS="Password1!"
+
+run "SignUp (auto-verify pool)" \
+  $AWS sign-up \
+    --client-id "$AUTOVERIFY_CLIENT_ID" \
+    --username "$AV_USER" \
+    --password "$AV_PASS" \
+    --user-attributes "Name=email,Value=$AV_USER"
+
+AV_BEFORE_JSON=$($AWS admin-get-user \
+  --user-pool-id "$AUTOVERIFY_POOL_ID" \
+  --username "$AV_USER" 2>&1)
+if echo "$AV_BEFORE_JSON" | grep -A1 '"Name": "email_verified"' | grep -q '"Value": "false"'; then
+  ok "AdminGetUser — email_verified=false right after SignUp"
+else
+  fail "AdminGetUser — expected email_verified=false right after SignUp"
+fi
+
+AV_CODE="${E2E_COGNITO_AUTOVERIFY_CODE:-}"
+if [[ -z "$AV_CODE" ]]; then
+  if command -v docker &>/dev/null && docker compose ps --services 2>/dev/null | grep -q .; then
+    AV_CODE=$(docker compose logs 2>/dev/null \
+      | grep 'SignUp confirmation code' \
+      | grep "$AV_USER" \
+      | tail -1 \
+      | grep -oE 'code=[0-9]+' \
+      | cut -d= -f2 || true)
+  fi
+fi
+
+if [[ -n "$AV_CODE" ]]; then
+  run "ConfirmSignUp (auto-verify pool)" \
+    $AWS confirm-sign-up \
+      --client-id "$AUTOVERIFY_CLIENT_ID" \
+      --username "$AV_USER" \
+      --confirmation-code "$AV_CODE"
+
+  AV_AFTER_JSON=$($AWS admin-get-user \
+    --user-pool-id "$AUTOVERIFY_POOL_ID" \
+    --username "$AV_USER" 2>&1)
+  if echo "$AV_AFTER_JSON" | grep -A1 '"Name": "email_verified"' | grep -q '"Value": "true"'; then
+    ok "AdminGetUser — email_verified=true after ConfirmSignUp (auto-verified)"
+  else
+    fail "AdminGetUser — expected email_verified=true after ConfirmSignUp"
+  fi
+
+  AV_FP_JSON=$($AWS forgot-password \
+    --client-id "$AUTOVERIFY_CLIENT_ID" \
+    --username "$AV_USER" 2>&1)
+  if echo "$AV_FP_JSON" | grep -q '"AttributeName": "email"'; then
+    ok "ForgotPassword — succeeds without AdminUpdateUserAttributes bypass"
+  else
+    fail "ForgotPassword — expected success without AdminUpdateUserAttributes bypass"
+  fi
+else
+  skip "ConfirmSignUp (auto-verify pool) — no confirmation code available"
+  echo "  Hint: set E2E_COGNITO_AUTOVERIFY_CODE=<code> from kumolo logs, or use Docker Compose"
 fi
 
 # admin_only AccountRecoverySetting: self-service ForgotPassword must be refused

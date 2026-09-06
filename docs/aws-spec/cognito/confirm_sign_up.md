@@ -2,7 +2,7 @@
 
 URL: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_ConfirmSignUp.html
 SDK: `cognitoidentityprovider.ConfirmSignUpInput` / `cognitoidentityprovider.ConfirmSignUpOutput`
-Last verified: 2026-06-23
+Last verified: 2026-09-06
 
 ## Request Parameters
 
@@ -44,3 +44,8 @@ HTTP 200 with empty body on success.
   The code is logged at INFO level on the server (`pool_id`, `username`, `code`)
   so developers can retrieve it from the server log without intercepting email delivery.
 - Once CONFIRMED, a subsequent ConfirmSignUp returns NotAuthorizedException.
+- On successful confirmation, for each attribute name in the pool's
+  `AutoVerifiedAttributes` (`email`, `phone_number`), if the user has that
+  contact attribute set, kumolo also sets `<attribute>_verified = "true"`.
+  Matches AWS: pools that auto-verify email/phone consider the contact info
+  confirmed once the user proves ownership via ConfirmSignUp.

@@ -512,6 +512,48 @@ func TestAdminConfirmSignUp_ValidationErrors(t *testing.T) {
 	}
 }
 
+func TestAdminConfirmSignUp_AutoVerifiesEmailAttribute(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID, clientID := setupPoolWithAutoVerify(t, ro, []string{"email"})
+	signUpUser(t, ro, clientID, "dave", "Pass1234!")
+
+	body, err := json.Marshal(map[string]any{"UserPoolId": poolID, "Username": "dave"})
+	require.NoError(t, err)
+	w := doOp(t, ro, "AdminConfirmSignUp", string(body))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	user, err := ro.storage.GetUser(poolID, "dave")
+	require.NoError(t, err)
+	verified, ok := getAttr(user.Attributes, "email_verified")
+	require.True(t, ok)
+	assert.Equal(t, "true", verified)
+}
+
+func TestAdminConfirmSignUp_AlreadyConfirmed_DoesNotReVerify(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID, clientID := setupPoolWithAutoVerify(t, ro, []string{"email"})
+	signUpUser(t, ro, clientID, "eve", "Pass1234!")
+	confirmUser(t, ro, clientID, "eve")
+
+	// Manually revert the attribute to simulate a user confirmed before this
+	// pool ever had AutoVerifiedAttributes set.
+	require.NoError(t, ro.storage.UpdateUser(poolID, "eve", func(u *UserMetadata) error {
+		u.Attributes = setAttr(u.Attributes, "email_verified", "false")
+		return nil
+	}))
+
+	body, err := json.Marshal(map[string]any{"UserPoolId": poolID, "Username": "eve"})
+	require.NoError(t, err)
+	w := doOp(t, ro, "AdminConfirmSignUp", string(body))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	user, err := ro.storage.GetUser(poolID, "eve")
+	require.NoError(t, err)
+	verified, ok := getAttr(user.Attributes, "email_verified")
+	require.True(t, ok)
+	assert.Equal(t, "false", verified)
+}
+
 // ──── AdminDeleteUser ────────────────────────────────────────────────────────
 
 func TestAdminDeleteUser_Success(t *testing.T) {

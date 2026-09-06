@@ -711,6 +711,40 @@ func deleteAttr(attrs []AttributeType, name string) []AttributeType {
 	return out
 }
 
+// defaultVerifiedAttrs ensures each contact attribute present in attrs (email,
+// phone_number) has a corresponding "*_verified" attribute, defaulting it to
+// "false" when the caller did not supply one. Matches AWS SignUp: the
+// attribute is always present, never absent. Not used by AdminCreateUser —
+// see the "kumolo Deviations" note in docs/aws-spec/cognito/sign_up.md.
+func defaultVerifiedAttrs(attrs []AttributeType) []AttributeType {
+	for _, contact := range []string{attrEmail, attrPhoneNumber} {
+		if _, ok := getAttr(attrs, contact); !ok {
+			continue
+		}
+		verifiedName := contact + verifiedSuffix
+		if _, ok := getAttr(attrs, verifiedName); !ok {
+			attrs = setAttr(attrs, verifiedName, verifiedFalse)
+		}
+	}
+	return attrs
+}
+
+// autoVerifyAttrs sets "*_verified"="true" for each contact attribute named in
+// autoVerified (a pool's AutoVerifiedAttributes) that is actually present on
+// the user. Called on successful ConfirmSignUp / AdminConfirmSignUp.
+func autoVerifyAttrs(attrs []AttributeType, autoVerified []string) []AttributeType {
+	for _, name := range autoVerified {
+		if name != attrEmail && name != attrPhoneNumber {
+			continue
+		}
+		if _, ok := getAttr(attrs, name); !ok {
+			continue
+		}
+		attrs = setAttr(attrs, name+verifiedSuffix, verifiedTrue)
+	}
+	return attrs
+}
+
 // prependSub ensures sub is always the first element of attrs.
 // Any existing sub attribute is removed and replaced with the provided value at index 0.
 func prependSub(attrs []AttributeType, sub string) []AttributeType {
