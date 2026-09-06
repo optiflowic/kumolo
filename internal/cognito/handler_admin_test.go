@@ -517,7 +517,8 @@ func TestAdminConfirmSignUp_AutoVerifiesEmailAttribute(t *testing.T) {
 	poolID, clientID := setupPoolWithAutoVerify(t, ro, []string{"email"})
 	signUpUser(t, ro, clientID, "dave", "Pass1234!")
 
-	body, _ := json.Marshal(map[string]any{"UserPoolId": poolID, "Username": "dave"})
+	body, err := json.Marshal(map[string]any{"UserPoolId": poolID, "Username": "dave"})
+	require.NoError(t, err)
 	w := doOp(t, ro, "AdminConfirmSignUp", string(body))
 	require.Equal(t, http.StatusOK, w.Code)
 
@@ -541,7 +542,8 @@ func TestAdminConfirmSignUp_AlreadyConfirmed_DoesNotReVerify(t *testing.T) {
 		return nil
 	}))
 
-	body, _ := json.Marshal(map[string]any{"UserPoolId": poolID, "Username": "eve"})
+	body, err := json.Marshal(map[string]any{"UserPoolId": poolID, "Username": "eve"})
+	require.NoError(t, err)
 	w := doOp(t, ro, "AdminConfirmSignUp", string(body))
 	require.Equal(t, http.StatusOK, w.Code)
 

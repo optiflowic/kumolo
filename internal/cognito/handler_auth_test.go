@@ -333,7 +333,7 @@ func TestSignUp_DefaultsPhoneNumberVerifiedFalse(t *testing.T) {
 	ro := newTestRouter(t)
 	poolID, clientID := setupPool(t, ro)
 
-	body, _ := json.Marshal(map[string]any{
+	body, err := json.Marshal(map[string]any{
 		"ClientId": clientID,
 		"Username": "bob",
 		"Password": "Password123!",
@@ -341,6 +341,7 @@ func TestSignUp_DefaultsPhoneNumberVerifiedFalse(t *testing.T) {
 			{"Name": "phone_number", "Value": "+15551234567"},
 		},
 	})
+	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, doOp(t, ro, "SignUp", string(body)).Code)
 
 	u, err := ro.storage.GetUser(poolID, "bob")
@@ -354,11 +355,12 @@ func TestSignUp_NoContactAttributes_NoVerifiedAttrs(t *testing.T) {
 	ro := newTestRouter(t)
 	poolID, clientID := setupPool(t, ro)
 
-	body, _ := json.Marshal(map[string]any{
+	body, err := json.Marshal(map[string]any{
 		"ClientId": clientID,
 		"Username": "carol",
 		"Password": "Password123!",
 	})
+	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, doOp(t, ro, "SignUp", string(body)).Code)
 
 	u, err := ro.storage.GetUser(poolID, "carol")
@@ -475,9 +477,10 @@ func TestConfirmSignUp_GetUserPoolError(t *testing.T) {
 		getPoolForClient: func(string) (string, error) { return "pool-1", nil },
 		getErr:           errors.New("db error"),
 	}}
-	body, _ := json.Marshal(map[string]string{
+	body, err := json.Marshal(map[string]string{
 		"ClientId": "c", "Username": "u", "ConfirmationCode": "000000",
 	})
+	require.NoError(t, err)
 	w := doOp(t, ro, "ConfirmSignUp", string(body))
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }
@@ -543,7 +546,7 @@ func TestConfirmSignUp_AutoVerifiesPhoneNumberAttribute(t *testing.T) {
 	ro := newTestRouter(t)
 	poolID, clientID := setupPoolWithAutoVerify(t, ro, []string{"phone_number"})
 
-	body, _ := json.Marshal(map[string]any{
+	body, err := json.Marshal(map[string]any{
 		"ClientId": clientID,
 		"Username": "alice",
 		"Password": "Password123!",
@@ -551,6 +554,7 @@ func TestConfirmSignUp_AutoVerifiesPhoneNumberAttribute(t *testing.T) {
 			{"Name": "phone_number", "Value": "+15551234567"},
 		},
 	})
+	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, doOp(t, ro, "SignUp", string(body)).Code)
 	confirmUser(t, ro, clientID, "alice")
 

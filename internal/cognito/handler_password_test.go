@@ -59,7 +59,8 @@ func TestForgotPassword_Success_AutoVerifiedOnSignUp(t *testing.T) {
 	signUpUser(t, ro, clientID, "alice", "Password123!")
 	confirmUser(t, ro, clientID, "alice")
 
-	body, _ := json.Marshal(map[string]string{"ClientId": clientID, "Username": "alice"})
+	body, err := json.Marshal(map[string]string{"ClientId": clientID, "Username": "alice"})
+	require.NoError(t, err)
 	w := doOp(t, ro, "ForgotPassword", string(body))
 
 	require.Equal(t, http.StatusOK, w.Code)
