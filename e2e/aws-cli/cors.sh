@@ -4,7 +4,11 @@
 # including the root preflight), and with it left unset (the root preflight
 # stays opt-in and unanswered; Cognito's actual response still defaults to
 # Access-Control-Allow-Origin: *, matching real cognito-idp; DynamoDB stays
-# opt-in only either way — #553). Starts its own kumolo instances; does not
+# opt-in only either way — #553). Also verifies the #567 convention-hostname
+# mechanism against the no-opt-in instance: a request whose Host names a
+# service (e.g. cognito-idp.localhost) gets that service's own default CORS
+# policy, and actual dispatch is pinned to that Host regardless of
+# X-Amz-Target. Starts its own kumolo instances; does not
 # require a pre-running server, and
 # doesn't depend on whether an ambient instance has CORS enabled. The AWS
 # CLI never issues a CORS preflight (that's a browser-only mechanism), so
@@ -161,6 +165,73 @@ if echo "$NO_ORIGIN_DYNAMODB" | grep -qi "^Access-Control-Allow-Origin:"; then
   fail "Actual DynamoDB response unexpectedly includes Access-Control-Allow-Origin without opt-in"
 else
   ok "Actual DynamoDB response has no Access-Control-Allow-Origin without opt-in"
+fi
+
+# ---------------------------------------------------------------------------
+# #567 convention hostnames, exercised against the NO_ORIGIN instance (no
+# KUMOLO_CORS_ALLOW_ORIGIN set). curl's -H "Host: ..." overrides only the
+# Host header sent on the wire while still connecting to
+# $NO_ORIGIN_ENDPOINT (localhost:$NO_ORIGIN_PORT) — this avoids depending on
+# *.localhost DNS resolution, which real SDK clients would rely on but which
+# isn't guaranteed on every CI/Linux resolver configuration.
+# ---------------------------------------------------------------------------
+COGNITO_HOST="cognito-idp.localhost:$NO_ORIGIN_PORT"
+DYNAMODB_HOST="dynamodb.localhost:$NO_ORIGIN_PORT"
+
+HOST_COGNITO_PREFLIGHT=$(curl -s -i -X OPTIONS "$NO_ORIGIN_ENDPOINT/" \
+  -H "Host: $COGNITO_HOST" \
+  -H "Origin: $ORIGIN" \
+  -H "Access-Control-Request-Method: POST")
+
+if echo "$HOST_COGNITO_PREFLIGHT" | grep -qi '^HTTP/[0-9.]* 200' \
+  && echo "$HOST_COGNITO_PREFLIGHT" | grep -qi "^Access-Control-Allow-Origin: \*"; then
+  ok "OPTIONS preflight to the Cognito convention Host defaults open without opt-in"
+else
+  fail "OPTIONS preflight to the Cognito convention Host did not default open"
+fi
+
+HOST_DYNAMODB_PREFLIGHT=$(curl -s -i -X OPTIONS "$NO_ORIGIN_ENDPOINT/" \
+  -H "Host: $DYNAMODB_HOST" \
+  -H "Origin: $ORIGIN" \
+  -H "Access-Control-Request-Method: POST")
+
+if echo "$HOST_DYNAMODB_PREFLIGHT" | grep -qi '^HTTP/[0-9.]* 200' \
+  && ! echo "$HOST_DYNAMODB_PREFLIGHT" | grep -qi "^Access-Control-Allow-Origin:"; then
+  ok "OPTIONS preflight to the DynamoDB convention Host returns 200 with no default origin"
+else
+  fail "OPTIONS preflight to the DynamoDB convention Host had unexpected CORS headers"
+fi
+
+# Regression check for the review finding on #567: dispatch must be pinned
+# to the Host-identified service regardless of X-Amz-Target, or the
+# Cognito convention Host's default-open preflight above would let an
+# unauthenticated DynamoDB operation through.
+HOST_MISMATCH=$(curl -s -i -X POST "$NO_ORIGIN_ENDPOINT/" \
+  -H "Host: $COGNITO_HOST" \
+  -H "Content-Type: application/x-amz-json-1.1" \
+  -H "X-Amz-Target: DynamoDB_20120810.PutItem" \
+  -H "Origin: $ORIGIN" \
+  -d '{}')
+
+if echo "$HOST_MISMATCH" | grep -qi '^HTTP/[0-9.]* 400' \
+  && echo "$HOST_MISMATCH" | grep -q "UnknownOperationException"; then
+  ok "Dispatch to the Cognito convention Host is pinned even when X-Amz-Target names DynamoDB"
+else
+  fail "Dispatch to the Cognito convention Host was not pinned (X-Amz-Target mismatch reached another service)"
+fi
+
+HOST_DYNAMODB_ACTUAL=$(curl -s -i -X POST "$NO_ORIGIN_ENDPOINT/" \
+  -H "Host: $DYNAMODB_HOST" \
+  -H "Content-Type: application/x-amz-json-1.0" \
+  -H "X-Amz-Target: DynamoDB_20120810.ListTables" \
+  -H "Origin: $ORIGIN" \
+  -d '{}')
+
+if echo "$HOST_DYNAMODB_ACTUAL" | grep -qi '^HTTP/[0-9.]* 200' \
+  && ! echo "$HOST_DYNAMODB_ACTUAL" | grep -qi "^Access-Control-Allow-Origin:"; then
+  ok "Actual DynamoDB response over the DynamoDB convention Host has no Access-Control-Allow-Origin"
+else
+  fail "Actual DynamoDB response over the DynamoDB convention Host had unexpected result"
 fi
 
 echo ""
