@@ -68,20 +68,58 @@ func TestCORSIntegration_PreflightAndActualResponses(t *testing.T) {
 }
 
 // TestCORSIntegration_DisabledByDefault confirms the opt-in flag's absence
-// leaves the dispatcher's behavior fully unchanged, over a real HTTP round trip.
+// leaves DynamoDB/DynamoDB Streams/KMS/STS behavior fully unchanged, while
+// Cognito still gets a default Access-Control-Allow-Origin: * on its actual
+// response — matching real cognito-idp, which returns it unconditionally
+// (#553). The root OPTIONS preflight itself stays opt-in: it can't be
+// scoped to Cognito alone (the eventual target isn't known yet), and
+// answering it unconditionally would let a browser send the unauthenticated
+// DynamoDB/KMS/STS request that follows.
 func TestCORSIntegration_DisabledByDefault(t *testing.T) {
 	clients := newTestClients(t)
 
-	req, err := http.NewRequest(http.MethodOptions, clients.baseURL+"/", nil)
-	require.NoError(t, err)
-	req.Header.Set("Origin", "http://localhost:5173")
-	req.Header.Set("Access-Control-Request-Method", "POST")
-	req.Header.Set("Access-Control-Request-Headers", "content-type,x-amz-target")
+	t.Run(
+		"OPTIONS preflight to root carries no Access-Control-Allow-Origin",
+		func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodOptions, clients.baseURL+"/", nil)
+			require.NoError(t, err)
+			req.Header.Set("Origin", "http://localhost:5173")
+			req.Header.Set("Access-Control-Request-Method", "POST")
+			req.Header.Set("Access-Control-Request-Headers", "content-type,x-amz-target")
 
-	resp, err := http.DefaultClient.Do(req)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = resp.Body.Close() })
+			resp, err := http.DefaultClient.Do(req)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = resp.Body.Close() })
 
-	require.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
-	require.Empty(t, resp.Header.Get("Access-Control-Allow-Origin"))
+			require.Empty(t, resp.Header.Get("Access-Control-Allow-Origin"))
+		},
+	)
+
+	t.Run("actual DynamoDB response carries no Access-Control-Allow-Origin", func(t *testing.T) {
+		req, err := http.NewRequest(http.MethodPost, clients.baseURL+"/", strings.NewReader(`{}`))
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/x-amz-json-1.0")
+		req.Header.Set("X-Amz-Target", "DynamoDB_20120810.ListTables")
+		req.Header.Set("Origin", "http://localhost:5173")
+
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = resp.Body.Close() })
+
+		require.Empty(t, resp.Header.Get("Access-Control-Allow-Origin"))
+	})
+
+	t.Run("actual Cognito response defaults to Access-Control-Allow-Origin: *", func(t *testing.T) {
+		req, err := http.NewRequest(http.MethodPost, clients.baseURL+"/", strings.NewReader(`{}`))
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/x-amz-json-1.1")
+		req.Header.Set("X-Amz-Target", "AWSCognitoIdentityProviderService.InitiateAuth")
+		req.Header.Set("Origin", "http://localhost:5173")
+
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = resp.Body.Close() })
+
+		require.Equal(t, "*", resp.Header.Get("Access-Control-Allow-Origin"))
+	})
 }

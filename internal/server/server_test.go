@@ -215,16 +215,57 @@ func TestNewMux(t *testing.T) {
 	})
 
 	t.Run(
-		"OPTIONS preflight to root falls through to S3 when CORS is disabled",
+		"OPTIONS preflight to root is not answered when CORS is disabled",
 		func(t *testing.T) {
+			// The preflight interceptor can't tell yet which service the
+			// browser is about to call, so it can't be scoped to Cognito
+			// alone. Answering it unconditionally would let a browser send
+			// the unauthenticated DynamoDB/KMS/STS request that follows, so
+			// it stays opt-in like every other CORS behavior here; only the
+			// *actual* Cognito response defaults to the wildcard origin
+			// below.
 			req := httptest.NewRequest(http.MethodOptions, "/", nil)
 			req.Header.Set("Origin", "http://localhost:5173")
 			req.Header.Set("Access-Control-Request-Method", "POST")
 			req.Header.Set("Access-Control-Request-Headers", "content-type,x-amz-target")
 			w := httptest.NewRecorder()
 			mux.ServeHTTP(w, req)
-			assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
 			assert.Empty(t, w.Header().Get("Access-Control-Allow-Origin"))
+		},
+	)
+
+	t.Run(
+		"actual DynamoDB response carries no Access-Control-Allow-Origin when CORS is disabled",
+		func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{}`))
+			req.Header.Set("X-Amz-Target", "DynamoDB_20120810.ListTables")
+			req.Header.Set("Origin", "http://localhost:5173")
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, req)
+			assert.Empty(t, w.Header().Get("Access-Control-Allow-Origin"))
+		},
+	)
+
+	t.Run(
+		"actual Cognito response defaults to Access-Control-Allow-Origin: * when CORS is disabled",
+		func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{}`))
+			req.Header.Set("X-Amz-Target", "AWSCognitoIdentityProviderService.InitiateAuth")
+			req.Header.Set("Origin", "http://localhost:5173")
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, req)
+			assert.Equal(t, "*", w.Header().Get("Access-Control-Allow-Origin"))
+		},
+	)
+
+	t.Run(
+		"actual Cognito jwks.json response defaults to Access-Control-Allow-Origin: * when CORS is disabled",
+		func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/pool123/.well-known/jwks.json", nil)
+			req.Header.Set("Origin", "http://localhost:5173")
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, req)
+			assert.Equal(t, "*", w.Header().Get("Access-Control-Allow-Origin"))
 		},
 	)
 }
