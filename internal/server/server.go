@@ -56,12 +56,30 @@ func WithCognitoOptions(opts ...cognito.Option) Option {
 // services (DynamoDB, DynamoDB Streams, KMS, Cognito) and STS, which have no
 // CORS handling of their own. It has no effect on S3, whose CORS behavior
 // remains driven exclusively by PutBucketCors, matching real AWS fidelity.
-// An empty origin leaves current behavior fully unchanged.
+// An empty origin leaves DynamoDB/DynamoDB Streams/KMS/STS behavior fully
+// unchanged; Cognito gets a default CORS origin regardless (see
+// defaultCognitoCORSAllowOrigin).
 func WithCORSAllowOrigin(origin string) Option {
 	return func(o *options) {
 		o.corsAllowOrigin = origin
 	}
 }
+
+// defaultCognitoCORSAllowOrigin is the Access-Control-Allow-Origin value
+// applied to Cognito-routed requests when KUMOLO_CORS_ALLOW_ORIGIN is unset.
+// Real cognito-idp returns "access-control-allow-origin: *" on every
+// response with no configuration required — browser SDKs
+// (amazon-cognito-identity-js, Amplify) call it directly and depend on
+// this. Unlike DynamoDB/KMS/STS, which are not designed for direct browser
+// use, leaving Cognito's CORS support opt-in broke the "works on kumolo ⇒
+// works on AWS" guarantee for the browser-SPA case (#553). Only the
+// Cognito-routed *response* is scoped this way; the OPTIONS preflight
+// interceptor below cannot tell which service a browser is about to call
+// (X-Amz-Target is never sent on a preflight, only listed as an intended
+// header name), so it answers by default for any service — harmlessly,
+// since non-Cognito actual responses still omit the header without opt-in
+// and remain blocked at the browser CORS layer.
+const defaultCognitoCORSAllowOrigin = "*"
 
 func NewMux(
 	ctx context.Context,
@@ -113,12 +131,19 @@ func NewMux(
 		// a valid S3 bucket/object path (parsePath treats it as bucket==""), so
 		// this only intercepts requests bound for the services dispatched below,
 		// leaving S3's own PutBucketCors-driven preflight handling untouched.
-		if o.corsAllowOrigin != "" && r.Method == http.MethodOptions && r.URL.Path == "/" {
-			writeCORSHeaders(w, r, o.corsAllowOrigin)
+		// It always answers (even without KUMOLO_CORS_ALLOW_ORIGIN) because the
+		// eventual target can't be determined yet — see defaultCognitoCORSAllowOrigin.
+		if r.Method == http.MethodOptions && r.URL.Path == "/" {
+			origin := o.corsAllowOrigin
+			if origin == "" {
+				origin = defaultCognitoCORSAllowOrigin
+			}
+			writeCORSHeaders(w, r, origin)
 			w.WriteHeader(http.StatusOK)
 			return
 		}
 		var target http.Handler
+		isCognito := false
 		switch {
 		case r.Method == http.MethodPost &&
 			strings.Contains(r.Header.Get("Content-Type"), "application/x-www-form-urlencoded"):
@@ -132,11 +157,16 @@ func NewMux(
 		case strings.HasPrefix(r.Header.Get("X-Amz-Target"), "AWSCognitoIdentityProviderService.") ||
 			strings.HasSuffix(r.URL.Path, "/.well-known/jwks.json"):
 			target = cognitoRouter
+			isCognito = true
 		default:
 			s3Router.ServeHTTP(w, r)
 			return
 		}
-		writeCORSHeaders(w, r, o.corsAllowOrigin)
+		origin := o.corsAllowOrigin
+		if origin == "" && isCognito {
+			origin = defaultCognitoCORSAllowOrigin
+		}
+		writeCORSHeaders(w, r, origin)
 		target.ServeHTTP(w, r)
 	}))
 
