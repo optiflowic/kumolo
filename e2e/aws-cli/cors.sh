@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Verifies CORS preflight handling for X-Amz-Target-routed services, in two
-# configurations: with KUMOLO_CORS_ALLOW_ORIGIN opted in (all services), and
-# with it left unset (Cognito still defaults to Access-Control-Allow-Origin:
-# *, matching real cognito-idp; DynamoDB stays opt-in only — #553). Starts
-# its own kumolo instances; does not require a pre-running server, and
+# configurations: with KUMOLO_CORS_ALLOW_ORIGIN opted in (all services,
+# including the root preflight), and with it left unset (the root preflight
+# stays opt-in and unanswered; Cognito's actual response still defaults to
+# Access-Control-Allow-Origin: *, matching real cognito-idp; DynamoDB stays
+# opt-in only either way — #553). Starts its own kumolo instances; does not
+# require a pre-running server, and
 # doesn't depend on whether an ambient instance has CORS enabled. The AWS
 # CLI never issues a CORS preflight (that's a browser-only mechanism), so
 # curl is used to simulate what a browser sends.
@@ -61,8 +63,11 @@ until $DDB list-tables >/dev/null 2>&1; do
   fi
 done
 
-KUMOLO_DATA_DIR="$NO_ORIGIN_DATA_DIR" KUMOLO_LOG_LEVEL=error \
-  "$KUMOLO_BIN" -port "$NO_ORIGIN_PORT" >/dev/null 2>&1 &
+(
+  unset KUMOLO_CORS_ALLOW_ORIGIN
+  KUMOLO_DATA_DIR="$NO_ORIGIN_DATA_DIR" KUMOLO_LOG_LEVEL=error \
+    "$KUMOLO_BIN" -port "$NO_ORIGIN_PORT" >/dev/null 2>&1
+) &
 NO_ORIGIN_KUMOLO_PID=$!
 n=0
 until $NO_ORIGIN_DDB list-tables >/dev/null 2>&1; do
@@ -115,19 +120,23 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Without KUMOLO_CORS_ALLOW_ORIGIN: Cognito still defaults to
-# Access-Control-Allow-Origin: * (matching real cognito-idp, which requires
-# no configuration); DynamoDB stays opt-in only and gets no header. (#553)
+# Without KUMOLO_CORS_ALLOW_ORIGIN: the root preflight stays opt-in (it
+# can't tell yet which service a browser is about to call, and answering it
+# unconditionally would let a browser send the unauthenticated
+# DynamoDB/KMS/STS request that follows). Cognito's *actual* response still
+# defaults to Access-Control-Allow-Origin: * (matching real cognito-idp,
+# which requires no configuration); DynamoDB stays opt-in only and gets no
+# header either way. (#553)
 # ---------------------------------------------------------------------------
 NO_ORIGIN_PREFLIGHT=$(curl -s -i -X OPTIONS "$NO_ORIGIN_ENDPOINT/" \
   -H "Origin: $ORIGIN" \
   -H "Access-Control-Request-Method: POST" \
   -H "Access-Control-Request-Headers: content-type,x-amz-target")
 
-if echo "$NO_ORIGIN_PREFLIGHT" | grep -qi "^Access-Control-Allow-Origin: \*"; then
-  ok "OPTIONS preflight to / defaults to Access-Control-Allow-Origin: * without opt-in"
+if echo "$NO_ORIGIN_PREFLIGHT" | grep -qi "^Access-Control-Allow-Origin:"; then
+  fail "OPTIONS preflight to / unexpectedly includes Access-Control-Allow-Origin without opt-in"
 else
-  fail "OPTIONS preflight to / missing default Access-Control-Allow-Origin: *"
+  ok "OPTIONS preflight to / has no Access-Control-Allow-Origin without opt-in"
 fi
 
 NO_ORIGIN_COGNITO=$(curl -s -i -X POST "$NO_ORIGIN_ENDPOINT/" \

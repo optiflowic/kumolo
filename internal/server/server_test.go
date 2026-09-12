@@ -215,20 +215,22 @@ func TestNewMux(t *testing.T) {
 	})
 
 	t.Run(
-		"OPTIONS preflight to root is answered with the Cognito default even when CORS is disabled",
+		"OPTIONS preflight to root is not answered when CORS is disabled",
 		func(t *testing.T) {
 			// The preflight interceptor can't tell yet which service the
-			// browser is about to call (see defaultCognitoCORSAllowOrigin),
-			// so it always answers; only the *actual* response is scoped to
-			// Cognito below.
+			// browser is about to call, so it can't be scoped to Cognito
+			// alone. Answering it unconditionally would let a browser send
+			// the unauthenticated DynamoDB/KMS/STS request that follows, so
+			// it stays opt-in like every other CORS behavior here; only the
+			// *actual* Cognito response defaults to the wildcard origin
+			// below.
 			req := httptest.NewRequest(http.MethodOptions, "/", nil)
 			req.Header.Set("Origin", "http://localhost:5173")
 			req.Header.Set("Access-Control-Request-Method", "POST")
 			req.Header.Set("Access-Control-Request-Headers", "content-type,x-amz-target")
 			w := httptest.NewRecorder()
 			mux.ServeHTTP(w, req)
-			assert.Equal(t, http.StatusOK, w.Code)
-			assert.Equal(t, "*", w.Header().Get("Access-Control-Allow-Origin"))
+			assert.Empty(t, w.Header().Get("Access-Control-Allow-Origin"))
 		},
 	)
 

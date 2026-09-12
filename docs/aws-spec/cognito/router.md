@@ -59,16 +59,21 @@ Implemented in #17 alongside JWT token issuance.
   `defaultCognitoCORSAllowOrigin`), not in `internal/cognito`, since it's a
   cross-cutting concern of the request router that multiplexes all
   `X-Amz-Target`-routed services on one port.
-- The `OPTIONS` preflight to `/` is answered by default regardless of which
-  service the browser is about to call — a preflight request never carries
-  `X-Amz-Target` (browsers only list it as an allowed header name, not its
-  value), so the dispatcher can't scope the preflight step to Cognito alone.
-  This is harmless: a non-Cognito *actual* response still omits the header
-  without opt-in, so the browser still blocks reading it.
-- Scope: broadening the preflight interceptor to `/{poolId}/.well-known/*`
-  paths (for generic OIDC discovery clients) is tracked separately, not part
-  of this default.
-- Last verified: 2026-09-12 (#553).
+- The `OPTIONS` preflight to `/` stays strictly opt-in
+  (`KUMOLO_CORS_ALLOW_ORIGIN` only), unlike the Cognito default above. A
+  preflight request never carries `X-Amz-Target` (browsers only list it as
+  an allowed header name, not its value), so the dispatcher cannot scope the
+  preflight step to Cognito alone. Answering it unconditionally would let a
+  browser send the unauthenticated DynamoDB/KMS/STS request that follows the
+  preflight — the actual response would still lack CORS headers and be
+  unreadable by the page, but the side effect (`PutItem`, `CreateKey`,
+  `AssumeRole`, ...) would already have happened server-side. So without
+  `KUMOLO_CORS_ALLOW_ORIGIN` set, a browser calling Cognito directly will
+  fail at the preflight step — the same posture as DynamoDB/KMS/STS. Real
+  parity for the unconfigured case would require distinguishing Cognito at
+  the transport level (e.g. a dedicated endpoint/listener); tracked
+  separately, not part of this default.
+- Last verified: 2026-09-13 (#553, post-review revision).
 
 ## kumolo Deviations
 

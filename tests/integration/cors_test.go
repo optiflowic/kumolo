@@ -69,15 +69,17 @@ func TestCORSIntegration_PreflightAndActualResponses(t *testing.T) {
 
 // TestCORSIntegration_DisabledByDefault confirms the opt-in flag's absence
 // leaves DynamoDB/DynamoDB Streams/KMS/STS behavior fully unchanged, while
-// Cognito still gets a default Access-Control-Allow-Origin: * — matching
-// real cognito-idp, which returns it unconditionally (#553). The preflight
-// itself is always answered because the eventual target can't be
-// determined yet (see defaultCognitoCORSAllowOrigin in internal/server).
+// Cognito still gets a default Access-Control-Allow-Origin: * on its actual
+// response — matching real cognito-idp, which returns it unconditionally
+// (#553). The root OPTIONS preflight itself stays opt-in: it can't be
+// scoped to Cognito alone (the eventual target isn't known yet), and
+// answering it unconditionally would let a browser send the unauthenticated
+// DynamoDB/KMS/STS request that follows.
 func TestCORSIntegration_DisabledByDefault(t *testing.T) {
 	clients := newTestClients(t)
 
 	t.Run(
-		"OPTIONS preflight to root defaults to Access-Control-Allow-Origin: *",
+		"OPTIONS preflight to root carries no Access-Control-Allow-Origin",
 		func(t *testing.T) {
 			req, err := http.NewRequest(http.MethodOptions, clients.baseURL+"/", nil)
 			require.NoError(t, err)
@@ -89,8 +91,7 @@ func TestCORSIntegration_DisabledByDefault(t *testing.T) {
 			require.NoError(t, err)
 			t.Cleanup(func() { _ = resp.Body.Close() })
 
-			require.Equal(t, http.StatusOK, resp.StatusCode)
-			require.Equal(t, "*", resp.Header.Get("Access-Control-Allow-Origin"))
+			require.Empty(t, resp.Header.Get("Access-Control-Allow-Origin"))
 		},
 	)
 

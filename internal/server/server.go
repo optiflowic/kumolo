@@ -131,14 +131,17 @@ func NewMux(
 		// a valid S3 bucket/object path (parsePath treats it as bucket==""), so
 		// this only intercepts requests bound for the services dispatched below,
 		// leaving S3's own PutBucketCors-driven preflight handling untouched.
-		// It always answers (even without KUMOLO_CORS_ALLOW_ORIGIN) because the
-		// eventual target can't be determined yet — see defaultCognitoCORSAllowOrigin.
-		if r.Method == http.MethodOptions && r.URL.Path == "/" {
-			origin := o.corsAllowOrigin
-			if origin == "" {
-				origin = defaultCognitoCORSAllowOrigin
-			}
-			writeCORSHeaders(w, r, origin)
+		// This stays strictly opt-in (o.corsAllowOrigin != ""): a preflight
+		// can't be scoped to Cognito alone (the eventual target isn't known
+		// yet), and answering it unconditionally would let a browser send the
+		// unauthenticated DynamoDB/KMS/STS request that follows — the
+		// response itself would lack CORS headers and be unreadable by the
+		// page, but the side effect (PutItem, CreateKey, AssumeRole, ...)
+		// would already have happened server-side. defaultCognitoCORSAllowOrigin
+		// only ever applies to the actual Cognito response below, where the
+		// target service is known.
+		if o.corsAllowOrigin != "" && r.Method == http.MethodOptions && r.URL.Path == "/" {
+			writeCORSHeaders(w, r, o.corsAllowOrigin)
 			w.WriteHeader(http.StatusOK)
 			return
 		}
