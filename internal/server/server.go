@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"strings"
@@ -250,9 +251,12 @@ func NewMux(
 				target = stsRouter
 			default:
 				// unreachable: hostService only returns ok=true for one of
-				// the five service constants handled above.
-				s3Router.ServeHTTP(w, r)
-				return
+				// the five service constants handled above. Panic instead of
+				// silently falling back to s3Router: a silent fallback here
+				// would resurrect the exact Host/dispatch mismatch #567
+				// closed, just via a future hostService value nobody wired
+				// a case for — fail closed, not open.
+				panic(fmt.Sprintf("server: hostService returned unhandled service %q", svc))
 			}
 		} else {
 			switch {
