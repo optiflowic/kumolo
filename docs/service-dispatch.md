@@ -30,10 +30,15 @@ SDK clients that want per-service CORS behavior without setting
 | KMS              | `kms.localhost:5566`               |
 | STS              | `sts.localhost:5566`               |
 
-`*.localhost` resolves to `127.0.0.1` with no DNS/hosts-file setup on every
-major OS and browser (RFC 6761), so this needs zero configuration beyond the
-SDK endpoint override. The port stays `5566` — this is Host-header virtual
-hosting on the one existing listener, not per-service ports.
+Supported browser environments normally resolve `*.localhost` to `127.0.0.1`
+with no DNS/hosts-file setup (RFC 6761), so this needs zero configuration
+beyond the SDK endpoint override in that case. Non-browser resolvers (some
+Linux/CI configurations, container networking) aren't guaranteed to honor
+this — if a client can't resolve the convention host, fall back to
+`http://localhost:5566` and let `KUMOLO_CORS_ALLOW_ORIGIN` or the
+Host-header-based dispatch above pick the service instead. The port stays
+`5566` either way — this is Host-header virtual hosting on the one existing
+listener, not per-service ports.
 
 Matching is an exact, case-insensitive match against the `Host` header (with
 any `:port` suffix stripped first) against this fixed list — no
