@@ -35,10 +35,12 @@ with no DNS/hosts-file setup (RFC 6761), so this needs zero configuration
 beyond the SDK endpoint override in that case. Non-browser resolvers (some
 Linux/CI configurations, container networking) aren't guaranteed to honor
 this — if a client can't resolve the convention host, fall back to
-`http://localhost:5566` and let `KUMOLO_CORS_ALLOW_ORIGIN` or the
-Host-header-based dispatch above pick the service instead. The port stays
-`5566` either way — this is Host-header virtual hosting on the one existing
-listener, not per-service ports.
+`http://localhost:5566` instead. `localhost:5566` isn't itself a convention
+host, so requests there aren't Host-dispatched: set `KUMOLO_CORS_ALLOW_ORIGIN`
+if the `/` preflight needs an `Access-Control-Allow-Origin` response, and rely
+on the existing `X-Amz-Target` dispatch for the actual request. The port
+stays `5566` either way — this is Host-header virtual hosting on the one
+existing listener, not per-service ports.
 
 Matching is an exact, case-insensitive match against the `Host` header (with
 any `:port` suffix stripped first) against this fixed list — no
