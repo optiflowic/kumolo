@@ -268,6 +268,111 @@ func TestNewMux(t *testing.T) {
 			assert.Equal(t, "*", w.Header().Get("Access-Control-Allow-Origin"))
 		},
 	)
+
+	t.Run(
+		"OPTIONS preflight to the Cognito convention Host is answered with the default origin even when CORS is disabled",
+		func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodOptions, "/", nil)
+			req.Host = "cognito-idp.localhost:5566"
+			req.Header.Set("Origin", "http://localhost:5173")
+			req.Header.Set("Access-Control-Request-Method", "POST")
+			req.Header.Set("Access-Control-Request-Headers", "content-type,x-amz-target")
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Equal(t, "*", w.Header().Get("Access-Control-Allow-Origin"))
+			assert.Equal(t, "POST", w.Header().Get("Access-Control-Allow-Methods"))
+		},
+	)
+
+	t.Run(
+		"actual dispatch is pinned to the Cognito convention Host even when X-Amz-Target names DynamoDB",
+		func(t *testing.T) {
+			// Regression test for the gap found in review: without pinning
+			// dispatch to the Host-identified service, this request would
+			// reach dynamoRouter (unauthenticated PutItem) after passing a
+			// preflight that trusted the Cognito Host's default-open CORS
+			// policy. It must instead land on cognitoRouter, which reports
+			// the target as unknown.
+			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{}`))
+			req.Host = "cognito-idp.localhost:5566"
+			req.Header.Set("X-Amz-Target", "DynamoDB_20120810.PutItem")
+			req.Header.Set("Origin", "http://localhost:5173")
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Equal(t, "application/x-amz-json-1.1", w.Header().Get("Content-Type"))
+			assert.Contains(t, w.Body.String(), "UnknownOperationException")
+			assert.Equal(t, "*", w.Header().Get("Access-Control-Allow-Origin"))
+		},
+	)
+
+	t.Run(
+		"actual dispatch is pinned to the DynamoDB convention Host even when X-Amz-Target names Cognito",
+		func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{}`))
+			req.Host = "dynamodb.localhost:5566"
+			req.Header.Set("X-Amz-Target", "AWSCognitoIdentityProviderService.InitiateAuth")
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, req)
+			assert.Equal(t, "application/x-amz-json-1.0", w.Header().Get("Content-Type"))
+		},
+	)
+
+	t.Run("actual dispatch is pinned to the DynamoDB Streams convention Host", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{}`))
+		req.Host = "streams.dynamodb.localhost:5566"
+		req.Header.Set("X-Amz-Target", "DynamoDBStreams_20120810.ListStreams")
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "application/x-amz-json-1.0", w.Header().Get("Content-Type"))
+		assert.Contains(t, w.Body.String(), `"Streams"`)
+	})
+
+	t.Run("actual dispatch is pinned to the KMS convention Host", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{}`))
+		req.Host = "kms.localhost:5566"
+		req.Header.Set("X-Amz-Target", "TrentService.ListKeys")
+		req.Header.Set("Content-Type", "application/x-amz-json-1.1")
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		assert.Equal(t, "application/x-amz-json-1.1", w.Header().Get("Content-Type"))
+	})
+
+	t.Run("actual dispatch is pinned to the STS convention Host", func(t *testing.T) {
+		req := httptest.NewRequest(
+			http.MethodPost,
+			"/",
+			strings.NewReader("Action=GetCallerIdentity&Version=2011-06-15"),
+		)
+		req.Host = "sts.localhost:5566"
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=utf-8")
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		assert.Contains(t, w.Header().Get("Content-Type"), "text/xml")
+	})
+
+	for _, host := range []string{
+		"dynamodb.localhost:5566",
+		"streams.dynamodb.localhost:5566",
+		"kms.localhost:5566",
+		"sts.localhost:5566",
+	} {
+		t.Run(
+			"OPTIONS preflight to the "+host+" convention Host is answered 200 without a default origin when CORS is disabled",
+			func(t *testing.T) {
+				req := httptest.NewRequest(http.MethodOptions, "/", nil)
+				req.Host = host
+				req.Header.Set("Origin", "http://localhost:5173")
+				req.Header.Set("Access-Control-Request-Method", "POST")
+				w := httptest.NewRecorder()
+				mux.ServeHTTP(w, req)
+				assert.Equal(t, http.StatusOK, w.Code)
+				assert.Empty(t, w.Header().Get("Access-Control-Allow-Origin"))
+			},
+		)
+	}
 }
 
 func TestNewMux_WithCORSAllowOrigin(t *testing.T) {
@@ -359,6 +464,82 @@ func TestNewMux_WithCORSAllowOrigin(t *testing.T) {
 		mux.ServeHTTP(w, req)
 		assert.Empty(t, w.Header().Get("Access-Control-Allow-Origin"))
 	})
+
+	t.Run(
+		"configured origin wins over the Cognito default for a preflight to the Cognito convention Host",
+		func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodOptions, "/", nil)
+			req.Host = "cognito-idp.localhost:5566"
+			req.Header.Set("Origin", "http://localhost:5173")
+			req.Header.Set("Access-Control-Request-Method", "POST")
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Equal(t, "http://localhost:5173", w.Header().Get("Access-Control-Allow-Origin"))
+		},
+	)
+
+	t.Run(
+		"configured origin applies to a preflight to the DynamoDB convention Host",
+		func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodOptions, "/", nil)
+			req.Host = "dynamodb.localhost:5566"
+			req.Header.Set("Origin", "http://localhost:5173")
+			req.Header.Set("Access-Control-Request-Method", "POST")
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Equal(t, "http://localhost:5173", w.Header().Get("Access-Control-Allow-Origin"))
+		},
+	)
+}
+
+func TestHostService(t *testing.T) {
+	tests := []struct {
+		name        string
+		host        string
+		wantService string
+		wantOK      bool
+	}{
+		{
+			"Cognito convention host with port",
+			"cognito-idp.localhost:5566",
+			hostServiceCognito,
+			true,
+		},
+		{"Cognito convention host without port", "cognito-idp.localhost", hostServiceCognito, true},
+		{
+			"Cognito convention host is case-insensitive",
+			"Cognito-IDP.Localhost:5566",
+			hostServiceCognito,
+			true,
+		},
+		{"DynamoDB convention host", "dynamodb.localhost:5566", hostServiceDynamoDB, true},
+		{
+			"DynamoDB Streams convention host",
+			"streams.dynamodb.localhost:5566",
+			hostServiceDynamoDBStreams,
+			true,
+		},
+		{"KMS convention host", "kms.localhost:5566", hostServiceKMS, true},
+		{"STS convention host", "sts.localhost:5566", hostServiceSTS, true},
+		{"default single-endpoint usage does not match", "localhost:5566", "", false},
+		{
+			"lookalike domain does not match via substring",
+			"dynamodb.localhost.evil.example:5566",
+			"",
+			false,
+		},
+		{"unrelated host does not match", "example.com:5566", "", false},
+		{"empty host does not match", "", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, ok := hostService(tt.host)
+			assert.Equal(t, tt.wantOK, ok)
+			assert.Equal(t, tt.wantService, svc)
+		})
+	}
 }
 
 func TestWriteCORSHeaders(t *testing.T) {

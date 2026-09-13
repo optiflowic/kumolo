@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -58,7 +60,9 @@ func WithCognitoOptions(opts ...cognito.Option) Option {
 // remains driven exclusively by PutBucketCors, matching real AWS fidelity.
 // An empty origin leaves DynamoDB/DynamoDB Streams/KMS/STS behavior fully
 // unchanged; Cognito gets a default CORS origin regardless (see
-// defaultCognitoCORSAllowOrigin).
+// defaultCognitoCORSAllowOrigin), and always wins over that default when
+// set — including for a preflight identified via a convention Host (#567,
+// see hostService).
 func WithCORSAllowOrigin(origin string) Option {
 	return func(o *options) {
 		o.corsAllowOrigin = origin
@@ -72,14 +76,61 @@ func WithCORSAllowOrigin(origin string) Option {
 // (amazon-cognito-identity-js, Amplify) call it directly and depend on
 // this. Unlike DynamoDB/KMS/STS, which are not designed for direct browser
 // use, leaving Cognito's CORS support opt-in broke the "works on kumolo ⇒
-// works on AWS" guarantee for the browser-SPA case (#553). Only the
-// Cognito-routed *response* is scoped this way; the OPTIONS preflight
-// interceptor below cannot tell which service a browser is about to call
-// (X-Amz-Target is never sent on a preflight, only listed as an intended
-// header name), so it answers by default for any service — harmlessly,
-// since non-Cognito actual responses still omit the header without opt-in
-// and remain blocked at the browser CORS layer.
+// works on AWS" guarantee for the browser-SPA case (#553). It applies to
+// the actual Cognito response below unconditionally, and — since #567 — to
+// the OPTIONS preflight too, but only when the Host header names the
+// Cognito convention hostname (see hostService); a preflight to any other
+// Host can't be scoped to Cognito alone (the eventual target isn't known
+// yet) and stays opt-in via KUMOLO_CORS_ALLOW_ORIGIN only.
 const defaultCognitoCORSAllowOrigin = "*"
+
+// Convention hostnames for Host-header virtual hosting (#567). These let an
+// SDK client identify its target service before the X-Amz-Target body
+// arrives, by pointing a per-service BaseEndpoint at one of these hosts
+// instead of the shared http://localhost:5566 endpoint. *.localhost
+// resolves to 127.0.0.1 with no DNS/hosts-file setup on every major OS and
+// browser (RFC 6761). See docs/service-dispatch.md for the full design.
+const (
+	hostServiceCognito         = "cognito-idp"
+	hostServiceDynamoDB        = "dynamodb"
+	hostServiceDynamoDBStreams = "streams.dynamodb"
+	hostServiceKMS             = "kms"
+	hostServiceSTS             = "sts"
+
+	hostSuffix = ".localhost"
+)
+
+// hostService identifies which X-Amz-Target-routed service (if any) a
+// request's Host header names. NewMux consults it twice: to pick the CORS
+// policy for an OPTIONS preflight, and to pin the actual request's dispatch
+// to that same service regardless of X-Amz-Target. Matching is exact and
+// case-insensitive against the fixed convention hostnames above — no
+// wildcard/prefix matching, so an unrelated domain that merely contains one
+// of these labels (e.g. "dynamodb.localhost.evil.example") does not match.
+// Any Host that isn't one of these, including the default single-endpoint
+// usage (http://localhost:5566 for everything), reports ok=false and falls
+// back to the pre-#567 behavior.
+func hostService(host string) (service string, ok bool) {
+	h, _, err := net.SplitHostPort(host)
+	if err != nil {
+		h = host // no ":port" suffix present
+	}
+	h = strings.ToLower(h)
+	switch h {
+	case hostServiceCognito + hostSuffix:
+		return hostServiceCognito, true
+	case hostServiceDynamoDBStreams + hostSuffix:
+		return hostServiceDynamoDBStreams, true
+	case hostServiceDynamoDB + hostSuffix:
+		return hostServiceDynamoDB, true
+	case hostServiceKMS + hostSuffix:
+		return hostServiceKMS, true
+	case hostServiceSTS + hostSuffix:
+		return hostServiceSTS, true
+	default:
+		return "", false
+	}
+}
 
 func NewMux(
 	ctx context.Context,
@@ -131,39 +182,101 @@ func NewMux(
 		// a valid S3 bucket/object path (parsePath treats it as bucket==""), so
 		// this only intercepts requests bound for the services dispatched below,
 		// leaving S3's own PutBucketCors-driven preflight handling untouched.
-		// This stays strictly opt-in (o.corsAllowOrigin != ""): a preflight
-		// can't be scoped to Cognito alone (the eventual target isn't known
-		// yet), and answering it unconditionally would let a browser send the
-		// unauthenticated DynamoDB/KMS/STS request that follows — the
-		// response itself would lack CORS headers and be unreadable by the
-		// page, but the side effect (PutItem, CreateKey, AssumeRole, ...)
-		// would already have happened server-side. defaultCognitoCORSAllowOrigin
-		// only ever applies to the actual Cognito response below, where the
-		// target service is known.
-		if o.corsAllowOrigin != "" && r.Method == http.MethodOptions && r.URL.Path == "/" {
-			writeCORSHeaders(w, r, o.corsAllowOrigin)
-			w.WriteHeader(http.StatusOK)
-			return
+		if r.Method == http.MethodOptions && r.URL.Path == "/" {
+			// The Host header (#567), unlike X-Amz-Target, is always present
+			// on a preflight — a client using one of the convention
+			// hostnames has already told us which service it's calling, so
+			// it's safe to resolve the request here with that service's own
+			// CORS policy and always answer 200. Omitting
+			// Access-Control-Allow-Origin (services with no configured or
+			// default origin) still returns 200, but a browser that doesn't
+			// see the header won't send the follow-up request. And even if
+			// it did, the actual dispatch below pins Host-identified
+			// requests to that same service regardless of X-Amz-Target, so
+			// this can't be used to reach a different, unauthenticated
+			// service the way answering unconditionally for an
+			// unidentified Host would.
+			if svc, ok := hostService(r.Host); ok {
+				origin := o.corsAllowOrigin
+				if origin == "" && svc == hostServiceCognito {
+					origin = defaultCognitoCORSAllowOrigin
+				}
+				writeCORSHeaders(w, r, origin)
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			// Host didn't match a known service — the default
+			// single-endpoint usage (http://localhost:5566 for everything).
+			// This stays strictly opt-in (o.corsAllowOrigin != ""): the
+			// eventual target isn't known yet, and answering unconditionally
+			// would let a browser send the unauthenticated DynamoDB/KMS/STS
+			// request that follows — the response itself would lack CORS
+			// headers and be unreadable by the page, but the side effect
+			// (PutItem, CreateKey, AssumeRole, ...) would already have
+			// happened server-side. defaultCognitoCORSAllowOrigin only ever
+			// applies to the actual Cognito response below (or the
+			// Host-identified branch above), where the target service is
+			// known.
+			if o.corsAllowOrigin != "" {
+				writeCORSHeaders(w, r, o.corsAllowOrigin)
+				w.WriteHeader(http.StatusOK)
+				return
+			}
 		}
 		var target http.Handler
 		isCognito := false
-		switch {
-		case r.Method == http.MethodPost &&
-			strings.Contains(r.Header.Get("Content-Type"), "application/x-www-form-urlencoded"):
-			target = stsRouter
-		case strings.HasPrefix(r.Header.Get("X-Amz-Target"), "DynamoDBStreams_"):
-			target = dynamoStreamsRouter
-		case strings.HasPrefix(r.Header.Get("X-Amz-Target"), "DynamoDB_"):
-			target = dynamoRouter
-		case strings.HasPrefix(r.Header.Get("X-Amz-Target"), "TrentService."):
-			target = kmsRouter
-		case strings.HasPrefix(r.Header.Get("X-Amz-Target"), "AWSCognitoIdentityProviderService.") ||
-			strings.HasSuffix(r.URL.Path, "/.well-known/jwks.json"):
-			target = cognitoRouter
-			isCognito = true
-		default:
-			s3Router.ServeHTTP(w, r)
-			return
+		if svc, ok := hostService(r.Host); ok {
+			// Host names the target service explicitly (#567). Pin the
+			// actual dispatch to it regardless of X-Amz-Target: without
+			// this, a request whose Host names one service (e.g. the
+			// Cognito convention host, whose CORS policy defaults open) but
+			// whose X-Amz-Target names another (e.g.
+			// "DynamoDB_20120810.PutItem") would still reach that other,
+			// unauthenticated service via the X-Amz-Target-only switch
+			// below — reopening the exact preflight/dispatch mismatch #566
+			// closed, just via a Host the browser was allowed to identify
+			// itself with. A mismatched target now hits that service's own
+			// unknown-operation error instead.
+			switch svc {
+			case hostServiceCognito:
+				target = cognitoRouter
+				isCognito = true
+			case hostServiceDynamoDBStreams:
+				target = dynamoStreamsRouter
+			case hostServiceDynamoDB:
+				target = dynamoRouter
+			case hostServiceKMS:
+				target = kmsRouter
+			case hostServiceSTS:
+				target = stsRouter
+			default:
+				// unreachable: hostService only returns ok=true for one of
+				// the five service constants handled above. Panic instead of
+				// silently falling back to s3Router: a silent fallback here
+				// would resurrect the exact Host/dispatch mismatch #567
+				// closed, just via a future hostService value nobody wired
+				// a case for — fail closed, not open.
+				panic(fmt.Sprintf("server: hostService returned unhandled service %q", svc))
+			}
+		} else {
+			switch {
+			case r.Method == http.MethodPost &&
+				strings.Contains(r.Header.Get("Content-Type"), "application/x-www-form-urlencoded"):
+				target = stsRouter
+			case strings.HasPrefix(r.Header.Get("X-Amz-Target"), "DynamoDBStreams_"):
+				target = dynamoStreamsRouter
+			case strings.HasPrefix(r.Header.Get("X-Amz-Target"), "DynamoDB_"):
+				target = dynamoRouter
+			case strings.HasPrefix(r.Header.Get("X-Amz-Target"), "TrentService."):
+				target = kmsRouter
+			case strings.HasPrefix(r.Header.Get("X-Amz-Target"), "AWSCognitoIdentityProviderService.") ||
+				strings.HasSuffix(r.URL.Path, "/.well-known/jwks.json"):
+				target = cognitoRouter
+				isCognito = true
+			default:
+				s3Router.ServeHTTP(w, r)
+				return
+			}
 		}
 		origin := o.corsAllowOrigin
 		if origin == "" && isCognito {

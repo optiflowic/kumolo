@@ -60,20 +60,32 @@ Implemented in #17 alongside JWT token issuance.
   cross-cutting concern of the request router that multiplexes all
   `X-Amz-Target`-routed services on one port.
 - The `OPTIONS` preflight to `/` stays strictly opt-in
-  (`KUMOLO_CORS_ALLOW_ORIGIN` only), unlike the Cognito default above. A
-  preflight request never carries `X-Amz-Target` (browsers only list it as
-  an allowed header name, not its value), so the dispatcher cannot scope the
-  preflight step to Cognito alone. Answering it unconditionally would let a
-  browser send the unauthenticated DynamoDB/KMS/STS request that follows the
+  (`KUMOLO_CORS_ALLOW_ORIGIN` only) **when the request's `Host` header
+  doesn't name a recognized service** — the default single-endpoint usage
+  (`http://localhost:5566` for everything). A preflight request never
+  carries `X-Amz-Target` (browsers only list it as an allowed header name,
+  not its value), so in that case the dispatcher cannot scope the preflight
+  step to Cognito alone: answering it unconditionally would let a browser
+  send the unauthenticated DynamoDB/KMS/STS request that follows the
   preflight — the actual response would still lack CORS headers and be
   unreadable by the page, but the side effect (`PutItem`, `CreateKey`,
-  `AssumeRole`, ...) would already have happened server-side. So without
-  `KUMOLO_CORS_ALLOW_ORIGIN` set, a browser calling Cognito directly will
-  fail at the preflight step — the same posture as DynamoDB/KMS/STS. Real
-  parity for the unconfigured case would require distinguishing Cognito at
-  the transport level (e.g. a dedicated endpoint/listener); tracked
-  separately, not part of this default.
-- Last verified: 2026-09-13 (#553, post-review revision).
+  `AssumeRole`, ...) would already have happened server-side.
+- Since #567, a client can identify itself before the preflight by pointing
+  its `BaseEndpoint` at the convention hostname `cognito-idp.localhost:5566`
+  instead of the shared endpoint (`*.localhost` resolves to `127.0.0.1` with
+  no setup). The `Host` header is always present on a preflight, so the
+  dispatcher recognizes it and answers with the Cognito default
+  (`Access-Control-Allow-Origin: *`, or the configured origin if
+  `KUMOLO_CORS_ALLOW_ORIGIN` is set) unconditionally — safe because the
+  target service is now known before dispatch, not inferred after the fact.
+  See `docs/service-dispatch.md` for the full mechanism and the equivalent
+  hostnames for DynamoDB/DynamoDB Streams/KMS/STS (which keep no default
+  origin, so their preflight is answered `200` but without the header,
+  still blocking the browser from proceeding).
+- Without `KUMOLO_CORS_ALLOW_ORIGIN` set and without using the convention
+  Host, a browser calling Cognito directly still fails at the preflight
+  step — the same posture as DynamoDB/KMS/STS on the shared endpoint.
+- Last verified: 2026-09-13 (#567).
 
 ## kumolo Deviations
 
