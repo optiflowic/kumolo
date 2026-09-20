@@ -11,7 +11,7 @@
 |---------------------------------|--------|----------|---------------------------------------------------------|
 | UserPoolId                     | string | yes      | Pattern: `[\w-]+_[0-9a-zA-Z]+`                          |
 | MfaConfiguration                | string | no       | `OFF` \| `ON` \| `OPTIONAL`                             |
-| SoftwareTokenMfaConfiguration    | object | no       | `{"Enabled": bool}` — persisted (#555); see deviations below |
+| SoftwareTokenMfaConfiguration    | object | no       | `{"Enabled": bool}` — persisted, full-replace semantics (#555); see deviations below |
 | SmsMfaConfiguration              | object | no       | Accepted but not persisted (SMS delivery not supported) |
 | EmailMfaConfiguration            | object | no       | Accepted but not persisted (email OTP not supported)    |
 | WebAuthnConfiguration            | object | no       | Accepted but not persisted (passkeys not supported)     |
@@ -41,17 +41,35 @@
   non-empty value — omitting it (e.g. a Terraform reconcile `apply` that only touches
   `software_token_mfa_configuration`) leaves the stored value unchanged.
 - `SoftwareTokenMfaConfiguration.Enabled` is persisted into `UserPoolMetadata.SoftwareTokenMfaConfigEnabled` (#555)
-  and echoed back by this operation and `GetUserPoolMfaConfig`. Only updated when the request includes the
-  `SoftwareTokenMfaConfiguration` object at all — an absent object leaves the stored value unchanged, matching
-  `MfaConfiguration`'s omit-to-keep semantics; an explicit `{"Enabled": false}` does reset it to `false`. This
+  and echoed back by this operation and `GetUserPoolMfaConfig`. Unlike `MfaConfiguration`, this uses **full-replace
+  semantics, not omit-to-keep**: a request that omits `SoftwareTokenMfaConfiguration` resets it to `false`, the
+  same as an explicit `{"Enabled": false}` — it does not preserve whatever was stored before. Evidence:
+  [aws/aws-sdk-js#4186](https://github.com/aws/aws-sdk-js/issues/4186) — a `SetUserPoolMfaConfig` call with only
+  `MfaConfiguration` set, omitting an already-configured `SmsMfaConfiguration`, failed with `InvalidParameterException:
+  can't disable all MFAs with a required or optional configuration`, which only makes sense if the omitted factor
+  was treated as cleared rather than kept. kumolo does not replicate that specific validation (rejecting
+  `MfaConfiguration: ON`/`OPTIONAL` when no factor ends up enabled) — see the enforcement note below for why. This
   field is **not** part of `DescribeUserPool`'s response (`UserPoolType` has no such field on real AWS either) —
   `handleDescribeUserPool` clears it before serializing.
+- Whether `MfaConfiguration` itself resets to `OFF` when omitted (matching `SoftwareTokenMfaConfiguration`'s
+  behavior) rather than kumolo's current omit-to-keep handling is **unconfirmed** — the aws-sdk-js#4186 evidence
+  only covers the factor sub-objects, not this top-level field, and no primary source was found either way.
+  Untouched by #555; `terraform-provider-aws`'s `aws_cognito_user_pool` resource always sends `mfa_configuration`
+  (its schema defaults it to `"OFF"`), so this ambiguity doesn't affect the Terraform reconcile-apply flow #463/#555
+  were driven by. Flagged here rather than changed without evidence — verify against a real pool before changing.
 - Persisting this value does **not** gate `InitiateAuth`/`RespondToAuthChallenge` on its own: pool-level
   `MfaConfiguration: "ON"` challenge behavior is driven by `MfaConfiguration` (see `associate_software_token.md`
   and `set_user_mfa_preference.md` for kumolo's per-user TOTP enrollment and enforcement), not by this flag —
   `SoftwareTokenMfaConfiguration.Enabled` is stored purely so Terraform/CLI reads reflect what was last set,
   matching the "works on kumolo ⇒ works on AWS" round-trip goal without kumolo needing to model a delivery-less
   admin toggle as an enforcement switch.
+- kumolo does **not** implement real AWS's validation that rejects `MfaConfiguration: "ON"`/`"OPTIONAL"` with
+  `InvalidParameterException` when the resulting config would have no MFA factor enabled at all (the exact
+  condition #4186 above hit). Deliberate: kumolo's `MfaConfiguration: "ON"` enforcement is per-user (an enrolled
+  user gets challenged regardless of `SoftwareTokenMfaConfigEnabled`; see `handler_mfa.go`'s `mfaConfigurationOn`
+  checks), and many existing tests (`handler_mfa_test.go`) call this operation with `MfaConfiguration: "ON"` and no
+  factor config at all — replicating AWS's rejection would break that established, documented model rather than
+  extend it. Flagged as a known gap, not fixed by #555.
 - `SmsMfaConfiguration`, `EmailMfaConfiguration`, and `WebAuthnConfiguration` are accepted (to avoid rejecting
   real-world SDK/Terraform payloads) but silently ignored — kumolo has no SMS/email delivery backend or WebAuthn
   support. This mirrors `GetUserPoolMfaConfig`'s existing deviations.

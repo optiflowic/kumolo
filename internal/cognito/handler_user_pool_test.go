@@ -978,13 +978,17 @@ func TestSetUserPoolMfaConfig_NoMfaConfigurationKeepsExisting(t *testing.T) {
 
 	w := doOp(t, ro, "SetUserPoolMfaConfig", fmt.Sprintf(`{
 		"UserPoolId": %q,
-		"MfaConfiguration": "ON",
-		"SoftwareTokenMfaConfiguration": {"Enabled": true}
+		"MfaConfiguration": "ON"
 	}`, poolID))
 	require.Equal(t, http.StatusOK, w.Code)
 
-	// A follow-up call that omits both fields (as terraform-provider-aws does on a
-	// no-op reconcile apply) must not reset either stored value.
+	// A follow-up call that omits MfaConfiguration must not reset it — unlike
+	// SoftwareTokenMfaConfiguration (see
+	// TestSetUserPoolMfaConfig_OmittedSoftwareTokenMfaConfigurationResetsToDisabled),
+	// no confirmed real-AWS evidence shows MfaConfiguration itself resets to OFF when
+	// omitted, and Terraform's aws_cognito_user_pool resource always sends it (its schema
+	// treats mfa_configuration as always-present, defaulting to "OFF") so this path isn't
+	// exercised by the terraform-provider-aws reconcile-apply flow #463/#555 were driven by.
 	w = doOp(t, ro, "SetUserPoolMfaConfig", fmt.Sprintf(`{
 		"UserPoolId": %q,
 		"SmsMfaConfiguration": {"SmsAuthenticationMessage": "code: {####}"}
@@ -992,10 +996,7 @@ func TestSetUserPoolMfaConfig_NoMfaConfigurationKeepsExisting(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 
 	var resp struct {
-		MfaConfiguration              string `json:"MfaConfiguration"`
-		SoftwareTokenMfaConfiguration struct {
-			Enabled bool `json:"Enabled"`
-		} `json:"SoftwareTokenMfaConfiguration"`
+		MfaConfiguration string `json:"MfaConfiguration"`
 	}
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
 	assert.Equal(
@@ -1004,11 +1005,54 @@ func TestSetUserPoolMfaConfig_NoMfaConfigurationKeepsExisting(t *testing.T) {
 		resp.MfaConfiguration,
 		"unset MfaConfiguration must not overwrite the stored value",
 	)
-	assert.True(
+}
+
+// TestSetUserPoolMfaConfig_OmittedSoftwareTokenMfaConfigurationResetsToDisabled guards
+// against the deviation caught in review for #555: unlike MfaConfiguration, real AWS uses
+// full-replace (not merge) semantics for SoftwareTokenMfaConfiguration — a request that
+// omits it disables the factor even if it was previously enabled. Evidence:
+// https://github.com/aws/aws-sdk-js/issues/4186 (a SetUserPoolMfaConfig call with
+// MfaConfiguration only, omitting an already-configured SmsMfaConfiguration, failed with
+// "can't disable all MFAs" — proving the omitted factor was treated as cleared, not kept).
+func TestSetUserPoolMfaConfig_OmittedSoftwareTokenMfaConfigurationResetsToDisabled(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "mfa-pool-reset-on-omit")
+
+	w := doOp(t, ro, "SetUserPoolMfaConfig", fmt.Sprintf(`{
+		"UserPoolId": %q,
+		"SoftwareTokenMfaConfiguration": {"Enabled": true}
+	}`, poolID))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// This call omits SoftwareTokenMfaConfiguration entirely — real AWS resets it to
+	// disabled rather than preserving the prior "Enabled: true".
+	w = doOp(t, ro, "SetUserPoolMfaConfig", fmt.Sprintf(`{
+		"UserPoolId": %q,
+		"MfaConfiguration": "OFF"
+	}`, poolID))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp struct {
+		SoftwareTokenMfaConfiguration struct {
+			Enabled bool `json:"Enabled"`
+		} `json:"SoftwareTokenMfaConfiguration"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.False(
 		t,
 		resp.SoftwareTokenMfaConfiguration.Enabled,
-		"unset SoftwareTokenMfaConfiguration must not overwrite the stored value",
+		"omitting SoftwareTokenMfaConfiguration must reset it, matching AWS's full-replace semantics",
 	)
+
+	getW := doOp(t, ro, "GetUserPoolMfaConfig", fmt.Sprintf(`{"UserPoolId":%q}`, poolID))
+	require.Equal(t, http.StatusOK, getW.Code)
+	var getResp struct {
+		SoftwareTokenMfaConfiguration struct {
+			Enabled bool `json:"Enabled"`
+		} `json:"SoftwareTokenMfaConfiguration"`
+	}
+	require.NoError(t, json.NewDecoder(getW.Body).Decode(&getResp))
+	assert.False(t, getResp.SoftwareTokenMfaConfiguration.Enabled)
 }
 
 func TestSetUserPoolMfaConfig_Errors(t *testing.T) {
