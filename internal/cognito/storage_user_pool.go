@@ -65,6 +65,14 @@ type UserPoolMetadata struct {
 	EmailVerificationSubject    string            `json:"EmailVerificationSubject,omitempty"`
 	SmsAuthenticationMessage    string            `json:"SmsAuthenticationMessage,omitempty"`
 	SmsVerificationMessage      string            `json:"SmsVerificationMessage,omitempty"`
+
+	// SoftwareTokenMfaConfigEnabled is the pool-level TOTP MFA admin toggle set via
+	// SetUserPoolMfaConfig and read back by GetUserPoolMfaConfig/SetUserPoolMfaConfig (#555).
+	// It needs a real JSON tag so it round-trips through storage's readJSON/writeJSON, but
+	// real AWS's DescribeUserPool response (UserPoolType) has no SoftwareTokenMfaConfiguration
+	// field — handleDescribeUserPool, which serializes this struct directly, clears it before
+	// writing the response so it doesn't leak into a response shape AWS never produces it in.
+	SoftwareTokenMfaConfigEnabled bool `json:"SoftwareTokenMfaConfigEnabled,omitempty"`
 }
 
 func poolARN(poolID string) string {

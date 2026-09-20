@@ -920,16 +920,56 @@ func TestSetUserPoolMfaConfig_Success(t *testing.T) {
 	}
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
 	assert.Equal(t, "OPTIONAL", resp.MfaConfiguration)
-	assert.False(t, resp.SoftwareTokenMfaConfiguration.Enabled, "TOTP is not supported by kumolo")
+	assert.True(
+		t,
+		resp.SoftwareTokenMfaConfiguration.Enabled,
+		"SetUserPoolMfaConfig must persist and echo back SoftwareTokenMfaConfiguration.Enabled",
+	)
 
 	// The change must persist for subsequent reads.
 	getW := doOp(t, ro, "GetUserPoolMfaConfig", fmt.Sprintf(`{"UserPoolId":%q}`, poolID))
 	require.Equal(t, http.StatusOK, getW.Code)
 	var getResp struct {
-		MfaConfiguration string `json:"MfaConfiguration"`
+		MfaConfiguration              string `json:"MfaConfiguration"`
+		SoftwareTokenMfaConfiguration struct {
+			Enabled bool `json:"Enabled"`
+		} `json:"SoftwareTokenMfaConfiguration"`
 	}
 	require.NoError(t, json.NewDecoder(getW.Body).Decode(&getResp))
 	assert.Equal(t, "OPTIONAL", getResp.MfaConfiguration)
+	assert.True(t, getResp.SoftwareTokenMfaConfiguration.Enabled)
+
+	// Real AWS's DescribeUserPool response (UserPoolType) has no
+	// SoftwareTokenMfaConfiguration field — kumolo's internal persistence field must not
+	// leak into it.
+	descW := doOp(t, ro, "DescribeUserPool", fmt.Sprintf(`{"UserPoolId":%q}`, poolID))
+	require.Equal(t, http.StatusOK, descW.Code)
+	assert.NotContains(t, descW.Body.String(), "SoftwareTokenMfaConfig")
+}
+
+func TestSetUserPoolMfaConfig_DisablesSoftwareTokenMfaConfig(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "mfa-pool-disable")
+
+	w := doOp(t, ro, "SetUserPoolMfaConfig", fmt.Sprintf(`{
+		"UserPoolId": %q,
+		"SoftwareTokenMfaConfiguration": {"Enabled": true}
+	}`, poolID))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	w = doOp(t, ro, "SetUserPoolMfaConfig", fmt.Sprintf(`{
+		"UserPoolId": %q,
+		"SoftwareTokenMfaConfiguration": {"Enabled": false}
+	}`, poolID))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp struct {
+		SoftwareTokenMfaConfiguration struct {
+			Enabled bool `json:"Enabled"`
+		} `json:"SoftwareTokenMfaConfiguration"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.False(t, resp.SoftwareTokenMfaConfiguration.Enabled)
 }
 
 func TestSetUserPoolMfaConfig_NoMfaConfigurationKeepsExisting(t *testing.T) {
@@ -938,19 +978,36 @@ func TestSetUserPoolMfaConfig_NoMfaConfigurationKeepsExisting(t *testing.T) {
 
 	w := doOp(t, ro, "SetUserPoolMfaConfig", fmt.Sprintf(`{
 		"UserPoolId": %q,
+		"MfaConfiguration": "ON",
+		"SoftwareTokenMfaConfiguration": {"Enabled": true}
+	}`, poolID))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// A follow-up call that omits both fields (as terraform-provider-aws does on a
+	// no-op reconcile apply) must not reset either stored value.
+	w = doOp(t, ro, "SetUserPoolMfaConfig", fmt.Sprintf(`{
+		"UserPoolId": %q,
 		"SmsMfaConfiguration": {"SmsAuthenticationMessage": "code: {####}"}
 	}`, poolID))
 	require.Equal(t, http.StatusOK, w.Code)
 
 	var resp struct {
-		MfaConfiguration string `json:"MfaConfiguration"`
+		MfaConfiguration              string `json:"MfaConfiguration"`
+		SoftwareTokenMfaConfiguration struct {
+			Enabled bool `json:"Enabled"`
+		} `json:"SoftwareTokenMfaConfiguration"`
 	}
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
 	assert.Equal(
 		t,
-		"OFF",
+		"ON",
 		resp.MfaConfiguration,
 		"unset MfaConfiguration must not overwrite the stored value",
+	)
+	assert.True(
+		t,
+		resp.SoftwareTokenMfaConfiguration.Enabled,
+		"unset SoftwareTokenMfaConfiguration must not overwrite the stored value",
 	)
 }
 

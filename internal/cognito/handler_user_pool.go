@@ -376,7 +376,13 @@ func (ro *Router) handleDescribeUserPool(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"UserPool": meta})
+	// UserPoolType (real AWS's DescribeUserPool response shape) has no
+	// SoftwareTokenMfaConfiguration field — only GetUserPoolMfaConfig/SetUserPoolMfaConfig
+	// expose it (#555) — so clear it here rather than leak kumolo's internal persistence
+	// field into a response shape AWS never puts it in.
+	descResp := *meta
+	descResp.SoftwareTokenMfaConfigEnabled = false
+	writeJSON(w, http.StatusOK, map[string]any{"UserPool": &descResp})
 }
 
 func (ro *Router) handleUpdateUserPool(w http.ResponseWriter, body []byte) {
@@ -532,17 +538,22 @@ func (ro *Router) handleGetUserPoolMfaConfig(w http.ResponseWriter, body []byte)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"MfaConfiguration":              meta.MfaConfiguration,
-		"SoftwareTokenMfaConfiguration": map[string]any{"Enabled": false},
+		"MfaConfiguration": meta.MfaConfiguration,
+		"SoftwareTokenMfaConfiguration": map[string]any{
+			"Enabled": meta.SoftwareTokenMfaConfigEnabled,
+		},
 	})
 }
 
 func (ro *Router) handleSetUserPoolMfaConfig(w http.ResponseWriter, body []byte) {
 	var req struct {
-		UserPoolId       string `json:"UserPoolId"`
-		MfaConfiguration string `json:"MfaConfiguration"`
-		// SoftwareTokenMfaConfiguration, SmsMfaConfiguration, EmailMfaConfiguration, and
-		// WebAuthnConfiguration are accepted by real AWS but not persisted by kumolo — see
+		UserPoolId                    string `json:"UserPoolId"`
+		MfaConfiguration              string `json:"MfaConfiguration"`
+		SoftwareTokenMfaConfiguration *struct {
+			Enabled bool `json:"Enabled"`
+		} `json:"SoftwareTokenMfaConfiguration"`
+		// SmsMfaConfiguration, EmailMfaConfiguration, and WebAuthnConfiguration are accepted
+		// by real AWS but not persisted by kumolo — see
 		// docs/aws-spec/cognito/set_user_pool_mfa_config.md.
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
@@ -565,11 +576,16 @@ func (ro *Router) handleSetUserPoolMfaConfig(w http.ResponseWriter, body []byte)
 	}
 
 	var mfaConfiguration string
+	var softwareTokenEnabled bool
 	err := ro.storage.UpdateUserPool(req.UserPoolId, func(meta *UserPoolMetadata) error {
 		if req.MfaConfiguration != "" {
 			meta.MfaConfiguration = req.MfaConfiguration
 		}
+		if req.SoftwareTokenMfaConfiguration != nil {
+			meta.SoftwareTokenMfaConfigEnabled = req.SoftwareTokenMfaConfiguration.Enabled
+		}
 		mfaConfiguration = meta.MfaConfiguration
+		softwareTokenEnabled = meta.SoftwareTokenMfaConfigEnabled
 		return nil
 	})
 	if err != nil {
@@ -593,7 +609,7 @@ func (ro *Router) handleSetUserPoolMfaConfig(w http.ResponseWriter, body []byte)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"MfaConfiguration":              mfaConfiguration,
-		"SoftwareTokenMfaConfiguration": map[string]any{"Enabled": false},
+		"SoftwareTokenMfaConfiguration": map[string]any{"Enabled": softwareTokenEnabled},
 	})
 }
 
