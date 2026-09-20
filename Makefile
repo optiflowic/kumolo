@@ -56,7 +56,15 @@ e2e:
 
 # e2e-terraform applies three times: initial create, then a toggle of
 # admin_user_enabled/admin_given_name to exercise AdminUpdateUserAttributes/
-# AdminEnableUser/AdminDisableUser, then a revert to defaults before destroy.
+# AdminEnableUser/AdminDisableUser, then a revert to defaults before destroy. The final
+# targeted `terraform plan -detailed-exitcode` is a regression guard for #555: it asserts a
+# clean re-apply of aws_cognito_user_pool.mfa_required (which declares
+# software_token_mfa_configuration) produces zero diff, which is exactly what the original
+# #555 bug (SetUserPoolMfaConfig always reporting Enabled: false) would violate. Scoped with
+# -target rather than a full-project plan: aws_cognito_user_pool.main/region_test don't
+# declare that block at all, and whether kumolo should omit SoftwareTokenMfaConfiguration
+# entirely for a pool that's never called SetUserPoolMfaConfig (rather than always reporting
+# Enabled: false) is a separate, unconfirmed-against-real-AWS question tracked outside #555.
 e2e-terraform:
 	./e2e/terraform/cleanup.sh
 	cd e2e/terraform && \
@@ -65,6 +73,14 @@ e2e-terraform:
 	  terraform apply -auto-approve && \
 	  terraform apply -auto-approve -var="admin_user_enabled=false" -var="admin_given_name=Updated" && \
 	  terraform apply -auto-approve && \
+	  ( terraform plan -input=false -detailed-exitcode -no-color \
+	      -target=aws_cognito_user_pool.mfa_required \
+	      -target=aws_cognito_user_pool_client.mfa_required; code=$$?; \
+	    case $$code in \
+	      0) exit 0 ;; \
+	      2) echo "ERROR: terraform plan reported drift on aws_cognito_user_pool.mfa_required after a clean re-apply (regression guard for #555)"; exit 1 ;; \
+	      *) exit 1 ;; \
+	    esac ) && \
 	  terraform destroy -auto-approve
 
 verify:

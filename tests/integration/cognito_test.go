@@ -298,6 +298,54 @@ func TestCognitoIntegration_UserPool(t *testing.T) {
 		assert.Equal(t, types.UserPoolMfaTypeOptional, updated.MfaConfiguration)
 	})
 
+	// TestCognitoIntegration_UserPool/SetUserPoolMfaConfig guards #555: persisting
+	// SoftwareTokenMfaConfiguration.Enabled instead of the prior hardcoded false, and
+	// resetting it (not preserving it) when a later call omits the field — AWS's
+	// full-replace semantics, verified against aws/aws-sdk-js#4186.
+	t.Run("SetUserPoolMfaConfig", func(t *testing.T) {
+		created, err := c.CreateUserPool(ctx, &awscognito.CreateUserPoolInput{
+			PoolName: aws.String("set-mfa-config-pool"),
+		})
+		require.NoError(t, err)
+		poolID := aws.ToString(created.UserPool.Id)
+
+		setOut, err := c.SetUserPoolMfaConfig(ctx, &awscognito.SetUserPoolMfaConfigInput{
+			UserPoolId:       aws.String(poolID),
+			MfaConfiguration: types.UserPoolMfaTypeOptional,
+			SoftwareTokenMfaConfiguration: &types.SoftwareTokenMfaConfigType{
+				Enabled: true,
+			},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, types.UserPoolMfaTypeOptional, setOut.MfaConfiguration)
+		require.NotNil(t, setOut.SoftwareTokenMfaConfiguration)
+		assert.True(t, setOut.SoftwareTokenMfaConfiguration.Enabled)
+
+		// The change must persist for subsequent reads, and must not leak into
+		// DescribeUserPool (real AWS's UserPoolType has no such field).
+		getOut, err := c.GetUserPoolMfaConfig(ctx, &awscognito.GetUserPoolMfaConfigInput{
+			UserPoolId: aws.String(poolID),
+		})
+		require.NoError(t, err)
+		require.NotNil(t, getOut.SoftwareTokenMfaConfiguration)
+		assert.True(t, getOut.SoftwareTokenMfaConfiguration.Enabled)
+
+		// A follow-up call that omits SoftwareTokenMfaConfiguration resets it to
+		// disabled — it does not preserve the prior "Enabled: true".
+		_, err = c.SetUserPoolMfaConfig(ctx, &awscognito.SetUserPoolMfaConfigInput{
+			UserPoolId:       aws.String(poolID),
+			MfaConfiguration: types.UserPoolMfaTypeOptional,
+		})
+		require.NoError(t, err)
+
+		afterReset, err := c.GetUserPoolMfaConfig(ctx, &awscognito.GetUserPoolMfaConfigInput{
+			UserPoolId: aws.String(poolID),
+		})
+		require.NoError(t, err)
+		require.NotNil(t, afterReset.SoftwareTokenMfaConfiguration)
+		assert.False(t, afterReset.SoftwareTokenMfaConfiguration.Enabled)
+	})
+
 	t.Run("ListUserPools", func(t *testing.T) {
 		for _, name := range []string{"list-pool-a", "list-pool-b", "list-pool-c"} {
 			_, err := c.CreateUserPool(ctx, &awscognito.CreateUserPoolInput{
