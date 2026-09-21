@@ -282,8 +282,11 @@ func TestCognitoIntegration_UserPool(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, out)
 		assert.Equal(t, types.UserPoolMfaTypeOff, out.MfaConfiguration)
-		require.NotNil(t, out.SoftwareTokenMfaConfiguration)
-		assert.False(t, out.SoftwareTokenMfaConfiguration.Enabled)
+		// A pool that's never called SetUserPoolMfaConfig gets SoftwareTokenMfaConfiguration
+		// omitted entirely (a nil pointer), not {Enabled: false} — matching real AWS's
+		// treatment of this field the same way it omits Sms/Email/WebAuthnConfiguration for
+		// an unconfigured factor.
+		assert.Nil(t, out.SoftwareTokenMfaConfiguration)
 
 		_, err = c.UpdateUserPool(ctx, &awscognito.UpdateUserPoolInput{
 			UserPoolId:       aws.String(poolID),
@@ -300,8 +303,8 @@ func TestCognitoIntegration_UserPool(t *testing.T) {
 
 	// TestCognitoIntegration_UserPool/SetUserPoolMfaConfig guards #555: persisting
 	// SoftwareTokenMfaConfiguration.Enabled instead of the prior hardcoded false, and
-	// resetting it (not preserving it) when a later call omits the field — AWS's
-	// full-replace semantics, verified against aws/aws-sdk-js#4186.
+	// resetting it to unconfigured (nil, not {Enabled: false}) when a later call omits the
+	// field — AWS's full-replace semantics, verified against aws/aws-sdk-js#4186.
 	t.Run("SetUserPoolMfaConfig", func(t *testing.T) {
 		created, err := c.CreateUserPool(ctx, &awscognito.CreateUserPoolInput{
 			PoolName: aws.String("set-mfa-config-pool"),
@@ -331,7 +334,8 @@ func TestCognitoIntegration_UserPool(t *testing.T) {
 		assert.True(t, getOut.SoftwareTokenMfaConfiguration.Enabled)
 
 		// A follow-up call that omits SoftwareTokenMfaConfiguration resets it to
-		// disabled — it does not preserve the prior "Enabled: true".
+		// unconfigured — it does not preserve the prior "Enabled: true", and the response
+		// omits the field entirely rather than reporting {Enabled: false}.
 		_, err = c.SetUserPoolMfaConfig(ctx, &awscognito.SetUserPoolMfaConfigInput{
 			UserPoolId:       aws.String(poolID),
 			MfaConfiguration: types.UserPoolMfaTypeOptional,
@@ -342,8 +346,7 @@ func TestCognitoIntegration_UserPool(t *testing.T) {
 			UserPoolId: aws.String(poolID),
 		})
 		require.NoError(t, err)
-		require.NotNil(t, afterReset.SoftwareTokenMfaConfiguration)
-		assert.False(t, afterReset.SoftwareTokenMfaConfiguration.Enabled)
+		assert.Nil(t, afterReset.SoftwareTokenMfaConfiguration)
 	})
 
 	t.Run("ListUserPools", func(t *testing.T) {

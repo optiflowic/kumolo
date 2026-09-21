@@ -381,7 +381,7 @@ func (ro *Router) handleDescribeUserPool(w http.ResponseWriter, body []byte) {
 	// expose it (#555) — so clear it here rather than leak kumolo's internal persistence
 	// field into a response shape AWS never puts it in.
 	descResp := *meta
-	descResp.SoftwareTokenMfaConfigEnabled = false
+	descResp.SoftwareTokenMfaConfigEnabled = nil
 	writeJSON(w, http.StatusOK, map[string]any{"UserPool": &descResp})
 }
 
@@ -537,12 +537,27 @@ func (ro *Router) handleGetUserPoolMfaConfig(w http.ResponseWriter, body []byte)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"MfaConfiguration": meta.MfaConfiguration,
-		"SoftwareTokenMfaConfiguration": map[string]any{
-			"Enabled": meta.SoftwareTokenMfaConfigEnabled,
-		},
-	})
+	writeJSON(
+		w,
+		http.StatusOK,
+		mfaConfigResponse(meta.MfaConfiguration, meta.SoftwareTokenMfaConfigEnabled),
+	)
+}
+
+// mfaConfigResponse builds the shared GetUserPoolMfaConfig/SetUserPoolMfaConfig response
+// body. SoftwareTokenMfaConfiguration is omitted entirely (not included as
+// {"Enabled": false}) when softwareTokenEnabled is nil — real AWS omits it the same way it
+// omits SmsMfaConfiguration/EmailMfaConfiguration/WebAuthnConfiguration for a pool that's
+// never had that factor explicitly configured via SetUserPoolMfaConfig (see the pointer
+// return types on GetUserPoolMfaConfigOutput/SetUserPoolMfaConfigOutput in
+// aws-sdk-go-v2, terraform-provider-aws's nil-guarded flattenSoftwareTokenMFAConfigType,
+// and docs/aws-spec/cognito/set_user_pool_mfa_config.md for the evidence).
+func mfaConfigResponse(mfaConfiguration string, softwareTokenEnabled *bool) map[string]any {
+	resp := map[string]any{"MfaConfiguration": mfaConfiguration}
+	if softwareTokenEnabled != nil {
+		resp["SoftwareTokenMfaConfiguration"] = map[string]any{"Enabled": *softwareTokenEnabled}
+	}
+	return resp
 }
 
 func (ro *Router) handleSetUserPoolMfaConfig(w http.ResponseWriter, body []byte) {
@@ -552,10 +567,12 @@ func (ro *Router) handleSetUserPoolMfaConfig(w http.ResponseWriter, body []byte)
 		// SoftwareTokenMfaConfiguration uses AWS's full-replace semantics, not
 		// MfaConfiguration's omit-to-keep semantics: real AWS resets a factor config that's
 		// absent from the request rather than preserving what was previously stored — see
-		// docs/aws-spec/cognito/set_user_pool_mfa_config.md (#555) for the evidence. A plain
-		// (non-pointer) struct gets this for free: an absent key, an explicit `{}`, and an
-		// explicit `{"Enabled": false}` all decode to the same zero value.
-		SoftwareTokenMfaConfiguration struct {
+		// docs/aws-spec/cognito/set_user_pool_mfa_config.md (#555) for the evidence. A
+		// pointer distinguishes "absent from the request" (nil — resets kumolo's stored
+		// state to unconfigured, the same as a pool that's never called this operation) from
+		// "present with Enabled: false" (non-nil — an explicitly configured, disabled state
+		// that's still echoed back by Get/SetUserPoolMfaConfig, unlike the unconfigured case).
+		SoftwareTokenMfaConfiguration *struct {
 			Enabled bool `json:"Enabled"`
 		} `json:"SoftwareTokenMfaConfiguration"`
 		// SmsMfaConfiguration, EmailMfaConfiguration, and WebAuthnConfiguration are accepted
@@ -582,12 +599,17 @@ func (ro *Router) handleSetUserPoolMfaConfig(w http.ResponseWriter, body []byte)
 	}
 
 	var mfaConfiguration string
-	var softwareTokenEnabled bool
+	var softwareTokenEnabled *bool
 	err := ro.storage.UpdateUserPool(req.UserPoolId, func(meta *UserPoolMetadata) error {
 		if req.MfaConfiguration != "" {
 			meta.MfaConfiguration = req.MfaConfiguration
 		}
-		meta.SoftwareTokenMfaConfigEnabled = req.SoftwareTokenMfaConfiguration.Enabled
+		if req.SoftwareTokenMfaConfiguration != nil {
+			enabled := req.SoftwareTokenMfaConfiguration.Enabled
+			meta.SoftwareTokenMfaConfigEnabled = &enabled
+		} else {
+			meta.SoftwareTokenMfaConfigEnabled = nil
+		}
 		mfaConfiguration = meta.MfaConfiguration
 		softwareTokenEnabled = meta.SoftwareTokenMfaConfigEnabled
 		return nil
@@ -611,10 +633,7 @@ func (ro *Router) handleSetUserPoolMfaConfig(w http.ResponseWriter, body []byte)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"MfaConfiguration":              mfaConfiguration,
-		"SoftwareTokenMfaConfiguration": map[string]any{"Enabled": softwareTokenEnabled},
-	})
+	writeJSON(w, http.StatusOK, mfaConfigResponse(mfaConfiguration, softwareTokenEnabled))
 }
 
 func (ro *Router) handleDeleteUserPool(w http.ResponseWriter, body []byte) {

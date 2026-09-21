@@ -68,11 +68,16 @@ type UserPoolMetadata struct {
 
 	// SoftwareTokenMfaConfigEnabled is the pool-level TOTP MFA admin toggle set via
 	// SetUserPoolMfaConfig and read back by GetUserPoolMfaConfig/SetUserPoolMfaConfig (#555).
+	// nil means "never explicitly configured" — GetUserPoolMfaConfig/SetUserPoolMfaConfig
+	// omit SoftwareTokenMfaConfiguration from their response entirely in that case, matching
+	// real AWS (see mfaConfigResponse in handler_user_pool.go for the evidence); a non-nil
+	// pointer (set or cleared only by an explicit SoftwareTokenMfaConfiguration object in a
+	// SetUserPoolMfaConfig request) is a concrete configured state, including Enabled: false.
 	// It needs a real JSON tag so it round-trips through storage's readJSON/writeJSON, but
 	// real AWS's DescribeUserPool response (UserPoolType) has no SoftwareTokenMfaConfiguration
 	// field — handleDescribeUserPool, which serializes this struct directly, clears it before
 	// writing the response so it doesn't leak into a response shape AWS never produces it in.
-	SoftwareTokenMfaConfigEnabled bool `json:"SoftwareTokenMfaConfigEnabled,omitempty"`
+	SoftwareTokenMfaConfigEnabled *bool `json:"SoftwareTokenMfaConfigEnabled,omitempty"`
 }
 
 func poolARN(poolID string) string {

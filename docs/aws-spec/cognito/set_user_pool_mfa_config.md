@@ -3,7 +3,7 @@
 - URL: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_SetUserPoolMfaConfig.html
 - SDK type: `cognitoidentityprovider.SetUserPoolMfaConfigInput` / `SetUserPoolMfaConfigOutput`
 - X-Amz-Target: `AWSCognitoIdentityProviderService.SetUserPoolMfaConfig`
-- Last verified: 2026-09-20
+- Last verified: 2026-09-21
 
 ## Request
 
@@ -21,7 +21,7 @@
 | Field                        | Type   | Notes                                                  |
 |------------------------------|--------|---------------------------------------------------------|
 | MfaConfiguration             | string | Echoes the stored `UserPoolMetadata.MfaConfiguration`   |
-| SoftwareTokenMfaConfiguration | object | Echoes the stored `UserPoolMetadata.SoftwareTokenMfaConfigEnabled` (#555) |
+| SoftwareTokenMfaConfiguration | object | **Omitted entirely** if never configured; otherwise echoes the stored `UserPoolMetadata.SoftwareTokenMfaConfigEnabled` (#555) |
 
 `SmsMfaConfiguration`, `EmailMfaConfiguration`, `WebAuthnConfiguration` are always omitted from the response, matching `GetUserPoolMfaConfig`.
 
@@ -40,17 +40,34 @@
   (consistent with `UpdateUserPool`'s existing handling of this field). Only updated when the request sends a
   non-empty value — omitting it (e.g. a Terraform reconcile `apply` that only touches
   `software_token_mfa_configuration`) leaves the stored value unchanged.
-- `SoftwareTokenMfaConfiguration.Enabled` is persisted into `UserPoolMetadata.SoftwareTokenMfaConfigEnabled` (#555)
-  and echoed back by this operation and `GetUserPoolMfaConfig`. Unlike `MfaConfiguration`, this uses **full-replace
-  semantics, not omit-to-keep**: a request that omits `SoftwareTokenMfaConfiguration` resets it to `false`, the
-  same as an explicit `{"Enabled": false}` — it does not preserve whatever was stored before. Evidence:
-  [aws/aws-sdk-js#4186](https://github.com/aws/aws-sdk-js/issues/4186) — a `SetUserPoolMfaConfig` call with only
-  `MfaConfiguration` set, omitting an already-configured `SmsMfaConfiguration`, failed with `InvalidParameterException:
-  can't disable all MFAs with a required or optional configuration`, which only makes sense if the omitted factor
-  was treated as cleared rather than kept. kumolo does not replicate that specific validation (rejecting
-  `MfaConfiguration: ON`/`OPTIONAL` when no factor ends up enabled) — see the enforcement note below for why. This
-  field is **not** part of `DescribeUserPool`'s response (`UserPoolType` has no such field on real AWS either) —
-  `handleDescribeUserPool` clears it before serializing.
+- `SoftwareTokenMfaConfiguration.Enabled` is persisted into `UserPoolMetadata.SoftwareTokenMfaConfigEnabled`
+  (`*bool`, #555) and echoed back by this operation and `GetUserPoolMfaConfig`. Two combined behaviors, both
+  verified against real-AWS evidence rather than assumed:
+  - **Full-replace semantics, not omit-to-keep** (unlike `MfaConfiguration`): a request that omits
+    `SoftwareTokenMfaConfiguration` resets it — it does not preserve whatever was stored before. Evidence:
+    [aws/aws-sdk-js#4186](https://github.com/aws/aws-sdk-js/issues/4186) — a `SetUserPoolMfaConfig` call with only
+    `MfaConfiguration` set, omitting an already-configured `SmsMfaConfiguration`, failed with
+    `InvalidParameterException: can't disable all MFAs with a required or optional configuration`, which only
+    makes sense if the omitted factor was treated as cleared rather than kept.
+  - **The reset target is "unconfigured" (nil), not "configured and disabled" (`{"Enabled": false}`)** — the same
+    state as a pool that's never called this operation at all, and the field is **omitted from the response
+    entirely** in that state (not sent as `{"Enabled": false}`), matching how `SmsMfaConfiguration`/
+    `EmailMfaConfiguration`/`WebAuthnConfiguration` are already documented as "omitted if not configured". An
+    explicit `{"Enabled": false}` in the request is still a concrete configured state and *is* echoed back.
+    Evidence: `aws-sdk-go-v2`'s `GetUserPoolMfaConfigOutput`/`SetUserPoolMfaConfigOutput` type
+    `SoftwareTokenMfaConfiguration` as `*types.SoftwareTokenMfaConfigType` — a pointer, the same pattern used for
+    the already-omitted sibling fields, not a plain struct — and `terraform-provider-aws`'s
+    `flattenSoftwareTokenMFAConfigType` explicitly nil-guards it (`if apiObject == nil { return nil }`) before
+    writing Terraform state. Reproduced locally: before this fix, a fresh `aws_cognito_user_pool` with no
+    `software_token_mfa_configuration` block showed `enabled = false -> null` drift on every `terraform plan`
+    against kumolo (kumolo always returned a concrete `Enabled: false`); confirmed gone after this fix
+    (`make e2e-terraform`'s full, untargeted `terraform plan -detailed-exitcode` shows zero Cognito-related
+    changes).
+  - kumolo does not replicate the specific validation `SetUserPoolMfaConfig` rejects with in #4186 above
+    (`MfaConfiguration: ON`/`OPTIONAL` with no factor enabled) — see the enforcement note below for why.
+  - This field is **not** part of `DescribeUserPool`'s response (`UserPoolType` has no such field on real AWS
+    either) — `handleDescribeUserPool` clears the pointer to `nil` before serializing, which `omitempty` then
+    drops from the JSON.
 - Whether `MfaConfiguration` itself resets to `OFF` when omitted (matching `SoftwareTokenMfaConfiguration`'s
   behavior) rather than kumolo's current omit-to-keep handling is **unconfirmed** — the aws-sdk-js#4186 evidence
   only covers the factor sub-objects, not this top-level field, and no primary source was found either way.

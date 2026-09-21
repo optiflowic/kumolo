@@ -838,15 +838,19 @@ func TestGetUserPoolMfaConfig_Success(t *testing.T) {
 	w := doOp(t, ro, "GetUserPoolMfaConfig", fmt.Sprintf(`{"UserPoolId":%q}`, poolID))
 	require.Equal(t, http.StatusOK, w.Code)
 
-	var resp struct {
-		MfaConfiguration              string `json:"MfaConfiguration"`
-		SoftwareTokenMfaConfiguration struct {
-			Enabled bool `json:"Enabled"`
-		} `json:"SoftwareTokenMfaConfiguration"`
-	}
+	var resp map[string]any
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
-	assert.Equal(t, "OFF", resp.MfaConfiguration)
-	assert.False(t, resp.SoftwareTokenMfaConfiguration.Enabled)
+	assert.Equal(t, "OFF", resp["MfaConfiguration"])
+	// A pool that has never called SetUserPoolMfaConfig gets SoftwareTokenMfaConfiguration
+	// omitted from the response entirely — not {"Enabled": false} — matching real AWS's
+	// treatment of this field the same way it omits Sms/Email/WebAuthnConfiguration for an
+	// unconfigured factor. See mfaConfigResponse (handler_user_pool.go) for the evidence.
+	_, present := resp["SoftwareTokenMfaConfiguration"]
+	assert.False(
+		t,
+		present,
+		"SoftwareTokenMfaConfiguration must be omitted for a never-configured pool",
+	)
 }
 
 func TestGetUserPoolMfaConfig_Errors(t *testing.T) {
@@ -963,13 +967,15 @@ func TestSetUserPoolMfaConfig_DisablesSoftwareTokenMfaConfig(t *testing.T) {
 	}`, poolID))
 	require.Equal(t, http.StatusOK, w.Code)
 
-	var resp struct {
-		SoftwareTokenMfaConfiguration struct {
-			Enabled bool `json:"Enabled"`
-		} `json:"SoftwareTokenMfaConfiguration"`
-	}
+	var resp map[string]any
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
-	assert.False(t, resp.SoftwareTokenMfaConfiguration.Enabled)
+	// An explicit {"Enabled": false} is a concrete configured state, distinct from
+	// omitting SoftwareTokenMfaConfiguration entirely (see
+	// TestSetUserPoolMfaConfig_OmittedSoftwareTokenMfaConfigurationResetsToUnconfigured) — the
+	// key must stay present here.
+	stc, present := resp["SoftwareTokenMfaConfiguration"].(map[string]any)
+	require.True(t, present)
+	assert.Equal(t, false, stc["Enabled"])
 }
 
 func TestSetUserPoolMfaConfig_NoMfaConfigurationKeepsExisting(t *testing.T) {
@@ -1014,7 +1020,23 @@ func TestSetUserPoolMfaConfig_NoMfaConfigurationKeepsExisting(t *testing.T) {
 // https://github.com/aws/aws-sdk-js/issues/4186 (a SetUserPoolMfaConfig call with
 // MfaConfiguration only, omitting an already-configured SmsMfaConfiguration, failed with
 // "can't disable all MFAs" — proving the omitted factor was treated as cleared, not kept).
-func TestSetUserPoolMfaConfig_OmittedSoftwareTokenMfaConfigurationResetsToDisabled(t *testing.T) {
+// TestSetUserPoolMfaConfig_OmittedSoftwareTokenMfaConfigurationResetsToUnconfigured guards
+// two related, evidence-backed deviations from kumolo's original #555 fix:
+//  1. Full-replace, not merge, semantics: a request that omits SoftwareTokenMfaConfiguration
+//     resets it rather than preserving what was previously stored. Evidence:
+//     https://github.com/aws/aws-sdk-js/issues/4186 (a SetUserPoolMfaConfig call with
+//     MfaConfiguration only, omitting an already-configured SmsMfaConfiguration, failed with
+//     "can't disable all MFAs" — proving the omitted factor was treated as cleared, not kept).
+//  2. The reset target is "unconfigured" (the key omitted from the response entirely), not
+//     "configured and disabled" ({"Enabled": false}) — the same as a pool that's never called
+//     SetUserPoolMfaConfig at all. Evidence: aws-sdk-go-v2 types SoftwareTokenMfaConfiguration
+//     as a pointer on both Get/SetUserPoolMfaConfigOutput (the same pattern as the
+//     documented-omitted Sms/Email/WebAuthnConfiguration fields), and
+//     terraform-provider-aws's flattenSoftwareTokenMFAConfigType nil-guards it before writing
+//     Terraform state.
+func TestSetUserPoolMfaConfig_OmittedSoftwareTokenMfaConfigurationResetsToUnconfigured(
+	t *testing.T,
+) {
 	ro := newTestRouter(t)
 	poolID := createPool(t, ro, "mfa-pool-reset-on-omit")
 
@@ -1024,35 +1046,28 @@ func TestSetUserPoolMfaConfig_OmittedSoftwareTokenMfaConfigurationResetsToDisabl
 	}`, poolID))
 	require.Equal(t, http.StatusOK, w.Code)
 
-	// This call omits SoftwareTokenMfaConfiguration entirely — real AWS resets it to
-	// disabled rather than preserving the prior "Enabled: true".
+	// This call omits SoftwareTokenMfaConfiguration entirely.
 	w = doOp(t, ro, "SetUserPoolMfaConfig", fmt.Sprintf(`{
 		"UserPoolId": %q,
 		"MfaConfiguration": "OFF"
 	}`, poolID))
 	require.Equal(t, http.StatusOK, w.Code)
 
-	var resp struct {
-		SoftwareTokenMfaConfiguration struct {
-			Enabled bool `json:"Enabled"`
-		} `json:"SoftwareTokenMfaConfiguration"`
-	}
+	var resp map[string]any
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	_, present := resp["SoftwareTokenMfaConfiguration"]
 	assert.False(
 		t,
-		resp.SoftwareTokenMfaConfiguration.Enabled,
-		"omitting SoftwareTokenMfaConfiguration must reset it, matching AWS's full-replace semantics",
+		present,
+		"omitting SoftwareTokenMfaConfiguration must reset it to unconfigured (key omitted), not {Enabled: false}",
 	)
 
 	getW := doOp(t, ro, "GetUserPoolMfaConfig", fmt.Sprintf(`{"UserPoolId":%q}`, poolID))
 	require.Equal(t, http.StatusOK, getW.Code)
-	var getResp struct {
-		SoftwareTokenMfaConfiguration struct {
-			Enabled bool `json:"Enabled"`
-		} `json:"SoftwareTokenMfaConfiguration"`
-	}
+	var getResp map[string]any
 	require.NoError(t, json.NewDecoder(getW.Body).Decode(&getResp))
-	assert.False(t, getResp.SoftwareTokenMfaConfiguration.Enabled)
+	_, getPresent := getResp["SoftwareTokenMfaConfiguration"]
+	assert.False(t, getPresent)
 }
 
 func TestSetUserPoolMfaConfig_Errors(t *testing.T) {

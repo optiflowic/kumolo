@@ -112,9 +112,19 @@ run "UpdateUserPool" \
 
 # ---------------------------------------------------------------------------
 # SetUserPoolMfaConfig / GetUserPoolMfaConfig (#555): SoftwareTokenMfaConfiguration.Enabled
-# must persist and round-trip, and reset (not preserve) when a later call omits it — AWS's
-# full-replace semantics, verified against aws/aws-sdk-js#4186.
+# must persist and round-trip, and reset to unconfigured — the key omitted from the
+# response entirely, not {Enabled: false} — when a later call omits it. Full-replace
+# semantics verified against aws/aws-sdk-js#4186; the omitted-when-unconfigured shape
+# verified against aws-sdk-go-v2's pointer-typed SoftwareTokenMfaConfiguration field and
+# terraform-provider-aws's nil-guarded flattenSoftwareTokenMFAConfigType.
 # ---------------------------------------------------------------------------
+MFA_CONFIG_FRESH_JSON=$($AWS get-user-pool-mfa-config --user-pool-id "$POOL_ID" 2>&1)
+if echo "$MFA_CONFIG_FRESH_JSON" | jq -e '(has("SoftwareTokenMfaConfiguration") | not)' >/dev/null 2>&1; then
+  ok "GetUserPoolMfaConfig — SoftwareTokenMfaConfiguration omitted for a pool that's never called SetUserPoolMfaConfig"
+else
+  fail "GetUserPoolMfaConfig — expected SoftwareTokenMfaConfiguration omitted, got: $MFA_CONFIG_FRESH_JSON"
+fi
+
 run "SetUserPoolMfaConfig (MfaConfiguration=OPTIONAL, SoftwareTokenMfaConfiguration Enabled=true)" \
   $AWS set-user-pool-mfa-config \
     --user-pool-id "$POOL_ID" \
@@ -136,10 +146,10 @@ run "SetUserPoolMfaConfig (SoftwareTokenMfaConfiguration omitted)" \
     --mfa-configuration "OPTIONAL"
 
 MFA_CONFIG_RESET_JSON=$($AWS get-user-pool-mfa-config --user-pool-id "$POOL_ID" 2>&1)
-if echo "$MFA_CONFIG_RESET_JSON" | jq -e '.SoftwareTokenMfaConfiguration.Enabled == false' >/dev/null 2>&1; then
-  ok "GetUserPoolMfaConfig — SoftwareTokenMfaConfiguration.Enabled reset after an omitted follow-up call"
+if echo "$MFA_CONFIG_RESET_JSON" | jq -e '(has("SoftwareTokenMfaConfiguration") | not)' >/dev/null 2>&1; then
+  ok "GetUserPoolMfaConfig — SoftwareTokenMfaConfiguration reset to unconfigured (omitted) after an omitted follow-up call"
 else
-  fail "GetUserPoolMfaConfig — expected SoftwareTokenMfaConfiguration.Enabled=false after omitting it, got: $MFA_CONFIG_RESET_JSON"
+  fail "GetUserPoolMfaConfig — expected SoftwareTokenMfaConfiguration omitted after omitting it, got: $MFA_CONFIG_RESET_JSON"
 fi
 
 run "UpdateUserPool (restore MfaConfiguration=OFF)" \
