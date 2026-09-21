@@ -1013,13 +1013,6 @@ func TestSetUserPoolMfaConfig_NoMfaConfigurationKeepsExisting(t *testing.T) {
 	)
 }
 
-// TestSetUserPoolMfaConfig_OmittedSoftwareTokenMfaConfigurationResetsToDisabled guards
-// against the deviation caught in review for #555: unlike MfaConfiguration, real AWS uses
-// full-replace (not merge) semantics for SoftwareTokenMfaConfiguration — a request that
-// omits it disables the factor even if it was previously enabled. Evidence:
-// https://github.com/aws/aws-sdk-js/issues/4186 (a SetUserPoolMfaConfig call with
-// MfaConfiguration only, omitting an already-configured SmsMfaConfiguration, failed with
-// "can't disable all MFAs" — proving the omitted factor was treated as cleared, not kept).
 // TestSetUserPoolMfaConfig_OmittedSoftwareTokenMfaConfigurationResetsToUnconfigured guards
 // two related, evidence-backed deviations from kumolo's original #555 fix:
 //  1. Full-replace, not merge, semantics: a request that omits SoftwareTokenMfaConfiguration
