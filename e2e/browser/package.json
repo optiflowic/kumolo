@@ -1,0 +1,15 @@
+{
+  "name": "kumolo-e2e-browser",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "amazon-cognito-identity-js": "^6.3.20",
+    "buffer": "^6.0.3",
+    "esbuild": "^0.28.2"
+  }
+}

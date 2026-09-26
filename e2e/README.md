@@ -34,6 +34,7 @@ catch most regressions. E2E tests add a real-tool smoke test on top of that.
 |-----------|-------------|
 | [`terraform/`](terraform/) | Terraform configurations for S3, DynamoDB, and Cognito |
 | [`aws-cli/`](aws-cli/) | AWS CLI verification scripts |
+| [`browser/`](browser/) | Playwright browser test for Cognito CORS (requires Node.js) |
 
 Run all CLI verifications at once:
 
@@ -46,6 +47,17 @@ Run Terraform verification:
 ```sh
 make e2e-terraform
 ```
+
+Run the browser CORS verification (requires Node.js; not included in `make e2e`):
+
+```sh
+make e2e-browser
+```
+
+`aws-cli/cors.sh` inspects CORS response headers with curl, which never enforces
+CORS the way a browser does. `browser/` drives a real Cognito JS SDK
+(`amazon-cognito-identity-js`) call from an actual browser across two origins,
+confirming the SDK call itself succeeds — not just that the headers look right.
 
 ## Other IaC Tools
 

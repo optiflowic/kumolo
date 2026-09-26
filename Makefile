@@ -1,4 +1,4 @@
-.PHONY: all install build run fmt fmt-check vet lint test cover uncovered integration e2e e2e-terraform verify tidy clean
+.PHONY: all install build run fmt fmt-check vet lint test cover uncovered integration e2e e2e-browser e2e-terraform verify tidy clean
 
 BUILD_DIR = build
 BINARY_NAME = $(BUILD_DIR)/kumolo
@@ -53,6 +53,13 @@ e2e:
 	./e2e/aws-cli/sts.sh
 	./e2e/aws-cli/cognito.sh
 	./e2e/aws-cli/cors.sh
+
+# e2e-browser exercises the same Cognito CORS default as e2e/aws-cli/cors.sh,
+# but through a real Cognito JS SDK call in a real browser (Playwright)
+# instead of curl, so CORS is genuinely enforced rather than inspected via
+# headers. Not folded into `e2e` above since it requires Node.js.
+e2e-browser:
+	./e2e/browser/run.sh
 
 # e2e-terraform applies three times: initial create, then a toggle of
 # admin_user_enabled/admin_given_name to exercise AdminUpdateUserAttributes/
