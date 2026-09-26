@@ -98,11 +98,16 @@ resource "aws_cognito_user_in_group" "admin_in_admins" {
 resource "aws_cognito_user_pool" "mfa_required" {
   name = "kumolo-tf-mfa-required-pool"
 
-  # software_token_mfa_configuration is intentionally omitted: kumolo does not
-  # model it (CreateUserPool/DescribeUserPool always report Enabled: false),
-  # so setting it here would show as perpetual apply drift. Forced MFA_SETUP
-  # in kumolo depends only on mfa_configuration = "ON" (see handler_auth.go).
   mfa_configuration = "ON"
+
+  # Regression guard for #555: SetUserPoolMfaConfig used to hardcode
+  # SoftwareTokenMfaConfiguration.Enabled=false in its response regardless of this
+  # block, so terraform-provider-aws's reconcile-on-every-apply call would show a
+  # perpetual diff here. Forced MFA_SETUP itself still depends only on
+  # mfa_configuration = "ON" (see handler_auth.go), independent of this block.
+  software_token_mfa_configuration {
+    enabled = true
+  }
 }
 
 resource "aws_cognito_user_pool_client" "mfa_required" {
