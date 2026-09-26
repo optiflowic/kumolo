@@ -1,12 +1,6 @@
 #!/usr/bin/env bash
-# Runs a Playwright-based e2e test that exercises kumolo's Cognito CORS
-# default (#553) through a real Cognito JS SDK (amazon-cognito-identity-js)
-# call from a browser, across two distinct origins — the way a real SPA
-# would talk to Cognito. The curl-based test (../aws-cli/cors.sh) only
-# inspects response headers; a real browser additionally enforces CORS at
-# the network layer, so this is the only test that can confirm the SDK call
-# actually completes (or is genuinely blocked). Requires Node.js; skips
-# gracefully if it or the kumolo binary are unavailable.
+# Drives Cognito's CORS default (#553) through a real browser SDK call,
+# unlike aws-cli/cors.sh which only inspects headers via curl.
 set -euo pipefail
 
 KUMOLO_BIN="${KUMOLO_BIN:-./build/kumolo}"

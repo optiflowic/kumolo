@@ -1,6 +1,3 @@
-// Minimal static file server for harness/, used as Playwright's webServer.
-// A dependency-free http.createServer is enough for two files (index.html,
-// dist/bundle.js) and keeps this tool's footprint small.
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";

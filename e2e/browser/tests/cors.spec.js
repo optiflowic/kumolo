@@ -6,10 +6,7 @@ const POOL_ID = process.env.KUMOLO_POOL_ID;
 const CLIENT_ID = process.env.KUMOLO_CLIENT_ID;
 const LOG_FILE = process.env.KUMOLO_LOG_FILE;
 
-// kumolo logs the SignUp confirmation code at INFO level ("SignUp
-// confirmation code ... code=XXXXXX") since there is no real email/SMS
-// provider to deliver it to. run.sh redirects the instance's stdout/stderr
-// to LOG_FILE so it can be read back here.
+// kumolo has no email/SMS provider; it logs the confirmation code instead.
 function readConfirmationCode(username) {
   const log = fs.readFileSync(LOG_FILE, "utf8");
   const match = log

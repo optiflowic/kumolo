@@ -1,8 +1,6 @@
 import { defineConfig } from "@playwright/test";
 
-// The harness must be served from a different origin than kumolo itself —
-// same-port would make every request same-origin and CORS would never be
-// exercised. run.sh picks kumolo's port and passes harness port + 1 here.
+// Must differ from kumolo's port, or the CORS this test exists to check for never triggers.
 const harnessPort = Number(process.env.HARNESS_PORT || 4173);
 
 export default defineConfig({
