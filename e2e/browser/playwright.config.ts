@@ -12,7 +12,7 @@ export default defineConfig({
     baseURL: `http://localhost:${harnessPort}`,
   },
   webServer: {
-    command: `node serve-harness.mjs ${harnessPort}`,
+    command: `npx tsx serve-harness.ts ${harnessPort}`,
     port: harnessPort,
     reuseExistingServer: false,
     timeout: 10_000,

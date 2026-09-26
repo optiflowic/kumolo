@@ -7,14 +7,14 @@ const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const root = path.join(__dirname, "harness");
 const port = Number(process.argv[2] || 4173);
 
-const MIME_TYPES = {
+const MIME_TYPES: Record<string, string> = {
   ".html": "text/html",
   ".js": "text/javascript",
 };
 
 http
   .createServer((req, res) => {
-    const reqPath = req.url.split("?")[0];
+    const reqPath = (req.url ?? "/").split("?")[0];
     const filePath = path.join(root, reqPath === "/" ? "/index.html" : reqPath);
     if (!filePath.startsWith(root)) {
       res.writeHead(403);

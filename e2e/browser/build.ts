@@ -3,7 +3,7 @@
 import * as esbuild from "esbuild";
 
 await esbuild.build({
-  entryPoints: ["harness/app.js"],
+  entryPoints: ["harness/app.ts"],
   bundle: true,
   outfile: "harness/dist/bundle.js",
   format: "iife",

@@ -3,13 +3,17 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node build.mjs",
+    "build": "tsx build.ts",
+    "typecheck": "tsc",
     "test": "playwright test"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
+    "@types/node": "^26.6.3",
     "amazon-cognito-identity-js": "^6.3.20",
     "buffer": "^6.0.3",
-    "esbuild": "^0.28.2"
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3"
   }
 }

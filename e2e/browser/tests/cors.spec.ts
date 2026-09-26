@@ -1,13 +1,13 @@
 import { test, expect } from "@playwright/test";
 import fs from "node:fs";
 
-const ENDPOINT = process.env.KUMOLO_ENDPOINT;
-const POOL_ID = process.env.KUMOLO_POOL_ID;
-const CLIENT_ID = process.env.KUMOLO_CLIENT_ID;
-const LOG_FILE = process.env.KUMOLO_LOG_FILE;
+const ENDPOINT = process.env.KUMOLO_ENDPOINT!;
+const POOL_ID = process.env.KUMOLO_POOL_ID!;
+const CLIENT_ID = process.env.KUMOLO_CLIENT_ID!;
+const LOG_FILE = process.env.KUMOLO_LOG_FILE!;
 
 // kumolo has no email/SMS provider; it logs the confirmation code instead.
-function readConfirmationCode(username) {
+function readConfirmationCode(username: string): string {
   const log = fs.readFileSync(LOG_FILE, "utf8");
   const match = log
     .split("\n")
