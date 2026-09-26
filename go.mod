@@ -10,7 +10,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.5
 	github.com/aws/aws-sdk-go-v2/service/cognitoidentityprovider v1.74.0
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.69.0
-	github.com/aws/aws-sdk-go-v2/service/dynamodbstreams v1.40.0
+	github.com/aws/aws-sdk-go-v2/service/dynamodbstreams v1.42.0
 	github.com/aws/aws-sdk-go-v2/service/kms v1.61.0
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.107.2
 	github.com/aws/aws-sdk-go-v2/service/sts v1.51.0
