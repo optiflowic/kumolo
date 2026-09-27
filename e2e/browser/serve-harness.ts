@@ -16,7 +16,7 @@ http
   .createServer((req, res) => {
     const reqPath = (req.url ?? "/").split("?")[0];
     const filePath = path.join(root, reqPath === "/" ? "/index.html" : reqPath);
-    if (!filePath.startsWith(root)) {
+    if (filePath !== root && !filePath.startsWith(root + path.sep)) {
       res.writeHead(403);
       res.end("forbidden");
       return;
