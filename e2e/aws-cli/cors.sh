@@ -23,18 +23,23 @@ if [[ ! -x "$KUMOLO_BIN" ]]; then
   exit 0
 fi
 
+# shellcheck source=e2e/lib/kumolo.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/kumolo.sh"
+
 export AWS_ACCESS_KEY_ID=test
 export AWS_SECRET_ACCESS_KEY=test
 export AWS_DEFAULT_REGION=us-east-1
 
-PORT=$(( (RANDOM % 50000) + 10000 ))
+PORT=$(pick_free_port 10000 50000 2)
 ENDPOINT="http://localhost:$PORT"
-DATA_DIR=$(mktemp -d)
+DATA_DIR=""
+LOG_FILE=""
 ORIGIN="http://localhost:5173"
 
 NO_ORIGIN_PORT=$(( PORT + 1 ))
 NO_ORIGIN_ENDPOINT="http://localhost:$NO_ORIGIN_PORT"
-NO_ORIGIN_DATA_DIR=$(mktemp -d)
+NO_ORIGIN_DATA_DIR=""
+NO_ORIGIN_LOG_FILE=""
 
 DDB="aws --endpoint-url $ENDPOINT dynamodb"
 NO_ORIGIN_DDB="aws --endpoint-url $NO_ORIGIN_ENDPOINT dynamodb"
@@ -50,38 +55,29 @@ fail() { echo "  FAIL: $*"; FAIL=$((FAIL + 1)); }
 cleanup() {
   [[ -n "$KUMOLO_PID" ]] && kill "$KUMOLO_PID" 2>/dev/null || true
   [[ -n "$NO_ORIGIN_KUMOLO_PID" ]] && kill "$NO_ORIGIN_KUMOLO_PID" 2>/dev/null || true
-  rm -rf "$DATA_DIR" "$NO_ORIGIN_DATA_DIR"
+  rm -rf "$DATA_DIR" "$NO_ORIGIN_DATA_DIR" "$LOG_FILE" "$NO_ORIGIN_LOG_FILE"
 }
 trap cleanup EXIT
 
-KUMOLO_DATA_DIR="$DATA_DIR" KUMOLO_LOG_LEVEL=error KUMOLO_CORS_ALLOW_ORIGIN="$ORIGIN" \
-  "$KUMOLO_BIN" -port "$PORT" >/dev/null 2>&1 &
-KUMOLO_PID=$!
-n=0
-until $DDB list-tables >/dev/null 2>&1; do
-  sleep 0.25
-  n=$((n + 1))
-  if [[ $n -ge 40 ]]; then
-    echo "  ERROR: kumolo did not start in time (port $PORT)"
-    exit 1
-  fi
-done
+DATA_DIR=$(mktemp -d)
+LOG_FILE=$(mktemp)
+NO_ORIGIN_DATA_DIR=$(mktemp -d)
+NO_ORIGIN_LOG_FILE=$(mktemp)
 
+require_free_port "$PORT"
+KUMOLO_DATA_DIR="$DATA_DIR" KUMOLO_LOG_LEVEL=error KUMOLO_CORS_ALLOW_ORIGIN="$ORIGIN" \
+  "$KUMOLO_BIN" -port "$PORT" >"$LOG_FILE" 2>&1 &
+KUMOLO_PID=$!
+wait_kumolo_ready "$KUMOLO_PID" "$PORT" "$LOG_FILE" $DDB list-tables
+
+require_free_port "$NO_ORIGIN_PORT"
 (
   unset KUMOLO_CORS_ALLOW_ORIGIN
   KUMOLO_DATA_DIR="$NO_ORIGIN_DATA_DIR" KUMOLO_LOG_LEVEL=error \
-    "$KUMOLO_BIN" -port "$NO_ORIGIN_PORT" >/dev/null 2>&1
+    "$KUMOLO_BIN" -port "$NO_ORIGIN_PORT" >"$NO_ORIGIN_LOG_FILE" 2>&1
 ) &
 NO_ORIGIN_KUMOLO_PID=$!
-n=0
-until $NO_ORIGIN_DDB list-tables >/dev/null 2>&1; do
-  sleep 0.25
-  n=$((n + 1))
-  if [[ $n -ge 40 ]]; then
-    echo "  ERROR: kumolo did not start in time (port $NO_ORIGIN_PORT)"
-    exit 1
-  fi
-done
+wait_kumolo_ready "$NO_ORIGIN_KUMOLO_PID" "$NO_ORIGIN_PORT" "$NO_ORIGIN_LOG_FILE" $NO_ORIGIN_DDB list-tables
 
 echo ""
 echo "=== CORS ==="

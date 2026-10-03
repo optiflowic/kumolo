@@ -16,8 +16,10 @@ if ! command -v npm &>/dev/null; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DATA_DIR=$(mktemp -d)
-LOG_FILE=$(mktemp)
+# shellcheck source=e2e/lib/kumolo.sh
+source "$SCRIPT_DIR/../lib/kumolo.sh"
+DATA_DIR=""
+LOG_FILE=""
 KUMOLO_PID=""
 
 cleanup() {
@@ -26,29 +28,25 @@ cleanup() {
 }
 trap cleanup EXIT
 
+DATA_DIR=$(mktemp -d)
+LOG_FILE=$(mktemp)
+
 export AWS_ACCESS_KEY_ID=test
 export AWS_SECRET_ACCESS_KEY=test
 export AWS_DEFAULT_REGION=us-east-1
 
-PORT=$(( (RANDOM % 40000) + 20000 ))
+PORT=$(pick_free_port 20000 40000 2)
 HARNESS_PORT=$((PORT + 1))
 ENDPOINT="http://localhost:$PORT"
 
 echo "=== Cognito CORS (browser) ==="
 
+require_free_port "$PORT"
 KUMOLO_DATA_DIR="$DATA_DIR" KUMOLO_CORS_ALLOW_ORIGIN="http://localhost:$HARNESS_PORT" \
   "$KUMOLO_BIN" -port "$PORT" >"$LOG_FILE" 2>&1 &
 KUMOLO_PID=$!
 
-n=0
-until curl -s -o /dev/null "$ENDPOINT/"; do
-  sleep 0.25
-  n=$((n + 1))
-  if [[ $n -ge 40 ]]; then
-    echo "ERROR: kumolo did not start in time (port $PORT)"
-    exit 1
-  fi
-done
+wait_kumolo_ready "$KUMOLO_PID" "$PORT" "$LOG_FILE" curl -s -o /dev/null "$ENDPOINT/"
 
 POOL_JSON=$(aws --endpoint-url "$ENDPOINT" cognito-idp create-user-pool \
   --pool-name "e2e-browser-cors-pool" \
@@ -74,6 +72,7 @@ if [[ ! -d node_modules ]]; then
 fi
 npm run build
 
+require_free_port "$HARNESS_PORT"
 KUMOLO_ENDPOINT="$ENDPOINT" \
 KUMOLO_POOL_ID="$POOL_ID" \
 KUMOLO_CLIENT_ID="$CLIENT_ID" \
