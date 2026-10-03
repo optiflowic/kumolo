@@ -69,6 +69,7 @@ if [[ ! -d node_modules ]]; then
 fi
 npm run build
 
+require_free_port "$HARNESS_PORT"
 KUMOLO_ENDPOINT="$ENDPOINT" \
 KUMOLO_POOL_ID="$POOL_ID" \
 KUMOLO_CLIENT_ID="$CLIENT_ID" \
