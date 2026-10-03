@@ -24,6 +24,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const uuidPattern = `^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`
+
 // codeCapture intercepts SignUp confirmation codes and attribute-verification
 // codes from slog output. It acts as a nop handler (no log forwarding) to
 // avoid holding its mutex while calling into log.Logger, which would deadlock
@@ -593,7 +595,7 @@ func TestCognitoIntegration_AuthFlows(t *testing.T) {
 			},
 		})
 		require.NoError(t, err)
-		assert.NotEmpty(t, aws.ToString(out.UserSub))
+		assert.Regexp(t, uuidPattern, aws.ToString(out.UserSub))
 		assert.False(t, out.UserConfirmed)
 	})
 
@@ -773,6 +775,9 @@ func TestCognitoIntegration_AdminLifecycle(t *testing.T) {
 		require.NotNil(t, out.User)
 		assert.Equal(t, "no-pass-user", aws.ToString(out.User.Username))
 		assert.Equal(t, types.UserStatusTypeConfirmed, out.User.UserStatus)
+		require.NotEmpty(t, out.User.Attributes)
+		assert.Equal(t, "sub", aws.ToString(out.User.Attributes[0].Name))
+		assert.Regexp(t, uuidPattern, aws.ToString(out.User.Attributes[0].Value))
 	})
 
 	t.Run("AdminCreateUser_WithTemporaryPassword", func(t *testing.T) {

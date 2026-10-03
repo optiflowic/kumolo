@@ -187,8 +187,8 @@ func TestIssueTokens_Success(t *testing.T) {
 	require.NotEmpty(t, access)
 	require.NotEmpty(t, id)
 	require.NotEmpty(t, refresh)
-	require.NotEmpty(t, accessJTI)
-	require.NotEmpty(t, originJTI)
+	assert.Regexp(t, uuidV4Pattern, accessJTI)
+	assert.Regexp(t, uuidV4Pattern, originJTI)
 
 	// Verify access token claims.
 	claims, err := verifyJWT(access, &key.PublicKey)
@@ -204,6 +204,7 @@ func TestIssueTokens_Success(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "id", idClaims["token_use"])
 	assert.Equal(t, "alice@example.com", idClaims["email"])
+	assert.Regexp(t, uuidV4Pattern, idClaims["jti"])
 }
 
 func TestIssueTokens_ReservedClaimsNotOverridden(t *testing.T) {

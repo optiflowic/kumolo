@@ -41,6 +41,7 @@ func TestAdminCreateUser_WithTempPassword(t *testing.T) {
 	assert.True(t, resp.User.Enabled)
 	require.NotEmpty(t, resp.User.Attributes)
 	assert.Equal(t, "sub", resp.User.Attributes[0].Name)
+	assert.Regexp(t, uuidV4Pattern, resp.User.Attributes[0].Value)
 }
 
 func TestAdminCreateUser_NoPassword(t *testing.T) {

@@ -212,20 +212,20 @@ func issueTokens(
 	accessExp := now + accessTokenExpirySeconds
 	idExp := now + idTokenExpirySeconds
 	if originJTI == "" {
-		originJTI, err = generateTokenID()
+		originJTI, err = generateUUID()
 		if err != nil {
 			// untestable: crypto/rand.Read only fails on OS-level entropy source errors
 			return "", "", "", "", "", fmt.Errorf("generate origin_jti: %w", err)
 		}
 	}
 
-	accessJTI, err = generateTokenID()
+	accessJTI, err = generateUUID()
 	if err != nil {
 		// untestable: crypto/rand.Read only fails on OS-level entropy source errors
 		return "", "", "", "", "", fmt.Errorf("generate access jti: %w", err)
 	}
 
-	idJTI, err := generateTokenID()
+	idJTI, err := generateUUID()
 	if err != nil {
 		// untestable: crypto/rand.Read only fails on OS-level entropy source errors
 		return "", "", "", "", "", fmt.Errorf("generate id jti: %w", err)

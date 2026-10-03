@@ -10,6 +10,7 @@ export AWS_DEFAULT_REGION=us-east-1
 AWS="aws --endpoint-url $ENDPOINT cognito-idp"
 PASS=0
 FAIL=0
+UUID_RE='[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
 
 ok()   { echo "  PASS: $*"; PASS=$((PASS + 1)); }
 fail() { echo "  FAIL: $*"; FAIL=$((FAIL + 1)); }
@@ -270,6 +271,11 @@ if echo "$SIGNUP_JSON" | grep -q '"UserSub"'; then
   ok "SignUp"
 else
   fail "SignUp"
+fi
+if echo "$SIGNUP_JSON" | grep -Eq "\"UserSub\": \"$UUID_RE\""; then
+  ok "SignUp (UserSub is a UUID)"
+else
+  fail "SignUp (UserSub is a UUID)"
 fi
 
 # Obtain the confirmation code.
@@ -605,6 +611,11 @@ if echo "$ADMIN_CREATE_JSON" | grep -q '"Username"'; then
   ok "AdminCreateUser (with temporary password)"
 else
   fail "AdminCreateUser (with temporary password)"
+fi
+if echo "$ADMIN_CREATE_JSON" | grep -A1 '"Name": "sub"' | grep -Eq "\"Value\": \"$UUID_RE\""; then
+  ok "AdminCreateUser (sub is a UUID)"
+else
+  fail "AdminCreateUser (sub is a UUID)"
 fi
 
 # AdminGetUser

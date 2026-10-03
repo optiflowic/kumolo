@@ -12,6 +12,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const uuidV4Pattern = `^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`
+
+func TestGenerateUUID(t *testing.T) {
+	first, err := generateUUID()
+	require.NoError(t, err)
+	assert.Regexp(t, uuidV4Pattern, first)
+
+	second, err := generateUUID()
+	require.NoError(t, err)
+	assert.NotEqual(t, first, second)
+}
+
 func makeRT(poolID, token string) *refreshTokenData {
 	return &refreshTokenData{
 		Token: token, PoolID: poolID, ClientID: "client-1",
