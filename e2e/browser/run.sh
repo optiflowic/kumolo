@@ -18,8 +18,8 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=e2e/lib/kumolo.sh
 source "$SCRIPT_DIR/../lib/kumolo.sh"
-DATA_DIR=$(mktemp -d)
-LOG_FILE=$(mktemp)
+DATA_DIR=""
+LOG_FILE=""
 KUMOLO_PID=""
 
 cleanup() {
@@ -27,6 +27,9 @@ cleanup() {
   rm -rf "$DATA_DIR" "$LOG_FILE"
 }
 trap cleanup EXIT
+
+DATA_DIR=$(mktemp -d)
+LOG_FILE=$(mktemp)
 
 export AWS_ACCESS_KEY_ID=test
 export AWS_SECRET_ACCESS_KEY=test

@@ -20,8 +20,8 @@ export AWS_DEFAULT_REGION=us-east-1
 
 PORT=$(pick_free_port 10000 50000)
 ENDPOINT="http://localhost:$PORT"
-DATA_DIR=$(mktemp -d)
-LOG_FILE=$(mktemp)
+DATA_DIR=""
+LOG_FILE=""
 
 DDB="aws --endpoint-url $ENDPOINT dynamodb"
 STREAMS="aws --endpoint-url $ENDPOINT dynamodbstreams"
@@ -38,6 +38,9 @@ cleanup() {
   rm -rf "$DATA_DIR" "$LOG_FILE"
 }
 trap cleanup EXIT
+
+DATA_DIR=$(mktemp -d)
+LOG_FILE=$(mktemp)
 
 start_kumolo() {
   require_free_port "$PORT"

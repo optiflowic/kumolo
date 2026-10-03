@@ -32,14 +32,14 @@ export AWS_DEFAULT_REGION=us-east-1
 
 PORT=$(pick_free_port 10000 50000 2)
 ENDPOINT="http://localhost:$PORT"
-DATA_DIR=$(mktemp -d)
-LOG_FILE=$(mktemp)
+DATA_DIR=""
+LOG_FILE=""
 ORIGIN="http://localhost:5173"
 
 NO_ORIGIN_PORT=$(( PORT + 1 ))
 NO_ORIGIN_ENDPOINT="http://localhost:$NO_ORIGIN_PORT"
-NO_ORIGIN_DATA_DIR=$(mktemp -d)
-NO_ORIGIN_LOG_FILE=$(mktemp)
+NO_ORIGIN_DATA_DIR=""
+NO_ORIGIN_LOG_FILE=""
 
 DDB="aws --endpoint-url $ENDPOINT dynamodb"
 NO_ORIGIN_DDB="aws --endpoint-url $NO_ORIGIN_ENDPOINT dynamodb"
@@ -58,6 +58,11 @@ cleanup() {
   rm -rf "$DATA_DIR" "$NO_ORIGIN_DATA_DIR" "$LOG_FILE" "$NO_ORIGIN_LOG_FILE"
 }
 trap cleanup EXIT
+
+DATA_DIR=$(mktemp -d)
+LOG_FILE=$(mktemp)
+NO_ORIGIN_DATA_DIR=$(mktemp -d)
+NO_ORIGIN_LOG_FILE=$(mktemp)
 
 require_free_port "$PORT"
 KUMOLO_DATA_DIR="$DATA_DIR" KUMOLO_LOG_LEVEL=error KUMOLO_CORS_ALLOW_ORIGIN="$ORIGIN" \
