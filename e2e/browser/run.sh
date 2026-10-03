@@ -41,11 +41,17 @@ KUMOLO_DATA_DIR="$DATA_DIR" KUMOLO_CORS_ALLOW_ORIGIN="http://localhost:$HARNESS_
 KUMOLO_PID=$!
 
 n=0
-until curl -s -o /dev/null "$ENDPOINT/"; do
+until curl -s -o /dev/null "$ENDPOINT/" && kill -0 "$KUMOLO_PID" 2>/dev/null; do
+  if ! kill -0 "$KUMOLO_PID" 2>/dev/null; then
+    echo "ERROR: kumolo exited before becoming ready (port $PORT)"
+    cat "$LOG_FILE"
+    exit 1
+  fi
   sleep 0.25
   n=$((n + 1))
   if [[ $n -ge 40 ]]; then
     echo "ERROR: kumolo did not start in time (port $PORT)"
+    cat "$LOG_FILE"
     exit 1
   fi
 done
