@@ -11,6 +11,9 @@ if [[ ! -x "$KUMOLO_BIN" ]]; then
   exit 0
 fi
 
+# shellcheck source=e2e/lib/kumolo.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/kumolo.sh"
+
 export AWS_ACCESS_KEY_ID=test
 export AWS_SECRET_ACCESS_KEY=test
 export AWS_DEFAULT_REGION=us-east-1
@@ -18,6 +21,7 @@ export AWS_DEFAULT_REGION=us-east-1
 PORT=$(( (RANDOM % 50000) + 10000 ))
 ENDPOINT="http://localhost:$PORT"
 DATA_DIR=$(mktemp -d)
+LOG_FILE=$(mktemp)
 
 DDB="aws --endpoint-url $ENDPOINT dynamodb"
 STREAMS="aws --endpoint-url $ENDPOINT dynamodbstreams"
@@ -31,22 +35,15 @@ fail() { echo "  FAIL: $*"; FAIL=$((FAIL + 1)); }
 
 cleanup() {
   [[ -n "$KUMOLO_PID" ]] && kill "$KUMOLO_PID" 2>/dev/null || true
-  rm -rf "$DATA_DIR"
+  rm -rf "$DATA_DIR" "$LOG_FILE"
 }
 trap cleanup EXIT
 
 start_kumolo() {
-  KUMOLO_DATA_DIR="$DATA_DIR" KUMOLO_LOG_LEVEL=error "$KUMOLO_BIN" -port "$PORT" >/dev/null 2>&1 &
+  require_free_port "$PORT"
+  KUMOLO_DATA_DIR="$DATA_DIR" KUMOLO_LOG_LEVEL=error "$KUMOLO_BIN" -port "$PORT" >"$LOG_FILE" 2>&1 &
   KUMOLO_PID=$!
-  local n=0
-  until $DDB list-tables >/dev/null 2>&1; do
-    sleep 0.25
-    n=$((n + 1))
-    if [[ $n -ge 40 ]]; then
-      echo "  ERROR: kumolo did not start in time (port $PORT)"
-      exit 1
-    fi
-  done
+  wait_kumolo_ready "$KUMOLO_PID" "$PORT" "$LOG_FILE" $DDB list-tables
 }
 
 TABLE="kumolo-e2e-stream-restart"
