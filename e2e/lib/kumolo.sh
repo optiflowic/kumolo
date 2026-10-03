@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Shared helpers for e2e runners that start their own kumolo instance.
 # Source this file; do not execute it.
 
