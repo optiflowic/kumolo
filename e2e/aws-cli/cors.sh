@@ -23,6 +23,9 @@ if [[ ! -x "$KUMOLO_BIN" ]]; then
   exit 0
 fi
 
+# shellcheck source=e2e/lib/kumolo.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/kumolo.sh"
+
 export AWS_ACCESS_KEY_ID=test
 export AWS_SECRET_ACCESS_KEY=test
 export AWS_DEFAULT_REGION=us-east-1
@@ -56,36 +59,20 @@ cleanup() {
 }
 trap cleanup EXIT
 
-wait_ready() {
-  local pid=$1 port=$2 log=$3 ddb=$4 n=0
-  until $ddb list-tables >/dev/null 2>&1 && kill -0 "$pid" 2>/dev/null; do
-    if ! kill -0 "$pid" 2>/dev/null; then
-      echo "  ERROR: kumolo exited before becoming ready (port $port)"
-      cat "$log"
-      exit 1
-    fi
-    sleep 0.25
-    n=$((n + 1))
-    if [[ $n -ge 40 ]]; then
-      echo "  ERROR: kumolo did not start in time (port $port)"
-      cat "$log"
-      exit 1
-    fi
-  done
-}
-
+require_free_port "$PORT"
 KUMOLO_DATA_DIR="$DATA_DIR" KUMOLO_LOG_LEVEL=error KUMOLO_CORS_ALLOW_ORIGIN="$ORIGIN" \
   "$KUMOLO_BIN" -port "$PORT" >"$LOG_FILE" 2>&1 &
 KUMOLO_PID=$!
-wait_ready "$KUMOLO_PID" "$PORT" "$LOG_FILE" "$DDB"
+wait_kumolo_ready "$KUMOLO_PID" "$PORT" "$LOG_FILE" $DDB list-tables
 
+require_free_port "$NO_ORIGIN_PORT"
 (
   unset KUMOLO_CORS_ALLOW_ORIGIN
   KUMOLO_DATA_DIR="$NO_ORIGIN_DATA_DIR" KUMOLO_LOG_LEVEL=error \
     "$KUMOLO_BIN" -port "$NO_ORIGIN_PORT" >"$NO_ORIGIN_LOG_FILE" 2>&1
 ) &
 NO_ORIGIN_KUMOLO_PID=$!
-wait_ready "$NO_ORIGIN_KUMOLO_PID" "$NO_ORIGIN_PORT" "$NO_ORIGIN_LOG_FILE" "$NO_ORIGIN_DDB"
+wait_kumolo_ready "$NO_ORIGIN_KUMOLO_PID" "$NO_ORIGIN_PORT" "$NO_ORIGIN_LOG_FILE" $NO_ORIGIN_DDB list-tables
 
 echo ""
 echo "=== CORS ==="
