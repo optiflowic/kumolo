@@ -1,13 +1,40 @@
 # Shared helpers for e2e runners that start their own kumolo instance.
 # Source this file; do not execute it.
 
+port_in_use() {
+  (exec 3<>"/dev/tcp/localhost/$1") 2>/dev/null
+}
+
+# pick_free_port MIN RANGE [COUNT]
+# Prints a random port in [MIN, MIN+RANGE) such that it and the COUNT-1 ports
+# after it are all free.
+pick_free_port() {
+  local min=$1 range=$2 count=${3:-1} attempt port i busy
+  for ((attempt = 0; attempt < 20; attempt++)); do
+    port=$(((RANDOM % range) + min))
+    busy=0
+    for ((i = 0; i < count; i++)); do
+      if port_in_use $((port + i)); then
+        busy=1
+        break
+      fi
+    done
+    if [[ $busy -eq 0 ]]; then
+      echo "$port"
+      return 0
+    fi
+  done
+  echo "ERROR: no free port found in [$min, $((min + range)))" >&2
+  return 1
+}
+
 # require_free_port PORT
 # Fails when something already listens on PORT, so a readiness probe can never
 # be answered by a foreign process while the launched kumolo is still on its
 # way to a failing bind.
 require_free_port() {
   local port=$1
-  if (exec 3<>"/dev/tcp/localhost/$port") 2>/dev/null; then
+  if port_in_use "$port"; then
     echo "ERROR: port $port is already in use"
     exit 1
   fi
