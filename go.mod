@@ -5,7 +5,7 @@ go 1.26.5
 tool golang.org/x/tools/cmd/goimports
 
 require (
-	github.com/aws/aws-sdk-go-v2 v1.47.0
+	github.com/aws/aws-sdk-go-v2 v1.47.1
 	github.com/aws/aws-sdk-go-v2/config v1.33.5
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.5
 	github.com/aws/aws-sdk-go-v2/service/cognitoidentityprovider v1.74.0
