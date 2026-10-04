@@ -831,7 +831,6 @@ func (ro *Router) handleDeleteObject(w http.ResponseWriter, r *http.Request, buc
 	bypassGovernance := r.Header.Get(amzBypassGovernanceRetention) == "true"
 
 	if versionID := r.URL.Query().Get("versionId"); versionID != "" {
-		// Permanently delete a specific version.
 		isMarker, err := ro.storage.DeleteObjectVersion(bucket, key, versionID, bypassGovernance)
 		switch {
 		case err == nil:
@@ -854,7 +853,6 @@ func (ro *Router) handleDeleteObject(w http.ResponseWriter, r *http.Request, buc
 		return
 	}
 
-	// Versioning-aware delete (may create a delete marker).
 	versionID, isMarker, err := ro.storage.DeleteObjectVersioned(bucket, key, bypassGovernance)
 	switch {
 	case err == nil:

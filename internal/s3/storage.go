@@ -442,18 +442,15 @@ func (s *Storage) CopyObject(
 		return ObjectMetadata{}, ErrBucketNotFound
 	}
 
-	// Resolve source path (current or versioned).
 	var srcPath string
 	var srcMeta ObjectMetadata
 	if srcVersionID != "" {
-		// Try current version first.
 		curPath := filepath.Join(srcBucket, srcKey)
 		cm, err := s.readMeta(curPath)
 		if err == nil && cm.VersionID == srcVersionID {
 			srcPath = curPath
 			srcMeta = cm
 		} else {
-			// Fall back to archived version.
 			vp := verPath(srcBucket, srcKey, srcVersionID)
 			vm, err := s.readMeta(vp)
 			if err != nil {
@@ -744,7 +741,6 @@ func (s *Storage) DeleteObjectVersioned(
 		return "", false, err
 	}
 
-	// Write empty body for the delete marker.
 	f, err := s.openFile(objPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return "", false, err
@@ -778,7 +774,6 @@ func (s *Storage) DeleteObjectVersion(
 
 	objPath := filepath.Join(bucket, key)
 
-	// Check if it's the current version.
 	if cm, err := s.readMeta(objPath); err == nil && cm.VersionID == versionID {
 		if !cm.IsDeleteMarker {
 			if err := s.checkObjectLockLocked(objPath, bypassGovernance); err != nil {
@@ -793,7 +788,6 @@ func (s *Storage) DeleteObjectVersion(
 		return isMarker, nil
 	}
 
-	// Check archived versions.
 	vp := verPath(bucket, key, versionID)
 	vm, err := s.readMeta(vp)
 	if err != nil {
@@ -845,7 +839,6 @@ func (s *Storage) GetObjectVersion(
 		return nil, ObjectMetadata{}, ErrBucketNotFound
 	}
 
-	// Check current version.
 	objPath := filepath.Join(bucket, key)
 	if cm, err := s.readMeta(objPath); err == nil && cm.VersionID == versionID {
 		if cm.IsDeleteMarker {
@@ -861,7 +854,6 @@ func (s *Storage) GetObjectVersion(
 		return f, cm, nil
 	}
 
-	// Check archived versions.
 	vp := verPath(bucket, key, versionID)
 	vm, err := s.readMeta(vp)
 	if err != nil {
@@ -891,7 +883,6 @@ func (s *Storage) HeadObjectVersion(bucket, key, versionID string) (ObjectMetada
 		return ObjectMetadata{}, ErrBucketNotFound
 	}
 
-	// Check current version.
 	objPath := filepath.Join(bucket, key)
 	if cm, err := s.readMeta(objPath); err == nil && cm.VersionID == versionID {
 		if cm.IsDeleteMarker {
@@ -900,7 +891,6 @@ func (s *Storage) HeadObjectVersion(bucket, key, versionID string) (ObjectMetada
 		return cm, nil
 	}
 
-	// Check archived versions.
 	vp := verPath(bucket, key, versionID)
 	vm, err := s.readMeta(vp)
 	if err != nil {
@@ -925,7 +915,6 @@ func (s *Storage) ListObjectVersions(bucket string) ([]VersionInfo, []DeleteMark
 
 	var entries []versionEntry
 
-	// Collect current-version objects (including delete markers).
 	if err := s.collectVersionEntries(bucket, bucket, &entries); err != nil {
 		return nil, nil, err
 	}
@@ -1140,14 +1129,12 @@ func (s *Storage) SetObjectVersionStorageClass(bucket, key, versionID, storageCl
 		return ErrBucketNotFound
 	}
 
-	// Check current version first.
 	objPath := filepath.Join(bucket, key)
 	if cm, err := s.readMeta(objPath); err == nil && cm.VersionID == versionID {
 		cm.StorageClass = storageClass
 		return s.writeMeta(objPath, cm)
 	}
 
-	// Fall back to archived version.
 	vp := verPath(bucket, key, versionID)
 	vm, err := s.readMeta(vp)
 	if err != nil {
@@ -1273,7 +1260,6 @@ func (s *Storage) archiveCurrentVersionLocked(bucket, key, objPath string) error
 		return err // untestable: os.Root.MkdirAll failure cannot be injected
 	}
 
-	// Copy body.
 	src, err := s.root.Open(objPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -1298,12 +1284,10 @@ func (s *Storage) archiveCurrentVersionLocked(bucket, key, objPath string) error
 
 	meta.NoncurrentSince = s.now()
 
-	// Write metadata with resolved version ID.
 	if err := s.writeJSON(vp+".meta.json", meta); err != nil {
 		_ = s.removeFile(vp)
 		return err
 	}
-	// Archive tags sidecar if present.
 	if tagsData, tagsErr := readJSON[[]Tag](s, objPath+".tags.json"); tagsErr == nil {
 		if writeErr := s.writeJSON(vp+".tags.json", tagsData); writeErr != nil {
 			// untestable: openFile failure on the version-specific tags path cannot be injected separately from the body path
@@ -1811,7 +1795,6 @@ func (s *Storage) UploadPartCopy(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Verify the upload exists.
 	if _, err := s.root.Stat(filepath.Join(mpuDir, uploadID, "upload.json")); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return "", time.Time{}, "", ErrUploadNotFound
@@ -1823,7 +1806,6 @@ func (s *Storage) UploadPartCopy(
 		return "", time.Time{}, "", ErrBucketNotFound
 	}
 
-	// Resolve source object path and metadata.
 	var srcPath string
 	var srcMeta ObjectMetadata
 	if srcVersionID != "" {
@@ -1874,7 +1856,6 @@ func (s *Storage) UploadPartCopy(
 	}
 	defer func() { _ = srcFile.Close() }()
 
-	// Apply byte range if specified.
 	var reader io.Reader = srcFile
 	if br != nil {
 		if _, err := srcFile.Seek(br.Start, io.SeekStart); err != nil {
@@ -1883,7 +1864,6 @@ func (s *Storage) UploadPartCopy(
 		reader = io.LimitReader(srcFile, br.End-br.Start+1)
 	}
 
-	// Write the part file.
 	partPath := filepath.Join(mpuDir, uploadID, fmt.Sprintf("%d.part", partNumber))
 	f, err := s.openFile(partPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
@@ -1953,7 +1933,6 @@ func (s *Storage) CompleteMultipartUpload(
 			return ObjectMetadata{}, ErrEntityTooSmall
 		}
 	}
-	// Open all part files and assemble via io.MultiReader.
 	files := make([]*os.File, 0, len(parts))
 	defer func() {
 		for _, f := range files {
@@ -2396,7 +2375,6 @@ func (s *Storage) resolveObjectMetaLocked(
 		}
 		return objPath, meta, nil
 	}
-	// versionID specified: check current version first, then archived.
 	if cm, err := s.readMeta(objPath); err == nil && cm.VersionID == versionID {
 		if cm.IsDeleteMarker {
 			return "", ObjectMetadata{}, &DeleteMarkerError{VersionID: versionID}
