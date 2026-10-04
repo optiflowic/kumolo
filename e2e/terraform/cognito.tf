@@ -49,6 +49,13 @@ resource "aws_cognito_user" "admin" {
     email      = "tf-admin@example.com"
     given_name = var.admin_given_name
   }
+
+  lifecycle {
+    postcondition {
+      condition     = can(regex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", self.sub))
+      error_message = "User sub must be a UUID (#584); got ${self.sub}."
+    }
+  }
 }
 
 resource "aws_cognito_user_pool_client" "main" {
