@@ -678,7 +678,6 @@ func parseKeyConditionExpression(
 ) (string, any, *SortKeyCondition, error) {
 	parts := strings.SplitN(strings.TrimSpace(expr), " AND ", 2)
 
-	// Parse hash key equality condition
 	tokens := strings.Fields(strings.TrimSpace(parts[0]))
 	if len(tokens) != 3 || tokens[1] != "=" {
 		return "", nil, nil, fmt.Errorf("unsupported KeyConditionExpression: %q", expr)
@@ -692,7 +691,6 @@ func parseKeyConditionExpression(
 		return "", nil, nil, fmt.Errorf("ExpressionAttributeValues missing %q", tokens[2])
 	}
 
-	// Parse optional sort key condition
 	var skCond *SortKeyCondition
 	if len(parts) == 2 {
 		var err error

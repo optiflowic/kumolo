@@ -141,7 +141,6 @@ func (s *Storage) UpdateTable(tableName string, in UpdateTableInput) (TableMetad
 			existing[a.AttributeName] = struct{}{}
 		}
 	}
-	// GSI deletes
 	deleteSet := make(map[string]struct{}, len(in.GSIDeletes))
 	for _, name := range in.GSIDeletes {
 		deleteSet[name] = struct{}{}
@@ -157,7 +156,6 @@ func (s *Storage) UpdateTable(tableName string, in UpdateTableInput) (TableMetad
 		}
 		filtered = append(filtered, gsi)
 	}
-	// GSI creates
 	filtered = append(filtered, in.GSICreates...)
 	meta.GlobalSecondaryIndexes = filtered
 
