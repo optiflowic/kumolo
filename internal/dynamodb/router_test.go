@@ -3518,7 +3518,6 @@ func TestHandleTagResource(t *testing.T) {
 		ro := newTestRouter(t)
 		require.Equal(t, http.StatusOK, dynamo(t, ro, "CreateTable", createTableBody).Code)
 		arn := tableARNFor("test-table")
-		// Add 50 tags first.
 		var tags []string
 		for i := range 50 {
 			tags = append(tags, `{"Key":"k`+strconv.Itoa(i)+`","Value":"v"}`)
@@ -4997,7 +4996,6 @@ func TestHandleTransactWriteItems(t *testing.T) {
 	t.Run("Put and Delete applied atomically", func(t *testing.T) {
 		ro := newTestRouter(t)
 		createTable(t, ro)
-		// seed an item to delete
 		dynamo(
 			t,
 			ro,

@@ -294,7 +294,6 @@ func TestExecuteStatement_INSERT(t *testing.T) {
 func TestExecuteStatement_SELECT(t *testing.T) {
 	ro := setup(t)
 
-	// Pre-populate items
 	require.Equal(t, http.StatusOK, dynamo(t, ro, "ExecuteStatement", `{
 		"Statement": "INSERT INTO \"t\" VALUE {'pk': 'a', 'val': 'alpha'}"
 	}`).Code)
@@ -350,7 +349,6 @@ func TestExecuteStatement_SELECT(t *testing.T) {
 	})
 
 	t.Run("SELECT with pagination", func(t *testing.T) {
-		// page 1
 		w1 := dynamo(t, ro, "ExecuteStatement", `{"Statement":"SELECT * FROM \"t\"","Limit":1}`)
 		assert.Equal(t, http.StatusOK, w1.Code)
 		var resp1 map[string]any
@@ -358,7 +356,6 @@ func TestExecuteStatement_SELECT(t *testing.T) {
 		token, ok := resp1["NextToken"].(string)
 		require.True(t, ok, "expected NextToken on page 1")
 
-		// page 2
 		body, _ := json.Marshal(map[string]any{
 			"Statement": `SELECT * FROM "t"`,
 			"Limit":     1,
@@ -376,7 +373,6 @@ func TestExecuteStatement_SELECT(t *testing.T) {
 func TestExecuteStatement_SELECT_CompositeKey(t *testing.T) {
 	ro := setup(t)
 
-	// Pre-populate t2
 	for _, body := range []string{
 		`{"Statement":"INSERT INTO \"t2\" VALUE {'pk': 'p', 'sk': 1, 'data': 'one'}"}`,
 		`{"Statement":"INSERT INTO \"t2\" VALUE {'pk': 'p', 'sk': 2, 'data': 'two'}"}`,
@@ -438,7 +434,6 @@ func TestExecuteStatement_UPDATE(t *testing.T) {
 		}`)
 		assert.Equal(t, http.StatusOK, w.Code)
 
-		// Verify
 		w2 := dynamo(t, ro, "ExecuteStatement", `{
 			"Statement": "SELECT * FROM \"t\" WHERE pk = ?",
 			"Parameters": [{"S":"u1"}]
@@ -474,7 +469,6 @@ func TestExecuteStatement_DELETE(t *testing.T) {
 		}`)
 		assert.Equal(t, http.StatusOK, w.Code)
 
-		// Verify deleted
 		w2 := dynamo(t, ro, "ExecuteStatement", `{
 			"Statement": "SELECT * FROM \"t\" WHERE pk = ?",
 			"Parameters": [{"S":"d1"}]
@@ -689,7 +683,6 @@ func TestExecuteTransaction_Writes(t *testing.T) {
 			assert.Empty(t, r.(map[string]any))
 		}
 
-		// Verify both items exist
 		w2 := dynamo(t, ro, "ExecuteStatement", `{
 			"Statement": "SELECT * FROM \"t\" WHERE pk = ?",
 			"Parameters": [{"S":"ttx1"}]
