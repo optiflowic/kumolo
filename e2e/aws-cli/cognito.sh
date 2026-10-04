@@ -113,11 +113,8 @@ run "UpdateUserPool" \
 
 # ---------------------------------------------------------------------------
 # SetUserPoolMfaConfig / GetUserPoolMfaConfig (#555): SoftwareTokenMfaConfiguration.Enabled
-# must persist and round-trip, and reset to unconfigured — the key omitted from the
-# response entirely, not {Enabled: false} — when a later call omits it. Full-replace
-# semantics verified against aws/aws-sdk-js#4186; the omitted-when-unconfigured shape
-# verified against aws-sdk-go-v2's pointer-typed SoftwareTokenMfaConfiguration field and
-# terraform-provider-aws's nil-guarded flattenSoftwareTokenMFAConfigType.
+# must round-trip, and reset to unconfigured — the key omitted from the response,
+# not {Enabled: false} — when a later call omits it.
 # ---------------------------------------------------------------------------
 MFA_CONFIG_FRESH_JSON=$($AWS get-user-pool-mfa-config --user-pool-id "$POOL_ID" 2>&1)
 if echo "$MFA_CONFIG_FRESH_JSON" | jq -e '(has("SoftwareTokenMfaConfiguration") | not)' >/dev/null 2>&1; then
