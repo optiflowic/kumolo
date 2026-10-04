@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-10-04
+
+### Added
+
+#### Server
+
+- `X-Amz-Target` services can now also be identified via convention Host headers (e.g. `cognito-idp.localhost:5566`), letting CORS preflight requests resolve the target service's CORS policy; the shared `http://localhost:5566` endpoint keeps working unchanged
+
+### Changed
+
+#### Cognito
+
+- CORS now defaults to `Access-Control-Allow-Origin: *`, so browser SPA calls work without extra configuration
+
+### Fixed
+
+#### Cognito
+
+- `ConfirmSignUp` now auto-verifies `email`/`phone_number` for pools with `AutoVerifiedAttributes`, so self-service `ForgotPassword` works afterwards
+- `SetUserPoolMfaConfig` now persists `SoftwareTokenMfaConfiguration`; `GetUserPoolMfaConfig` no longer always returns `Enabled=false`
+- `sub`, `jti`, and `origin_jti` are now generated as UUID v4 instead of 64-char hex strings
+
 ## [0.4.1] - 2026-08-24
 
 ### Changed
@@ -271,6 +293,10 @@ Initial release of kumolo — a high-fidelity AWS emulator for local development
 - AWS CLI and Terraform e2e verification suite (`e2e/`)
 - CI: build, vet, lint (golangci-lint), test with race detector, Docker image publish
 
+[0.4.2]: https://github.com/optiflowic/kumolo/compare/v0.4.1...v0.4.2
+[0.4.1]: https://github.com/optiflowic/kumolo/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/optiflowic/kumolo/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/optiflowic/kumolo/compare/v0.2.3...v0.3.0
 [0.2.3]: https://github.com/optiflowic/kumolo/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/optiflowic/kumolo/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/optiflowic/kumolo/compare/v0.2.0...v0.2.1
