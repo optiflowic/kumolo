@@ -69,6 +69,10 @@ output "cognito_admin_user" {
   value = aws_cognito_user.admin.username
 }
 
+output "cognito_admin_user_sub" {
+  value = aws_cognito_user.admin.sub
+}
+
 output "cognito_admin_user_status" {
   value = aws_cognito_user.admin.status
 }

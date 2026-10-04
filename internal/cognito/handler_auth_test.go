@@ -157,7 +157,7 @@ func TestSignUp_Success(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	var resp signUpResponse
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
-	assert.NotEmpty(t, resp.UserSub)
+	assert.Regexp(t, uuidV4Pattern, resp.UserSub)
 	assert.False(t, resp.UserConfirmed)
 	assert.Equal(t, "EMAIL", resp.CodeDeliveryDetails.DeliveryMedium)
 	assert.Contains(t, resp.CodeDeliveryDetails.Destination, "@example.com")

@@ -24,6 +24,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const uuidPattern = `^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`
+
 // codeCapture intercepts SignUp confirmation codes and attribute-verification
 // codes from slog output. It acts as a nop handler (no log forwarding) to
 // avoid holding its mutex while calling into log.Logger, which would deadlock
@@ -593,7 +595,7 @@ func TestCognitoIntegration_AuthFlows(t *testing.T) {
 			},
 		})
 		require.NoError(t, err)
-		assert.NotEmpty(t, aws.ToString(out.UserSub))
+		assert.Regexp(t, uuidPattern, aws.ToString(out.UserSub))
 		assert.False(t, out.UserConfirmed)
 	})
 
@@ -648,6 +650,14 @@ func TestCognitoIntegration_AuthFlows(t *testing.T) {
 		assert.NotEmpty(t, aws.ToString(out.AuthenticationResult.RefreshToken))
 		assert.Equal(t, "Bearer", aws.ToString(out.AuthenticationResult.TokenType))
 		assert.Equal(t, int32(3600), out.AuthenticationResult.ExpiresIn)
+
+		accessClaims := decodeJWTClaims(t, aws.ToString(out.AuthenticationResult.AccessToken))
+		assert.Regexp(t, uuidPattern, accessClaims["sub"])
+		assert.Regexp(t, uuidPattern, accessClaims["jti"])
+		assert.Regexp(t, uuidPattern, accessClaims["origin_jti"])
+		idClaims := decodeJWTClaims(t, aws.ToString(out.AuthenticationResult.IdToken))
+		assert.Regexp(t, uuidPattern, idClaims["jti"])
+		assert.Regexp(t, uuidPattern, idClaims["origin_jti"])
 	})
 
 	t.Run("InitiateAuth_WrongPassword", func(t *testing.T) {
@@ -773,6 +783,13 @@ func TestCognitoIntegration_AdminLifecycle(t *testing.T) {
 		require.NotNil(t, out.User)
 		assert.Equal(t, "no-pass-user", aws.ToString(out.User.Username))
 		assert.Equal(t, types.UserStatusTypeConfirmed, out.User.UserStatus)
+		var sub string
+		for _, attr := range out.User.Attributes {
+			if aws.ToString(attr.Name) == "sub" {
+				sub = aws.ToString(attr.Value)
+			}
+		}
+		assert.Regexp(t, uuidPattern, sub)
 	})
 
 	t.Run("AdminCreateUser_WithTemporaryPassword", func(t *testing.T) {
@@ -1903,6 +1920,18 @@ func decodeJWTExpClaim(t *testing.T, token string) float64 {
 	}
 	require.NoError(t, json.Unmarshal(payload, &claims))
 	return claims.Exp
+}
+
+// decodeJWTClaims decodes a JWT's payload into a claim map, without verifying the signature.
+func decodeJWTClaims(t *testing.T, token string) map[string]any {
+	t.Helper()
+	parts := strings.Split(token, ".")
+	require.Len(t, parts, 3)
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	require.NoError(t, err)
+	var claims map[string]any
+	require.NoError(t, json.Unmarshal(payload, &claims))
+	return claims
 }
 
 // decodeJWTIssClaim decodes a JWT's payload and returns its "iss" claim, without verifying

@@ -127,7 +127,7 @@ func (ro *Router) handleSignUp(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	sub, err := generateTokenID()
+	sub, err := generateUUID()
 	if err != nil {
 		// untestable: crypto/rand.Read only fails on OS-level entropy source errors
 		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
