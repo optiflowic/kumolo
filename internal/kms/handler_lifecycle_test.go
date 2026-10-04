@@ -47,7 +47,6 @@ func TestHandleEnableKey(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Empty(t, w.Body.String())
 
-		// Verify key is now Enabled.
 		w2 := kmsReq(t, ro, "DescribeKey", `{"KeyId":"`+keyID+`"}`)
 		require.Equal(t, http.StatusOK, w2.Code)
 		var resp map[string]any
@@ -120,7 +119,6 @@ func TestHandleDisableKey(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Empty(t, w.Body.String())
 
-		// Verify key is now Disabled.
 		w2 := kmsReq(t, ro, "DescribeKey", `{"KeyId":"`+keyID+`"}`)
 		require.Equal(t, http.StatusOK, w2.Code)
 		var resp map[string]any
@@ -643,21 +641,17 @@ func TestKeyLifecycle_rotationRoundtrip(t *testing.T) {
 	ro := newTestRouter(t)
 	keyID := mustCreateKey(t, ro, `{}`)
 
-	// Enable rotation.
 	mustEnableKeyRotation(t, ro, keyID)
 
-	// Status shows enabled.
 	w := kmsReq(t, ro, "GetKeyRotationStatus", `{"KeyId":"`+keyID+`"}`)
 	require.Equal(t, http.StatusOK, w.Code)
 	var resp map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	assert.Equal(t, true, resp["KeyRotationEnabled"])
 
-	// Disable rotation.
 	w2 := kmsReq(t, ro, "DisableKeyRotation", `{"KeyId":"`+keyID+`"}`)
 	require.Equal(t, http.StatusOK, w2.Code)
 
-	// Status shows disabled.
 	w3 := kmsReq(t, ro, "GetKeyRotationStatus", `{"KeyId":"`+keyID+`"}`)
 	require.Equal(t, http.StatusOK, w3.Code)
 	var resp3 map[string]any
@@ -733,7 +727,6 @@ func TestHandleTagResource(t *testing.T) {
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		tags := resp["Tags"].([]any)
 		assert.Len(t, tags, 2)
-		// Tags are sorted by key.
 		assert.Equal(t, "Env", tags[0].(map[string]any)["TagKey"])
 		assert.Equal(t, "test", tags[0].(map[string]any)["TagValue"])
 	})
@@ -894,7 +887,6 @@ func TestHandleTagResource(t *testing.T) {
 	t.Run("400 LimitExceededException when exceeding 50 tags", func(t *testing.T) {
 		ro := newTestRouter(t)
 		keyID := mustCreateKey(t, ro, `{}`)
-		// Add 50 tags first.
 		tags := make([]map[string]string, 50)
 		for i := range 50 {
 			tags[i] = map[string]string{
@@ -905,7 +897,6 @@ func TestHandleTagResource(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{"KeyId": keyID, "Tags": tags})
 		w := kmsReq(t, ro, "TagResource", string(body))
 		require.Equal(t, http.StatusOK, w.Code)
-		// Adding one more should fail.
 		extra, _ := json.Marshal(map[string]any{
 			"KeyId": keyID,
 			"Tags":  []map[string]string{{"TagKey": "extra", "TagValue": "v"}},
@@ -951,7 +942,6 @@ func TestHandleUntagResource(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code)
 		assert.Empty(t, w.Body.String())
 
-		// Verify only "Team" remains.
 		w2 := kmsReq(t, ro, "ListResourceTags", `{"KeyId":"`+keyID+`"}`)
 		require.Equal(t, http.StatusOK, w2.Code)
 		var resp map[string]any
@@ -1106,7 +1096,6 @@ func TestHandleListResourceTags_withTags(t *testing.T) {
 		keyID := mustCreateKey(t, ro, `{}`)
 		mustTagResource(t, ro, keyID, map[string]string{"A": "1", "B": "2", "C": "3"})
 
-		// First page: Limit=2
 		body, _ := json.Marshal(map[string]any{"KeyId": keyID, "Limit": 2})
 		w := kmsReq(t, ro, "ListResourceTags", string(body))
 		require.Equal(t, http.StatusOK, w.Code)
@@ -1117,7 +1106,6 @@ func TestHandleListResourceTags_withTags(t *testing.T) {
 		nextMarker := page1["NextMarker"].(string)
 		assert.Equal(t, "B", nextMarker)
 
-		// Second page using NextMarker.
 		body2, _ := json.Marshal(map[string]any{"KeyId": keyID, "Marker": nextMarker})
 		w2 := kmsReq(t, ro, "ListResourceTags", string(body2))
 		require.Equal(t, http.StatusOK, w2.Code)
@@ -1381,7 +1369,6 @@ func TestHandleListKeyRotations(t *testing.T) {
 		mustRotateKeyOnDemand(t, ro, keyID)
 		mustRotateKeyOnDemand(t, ro, keyID)
 
-		// Page 1: limit 2
 		body, _ := json.Marshal(map[string]any{"KeyId": keyID, "Limit": 2})
 		w := kmsReq(t, ro, "ListKeyRotations", string(body))
 		require.Equal(t, http.StatusOK, w.Code)
@@ -1393,7 +1380,6 @@ func TestHandleListKeyRotations(t *testing.T) {
 		nextMarker := page1["NextMarker"].(string)
 		assert.NotEmpty(t, nextMarker)
 
-		// Page 2 using NextMarker
 		body2, _ := json.Marshal(map[string]any{"KeyId": keyID, "Marker": nextMarker})
 		w2 := kmsReq(t, ro, "ListKeyRotations", string(body2))
 		require.Equal(t, http.StatusOK, w2.Code)
@@ -1489,10 +1475,8 @@ func TestDecrypt_afterRotation(t *testing.T) {
 	ro := newTestRouter(t)
 	keyID := mustCreateKey(t, ro, `{}`)
 
-	// Encrypt with original key material.
 	cipherBlob := mustEncrypt(t, ro, keyID, []byte("rotate-test"))
 
-	// Rotate the key.
 	mustRotateKeyOnDemand(t, ro, keyID)
 
 	// Decrypt must still succeed using the retained old material.
@@ -1515,7 +1499,6 @@ func TestReEncrypt_afterRotation(t *testing.T) {
 
 	cipherBlob := mustEncrypt(t, ro, srcKeyID, []byte("reencrypt-rotate-test"))
 
-	// Rotate the source key.
 	mustRotateKeyOnDemand(t, ro, srcKeyID)
 
 	// ReEncrypt from old-material ciphertext to dstKey must succeed.
@@ -1530,7 +1513,6 @@ func TestReEncrypt_afterRotation(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &reEncResp))
 	newCipherBlob := reEncResp["CiphertextBlob"].(string)
 
-	// Decrypt the re-encrypted ciphertext and verify plaintext integrity.
 	decBody, _ := json.Marshal(map[string]any{"CiphertextBlob": newCipherBlob, "KeyId": dstKeyID})
 	decW := kmsReq(t, ro, "Decrypt", string(decBody))
 	require.Equal(t, http.StatusOK, decW.Code)
@@ -1547,21 +1529,17 @@ func TestKeyLifecycle_scheduleAndCancelRoundtrip(t *testing.T) {
 	ro := newTestRouter(t)
 	keyID := mustCreateKey(t, ro, `{}`)
 
-	// Schedule deletion.
 	mustScheduleKeyDeletion(t, ro, keyID)
 
-	// Verify PendingDeletion.
 	w := kmsReq(t, ro, "DescribeKey", `{"KeyId":"`+keyID+`"}`)
 	require.Equal(t, http.StatusOK, w.Code)
 	var desc map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &desc))
 	assert.Equal(t, "PendingDeletion", desc["KeyMetadata"].(map[string]any)["KeyState"])
 
-	// Cancel deletion.
 	w2 := kmsReq(t, ro, "CancelKeyDeletion", `{"KeyId":"`+keyID+`"}`)
 	require.Equal(t, http.StatusOK, w2.Code)
 
-	// Key should now be Disabled.
 	w3 := kmsReq(t, ro, "DescribeKey", `{"KeyId":"`+keyID+`"}`)
 	require.Equal(t, http.StatusOK, w3.Code)
 	var desc3 map[string]any

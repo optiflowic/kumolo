@@ -329,7 +329,6 @@ func TestHandleListKeys(t *testing.T) {
 		for range 5 {
 			mustCreateKey(t, ro, `{}`)
 		}
-		// First page: Limit=3
 		w := kmsReq(t, ro, "ListKeys", `{"Limit":3}`)
 		assert.Equal(t, http.StatusOK, w.Code)
 		var page1 map[string]any
@@ -338,7 +337,6 @@ func TestHandleListKeys(t *testing.T) {
 		assert.Len(t, page1["Keys"].([]any), 3)
 		marker := page1["NextMarker"].(string)
 
-		// Second page
 		w = kmsReq(t, ro, "ListKeys", `{"Limit":3,"Marker":"`+marker+`"}`)
 		assert.Equal(t, http.StatusOK, w.Code)
 		var page2 map[string]any
@@ -575,7 +573,6 @@ func TestHandlePutKeyPolicy(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Empty(t, w.Body.String())
 
-		// Read it back.
 		w2 := kmsReq(t, ro, "GetKeyPolicy", `{"KeyId":"`+keyID+`"}`)
 		assert.Equal(t, http.StatusOK, w2.Code)
 		var resp map[string]any
@@ -1423,7 +1420,6 @@ func TestHandleGenerateDataKey(t *testing.T) {
 		var decResp map[string]any
 		require.NoError(t, json.Unmarshal(dw.Body.Bytes(), &decResp))
 
-		// The decrypted plaintext must match the original plaintext.
 		ptJSON, _ := json.Marshal(genResp["Plaintext"])
 		decJSON, _ := json.Marshal(decResp["Plaintext"])
 		assert.Equal(t, string(ptJSON), string(decJSON))
@@ -2971,7 +2967,6 @@ func TestHandleListAliases(t *testing.T) {
 			mustCreateAlias(t, ro, name, keyID)
 		}
 
-		// First page: limit=2.
 		body, _ := json.Marshal(map[string]any{"Limit": 2})
 		w := kmsReq(t, ro, "ListAliases", string(body))
 		require.Equal(t, http.StatusOK, w.Code)
@@ -2981,7 +2976,6 @@ func TestHandleListAliases(t *testing.T) {
 		nextMarker := resp["NextMarker"].(string)
 		assert.Equal(t, "alias/b", nextMarker)
 
-		// Second page: use NextMarker.
 		body, _ = json.Marshal(map[string]any{"Marker": nextMarker})
 		w = kmsReq(t, ro, "ListAliases", string(body))
 		require.Equal(t, http.StatusOK, w.Code)
@@ -3059,7 +3053,6 @@ func TestHandleReEncrypt(t *testing.T) {
 		assert.NotEmpty(t, resp["SourceKeyMaterialId"])
 		assert.NotEmpty(t, resp["DestinationKeyMaterialId"])
 
-		// Decrypt the re-encrypted ciphertext and verify plaintext.
 		got, _ := json.Marshal(resp["CiphertextBlob"])
 		var newBlob []byte
 		require.NoError(t, json.Unmarshal(got, &newBlob))
@@ -3398,7 +3391,6 @@ func TestHandleGenerateMac(t *testing.T) {
 			assert.Equal(t, tc.algo, gResp["MacAlgorithm"])
 			assert.NotEmpty(t, gResp["KeyId"])
 
-			// Decode the Mac for VerifyMac
 			macRaw, _ := json.Marshal(gResp["Mac"])
 			var macBytes []byte
 			require.NoError(t, json.Unmarshal(macRaw, &macBytes))

@@ -217,13 +217,6 @@ func TestNewMux(t *testing.T) {
 	t.Run(
 		"OPTIONS preflight to root is not answered when CORS is disabled",
 		func(t *testing.T) {
-			// The preflight interceptor can't tell yet which service the
-			// browser is about to call, so it can't be scoped to Cognito
-			// alone. Answering it unconditionally would let a browser send
-			// the unauthenticated DynamoDB/KMS/STS request that follows, so
-			// it stays opt-in like every other CORS behavior here; only the
-			// *actual* Cognito response defaults to the wildcard origin
-			// below.
 			req := httptest.NewRequest(http.MethodOptions, "/", nil)
 			req.Header.Set("Origin", "http://localhost:5173")
 			req.Header.Set("Access-Control-Request-Method", "POST")
@@ -288,12 +281,7 @@ func TestNewMux(t *testing.T) {
 	t.Run(
 		"actual dispatch is pinned to the Cognito convention Host even when X-Amz-Target names DynamoDB",
 		func(t *testing.T) {
-			// Regression test for the gap found in review: without pinning
-			// dispatch to the Host-identified service, this request would
-			// reach dynamoRouter (unauthenticated PutItem) after passing a
-			// preflight that trusted the Cognito Host's default-open CORS
-			// policy. It must instead land on cognitoRouter, which reports
-			// the target as unknown.
+			// Must land on cognitoRouter, which reports the target as unknown.
 			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{}`))
 			req.Host = "cognito-idp.localhost:5566"
 			req.Header.Set("X-Amz-Target", "DynamoDB_20120810.PutItem")

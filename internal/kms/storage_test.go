@@ -453,18 +453,15 @@ func TestCreateAlias_and_basic_operations(t *testing.T) {
 
 	require.NoError(t, s.CreateAlias("alias/my-key", meta.KeyID))
 
-	// ResolveAlias returns the key ID.
 	resolved, err := s.ResolveAlias("alias/my-key")
 	require.NoError(t, err)
 	assert.Equal(t, meta.KeyID, resolved)
 
-	// ListAliases returns the alias.
 	aliases, err := s.ListAliases("")
 	require.NoError(t, err)
 	require.Len(t, aliases, 1)
 	assert.Equal(t, "alias/my-key", aliases[0].AliasName)
 
-	// UpdateAlias changes the target.
 	meta2, err := s.CreateKey(
 		CreateKeyInput{KeySpec: "SYMMETRIC_DEFAULT", KeyUsage: "ENCRYPT_DECRYPT"},
 	)
@@ -475,7 +472,6 @@ func TestCreateAlias_and_basic_operations(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, meta2.KeyID, resolved)
 
-	// DeleteAlias removes the alias.
 	require.NoError(t, s.DeleteAlias("alias/my-key"))
 	_, err = s.ResolveAlias("alias/my-key")
 	require.ErrorIs(t, err, ErrAliasNotFound)
@@ -847,7 +843,6 @@ func TestTagResource(t *testing.T) {
 		s, _ := newTestStorage(t)
 		keyID := newSymmetricKey(t, s)
 
-		// Add exactly 50 tags.
 		tags := make([]TagEntry, 50)
 		for i := range 50 {
 			tags[i] = TagEntry{
@@ -857,7 +852,6 @@ func TestTagResource(t *testing.T) {
 		}
 		require.NoError(t, s.TagResource(keyID, tags))
 
-		// Adding one more must fail.
 		err := s.TagResource(keyID, []TagEntry{{TagKey: "extra", TagValue: "v"}})
 		require.ErrorIs(t, err, ErrTagLimitExceeded)
 	})
@@ -1396,12 +1390,10 @@ func TestEnsureAwsS3Key(t *testing.T) {
 		assert.Contains(t, arn, "arn:aws:kms:")
 		assert.Contains(t, arn, ":key/")
 
-		// Alias must now exist.
 		keyID, err := s.ResolveAlias("alias/aws/s3")
 		require.NoError(t, err)
 		assert.NotEmpty(t, keyID)
 
-		// Key must have KeyManager=AWS.
 		meta, err := s.GetKeyMetadata(keyID)
 		require.NoError(t, err)
 		assert.Equal(t, "AWS", meta.KeyManager)
