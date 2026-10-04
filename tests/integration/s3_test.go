@@ -493,7 +493,6 @@ func TestS3MultipartUpload(t *testing.T) {
 			content = "source object content"
 		)
 
-		// Create the source object.
 		_, err := clients.s3.PutObject(ctx, &awss3.PutObjectInput{
 			Bucket: aws.String(bucket),
 			Key:    aws.String(srcKey),
@@ -1242,7 +1241,6 @@ func TestBucketAclRoundTrip(t *testing.T) {
 	}
 	assert.True(t, hasFullControl, "default ACL must include FULL_CONTROL grant")
 
-	// Set public-read canned ACL.
 	_, err = clients.s3.PutBucketAcl(ctx, &awss3.PutBucketAclInput{
 		Bucket: aws.String(bucket),
 		ACL:    s3types.BucketCannedACLPublicRead,

@@ -708,11 +708,8 @@ func TestCognitoIntegration_AuthFlows(t *testing.T) {
 		const tempPass = "TempPass1!"
 		const newPass = "NewPass1!"
 
-		// Sign up and skip confirmation — use a separate user directly set to FORCE_CHANGE_PASSWORD
-		// by registering and then forcibly initiating the challenge flow.
-		// Since we cannot insert storage state from outside, we use SignUp+ConfirmSignUp
-		// to get a confirmed user, then test the challenge flow via a different mechanism.
-		// Instead, test that an unsupported challenge returns an error.
+		// FORCE_CHANGE_PASSWORD can't be set up from outside, so only test that an
+		// unsupported challenge returns an error.
 		_, err := c.RespondToAuthChallenge(ctx, &awscognito.RespondToAuthChallengeInput{
 			ClientId:      aws.String(clientID),
 			ChallengeName: types.ChallengeNameTypeNewPasswordRequired,
@@ -1681,7 +1678,6 @@ func TestCognitoIntegration_TokenRevocation(t *testing.T) {
 	})
 
 	t.Run("GlobalSignOut_OtherSessionAccessTokenRevoked", func(t *testing.T) {
-		// Sign in from two independent sessions.
 		token1, _ := authenticate(t)
 		token2, _ := authenticate(t)
 
@@ -2579,14 +2575,8 @@ func TestCognitoIntegration_PasswordPolicy(t *testing.T) {
 		assert.Equal(t, "InvalidPasswordException", apiErrorCode(err))
 	})
 
-	// Note: the SDK's JSON serializer only emits RequireUppercase / RequireLowercase
-	// / RequireNumbers / RequireSymbols when they are true — a false value is
-	// indistinguishable from an omitted field on the wire (see
-	// serializeDocumentPasswordPolicyType in the SDK). So "explicit false"
-	// scenarios can't be driven through this client; they're covered by
-	// unit tests (internal/cognito/password_policy_test.go) and by
-	// e2e/aws-cli/cognito.sh, which sends raw JSON and isn't subject to this
-	// limitation.
+	// The SDK only serializes the Require* flags when true, so "explicit false" can't
+	// be driven through this client; unit tests and e2e/aws-cli/cognito.sh cover it.
 	t.Run("SignUp_CustomPolicy_OnlyMinimumLengthOverridden", func(t *testing.T) {
 		// This pool's Policies blob carries only MinimumLength; every
 		// RequireX field must still inherit the built-in default (true).

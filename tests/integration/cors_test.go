@@ -10,11 +10,8 @@ import (
 )
 
 // TestCORSIntegration_PreflightAndActualResponses exercises the CORS opt-in
-// over a real HTTP round trip against a fully-wired server (all routers, not
-// just the bare mux), unlike the internal/server unit tests which call
-// ServeHTTP directly. AWS SDK clients never issue CORS preflight requests
-// themselves (that's a browser-only mechanism), so this uses a raw
-// http.Client to simulate what a browser sends.
+// against a fully-wired server. SDK clients never send a preflight, so a raw
+// http.Client simulates the browser.
 func TestCORSIntegration_PreflightAndActualResponses(t *testing.T) {
 	clients, _ := newServerAt(t, t.TempDir(), server.WithCORSAllowOrigin("http://localhost:5173"))
 
@@ -67,14 +64,9 @@ func TestCORSIntegration_PreflightAndActualResponses(t *testing.T) {
 	})
 }
 
-// TestCORSIntegration_DisabledByDefault confirms the opt-in flag's absence
-// leaves DynamoDB/DynamoDB Streams/KMS/STS behavior fully unchanged, while
-// Cognito still gets a default Access-Control-Allow-Origin: * on its actual
-// response — matching real cognito-idp, which returns it unconditionally
-// (#553). The root OPTIONS preflight itself stays opt-in: it can't be
-// scoped to Cognito alone (the eventual target isn't known yet), and
-// answering it unconditionally would let a browser send the unauthenticated
-// DynamoDB/KMS/STS request that follows.
+// TestCORSIntegration_DisabledByDefault confirms that without the opt-in only
+// Cognito's actual response gets Access-Control-Allow-Origin: * (#553); the
+// root preflight stays unanswered.
 func TestCORSIntegration_DisabledByDefault(t *testing.T) {
 	clients := newTestClients(t)
 
@@ -125,13 +117,8 @@ func TestCORSIntegration_DisabledByDefault(t *testing.T) {
 }
 
 // TestCORSIntegration_HostBasedServiceIdentification exercises the #567
-// convention-hostname mechanism over a real HTTP round trip against a
-// fully-wired server. Requests target clients.baseURL (127.0.0.1) directly
-// and only override the Host header field on the request — this avoids
-// depending on *.localhost DNS resolution, which is reliable on macOS but
-// not guaranteed on every CI/Linux resolver configuration, while still
-// exercising exactly what the server inspects (the Host header of an
-// incoming request).
+// convention hostnames. It overrides only the Host header, because *.localhost
+// DNS resolution isn't guaranteed on every CI resolver.
 func TestCORSIntegration_HostBasedServiceIdentification(t *testing.T) {
 	clients := newTestClients(t)
 
@@ -174,11 +161,7 @@ func TestCORSIntegration_HostBasedServiceIdentification(t *testing.T) {
 	t.Run(
 		"actual dispatch is pinned to the Cognito convention Host even when X-Amz-Target names DynamoDB",
 		func(t *testing.T) {
-			// Regression coverage for the review finding on #567: without
-			// pinning dispatch to the Host-identified service, this request
-			// would reach the DynamoDB router (unauthenticated PutItem)
-			// after a preflight that trusted the Cognito Host's
-			// default-open CORS policy.
+			// Without Host-pinned dispatch this would reach the DynamoDB router.
 			req, err := http.NewRequest(
 				http.MethodPost,
 				clients.baseURL+"/",
