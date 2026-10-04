@@ -88,8 +88,8 @@ const (
 )
 
 // hostService identifies which X-Amz-Target-routed service (if any) a
-// request's Host header names. Matching is exact, never by prefix or suffix,
-// so "dynamodb.localhost.evil.example" does not match.
+// request's Host header names. Matching is exact (case-insensitive), never by
+// prefix or suffix, so "dynamodb.localhost.evil.example" does not match.
 func hostService(host string) (service string, ok bool) {
 	h, _, err := net.SplitHostPort(host)
 	if err != nil {
