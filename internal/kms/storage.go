@@ -526,7 +526,6 @@ func (s *Storage) ResolveKeyForEncryption(keyRef string) (string, error) {
 			return "", ErrKeyNotFound
 		}
 		if aliasName == "alias/aws/s3" {
-			// Ensure the managed key exists before resolving its ID for state validation.
 			if _, err := s.EnsureAwsS3Key(); err != nil {
 				return "", fmt.Errorf("ensure alias/aws/s3: %w", err)
 			}
@@ -714,7 +713,6 @@ func (s *Storage) CreateAlias(aliasName, targetKeyID string) error {
 		return ErrKeyPendingDeletion
 	}
 
-	// Check per-key alias limit.
 	count, err := s.countAliasesForKeyLocked(targetKeyID)
 	if err != nil {
 		return fmt.Errorf("count aliases: %w", err)
@@ -723,7 +721,6 @@ func (s *Storage) CreateAlias(aliasName, targetKeyID string) error {
 		return fmt.Errorf("alias limit exceeded: %w", ErrAliasLimitExceeded)
 	}
 
-	// Fail if alias already exists.
 	if _, err := s.statFn(aliasPath(aliasName)); err == nil {
 		return ErrAliasAlreadyExists
 	}
@@ -759,7 +756,6 @@ func (s *Storage) UpdateAlias(aliasName, targetKeyID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Alias must exist.
 	existing, err := readJSON[AliasEntry](s, aliasPath(aliasName))
 	if errors.Is(err, os.ErrNotExist) {
 		return ErrAliasNotFound
@@ -768,7 +764,6 @@ func (s *Storage) UpdateAlias(aliasName, targetKeyID string) error {
 		return fmt.Errorf("read alias: %w", err)
 	}
 
-	// Target key must exist and must not be pending deletion.
 	if err := s.keyExistsLocked(targetKeyID); err != nil {
 		return fmt.Errorf("target key: %w", err)
 	}

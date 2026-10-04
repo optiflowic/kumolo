@@ -76,7 +76,6 @@ func (ro *Router) resolveAndValidateMACKey(
 		return KeyMetadata{}, KeyMaterial{}, false
 	}
 
-	// Verify the algorithm is compatible with the key spec.
 	supported := false
 	for _, a := range meta.MacAlgorithms {
 		if a == macAlgorithm {
