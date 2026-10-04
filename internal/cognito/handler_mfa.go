@@ -673,13 +673,8 @@ func (ro *Router) handleSoftwareTokenMFAChallenge(
 		return
 	}
 
-	// Normally this challenge is only issued, via completeAuth, for a user with
-	// SoftwareTokenMFAEnabled. The exception is a pool with MfaConfiguration "ON": completeAuth
-	// also issues it for a user with a verified TOTPSecret but SoftwareTokenMFAEnabled == false
-	// (enrolled and later disabled while the pool still allowed it), reusing the existing
-	// authenticator instead of forcing MFA_SETUP re-enrollment. Re-derive that same allowance
-	// here rather than trusting the session, since SetUserMFAPreference could have disabled MFA
-	// between challenge issuance and response.
+	// Re-derive completeAuth's allowance rather than trusting the session:
+	// SetUserMFAPreference could have disabled MFA since the challenge was issued.
 	allowed := user.SoftwareTokenMFAEnabled
 	if !allowed {
 		pool, err := ro.storage.GetUserPool(poolID)
@@ -706,9 +701,7 @@ func (ro *Router) handleSoftwareTokenMFAChallenge(
 	}
 
 	if !user.SoftwareTokenMFAEnabled {
-		// Self-heal the enrolled-but-disabled state now that the user has proven possession of
-		// the authenticator in a pool that mandates MFA: converges to the invariant
-		// SetUserMFAPreference already enforces going forward (can't disable MFA once "ON").
+		// Self-heal the enrolled-but-disabled state, which a pool with MFA "ON" doesn't allow.
 		updateErr := ro.storage.UpdateUser(poolID, username, func(u *UserMetadata) error {
 			u.SoftwareTokenMFAEnabled = true
 			u.PreferredMfaSetting = mfaSettingSoftwareToken
