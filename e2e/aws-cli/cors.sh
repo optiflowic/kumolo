@@ -1,19 +1,8 @@
 #!/usr/bin/env bash
-# Verifies CORS preflight handling for X-Amz-Target-routed services, in two
-# configurations: with KUMOLO_CORS_ALLOW_ORIGIN opted in (all services,
-# including the root preflight), and with it left unset (the root preflight
-# stays opt-in and unanswered; Cognito's actual response still defaults to
-# Access-Control-Allow-Origin: *, matching real cognito-idp; DynamoDB stays
-# opt-in only either way — #553). Also verifies the #567 convention-hostname
-# mechanism against the no-opt-in instance: a request whose Host names a
-# service (e.g. cognito-idp.localhost) gets that service's own default CORS
-# policy, and actual dispatch is pinned to that Host regardless of
-# X-Amz-Target. Starts its own kumolo instances; does not
-# require a pre-running server, and
-# doesn't depend on whether an ambient instance has CORS enabled. The AWS
-# CLI never issues a CORS preflight (that's a browser-only mechanism), so
-# curl is used to simulate what a browser sends.
-# Skips gracefully if the binary has not been built yet.
+# Verifies CORS handling for X-Amz-Target-routed services with and without
+# KUMOLO_CORS_ALLOW_ORIGIN (#553), and the convention-hostname dispatch (#567).
+# Starts its own kumolo instances; skips if the binary has not been built.
+# The AWS CLI never sends a preflight, so curl simulates the browser.
 set -euo pipefail
 
 KUMOLO_BIN="${KUMOLO_BIN:-./build/kumolo}"
@@ -120,13 +109,9 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Without KUMOLO_CORS_ALLOW_ORIGIN: the root preflight stays opt-in (it
-# can't tell yet which service a browser is about to call, and answering it
-# unconditionally would let a browser send the unauthenticated
-# DynamoDB/KMS/STS request that follows). Cognito's *actual* response still
-# defaults to Access-Control-Allow-Origin: * (matching real cognito-idp,
-# which requires no configuration); DynamoDB stays opt-in only and gets no
-# header either way. (#553)
+# Without KUMOLO_CORS_ALLOW_ORIGIN: the root preflight goes unanswered, but
+# Cognito's actual response still defaults to Access-Control-Allow-Origin: *.
+# DynamoDB gets no header. (#553)
 # ---------------------------------------------------------------------------
 NO_ORIGIN_PREFLIGHT=$(curl -s -i -X OPTIONS "$NO_ORIGIN_ENDPOINT/" \
   -H "Origin: $ORIGIN" \
@@ -164,12 +149,9 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# #567 convention hostnames, exercised against the NO_ORIGIN instance (no
-# KUMOLO_CORS_ALLOW_ORIGIN set). curl's -H "Host: ..." overrides only the
-# Host header sent on the wire while still connecting to
-# $NO_ORIGIN_ENDPOINT (localhost:$NO_ORIGIN_PORT) — this avoids depending on
-# *.localhost DNS resolution, which real SDK clients would rely on but which
-# isn't guaranteed on every CI/Linux resolver configuration.
+# #567 convention hostnames, against the NO_ORIGIN instance. The Host header
+# is overridden with -H because *.localhost DNS resolution isn't guaranteed on
+# every CI resolver.
 # ---------------------------------------------------------------------------
 COGNITO_HOST="cognito-idp.localhost:$NO_ORIGIN_PORT"
 DYNAMODB_HOST="dynamodb.localhost:$NO_ORIGIN_PORT"
@@ -198,10 +180,8 @@ else
   fail "OPTIONS preflight to the DynamoDB convention Host had unexpected CORS headers"
 fi
 
-# Regression check for the review finding on #567: dispatch must be pinned
-# to the Host-identified service regardless of X-Amz-Target, or the
-# Cognito convention Host's default-open preflight above would let an
-# unauthenticated DynamoDB operation through.
+# Dispatch must be pinned to the Host-identified service regardless of
+# X-Amz-Target, or the Cognito host would let a DynamoDB operation through.
 HOST_MISMATCH=$(curl -s -i -X POST "$NO_ORIGIN_ENDPOINT/" \
   -H "Host: $COGNITO_HOST" \
   -H "Content-Type: application/x-amz-json-1.1" \

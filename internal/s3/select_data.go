@@ -49,7 +49,6 @@ func readCSVRows(r io.Reader, cfg *xmlCSVInput) ([]selectRow, int64, error) {
 	var headers []string
 	var rows []selectRow
 
-	// Read first row to determine headers.
 	firstRow, err := cr.Read()
 	if err == io.EOF {
 		return nil, bytesProcessed, nil
@@ -76,7 +75,6 @@ func readCSVRows(r io.Reader, cfg *xmlCSVInput) ([]selectRow, int64, error) {
 		rows = append(rows, r)
 	}
 
-	// Read remaining rows.
 	for {
 		record, err := cr.Read()
 		if err == io.EOF {

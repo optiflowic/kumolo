@@ -414,7 +414,6 @@ func (ro *Router) handleDecrypt(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	// Parse the envelope header to extract the embedded key ID before loading the key.
 	if len(req.CiphertextBlob) < envelopeSealedOffset+1 {
 		writeError(
 			w,
@@ -449,7 +448,6 @@ func (ro *Router) handleDecrypt(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	// If the caller provided a KeyId, verify it matches the embedded key ID.
 	if req.KeyID != "" {
 		resolvedID, ok := ro.resolveKeyRef(w, req.KeyID)
 		if !ok {
@@ -574,7 +572,6 @@ func (ro *Router) handleReEncrypt(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	// Parse and validate the source ciphertext envelope.
 	if len(req.CiphertextBlob) < envelopeSealedOffset+1 {
 		writeError(
 			w,
@@ -606,7 +603,6 @@ func (ro *Router) handleReEncrypt(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	// If SourceKeyId is provided, verify it matches the embedded key ID.
 	if req.SourceKeyId != "" {
 		resolvedSrc, ok := ro.resolveKeyRef(w, req.SourceKeyId)
 		if !ok {
@@ -619,7 +615,6 @@ func (ro *Router) handleReEncrypt(w http.ResponseWriter, body []byte) {
 		}
 	}
 
-	// Decrypt with source key.
 	srcMeta, srcKeyID, ok := ro.resolveAndValidateKey(w, embeddedKeyID)
 	if !ok {
 		return
@@ -640,7 +635,6 @@ func (ro *Router) handleReEncrypt(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	// Re-encrypt with destination key.
 	dstMeta, dstKeyID, ok := ro.resolveAndValidateKey(w, req.DestinationKeyId)
 	if !ok {
 		return
@@ -891,7 +885,6 @@ func (ro *Router) generateDataKeyCommon(
 		return nil, nil, "", "", false
 	}
 
-	// Exactly one of KeySpec or NumberOfBytes must be set.
 	if req.KeySpec != "" && req.NumberOfBytes != nil {
 		writeError(w, http.StatusBadRequest, "ValidationException",
 			"specify either KeySpec or NumberOfBytes, not both")

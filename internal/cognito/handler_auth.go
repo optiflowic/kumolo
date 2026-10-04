@@ -670,13 +670,9 @@ func (ro *Router) writeAuthResult(
 // have been read before password/SRP verification, and SetUserMFAPreference could have
 // enabled MFA in the interim.
 //
-// A pool with MfaConfiguration "ON" also falls back to a SOFTWARE_TOKEN_MFA challenge — not
-// MFA_SETUP — for a user with a verified TOTPSecret but SoftwareTokenMFAEnabled == false: that
-// combination arises when a user enrolled and later disabled MFA while the pool still allowed
-// it (SetUserMFAPreference only rejects disabling once the pool is already "ON" — see
-// set_user_mfa_preference.md). Real AWS reuses an already-registered TOTP authenticator instead
-// of forcing re-enrollment through MFA_SETUP in this case (see "Details of MFA logic at user
-// runtime" in the AWS user guide).
+// A pool with MfaConfiguration "ON" also issues SOFTWARE_TOKEN_MFA — not MFA_SETUP — for a
+// user with a verified TOTPSecret but SoftwareTokenMFAEnabled == false: real AWS reuses the
+// registered authenticator instead of forcing re-enrollment.
 func (ro *Router) completeAuth(
 	w http.ResponseWriter,
 	poolID, clientID string,

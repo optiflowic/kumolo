@@ -265,7 +265,6 @@ func (ro *Router) handleListKeys(w http.ResponseWriter, body []byte) {
 		ids = []string{}
 	}
 
-	// Apply Marker pagination cursor.
 	if req.Marker != "" {
 		if !looksLikeUUID(req.Marker) {
 			writeError(w, http.StatusBadRequest, "InvalidMarkerException",
@@ -355,7 +354,6 @@ func (ro *Router) handleListResourceTags(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	// Apply Marker pagination: Marker is the TagKey to start after.
 	if req.Marker != "" {
 		start := -1
 		for i, t := range tags {

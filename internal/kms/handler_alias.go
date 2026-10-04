@@ -11,7 +11,6 @@ import (
 )
 
 var (
-	// ^alias/[a-zA-Z0-9/_-]+$ — AWS CreateAlias / UpdateAlias pattern
 	reAliasName = regexp.MustCompile(`^alias/[a-zA-Z0-9/_-]+$`)
 )
 
@@ -44,7 +43,6 @@ func (ro *Router) handleCreateAlias(w http.ResponseWriter, body []byte) {
 		writeError(w, http.StatusBadRequest, "InvalidAliasNameException", err.Error())
 		return
 	}
-	// alias/aws/ prefix is reserved for AWS managed keys
 	if strings.HasPrefix(req.AliasName, "alias/aws/") {
 		writeError(w, http.StatusBadRequest, "InvalidAliasNameException",
 			"alias names beginning with alias/aws/ are reserved for AWS managed keys")
@@ -276,7 +274,6 @@ func (ro *Router) handleListAliases(w http.ResponseWriter, body []byte) {
 		limit = *req.Limit
 	}
 
-	// Resolve optional KeyId filter.
 	var filterKeyID string
 	if req.KeyId != "" {
 		resolved, ok := resolveKeyID(req.KeyId)
@@ -285,7 +282,6 @@ func (ro *Router) handleListAliases(w http.ResponseWriter, body []byte) {
 				fmt.Sprintf("Invalid key ARN: %s", req.KeyId))
 			return
 		}
-		// Verify the key exists.
 		if _, err := ro.storage.GetKeyMetadata(resolved); err != nil {
 			if errors.Is(err, ErrKeyNotFound) {
 				writeError(w, http.StatusBadRequest, "NotFoundException",
@@ -317,7 +313,6 @@ func (ro *Router) handleListAliases(w http.ResponseWriter, body []byte) {
 		aliases = []AliasEntry{}
 	}
 
-	// Apply Marker pagination.
 	if req.Marker != "" {
 		if !strings.HasPrefix(req.Marker, "alias/") {
 			writeError(w, http.StatusBadRequest, "InvalidMarkerException",

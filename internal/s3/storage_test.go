@@ -3891,7 +3891,6 @@ func TestMultipartUpload(t *testing.T) {
 		uploadDir := filepath.Join(rootPath, mpuDir, uploadID)
 		// Add a regular file that doesn't match the part meta pattern.
 		require.NoError(t, os.WriteFile(filepath.Join(uploadDir, "other.txt"), []byte{}, 0o600))
-		// Add a subdirectory.
 		require.NoError(t, os.Mkdir(filepath.Join(uploadDir, "subdir"), 0o750))
 		// Add a file matching the suffix but with an unparseable part number prefix.
 		require.NoError(
@@ -6451,7 +6450,6 @@ func TestVersioningErrorPaths(t *testing.T) {
 				nil, "", "", false, "", nil, nil, "",
 			)
 			require.NoError(t, err)
-			// Enable versioning.
 			require.NoError(t, s.PutBucketVersioning("my-bucket", "Enabled"))
 			// Make randRead fail — triggered during archiveCurrentVersionLocked for pre-versioning object.
 			s.randRead = func(b []byte) (int, error) { return 0, errors.New("rand failure") }

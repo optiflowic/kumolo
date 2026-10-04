@@ -299,7 +299,6 @@ func (ro *Router) handleExecuteTransaction(w http.ResponseWriter, body []byte) {
 	resp := map[string]any{}
 
 	if stmts[0].kind == pqSelect {
-		// All reads — translate to TransactGetItems
 		items, err := ro.executePartiQLTransactReads(stmts)
 		if err != nil {
 			pqWriteTransactError(w, err)
@@ -315,7 +314,6 @@ func (ro *Router) handleExecuteTransaction(w http.ResponseWriter, body []byte) {
 		}
 		resp["Responses"] = responses
 	} else {
-		// All writes — translate to TransactWriteItems
 		rvocf := make([]string, len(req.TransactStatements))
 		for i, s := range req.TransactStatements {
 			rvocf[i] = s.ReturnValuesOnConditionCheckFailure
@@ -376,7 +374,6 @@ func (ro *Router) executePartiQLSelect(
 		}
 	}
 
-	// Classify WHERE conditions into hash-key, sort-key, and filter groups.
 	var hashEqCond *pqCond
 	var sortCond *pqCond
 	var filterConds []pqCond
@@ -394,7 +391,6 @@ func (ro *Router) executePartiQLSelect(
 
 	effectiveLimit := pqMinLimit(apiLimit, stmt.stmtLimit)
 
-	// Decode NextToken → ExclusiveStartKey
 	var esk map[string]any
 	if nextToken != "" {
 		esk, err = pqDecodeToken(nextToken)
@@ -408,13 +404,11 @@ func (ro *Router) executePartiQLSelect(
 
 	switch {
 	case hashEqCond == nil:
-		// Full Scan
 		items, lek, err = ro.storage.Scan(stmt.tableName, ScanOptions{
 			Limit:             effectiveLimit,
 			ExclusiveStartKey: esk,
 		})
 	case sortKeyName != "" && sortCond != nil && sortCond.op == "=":
-		// Exact point lookup via GetItem
 		key := map[string]any{
 			hashKeyName: hashEqCond.val,
 			sortKeyName: sortCond.val,
@@ -425,7 +419,6 @@ func (ro *Router) executePartiQLSelect(
 			items = []map[string]any{item}
 		}
 	default:
-		// Query with hash key + optional sort key range condition
 		var skCond *SortKeyCondition
 		if sortCond != nil {
 			skCond = pqCondToSortKey(sortCond)
@@ -446,7 +439,6 @@ func (ro *Router) executePartiQLSelect(
 		return nil, "", err
 	}
 
-	// Apply remaining WHERE conditions as in-memory filter.
 	if len(filterConds) > 0 && len(items) > 0 {
 		filterExpr, names, values := pqCondsToFilterExpr(filterConds)
 		if filterExpr != "" {

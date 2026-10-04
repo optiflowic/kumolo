@@ -51,7 +51,6 @@ func setAtDynamoValue(dynVal any, segs []projSegment, val any) error {
 		}
 		return setAtDynamoValue(child, rest, val)
 	}
-	// List index step.
 	lRaw, ok := m["L"]
 	if !ok {
 		return fmt.Errorf(
@@ -112,7 +111,6 @@ func removeAtDynamoValue(dynVal any, segs []projSegment) error {
 		}
 		return removeAtDynamoValue(child, rest)
 	}
-	// List index step: remove element and shift remaining elements.
 	lRaw, ok := m["L"]
 	if !ok {
 		return nil

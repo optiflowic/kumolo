@@ -816,17 +816,14 @@ func TestScan(t *testing.T) {
 		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "b"}})
 		mustPutItem(t, s, "test-table", map[string]any{"pk": map[string]any{"S": "c"}})
 		limit := 1
-		// first page
 		page1, lek, err := s.Scan("test-table", ScanOptions{Limit: &limit})
 		require.NoError(t, err)
 		require.Len(t, page1, 1)
 		require.NotNil(t, lek)
-		// second page
 		page2, lek2, err := s.Scan("test-table", ScanOptions{Limit: &limit, ExclusiveStartKey: lek})
 		require.NoError(t, err)
 		require.Len(t, page2, 1)
 		require.NotNil(t, lek2)
-		// third page
 		page3, lek3, err := s.Scan(
 			"test-table",
 			ScanOptions{Limit: &limit, ExclusiveStartKey: lek2},

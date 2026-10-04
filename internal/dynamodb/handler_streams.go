@@ -53,7 +53,6 @@ func (sr *StreamsRouter) handleListStreams(w http.ResponseWriter, body []byte) {
 		return
 	}
 
-	// Apply ExclusiveStartStreamArn cursor.
 	if req.ExclusiveStartStreamArn != "" {
 		start := len(entries)
 		for i, e := range entries {

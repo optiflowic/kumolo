@@ -69,7 +69,6 @@ func TestTagResource(t *testing.T) {
 		poolID := createPool(t, ro, "tag-pool")
 		arn := poolARNFromID(poolID)
 
-		// First tag
 		w := doOp(t, ro, "TagResource", fmt.Sprintf(
 			`{"ResourceArn":%q,"Tags":{"env":"test","owner":"alice"}}`, arn))
 		require.Equal(t, http.StatusOK, w.Code)
@@ -79,7 +78,6 @@ func TestTagResource(t *testing.T) {
 			`{"ResourceArn":%q,"Tags":{"owner":"bob","team":"platform"}}`, arn))
 		require.Equal(t, http.StatusOK, w.Code)
 
-		// Verify via ListTagsForResource
 		w = doOp(t, ro, "ListTagsForResource", fmt.Sprintf(`{"ResourceArn":%q}`, arn))
 		require.Equal(t, http.StatusOK, w.Code)
 		var resp struct {
@@ -178,17 +176,14 @@ func TestUntagResource(t *testing.T) {
 		poolID := createPool(t, ro, "untag-pool")
 		arn := poolARNFromID(poolID)
 
-		// Set initial tags
 		w := doOp(t, ro, "TagResource", fmt.Sprintf(
 			`{"ResourceArn":%q,"Tags":{"a":"1","b":"2","c":"3"}}`, arn))
 		require.Equal(t, http.StatusOK, w.Code)
 
-		// Remove two keys
 		w = doOp(t, ro, "UntagResource", fmt.Sprintf(
 			`{"ResourceArn":%q,"TagKeys":["a","c"]}`, arn))
 		require.Equal(t, http.StatusOK, w.Code)
 
-		// Verify only "b" remains
 		w = doOp(t, ro, "ListTagsForResource", fmt.Sprintf(`{"ResourceArn":%q}`, arn))
 		require.Equal(t, http.StatusOK, w.Code)
 		var resp struct {

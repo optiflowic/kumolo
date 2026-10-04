@@ -180,7 +180,6 @@ func TestStorageListGroups_SortedAndPaginated(t *testing.T) {
 		setupStorageGroup(t, s, poolID, name)
 	}
 
-	// First page: limit 2.
 	groups, nextToken, err := s.ListGroups(poolID, 2, "")
 	require.NoError(t, err)
 	require.Len(t, groups, 2)
@@ -188,7 +187,6 @@ func TestStorageListGroups_SortedAndPaginated(t *testing.T) {
 	assert.Equal(t, "beta", groups[1].GroupName)
 	assert.Equal(t, "beta", nextToken)
 
-	// Second page.
 	groups2, nextToken2, err := s.ListGroups(poolID, 2, nextToken)
 	require.NoError(t, err)
 	require.Len(t, groups2, 1)
@@ -227,7 +225,6 @@ func TestStorageAddRemoveUserToGroup(t *testing.T) {
 	require.Len(t, groups, 1)
 	assert.Equal(t, "admins", groups[0].GroupName)
 
-	// Remove.
 	require.NoError(t, s.RemoveUserFromGroup(poolID, "admins", "alice"))
 
 	users2, _, err := s.ListUsersInGroup(poolID, "admins", 60, "")

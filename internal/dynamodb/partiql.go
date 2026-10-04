@@ -176,7 +176,6 @@ func pqTokenize(s string) ([]pqTok, error) {
 			toks = append(toks, pqTok{kind: pqTokStr, val: s[i : j+1], strVal: sb.String()})
 			i = j + 1
 		case '"':
-			// double-quoted identifier
 			j := i + 1
 			for j < len(s) && s[j] != '"' {
 				j++
@@ -187,7 +186,6 @@ func pqTokenize(s string) ([]pqTok, error) {
 			toks = append(toks, pqTok{kind: pqTokStr, val: s[i : j+1], strVal: s[i+1 : j]})
 			i = j + 1
 		case '`':
-			// backtick-quoted identifier
 			j := i + 1
 			for j < len(s) && s[j] != '`' {
 				j++
@@ -210,7 +208,6 @@ func pqTokenize(s string) ([]pqTok, error) {
 				toks = append(toks, pqTok{kind: pqTokNum, val: s[i:j]})
 				i = j
 			} else if c == '-' && i+1 < len(s) && unicode.IsDigit(rune(s[i+1])) {
-				// negative number literal
 				j := i + 1
 				hasDot := false
 				for j < len(s) && (unicode.IsDigit(rune(s[j])) || (s[j] == '.' && !hasDot)) {

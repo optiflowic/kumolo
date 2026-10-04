@@ -3,13 +3,8 @@ resource "aws_cognito_user_pool" "main" {
 
   mfa_configuration = "OFF"
 
-  # Note: the AWS provider's underlying SDK only transmits require_* fields
-  # when true (a false value is indistinguishable from an omitted field on
-  # the wire — confirmed against real AWS behavior, not kumolo-specific), so
-  # require_*=false here would have no effect. minimum_length is the only
-  # PasswordPolicy field this resource can meaningfully override; the
-  # RequireUppercase/Lowercase/Numbers/Symbols complexity defaults (all true)
-  # still apply regardless of this block's require_* settings.
+  # The provider's SDK only transmits require_* when true, so require_*=false
+  # would have no effect: only minimum_length can be overridden here.
   password_policy {
     minimum_length = 12
   }
@@ -35,11 +30,8 @@ resource "aws_cognito_user" "admin" {
   user_pool_id = aws_cognito_user_pool.main.id
   username     = "tf-admin@example.com"
 
-  # Satisfies both the pool's custom 12-character minimum_length and the
-  # default complexity requirements (upper/lower/number/symbol) that still
-  # apply because require_*=false can't be transmitted (see password_policy
-  # above). This exercises passwordPolicyFromPool's merge of an explicit
-  # MinimumLength override with the inherited default complexity flags.
+  # Satisfies both the custom 12-character minimum_length and the default
+  # complexity requirements, which still apply (see password_policy above).
   temporary_password = "TempPass123!"
   message_action     = "SUPPRESS"
 
@@ -107,11 +99,8 @@ resource "aws_cognito_user_pool" "mfa_required" {
 
   mfa_configuration = "ON"
 
-  # Regression guard for #555: SetUserPoolMfaConfig used to hardcode
-  # SoftwareTokenMfaConfiguration.Enabled=false in its response regardless of this
-  # block, so terraform-provider-aws's reconcile-on-every-apply call would show a
-  # perpetual diff here. Forced MFA_SETUP itself still depends only on
-  # mfa_configuration = "ON" (see handler_auth.go), independent of this block.
+  # Regression guard for #555: a response that doesn't echo this block back
+  # shows up as a perpetual diff on every apply.
   software_token_mfa_configuration {
     enabled = true
   }

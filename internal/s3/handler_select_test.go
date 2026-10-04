@@ -45,15 +45,12 @@ func parseEventStream(t *testing.T, data []byte) []struct{ kind, payload string 
 
 		msg := data[:totalLen]
 
-		// Verify prelude CRC.
 		preludeCRC := binary.BigEndian.Uint32(msg[8:12])
 		require.Equal(t, crc32.ChecksumIEEE(msg[0:8]), preludeCRC, "prelude CRC mismatch")
 
-		// Verify message CRC.
 		msgCRC := binary.BigEndian.Uint32(msg[totalLen-4 : totalLen])
 		require.Equal(t, crc32.ChecksumIEEE(msg[:totalLen-4]), msgCRC, "message CRC mismatch")
 
-		// Parse headers.
 		hBytes := msg[12 : 12+headersLen]
 		headers := parseESHeaders(hBytes)
 

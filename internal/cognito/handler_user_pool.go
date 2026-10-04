@@ -376,10 +376,7 @@ func (ro *Router) handleDescribeUserPool(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
-	// UserPoolType (real AWS's DescribeUserPool response shape) has no
-	// SoftwareTokenMfaConfiguration field — only GetUserPoolMfaConfig/SetUserPoolMfaConfig
-	// expose it (#555) — so clear it here rather than leak kumolo's internal persistence
-	// field into a response shape AWS never puts it in.
+	// AWS's UserPoolType has no SoftwareTokenMfaConfiguration field (#555).
 	descResp := *meta
 	descResp.SoftwareTokenMfaConfigEnabled = nil
 	writeJSON(w, http.StatusOK, map[string]any{"UserPool": &descResp})
@@ -545,13 +542,9 @@ func (ro *Router) handleGetUserPoolMfaConfig(w http.ResponseWriter, body []byte)
 }
 
 // mfaConfigResponse builds the shared GetUserPoolMfaConfig/SetUserPoolMfaConfig response
-// body. SoftwareTokenMfaConfiguration is omitted entirely (not included as
-// {"Enabled": false}) when softwareTokenEnabled is nil — real AWS omits it the same way it
-// omits SmsMfaConfiguration/EmailMfaConfiguration/WebAuthnConfiguration for a pool that's
-// never had that factor explicitly configured via SetUserPoolMfaConfig (see the pointer
-// return types on GetUserPoolMfaConfigOutput/SetUserPoolMfaConfigOutput in
-// aws-sdk-go-v2, terraform-provider-aws's nil-guarded flattenSoftwareTokenMFAConfigType,
-// and docs/aws-spec/cognito/set_user_pool_mfa_config.md for the evidence).
+// body. Like real AWS, it omits SoftwareTokenMfaConfiguration (rather than sending
+// {"Enabled": false}) for a pool that never configured it — see
+// docs/aws-spec/cognito/set_user_pool_mfa_config.md.
 func mfaConfigResponse(mfaConfiguration string, softwareTokenEnabled *bool) map[string]any {
 	resp := map[string]any{"MfaConfiguration": mfaConfiguration}
 	if softwareTokenEnabled != nil {
@@ -564,14 +557,8 @@ func (ro *Router) handleSetUserPoolMfaConfig(w http.ResponseWriter, body []byte)
 	var req struct {
 		UserPoolId       string `json:"UserPoolId"`
 		MfaConfiguration string `json:"MfaConfiguration"`
-		// SoftwareTokenMfaConfiguration uses AWS's full-replace semantics, not
-		// MfaConfiguration's omit-to-keep semantics: real AWS resets a factor config that's
-		// absent from the request rather than preserving what was previously stored — see
-		// docs/aws-spec/cognito/set_user_pool_mfa_config.md (#555) for the evidence. A
-		// pointer distinguishes "absent from the request" (nil — resets kumolo's stored
-		// state to unconfigured, the same as a pool that's never called this operation) from
-		// "present with Enabled: false" (non-nil — an explicitly configured, disabled state
-		// that's still echoed back by Get/SetUserPoolMfaConfig, unlike the unconfigured case).
+		// Full-replace semantics, unlike MfaConfiguration's omit-to-keep: absent (nil)
+		// resets the stored state to unconfigured (#555).
 		SoftwareTokenMfaConfiguration *struct {
 			Enabled bool `json:"Enabled"`
 		} `json:"SoftwareTokenMfaConfiguration"`

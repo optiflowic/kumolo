@@ -132,11 +132,8 @@ func TestDeleteUserPool_RemovePoolDirError(t *testing.T) {
 	assert.Contains(t, err.Error(), "remove pool dir")
 }
 
-// TestDeleteUserPool_WithRevokedJTIs is a regression test: DeleteUserPool must
-// succeed for a pool that has revoked at least one access token. Before
-// revoked_jtis was added to the cleanup list, the leftover directory made
-// "pools/{poolID}" non-empty, so the final os.Remove failed with
-// InternalErrorException on every pool that ever called RevokeToken/GlobalSignOut.
+// TestDeleteUserPool_WithRevokedJTIs is a regression test: a leftover revoked_jtis
+// directory used to make the final os.Remove of the pool directory fail.
 func TestDeleteUserPool_WithRevokedJTIs(t *testing.T) {
 	s := newTestStorage(t)
 	poolID := setupStoragePool(t, s)

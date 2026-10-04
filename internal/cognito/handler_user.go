@@ -489,7 +489,6 @@ func (ro *Router) handleGlobalSignOut(w http.ResponseWriter, body []byte) {
 		}
 	}
 
-	// Delete all refresh tokens for this user.
 	if err := ro.storage.DeleteRefreshTokensBySub(poolID, sub); err != nil {
 		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
 			"failed to revoke refresh tokens")

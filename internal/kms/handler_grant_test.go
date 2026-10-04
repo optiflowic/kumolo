@@ -462,7 +462,6 @@ func TestHandleRevokeGrant(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Empty(t, w.Body.String())
 
-		// Confirm the grant is gone.
 		listBody, _ := json.Marshal(map[string]any{"KeyId": keyID})
 		lw := kmsReq(t, ro, "ListGrants", string(listBody))
 		require.Equal(t, http.StatusOK, lw.Code)

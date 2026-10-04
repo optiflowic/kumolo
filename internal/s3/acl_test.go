@@ -223,7 +223,6 @@ func TestACLHandlers(t *testing.T) {
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
 
-		// Verify stored ACL
 		req2 := httptest.NewRequest(http.MethodGet, "/b-put-canned?acl", nil)
 		w2 := httptest.NewRecorder()
 		ro.ServeHTTP(w2, req2)
@@ -270,7 +269,6 @@ func TestACLHandlers(t *testing.T) {
 		ro.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
 
-		// Verify stored ACL
 		req2 := httptest.NewRequest(http.MethodGet, "/b-obj-put-acl/key?acl", nil)
 		w2 := httptest.NewRecorder()
 		ro.ServeHTTP(w2, req2)

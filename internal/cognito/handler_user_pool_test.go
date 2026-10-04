@@ -401,7 +401,6 @@ func TestUpdateUserPool_Success(t *testing.T) {
 	}`, poolID))
 	require.Equal(t, http.StatusOK, w.Code)
 
-	// Verify via Describe
 	w2 := doOp(t, ro, "DescribeUserPool", fmt.Sprintf(`{"UserPoolId":%q}`, poolID))
 	require.Equal(t, http.StatusOK, w2.Code)
 
@@ -452,7 +451,6 @@ func TestDeleteUserPool_Success(t *testing.T) {
 	w := doOp(t, ro, "DeleteUserPool", fmt.Sprintf(`{"UserPoolId":%q}`, poolID))
 	require.Equal(t, http.StatusOK, w.Code)
 
-	// Verify it's gone
 	w2 := doOp(t, ro, "DescribeUserPool", fmt.Sprintf(`{"UserPoolId":%q}`, poolID))
 	assert.Equal(t, http.StatusBadRequest, w2.Code)
 	var resp errResponse
@@ -590,7 +588,6 @@ func TestListUserPools_Pagination(t *testing.T) {
 		createPool(t, ro, fmt.Sprintf("page-pool-%d", i))
 	}
 
-	// Page 1: MaxResults=2
 	w1 := doOp(t, ro, "ListUserPools", `{"MaxResults":2}`)
 	require.Equal(t, http.StatusOK, w1.Code)
 	var resp1 struct {
@@ -603,7 +600,6 @@ func TestListUserPools_Pagination(t *testing.T) {
 	assert.Len(t, resp1.UserPools, 2)
 	assert.NotEmpty(t, resp1.NextToken)
 
-	// Page 2
 	w2 := doOp(
 		t,
 		ro,
@@ -621,7 +617,6 @@ func TestListUserPools_Pagination(t *testing.T) {
 	assert.Len(t, resp2.UserPools, 2)
 	assert.NotEmpty(t, resp2.NextToken)
 
-	// Page 3: last page
 	w3 := doOp(
 		t,
 		ro,
@@ -988,13 +983,8 @@ func TestSetUserPoolMfaConfig_NoMfaConfigurationKeepsExisting(t *testing.T) {
 	}`, poolID))
 	require.Equal(t, http.StatusOK, w.Code)
 
-	// A follow-up call that omits MfaConfiguration must not reset it — unlike
-	// SoftwareTokenMfaConfiguration (see
-	// TestSetUserPoolMfaConfig_OmittedSoftwareTokenMfaConfigurationResetsToDisabled),
-	// no confirmed real-AWS evidence shows MfaConfiguration itself resets to OFF when
-	// omitted, and Terraform's aws_cognito_user_pool resource always sends it (its schema
-	// treats mfa_configuration as always-present, defaulting to "OFF") so this path isn't
-	// exercised by the terraform-provider-aws reconcile-apply flow #463/#555 were driven by.
+	// A follow-up call that omits MfaConfiguration must not reset it, unlike
+	// SoftwareTokenMfaConfiguration.
 	w = doOp(t, ro, "SetUserPoolMfaConfig", fmt.Sprintf(`{
 		"UserPoolId": %q,
 		"SmsMfaConfiguration": {"SmsAuthenticationMessage": "code: {####}"}
@@ -1014,19 +1004,9 @@ func TestSetUserPoolMfaConfig_NoMfaConfigurationKeepsExisting(t *testing.T) {
 }
 
 // TestSetUserPoolMfaConfig_OmittedSoftwareTokenMfaConfigurationResetsToUnconfigured guards
-// two related, evidence-backed deviations from kumolo's original #555 fix:
-//  1. Full-replace, not merge, semantics: a request that omits SoftwareTokenMfaConfiguration
-//     resets it rather than preserving what was previously stored. Evidence:
-//     https://github.com/aws/aws-sdk-js/issues/4186 (a SetUserPoolMfaConfig call with
-//     MfaConfiguration only, omitting an already-configured SmsMfaConfiguration, failed with
-//     "can't disable all MFAs" — proving the omitted factor was treated as cleared, not kept).
-//  2. The reset target is "unconfigured" (the key omitted from the response entirely), not
-//     "configured and disabled" ({"Enabled": false}) — the same as a pool that's never called
-//     SetUserPoolMfaConfig at all. Evidence: aws-sdk-go-v2 types SoftwareTokenMfaConfiguration
-//     as a pointer on both Get/SetUserPoolMfaConfigOutput (the same pattern as the
-//     documented-omitted Sms/Email/WebAuthnConfiguration fields), and
-//     terraform-provider-aws's flattenSoftwareTokenMFAConfigType nil-guards it before writing
-//     Terraform state.
+// two behaviors: omitting SoftwareTokenMfaConfiguration resets it (full-replace, not
+// merge), and the reset state is "unconfigured" — the key absent from the response, not
+// {"Enabled": false}. Evidence: docs/aws-spec/cognito/set_user_pool_mfa_config.md.
 func TestSetUserPoolMfaConfig_OmittedSoftwareTokenMfaConfigurationResetsToUnconfigured(
 	t *testing.T,
 ) {
