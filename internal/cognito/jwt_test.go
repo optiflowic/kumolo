@@ -190,7 +190,6 @@ func TestIssueTokens_Success(t *testing.T) {
 	assert.Regexp(t, uuidV4Pattern, accessJTI)
 	assert.Regexp(t, uuidV4Pattern, originJTI)
 
-	// Verify access token claims.
 	claims, err := verifyJWT(access, &key.PublicKey)
 	require.NoError(t, err)
 	assert.Equal(t, "sub-alice", claims["sub"])

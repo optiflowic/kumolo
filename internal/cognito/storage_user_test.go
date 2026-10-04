@@ -24,12 +24,8 @@ func newTestStorage(t *testing.T) *Storage {
 	return s
 }
 
-// testRSAKeyPool lazily generates a small set of real RSA-2048 keys once per
-// test binary run (gosec G403 requires at least 2048 bits, even in test code,
-// so key *size* can't be reduced to speed up tests). Repeated RSA-2048
-// generation is the dominant cost across this package's tests; a shared,
-// round-robin pool amortizes that cost across hundreds of tests instead of
-// paying it on every call.
+// testRSAKeyPool generates a few RSA-2048 keys once per test binary: key generation
+// dominates this package's test time, and gosec G403 forbids smaller keys.
 var testRSAKeyPool = sync.OnceValue(func() []*rsa.PrivateKey {
 	const poolSize = 4
 	keys := make([]*rsa.PrivateKey, poolSize)
@@ -45,16 +41,8 @@ var testRSAKeyPool = sync.OnceValue(func() []*rsa.PrivateKey {
 
 var testRSAKeyIdx atomic.Uint32
 
-// nextTestRSAKey returns a key from the shared pool, cycling round-robin so
-// consecutive calls always return different keys. Some tests rely on two
-// pools (or two otherwise-related keys) having distinct RSA keys — e.g.
-// TestRespondToAuthChallenge_WrongSessionPool checks that a session token
-// signed by one pool's key fails verification against another pool's key —
-// round-robin over a pool of >1 keys preserves that for any two calls in
-// immediate succession. This assumes no test in this package calls
-// t.Parallel(): interleaved calls from unrelated parallel tests could shift
-// which pool index a given test's calls land on, silently breaking that
-// distinctness guarantee.
+// nextTestRSAKey cycles through the pool so consecutive calls return distinct keys,
+// which some tests rely on. This assumes no test in this package calls t.Parallel().
 func nextTestRSAKey() *rsa.PrivateKey {
 	keys := testRSAKeyPool()
 	idx := testRSAKeyIdx.Add(1) - 1

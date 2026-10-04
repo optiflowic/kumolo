@@ -1446,12 +1446,9 @@ func TestMFASetup_NotTriggeredWhenAlreadyEnrolled(t *testing.T) {
 	assert.Equal(t, "SOFTWARE_TOKEN_MFA", resp["ChallengeName"])
 }
 
-// TestMFASetup_NotForcedForDisabledButRegisteredUser guards against the regression in #502: a
-// user who enrolled and then disabled SOFTWARE_TOKEN_MFA while the pool still allowed it
-// (permitted per TestSetUserMFAPreference_DisableClearsPreferred) must not be forced through
-// MFA_SETUP re-enrollment once the pool later switches to "ON" — their existing verified TOTP
-// secret must be reused via a SOFTWARE_TOKEN_MFA challenge instead, and completing it must
-// self-heal SoftwareTokenMFAEnabled back to true without generating a new secret.
+// TestMFASetup_NotForcedForDisabledButRegisteredUser guards against #502: a user who
+// enrolled and then disabled SOFTWARE_TOKEN_MFA must get a SOFTWARE_TOKEN_MFA challenge,
+// not MFA_SETUP, once the pool switches to "ON", and completing it re-enables the factor.
 func TestMFASetup_NotForcedForDisabledButRegisteredUser(t *testing.T) {
 	ro := newTestRouter(t)
 	poolID := createPoolWithMFA(t, ro, "mfa-pool", "OPTIONAL")
@@ -1503,12 +1500,8 @@ func TestMFASetup_NotForcedForDisabledButRegisteredUser(t *testing.T) {
 	assert.Equal(t, mfaSettingSoftwareToken, u.PreferredMfaSetting)
 }
 
-// TestSetUserMFAPreference_DisableRejectedInMFARequiredPool guards against a regression where
-// an already-enrolled user could call SetUserMFAPreference to disable SOFTWARE_TOKEN_MFA in a
-// pool with MfaConfiguration "ON", which forced them back through MFA_SETUP on their next
-// sign-in even though they still had a registered TOTP secret. Real AWS doesn't let users
-// disable an MFA method once the pool enforces MFA (see docs/aws-spec/cognito/initiate_auth.md),
-// so the disable attempt itself must be rejected up front.
+// TestSetUserMFAPreference_DisableRejectedInMFARequiredPool: real AWS doesn't let a user
+// disable an MFA method once the pool enforces MFA (see docs/aws-spec/cognito/initiate_auth.md).
 func TestSetUserMFAPreference_DisableRejectedInMFARequiredPool(t *testing.T) {
 	ro := newTestRouter(t)
 	clientID := setupMFARequiredPool(t, ro)

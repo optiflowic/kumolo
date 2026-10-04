@@ -320,7 +320,6 @@ func TestDescribeUserPoolClient_SecretPreserved(t *testing.T) {
 	ro := newTestRouter(t)
 	poolID := createPool(t, ro, "pool")
 
-	// Create with generated secret
 	w := doOp(t, ro, "CreateUserPoolClient", fmt.Sprintf(`{
 		"UserPoolId": %q,
 		"ClientName": "secret-app",
@@ -462,7 +461,6 @@ func TestUpdateUserPoolClient_SecretPreservedAfterUpdate(t *testing.T) {
 	ro := newTestRouter(t)
 	poolID := createPool(t, ro, "pool")
 
-	// Create with secret
 	w := doOp(t, ro, "CreateUserPoolClient", fmt.Sprintf(`{
 		"UserPoolId": %q,
 		"ClientName": "secret-app",
@@ -598,7 +596,6 @@ func TestDeleteUserPoolClient_Success(t *testing.T) {
 	))
 	require.Equal(t, http.StatusOK, w.Code)
 
-	// Verify it's gone
 	w2 := doOp(t, ro, "DescribeUserPoolClient", fmt.Sprintf(
 		`{"UserPoolId":%q,"ClientId":%q}`, poolID, clientID,
 	))
@@ -726,7 +723,6 @@ func TestListUserPoolClients_Pagination(t *testing.T) {
 		createClient(t, ro, poolID, fmt.Sprintf("app-%d", i))
 	}
 
-	// Page 1: MaxResults=2
 	w1 := doOp(t, ro, "ListUserPoolClients", fmt.Sprintf(
 		`{"UserPoolId":%q,"MaxResults":2}`, poolID,
 	))
@@ -741,7 +737,6 @@ func TestListUserPoolClients_Pagination(t *testing.T) {
 	assert.Len(t, resp1.UserPoolClients, 2)
 	assert.NotEmpty(t, resp1.NextToken)
 
-	// Page 2
 	w2 := doOp(t, ro, "ListUserPoolClients", fmt.Sprintf(
 		`{"UserPoolId":%q,"MaxResults":2,"NextToken":%q}`, poolID, resp1.NextToken,
 	))
@@ -756,7 +751,6 @@ func TestListUserPoolClients_Pagination(t *testing.T) {
 	assert.Len(t, resp2.UserPoolClients, 2)
 	assert.NotEmpty(t, resp2.NextToken)
 
-	// Page 3: last page
 	w3 := doOp(t, ro, "ListUserPoolClients", fmt.Sprintf(
 		`{"UserPoolId":%q,"MaxResults":2,"NextToken":%q}`, poolID, resp2.NextToken,
 	))

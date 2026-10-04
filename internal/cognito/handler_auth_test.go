@@ -829,7 +829,6 @@ func TestInitiateAuth_RefreshTokenAuth_Success(t *testing.T) {
 	signUpUser(t, ro, clientID, "alice", "Password123!")
 	confirmUser(t, ro, clientID, "alice")
 
-	// Sign in to get a refresh token.
 	w := doInitAuth(t, ro, clientID, "alice", "Password123!")
 	require.Equal(t, http.StatusOK, w.Code)
 	var firstResp map[string]any
@@ -909,11 +908,8 @@ func TestInitiateAuth_RefreshTokenAuth_HonorsClientTokenValidity(t *testing.T) {
 	assert.InDelta(t, before+45, idClaims[jwtClaimExp].(float64), 2)
 }
 
-// TestInitiateAuth_RefreshTokenAuth_DisabledUser uses a mockStore because
-// AdminDisableUser also deletes refresh tokens outright — a real disabled
-// user's refresh token would already be gone, masking the Enabled check this
-// test targets. A stubbed store keeps the token "valid" so the disabled-user
-// gate itself is exercised.
+// TestInitiateAuth_RefreshTokenAuth_DisabledUser uses a mockStore because AdminDisableUser
+// also deletes refresh tokens, which would mask the Enabled check this test targets.
 func TestInitiateAuth_RefreshTokenAuth_DisabledUser(t *testing.T) {
 	poolID, clientID := "us-east-1_TestPool", "client-1"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice", Enabled: false}
@@ -985,7 +981,6 @@ func TestInitiateAuth_RefreshToken_ClientIDMismatch(t *testing.T) {
 	require.NoError(t, json.NewDecoder(w1.Body).Decode(&firstResp))
 	rt := firstResp["AuthenticationResult"].(map[string]any)["RefreshToken"].(string)
 
-	// Create a second client in the same pool.
 	clientID2 := createClient(t, ro, poolID, "test-client-2")
 
 	// Presenting the first client's refresh token to the second client must fail.
@@ -1408,11 +1403,8 @@ func TestResendDeliveryDetails_EmailWinsOverPhone(t *testing.T) {
 	assert.Equal(t, "a***@example.com", got.Destination)
 }
 
-// TestCompleteAuth_MFAEnabledDuringAuth_ReturnsChallenge ensures a request that read the
-// user record before SetUserMFAPreference enabled SOFTWARE_TOKEN_MFA (e.g. during the
-// bcrypt comparison window) still gets an MFA challenge instead of tokens: completeAuth
-// reloads the current user record right before deciding, rather than trusting the
-// caller's earlier snapshot.
+// TestCompleteAuth_MFAEnabledDuringAuth_ReturnsChallenge ensures completeAuth reloads the
+// user record, so MFA enabled after the caller's earlier read still yields a challenge.
 func TestCompleteAuth_MFAEnabledDuringAuth_ReturnsChallenge(t *testing.T) {
 	key := testRSAKey(t)
 	keyID, _ := generateTokenID()
@@ -1823,7 +1815,6 @@ func TestRespondToAuthChallenge_WrongSessionPool(t *testing.T) {
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&initResp))
 	session := initResp["Session"].(string)
 
-	// Create a second pool with its own client.
 	poolID2 := createPool(t, ro, "other-pool")
 	clientID2 := createClient(t, ro, poolID2, "other-client")
 
@@ -1846,7 +1837,6 @@ func TestRespondToAuthChallenge_UpdateUserNotFound(t *testing.T) {
 	key := testRSAKey(t)
 	keyID, _ := generateTokenID()
 
-	// Build a valid session token.
 	session, err := buildSessionToken(key, keyID, "pool-1", "c", "u", "NEW_PASSWORD_REQUIRED", nil)
 	require.NoError(t, err)
 
@@ -2380,7 +2370,6 @@ func TestRevokeToken_RefreshTokenNoLongerUsable(t *testing.T) {
 	result := doFullAuth(t, ro, clientID, "alice", "Password123!")
 	refreshToken := result["RefreshToken"].(string)
 
-	// Revoke the refresh token.
 	revokeBody, _ := json.Marshal(map[string]string{"ClientId": clientID, "Token": refreshToken})
 	w := doOp(t, ro, "RevokeToken", string(revokeBody))
 	require.Equal(t, http.StatusOK, w.Code)
@@ -2475,7 +2464,6 @@ func TestRevokeToken_ClientMismatch(t *testing.T) {
 	result := doFullAuth(t, ro, clientID, "alice", "Password123!")
 	refreshToken := result["RefreshToken"].(string)
 
-	// Create a second client in the same pool.
 	clientID2 := createClient(t, ro, poolID, "other-client")
 
 	body, _ := json.Marshal(map[string]string{

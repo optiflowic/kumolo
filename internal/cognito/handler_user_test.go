@@ -504,7 +504,6 @@ func TestGlobalSignOut_AccessTokenRejectedAfterSignOut(t *testing.T) {
 	_, clientID := setupPool(t, ro)
 	token := doAuth(t, ro, clientID, "alice", "Password123!")
 
-	// Sign out.
 	signOutBody, _ := json.Marshal(map[string]string{"AccessToken": token})
 	w := doOp(t, ro, "GlobalSignOut", string(signOutBody))
 	require.Equal(t, http.StatusOK, w.Code)
@@ -523,7 +522,6 @@ func TestGlobalSignOut_RefreshTokensRevokedAfterSignOut(t *testing.T) {
 	accessToken := result["AccessToken"].(string)
 	refreshToken := result["RefreshToken"].(string)
 
-	// Sign out.
 	signOutBody, _ := json.Marshal(map[string]string{"AccessToken": accessToken})
 	w := doOp(t, ro, "GlobalSignOut", string(signOutBody))
 	require.Equal(t, http.StatusOK, w.Code)
@@ -546,7 +544,6 @@ func TestGlobalSignOut_AlreadyRevokedTokenRejected(t *testing.T) {
 	_, clientID := setupPool(t, ro)
 	token := doAuth(t, ro, clientID, "alice", "Password123!")
 
-	// First sign out.
 	body, _ := json.Marshal(map[string]string{"AccessToken": token})
 	w := doOp(t, ro, "GlobalSignOut", string(body))
 	require.Equal(t, http.StatusOK, w.Code)
@@ -771,7 +768,6 @@ func TestGlobalSignOut_NewTokenValidAfterSignOut(t *testing.T) {
 	_, clientID := setupPool(t, ro)
 	token := doAuth(t, ro, clientID, "alice", "Password123!")
 
-	// Sign out.
 	signOutBody, _ := json.Marshal(map[string]string{"AccessToken": token})
 	wOut := doOp(t, ro, "GlobalSignOut", string(signOutBody))
 	require.Equal(t, http.StatusOK, wOut.Code)
