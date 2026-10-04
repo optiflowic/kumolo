@@ -2200,7 +2200,6 @@ func TestRouterListObjectsV2(t *testing.T) {
 			ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/"+key, "data"))
 		}
 
-		// First page: max-keys=2
 		req1 := httptest.NewRequest(http.MethodGet, "/my-bucket?list-type=2&max-keys=2", nil)
 		w1 := httptest.NewRecorder()
 		ro.ServeHTTP(w1, req1)
@@ -2839,7 +2838,6 @@ func TestRouterCopyObject(t *testing.T) {
 		createReq.Header.Set(amzBucketObjectLockEnabled, "true")
 		ro.ServeHTTP(httptest.NewRecorder(), createReq)
 
-		// Create src bucket and put source object.
 		ro.ServeHTTP(
 			httptest.NewRecorder(),
 			httptest.NewRequest(http.MethodPut, "/src-bucket", nil),
@@ -3166,7 +3164,6 @@ func TestRouterMultipartUpload(t *testing.T) {
 	setup := func(t *testing.T) (*Router, string) {
 		t.Helper()
 		ro := newTestRouter(t)
-		// Create bucket
 		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
 		return ro, "/my-bucket/big.txt"
 	}
@@ -3882,7 +3879,6 @@ func TestRouterMultipartUpload(t *testing.T) {
 
 	t.Run("x-amz-tagging on CreateMultipartUpload is applied to final object", func(t *testing.T) {
 		ro, path := setup(t)
-		// Initiate with tagging.
 		initReq := httptest.NewRequest(http.MethodPost, path+"?uploads", nil)
 		initReq.Header.Set("Content-Type", "text/plain")
 		initReq.Header.Set(amzTagging, "env=prod&team=backend")
@@ -3905,7 +3901,6 @@ func TestRouterMultipartUpload(t *testing.T) {
 		require.Equal(t, http.StatusOK, partW.Code)
 		etag := partW.Header().Get("ETag")
 
-		// Complete.
 		body, err := xml.Marshal(completeMultipartUploadRequest{
 			Parts: []xmlCompletePart{{PartNumber: 1, ETag: etag}},
 		})
@@ -3919,7 +3914,6 @@ func TestRouterMultipartUpload(t *testing.T) {
 		ro.ServeHTTP(completeW, completeReq)
 		require.Equal(t, http.StatusOK, completeW.Code)
 
-		// Verify tags were applied.
 		tagReq := httptest.NewRequest(http.MethodGet, path+"?tagging", nil)
 		tagW := httptest.NewRecorder()
 		ro.ServeHTTP(tagW, tagReq)
@@ -4335,7 +4329,6 @@ func TestRouterDeleteObjects(t *testing.T) {
 		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
 		enableVersioning(t, ro, "my-bucket")
 
-		// Upload two versions.
 		w1 := httptest.NewRecorder()
 		ro.ServeHTTP(w1, putRequest("/my-bucket/obj.txt", "v1"))
 		vid1 := w1.Header().Get(amzVersionID)
@@ -4640,7 +4633,6 @@ func TestRouterListMultipartUploads(t *testing.T) {
 	t.Run("returns 200 with in-progress uploads", func(t *testing.T) {
 		ro := newTestRouter(t)
 		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
-		// Initiate two uploads.
 		for _, key := range []string{"big.txt", "other.txt"} {
 			req := httptest.NewRequest(
 				http.MethodPost,
@@ -4812,7 +4804,6 @@ func TestRouterListParts(t *testing.T) {
 		ro := newTestRouter(t)
 		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/my-bucket", nil))
 
-		// Initiate upload and upload two parts.
 		initReq := httptest.NewRequest(http.MethodPost, "/my-bucket/big.txt?uploads", nil)
 		initW := httptest.NewRecorder()
 		ro.ServeHTTP(initW, initReq)
@@ -4973,7 +4964,6 @@ func TestRouterListParts(t *testing.T) {
 	t.Run("second page via part-number-marker returns remaining parts", func(t *testing.T) {
 		ro, uploadID := setupUploadWithParts(t, 4)
 
-		// First page.
 		req1 := httptest.NewRequest(
 			http.MethodGet,
 			"/my-bucket/big.txt?uploadId="+uploadID+"&max-parts=2",
@@ -4986,7 +4976,6 @@ func TestRouterListParts(t *testing.T) {
 		require.NoError(t, xml.Unmarshal(w1.Body.Bytes(), &page1))
 		require.True(t, page1.IsTruncated)
 
-		// Second page using NextPartNumberMarker.
 		req2 := httptest.NewRequest(
 			http.MethodGet,
 			fmt.Sprintf(
@@ -5426,7 +5415,6 @@ func TestRouterUploadPartCopy(t *testing.T) {
 
 	t.Run("returns 200 when x-amz-copy-source-if-match succeeds", func(t *testing.T) {
 		ro, uploadID, path := setup(t)
-		// Fetch ETag of the source object.
 		headReq := httptest.NewRequest(http.MethodHead, "/src-bucket/source.txt", nil)
 		headW := httptest.NewRecorder()
 		ro.ServeHTTP(headW, headReq)
@@ -5565,7 +5553,6 @@ func TestRouterUploadPartCopy(t *testing.T) {
 		"evaluates precondition via HeadObjectVersion when copy source includes versionId",
 		func(t *testing.T) {
 			ro, uploadID, path := setup(t)
-			// Enable versioning and put a versioned object.
 			ro.ServeHTTP(
 				httptest.NewRecorder(),
 				httptest.NewRequest(
@@ -5588,7 +5575,6 @@ func TestRouterUploadPartCopy(t *testing.T) {
 			vID := putW.Header().Get("x-amz-version-id")
 			require.NotEmpty(t, vID)
 
-			// Fetch the ETag of the versioned object.
 			headReq := httptest.NewRequest(
 				http.MethodHead,
 				"/src-bucket/versioned.txt?versionId="+vID,
@@ -7361,7 +7347,6 @@ func TestRouterDeleteObjectVersioned(t *testing.T) {
 			require.NoError(t, ro.storage.(*Storage).PutBucketVersioning("my-bucket", "Enabled"))
 			ro.ServeHTTP(httptest.NewRecorder(), putRequest("/my-bucket/obj.txt", "hello"))
 
-			// Create a delete marker.
 			delW := httptest.NewRecorder()
 			ro.ServeHTTP(
 				delW,
@@ -9827,7 +9812,6 @@ func TestObjectRetentionHandlers(t *testing.T) {
 
 	t.Run("PUT/GET roundtrip via real storage", func(t *testing.T) {
 		ro := newTestRouter(t)
-		// Create bucket and object.
 		ro.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPut, "/b", nil))
 		ro.ServeHTTP(
 			httptest.NewRecorder(),

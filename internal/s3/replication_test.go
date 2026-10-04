@@ -442,7 +442,6 @@ func TestReplicateObject(t *testing.T) {
 		require.NoError(t, ro.storage.PutBucketReplication("src",
 			buildReplicationCfg("arn:aws:s3:::dst", "", "Enabled")))
 
-		// Create MPU
 		createReq := httptest.NewRequest(http.MethodPost, "/src/mpu.bin?uploads", nil)
 		createRR := httptest.NewRecorder()
 		ro.ServeHTTP(createRR, createReq)
@@ -462,7 +461,6 @@ func TestReplicateObject(t *testing.T) {
 		require.Equal(t, http.StatusOK, partRR.Code)
 		etag := partRR.Header().Get("ETag")
 
-		// Complete
 		completeBody := `<CompleteMultipartUpload>` +
 			`<Part><PartNumber>1</PartNumber><ETag>` + etag + `</ETag></Part>` +
 			`</CompleteMultipartUpload>`

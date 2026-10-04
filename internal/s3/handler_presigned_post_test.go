@@ -84,7 +84,6 @@ func TestHandlePresignedPost(t *testing.T) {
 		assert.Equal(t, http.StatusNoContent, w.Code)
 		assert.Empty(t, w.Body.String())
 
-		// Verify object was stored.
 		getW := httptest.NewRecorder()
 		ro.ServeHTTP(
 			getW,

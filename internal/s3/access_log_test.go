@@ -156,7 +156,6 @@ func TestWriteAccessLog(t *testing.T) {
 func TestAppendAccessLog(t *testing.T) {
 	ro := newTestRouter(t)
 
-	// Create source and target buckets.
 	req := httptest.NewRequest(http.MethodPut, "/src", nil)
 	ro.ServeHTTP(httptest.NewRecorder(), req)
 	req = httptest.NewRequest(http.MethodPut, "/logs", nil)
