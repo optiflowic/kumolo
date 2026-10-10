@@ -15,15 +15,15 @@
     flake-utils.lib.eachDefaultSystem (
       system:
       let
-        # Temporary overlay: pin go_1_26 to 1.26.9 (security release; fixes the
+        # Temporary overlay: pin go_1_27 to 1.27.2 (security release; fixes the
         # net/http, net/textproto, crypto/tls and os advisories GO-2026-6603..6617).
-        # Remove once nixpkgs-unstable ships 1.26.9 natively.
+        # Remove once nixpkgs-unstable ships 1.27.2 natively.
         goOverlay = final: prev: {
-          go_1_26 = prev.go_1_26.overrideAttrs (_: {
-            version = "1.26.9";
+          go_1_27 = prev.go_1_27.overrideAttrs (_: {
+            version = "1.27.2";
             src = prev.fetchurl {
-              url = "https://go.dev/dl/go1.26.9.src.tar.gz";
-              hash = "sha256-lzXX3Ntls10/pXfwQGRzfAO4nPGitx5uaf4vPG+f1Mo=";
+              url = "https://go.dev/dl/go1.27.2.src.tar.gz";
+              hash = "sha256-A0ldorpkiU1A9cSZLklFT6eLUGkGBP+Stq//UIG3bmI=";
             };
           });
         };
@@ -39,7 +39,7 @@
         };
         # Packages shared between both shells.
         commonPackages = with pkgs; [
-          go_1_26
+          go_1_27
           gnumake
           govulncheck
           goreleaser
