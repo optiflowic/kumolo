@@ -1,6 +1,6 @@
 module github.com/optiflowic/kumolo
 
-go 1.26.5
+go 1.27.2
 
 tool golang.org/x/tools/cmd/goimports
 
