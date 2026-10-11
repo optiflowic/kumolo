@@ -2,7 +2,7 @@
 
 URL: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/
 SDK: github.com/aws/aws-sdk-go-v2/service/cognitoidentityprovider
-Last verified: 2026-08-09
+Last verified: 2026-10-11
 
 ## Operations
 
@@ -44,6 +44,13 @@ work unchanged, since the region is parsed from the ID rather than tracked separ
 ## CreateUserPool
 
 - Required: `PoolName` (1–128 chars, pattern `[\w\s+=,.@-]+`)
+- Validated optional members (omitted or JSON `null` skips the check):
+  - `MfaConfiguration`: `OFF` | `ON` | `OPTIONAL`
+  - `DeletionProtection`: `ACTIVE` | `INACTIVE`
+  - `UserPoolTier`: `LITE` | `ESSENTIALS` | `PLUS`
+  - `EmailVerificationSubject`: 1–140 characters, counted as Unicode code points; an explicit
+    empty string is rejected
+- A violation returns InvalidParameterException (400) and no pool is created
 - Returns: `{"UserPool": {...}}` HTTP 200
 - Response includes generated `Id`, `Arn`, `CreationDate`, `LastModifiedDate`, `Status: "Active"`, `EstimatedNumberOfUsers: 0`
 - `SchemaAttributes` always includes standard OIDC attributes merged with any caller-provided `Schema`
@@ -82,7 +89,9 @@ work unchanged, since the region is parsed from the ID rather than tracked separ
 ## ListUserPools
 
 - Required: `MaxResults` (1–60)
-- Optional: `NextToken` (pagination cursor = ID of last item from previous page)
+- Optional: `NextToken` (pagination cursor = ID of last item from previous page; min 1 char —
+  an explicit empty string returns InvalidParameterException, omitted or `null` starts from
+  the first page)
 - Returns: `{"UserPools": [...], "NextToken": "..."}` HTTP 200
 - `UserPools` uses summary format (UserPoolDescriptionType): `Id`, `Name`, `CreationDate`, `LastModifiedDate`, `LambdaConfig`, `Status`
 - `NextToken` in response is the ID of the last pool returned; absent when no more pages
@@ -132,5 +141,10 @@ JSON on `CreateUserPool`/`UpdateUserPool`/`DescribeUserPool`, and consumed by `F
   resolution" above), not a real AWS availability constraint — kumolo does not validate that
   the region is a real AWS region name. Fixed account: `000000000000`.
 - No SMS/email delivery; no Lambda trigger invocation
+- `CreateUserPool` does not check the model's character-class pattern for
+  `EmailVerificationSubject`, and an empty-string enum member (`MfaConfiguration`,
+  `DeletionProtection`, `UserPoolTier`) is treated as omitted rather than rejected
+- `UpdateUserPool` does not validate the enum and length constraints that `CreateUserPool`
+  enforces
 - `EstimatedNumberOfUsers` always returns 0 (user counting not yet implemented)
 - `Policies.PasswordPolicy` enforcement: see `docs/aws-spec/cognito/password_policy.md`

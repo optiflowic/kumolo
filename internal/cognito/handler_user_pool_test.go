@@ -648,6 +648,125 @@ func TestListUserPools_Pagination(t *testing.T) {
 	assert.Len(t, allIDs, 5)
 }
 
+func TestCreateUserPool_InvalidOptionalFields(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "MfaConfiguration invalid enum",
+			body: `{"PoolName":"pool","MfaConfiguration":"INVALID"}`,
+		},
+		{
+			name: "DeletionProtection invalid enum",
+			body: `{"PoolName":"pool","DeletionProtection":"INVALID"}`,
+		},
+		{
+			name: "UserPoolTier invalid enum",
+			body: `{"PoolName":"pool","UserPoolTier":"INVALID"}`,
+		},
+		{
+			name: "EmailVerificationSubject empty",
+			body: `{"PoolName":"pool","EmailVerificationSubject":""}`,
+		},
+		{
+			name: "EmailVerificationSubject too long",
+			body: fmt.Sprintf(
+				`{"PoolName":"pool","EmailVerificationSubject":%q}`,
+				strings.Repeat("a", 141),
+			),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ro := newTestRouter(t)
+			w := doOp(t, ro, "CreateUserPool", tt.body)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			var resp errResponse
+			require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+			assert.Equal(t, ErrTypeInvalidParameterException, resp.Type)
+
+			list := doOp(t, ro, "ListUserPools", `{"MaxResults":10}`)
+			require.Equal(t, http.StatusOK, list.Code)
+			assert.JSONEq(t, `{"UserPools":[]}`, list.Body.String())
+		})
+	}
+}
+
+func TestCreateUserPool_ValidOptionalFields(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "MfaConfiguration OFF", body: `{"PoolName":"pool","MfaConfiguration":"OFF"}`},
+		{name: "MfaConfiguration ON", body: `{"PoolName":"pool","MfaConfiguration":"ON"}`},
+		{
+			name: "MfaConfiguration OPTIONAL",
+			body: `{"PoolName":"pool","MfaConfiguration":"OPTIONAL"}`,
+		},
+		{
+			name: "DeletionProtection ACTIVE",
+			body: `{"PoolName":"pool","DeletionProtection":"ACTIVE"}`,
+		},
+		{
+			name: "DeletionProtection INACTIVE",
+			body: `{"PoolName":"pool","DeletionProtection":"INACTIVE"}`,
+		},
+		{name: "UserPoolTier LITE", body: `{"PoolName":"pool","UserPoolTier":"LITE"}`},
+		{
+			name: "UserPoolTier ESSENTIALS",
+			body: `{"PoolName":"pool","UserPoolTier":"ESSENTIALS"}`,
+		},
+		{name: "UserPoolTier PLUS", body: `{"PoolName":"pool","UserPoolTier":"PLUS"}`},
+		{
+			name: "empty enum members are treated as omitted",
+			body: `{"PoolName":"pool","MfaConfiguration":"","DeletionProtection":"","UserPoolTier":""}`,
+		},
+		{
+			name: "EmailVerificationSubject null",
+			body: `{"PoolName":"pool","EmailVerificationSubject":null}`,
+		},
+		{
+			name: "EmailVerificationSubject 140 multibyte characters",
+			body: fmt.Sprintf(
+				`{"PoolName":"pool","EmailVerificationSubject":%q}`,
+				strings.Repeat("あ", 140),
+			),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ro := newTestRouter(t)
+			w := doOp(t, ro, "CreateUserPool", tt.body)
+			assert.Equal(t, http.StatusOK, w.Code)
+		})
+	}
+}
+
+func TestListUserPools_EmptyNextToken(t *testing.T) {
+	ro := newTestRouter(t)
+	w := doOp(t, ro, "ListUserPools", `{"MaxResults":10,"NextToken":""}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	var resp errResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, ErrTypeInvalidParameterException, resp.Type)
+}
+
+func TestListUserPools_NullNextToken(t *testing.T) {
+	ro := newTestRouter(t)
+	createPool(t, ro, "pool-0")
+
+	w := doOp(t, ro, "ListUserPools", `{"MaxResults":10,"NextToken":null}`)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp struct {
+		UserPools []userPoolDescription `json:"UserPools"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Len(t, resp.UserPools, 1)
+}
+
 func TestListUserPools_MissingMaxResults(t *testing.T) {
 	ro := newTestRouter(t)
 	w := doOp(t, ro, "ListUserPools", `{}`)
