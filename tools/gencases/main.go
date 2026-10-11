@@ -93,6 +93,13 @@ var candidates = []string{"abc123", "user1", "123456", "a"}
 
 var invalidCandidates = []string{"!!!", " ", "a b", "@@@", "\t"}
 
+const (
+	// maxOverflowLen caps the length limits a "too long" case is generated for,
+	// so request bodies stay small.
+	maxOverflowLen = 10000
+	maxNestDepth   = 3
+)
+
 func main() {
 	modelPath := flag.String("model", "", "path to botocore service-2.json")
 	routerPath := flag.String("router", "", "router.go with case \"<Operation>\": dispatch")
@@ -226,7 +233,7 @@ func casesFor(m *model, op, errType string) ([]testCase, []string) {
 			skip := func(desc string) {
 				skipped = append(skipped, fmt.Sprintf("%s: %s: no %s value", op, name, desc))
 			}
-			if s.Max != nil && *s.Max < 10000 {
+			if s.Max != nil && *s.Max < maxOverflowLen {
 				if v, ok := resize(s, str, int(*s.Max)+1); ok {
 					add("too long", name, v)
 				} else {
@@ -261,7 +268,7 @@ func casesFor(m *model, op, errType string) ([]testCase, []string) {
 
 // validValue builds a value that satisfies the shape's constraints.
 func validValue(m *model, name string, depth int) (any, error) {
-	if depth > 3 {
+	if depth > maxNestDepth {
 		return nil, fmt.Errorf("shape %s nests too deep", name)
 	}
 	s := m.Shapes[name]
