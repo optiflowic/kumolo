@@ -40,7 +40,7 @@ cover:
 	go tool cover -func=coverage.out
 
 uncovered: cover
-	@go run tools/uncovered/main.go -exclude cmd/kumolo/main.go
+	@go run ./tools/uncovered -exclude cmd/kumolo/main.go
 
 integration:
 	go test -race -count=1 -timeout 120s ./tests/integration/...
