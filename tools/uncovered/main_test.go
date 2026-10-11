@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -55,7 +56,7 @@ func TestSourceExempt(t *testing.T) {
 	}
 	return nil`,
 			first: "return err",
-			last:  "return err",
+			last:  "cannot fail\n",
 			want:  true,
 		},
 		{
@@ -67,7 +68,7 @@ func TestSourceExempt(t *testing.T) {
 	}
 	return nil`,
 			first: "return err",
-			last:  "return err",
+			last:  "return err\n",
 			want:  true,
 		},
 		{
@@ -80,7 +81,7 @@ func TestSourceExempt(t *testing.T) {
 	}
 	return nil`,
 			first: "return err",
-			last:  "return err",
+			last:  "return err\n",
 			want:  true,
 		},
 		{
@@ -92,7 +93,7 @@ func TestSourceExempt(t *testing.T) {
 	}
 	return nil`,
 			first: "return err",
-			last:  "return err",
+			last:  "return err\n",
 			want:  true,
 		},
 		{
@@ -103,7 +104,7 @@ func TestSourceExempt(t *testing.T) {
 	}
 	return nil`,
 			first: "return err",
-			last:  "return err",
+			last:  "return err\n",
 			want:  true,
 		},
 		{
@@ -117,7 +118,7 @@ func TestSourceExempt(t *testing.T) {
 	}
 	return nil`,
 			first: "return err",
-			last:  "return err",
+			last:  "return err\n",
 			want:  true,
 		},
 		{
@@ -129,7 +130,7 @@ func TestSourceExempt(t *testing.T) {
 	}
 	return nil`,
 			first: "return err",
-			last:  "return err",
+			last:  "return err\n",
 			want:  true,
 		},
 		{
@@ -141,7 +142,7 @@ func TestSourceExempt(t *testing.T) {
 	}
 	return nil`,
 			first: "return err",
-			last:  "return err",
+			last:  "return err\n",
 			want:  true,
 		},
 		{
@@ -150,7 +151,7 @@ func TestSourceExempt(t *testing.T) {
 	// untestable: process entry point
 	return err`,
 			first: "return err",
-			last:  "return err",
+			last:  "return err\n",
 			want:  true,
 		},
 		{
@@ -161,7 +162,7 @@ func TestSourceExempt(t *testing.T) {
 	}
 	return nil`,
 			first: "{ // untestable",
-			last:  "return err",
+			last:  "return err\n",
 			want:  true,
 		},
 		{
@@ -172,7 +173,7 @@ func TestSourceExempt(t *testing.T) {
 	}
 	return nil`,
 			first: "return err",
-			last:  "return err",
+			last:  "return err\n",
 			want:  false,
 		},
 		{
@@ -184,7 +185,7 @@ func TestSourceExempt(t *testing.T) {
 	}
 	return nil`,
 			first: "return err",
-			last:  "return err",
+			last:  "return err\n",
 			want:  false,
 		},
 		{
@@ -196,7 +197,7 @@ func TestSourceExempt(t *testing.T) {
 	// untestable: cannot fail
 	return nil`,
 			first: "return err",
-			last:  "return err",
+			last:  "return err\n",
 			want:  false,
 		},
 		{
@@ -207,7 +208,7 @@ func TestSourceExempt(t *testing.T) {
 	}
 	return nil`,
 			first: "return err",
-			last:  "return err",
+			last:  "return err\n",
 			want:  false,
 		},
 		{
@@ -218,7 +219,7 @@ func TestSourceExempt(t *testing.T) {
 	}
 	return nil`,
 			first: "return fmt",
-			last:  "err)",
+			last:  "err)\n",
 			want:  false,
 		},
 		{
@@ -232,7 +233,66 @@ func TestSourceExempt(t *testing.T) {
 	}
 	return nil`,
 			first: "return err",
-			last:  "return err",
+			last:  "return err\n",
+			want:  false,
+		},
+		{
+			name: "opening line annotation does not reach the condition before it",
+			body: `
+	if err != nil { // untestable: cannot fail
+		return err
+	}
+	return nil`,
+			first: "if err != nil",
+			last:  "if err != nil ",
+			want:  false,
+		},
+		{
+			name: "opening line annotation does not reach the condition of an empty body",
+			body: `
+	if err != nil { // untestable: cannot fail
+	}
+	return nil`,
+			first: "if err != nil",
+			last:  "if err != nil ",
+			want:  false,
+		},
+		{
+			name: "else annotation does not reach the if body before it",
+			body: `
+	if err != nil {
+		return err
+	} else { // untestable: cannot fail
+		return nil
+	}`,
+			first: "return err",
+			last:  "return err\n",
+			want:  false,
+		},
+		{
+			name: "comment trailing an else opening line",
+			body: `
+	if err != nil {
+		return err
+	} else { // untestable: cannot fail
+		return nil
+	}`,
+			first: "return nil",
+			last:  "return nil\n",
+			want:  true,
+		},
+		{
+			name: "case annotation does not reach the clause before it",
+			body: `
+	switch {
+	case err == nil:
+		return nil
+	case err != nil: // unreachable: checked by the caller
+		return err
+	}
+	return nil`,
+			first: "return nil",
+			last:  "return nil\n",
 			want:  false,
 		},
 	}
@@ -250,16 +310,32 @@ func TestSourceExempt(t *testing.T) {
 	}
 }
 
-func TestSourceExempt_BlockBeyondEndOfFile(t *testing.T) {
+func TestSourceExempt_BlockOutsideFile(t *testing.T) {
+	tests := []struct {
+		name  string
+		block cover.ProfileBlock
+	}{
+		{"start before the first line", cover.ProfileBlock{StartLine: 0, EndLine: 1, EndCol: 1}},
+		{
+			"start past the last line",
+			cover.ProfileBlock{StartLine: 40, StartCol: 2, EndLine: 41, EndCol: 3},
+		},
+		{
+			"end past the last line",
+			cover.ProfileBlock{StartLine: 1, StartCol: 1, EndLine: 41, EndCol: 3},
+		},
+	}
+
 	path := filepath.Join(t.TempDir(), "p.go")
 	writeFile(t, path, "package p\n\n// untestable: stale profile\n")
-
 	s, err := parseSource(path)
 	require.NoError(t, err)
-	assert.False(
-		t,
-		s.exempt(cover.ProfileBlock{StartLine: 40, StartCol: 2, EndLine: 41, EndCol: 3}),
-	)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.False(t, s.exempt(tt.block))
+		})
+	}
 }
 
 func TestIsExcluded(t *testing.T) {
@@ -326,14 +402,15 @@ func f(err error) error {
 }
 `
 
-// runProfile builds a profile for runSource: the function entry is covered and
-// the three if bodies are not.
+// runProfile builds a profile for runSource: the first condition is covered,
+// the third condition and the three if bodies are not.
 func runProfile(file string) string {
 	return fmt.Sprintf(`mode: set
 %[1]s:4.2,4.16 1 1
-%[1]s:5.3,5.13 1 0
-%[1]s:8.3,8.13 1 0
-%[1]s:11.3,12.13 2 0
+%[1]s:5.3,6.1 1 0
+%[1]s:8.3,9.1 1 0
+%[1]s:10.2,10.16 1 0
+%[1]s:11.3,13.1 2 0
 `, file)
 }
 
@@ -349,13 +426,13 @@ func TestRun(t *testing.T) {
 		{
 			name:       "reports blocks without an annotation",
 			profile:    "coverage.out",
-			wantStdout: "pkg/a.go:5\npkg/a.go:11-12\n",
+			wantStdout: "pkg/a.go:5-6\npkg/a.go:10\npkg/a.go:11-13\n",
 		},
 		{
 			name:       "reads the profile named by the argument",
 			profile:    "other.out",
 			args:       []string{"other.out"},
-			wantStdout: "pkg/a.go:5\npkg/a.go:11-12\n",
+			wantStdout: "pkg/a.go:5-6\npkg/a.go:10\npkg/a.go:11-13\n",
 		},
 		{
 			name:    "skips excluded files",
@@ -407,4 +484,22 @@ func TestRun_SourceFileMissing(t *testing.T) {
 	assert.Equal(t, 1, code)
 	assert.Empty(t, stdout.String())
 	assert.Contains(t, stderr.String(), "gone.go")
+}
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("write failed") }
+
+func TestRun_StdoutWriteFails(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/m\n")
+	writeFile(t, filepath.Join(dir, "pkg", "a.go"), runSource)
+	writeFile(t, filepath.Join(dir, "coverage.out"), runProfile("example.com/m/pkg/a.go"))
+	t.Chdir(dir)
+
+	var stderr bytes.Buffer
+	code := run(nil, failingWriter{}, &stderr)
+
+	assert.Equal(t, 1, code)
+	assert.Contains(t, stderr.String(), "write failed")
 }

@@ -12,6 +12,7 @@ import (
 	"os"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"golang.org/x/tools/cover"
@@ -66,10 +67,12 @@ func report(w io.Writer, profile, module string, excludes excludeList) error {
 			if b.Count != 0 || src.exempt(b) {
 				continue
 			}
-			if b.StartLine == b.EndLine {
-				_, _ = fmt.Fprintf(w, "%s:%d\n", localPath, b.StartLine)
-			} else {
-				_, _ = fmt.Fprintf(w, "%s:%d-%d\n", localPath, b.StartLine, b.EndLine)
+			lines := strconv.Itoa(b.StartLine)
+			if b.EndLine != b.StartLine {
+				lines += "-" + strconv.Itoa(b.EndLine)
+			}
+			if _, err := fmt.Fprintf(w, "%s:%s\n", localPath, lines); err != nil {
+				return err
 			}
 		}
 	}
@@ -86,7 +89,7 @@ func isExcluded(path string, excludes []string) bool {
 }
 
 // opener is the brace or case colon that opens a statement list, paired with
-// the list's first statement.
+// the list's first statement (the opener itself when the list is empty).
 type opener struct {
 	open, first token.Pos
 }
@@ -125,20 +128,28 @@ func parseSource(path string) (*source, error) {
 }
 
 func (s *source) addOpener(open token.Pos, list []ast.Stmt) {
+	first := open
 	if len(list) > 0 {
-		s.openers = append(s.openers, opener{open: open, first: list[0].Pos()})
+		first = list[0].Pos()
 	}
+	s.openers = append(s.openers, opener{open: open, first: first})
 }
 
-// exempt reports whether an annotation comment sits inside the block. A profile
+// exempt reports whether an annotation comment belongs to the block. A profile
 // block starts at its first statement, so a block that begins a statement list
 // is widened to the list's opener: that covers a comment trailing the opening
-// line and comment lines between the opener and the statement.
+// line and comment lines between the opener and the statement. A comment after
+// the block's end counts only up to the next opener on that line, where it
+// belongs to the list being opened.
 func (s *source) exempt(b cover.ProfileBlock) bool {
-	if b.StartLine > s.file.LineCount() {
+	start, ok := s.pos(b.StartLine, b.StartCol)
+	if !ok {
 		return false
 	}
-	start := s.file.LineStart(b.StartLine) + token.Pos(b.StartCol-1)
+	end, ok := s.pos(b.EndLine, b.EndCol)
+	if !ok {
+		return false
+	}
 	for _, o := range s.openers {
 		if o.open <= start && start <= o.first {
 			start = o.open
@@ -146,8 +157,20 @@ func (s *source) exempt(b cover.ProfileBlock) bool {
 		}
 	}
 	return slices.ContainsFunc(s.annotations, func(a token.Pos) bool {
-		return a >= start && s.file.Line(a) <= b.EndLine
+		if a < start || s.file.Line(a) > b.EndLine {
+			return false
+		}
+		return !slices.ContainsFunc(s.openers, func(o opener) bool {
+			return end <= o.open && o.open < a
+		})
 	})
+}
+
+func (s *source) pos(line, col int) (token.Pos, bool) {
+	if line < 1 || line > s.file.LineCount() {
+		return token.NoPos, false
+	}
+	return s.file.LineStart(line) + token.Pos(col-1), true
 }
 
 func modulePrefix() string {
