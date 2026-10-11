@@ -444,6 +444,60 @@ func TestUpdateUserPool_InvalidBody(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
+func TestUpdateUserPool_InvalidFieldsLeaveExistingPoolUnchanged(t *testing.T) {
+	tests := []struct {
+		name   string
+		member string
+		value  string
+	}{
+		{name: "MfaConfiguration invalid enum", member: "MfaConfiguration", value: "INVALID"},
+		{name: "DeletionProtection invalid enum", member: "DeletionProtection", value: "INVALID"},
+		{name: "UserPoolTier invalid enum", member: "UserPoolTier", value: "INVALID"},
+		{name: "empty enum member", member: "MfaConfiguration", value: ""},
+		{name: "PoolName invalid chars", member: "PoolName", value: "pool!invalid"},
+		{name: "PoolName too long", member: "PoolName", value: strings.Repeat("a", 129)},
+		{name: "EmailVerificationSubject empty", member: "EmailVerificationSubject", value: ""},
+		{
+			name:   "EmailVerificationSubject too long",
+			member: "EmailVerificationSubject",
+			value:  strings.Repeat("a", 141),
+		},
+		{
+			name:   "EmailVerificationMessage without code placeholder",
+			member: "EmailVerificationMessage",
+			value:  "Your code",
+		},
+		{
+			name:   "SmsVerificationMessage without code placeholder",
+			member: "SmsVerificationMessage",
+			value:  "Your code",
+		},
+		{
+			name:   "SmsAuthenticationMessage too long",
+			member: "SmsAuthenticationMessage",
+			value:  "{####}" + strings.Repeat("a", 135),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ro := newTestRouter(t)
+			poolID := createPool(t, ro, "update-pool")
+			before := doOp(t, ro, "DescribeUserPool", fmt.Sprintf(`{"UserPoolId":%q}`, poolID))
+			require.Equal(t, http.StatusOK, before.Code)
+
+			body, err := json.Marshal(map[string]string{"UserPoolId": poolID, tt.member: tt.value})
+			require.NoError(t, err)
+			w := doOp(t, ro, "UpdateUserPool", string(body))
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assertErrType(t, w, ErrTypeInvalidParameterException)
+
+			after := doOp(t, ro, "DescribeUserPool", fmt.Sprintf(`{"UserPoolId":%q}`, poolID))
+			require.Equal(t, http.StatusOK, after.Code)
+			assert.JSONEq(t, before.Body.String(), after.Body.String())
+		})
+	}
+}
+
 func TestDeleteUserPool_Success(t *testing.T) {
 	ro := newTestRouter(t)
 	poolID := createPool(t, ro, "delete-pool")
@@ -666,8 +720,27 @@ func TestCreateUserPool_InvalidOptionalFields(t *testing.T) {
 			body: `{"PoolName":"pool","UserPoolTier":"INVALID"}`,
 		},
 		{
+			name: "empty enum members",
+			body: `{"PoolName":"pool","MfaConfiguration":"","DeletionProtection":"","UserPoolTier":""}`,
+		},
+		{
 			name: "EmailVerificationSubject empty",
 			body: `{"PoolName":"pool","EmailVerificationSubject":""}`,
+		},
+		{
+			name: "EmailVerificationMessage without code placeholder",
+			body: `{"PoolName":"pool","EmailVerificationMessage":"Your code"}`,
+		},
+		{
+			name: "SmsVerificationMessage without code placeholder",
+			body: `{"PoolName":"pool","SmsVerificationMessage":"Your code"}`,
+		},
+		{
+			name: "SmsAuthenticationMessage too long",
+			body: fmt.Sprintf(
+				`{"PoolName":"pool","SmsAuthenticationMessage":%q}`,
+				"{####}"+strings.Repeat("a", 135),
+			),
 		},
 		{
 			name: "EmailVerificationSubject too long",
@@ -718,10 +791,6 @@ func TestCreateUserPool_ValidOptionalFields(t *testing.T) {
 			body: `{"PoolName":"pool","UserPoolTier":"ESSENTIALS"}`,
 		},
 		{name: "UserPoolTier PLUS", body: `{"PoolName":"pool","UserPoolTier":"PLUS"}`},
-		{
-			name: "empty enum members are treated as omitted",
-			body: `{"PoolName":"pool","MfaConfiguration":"","DeletionProtection":"","UserPoolTier":""}`,
-		},
 		{
 			name: "EmailVerificationSubject null",
 			body: `{"PoolName":"pool","EmailVerificationSubject":null}`,

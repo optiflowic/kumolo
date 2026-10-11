@@ -165,6 +165,10 @@ func (ro *Router) serveHTTP(w http.ResponseWriter, r *http.Request, op string) {
 		)
 		return
 	}
+	if msg, ok := validateInput(op, body); !ok {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException, msg)
+		return
+	}
 	switch op {
 	case "CreateUserPool":
 		ro.handleCreateUserPool(w, r, body)

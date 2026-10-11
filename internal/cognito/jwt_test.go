@@ -176,7 +176,7 @@ func TestIssueTokens_Success(t *testing.T) {
 		key,
 		keyID,
 		"us-east-1_Pool1",
-		"client-1",
+		"client1",
 		user,
 		nil,
 		"",
@@ -224,7 +224,7 @@ func TestIssueTokens_ReservedClaimsNotOverridden(t *testing.T) {
 		key,
 		keyID,
 		"us-east-1_Pool1",
-		"client-1",
+		"client1",
 		user,
 		nil,
 		"",
@@ -263,7 +263,7 @@ func TestIssueTokens_CognitoPrefixAttributesBlocked(t *testing.T) {
 		key,
 		keyID,
 		"us-east-1_Pool1",
-		"client-1",
+		"client1",
 		user,
 		nil,
 		"",
@@ -291,7 +291,7 @@ func TestIssueTokens_AccessTokenBuildFails(t *testing.T) {
 	}
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
 	_, _, _, _, _, err := issueTokens(
-		key, "kid", "us-east-1_Pool1", "client-1", user, nil, "",
+		key, "kid", "us-east-1_Pool1", "client1", user, nil, "",
 		accessTokenExpiry, accessTokenExpiry,
 	)
 	require.Error(t, err)
@@ -304,7 +304,7 @@ func TestIssueTokens_HonorsPerTokenExpiry(t *testing.T) {
 
 	before := time.Now().Unix()
 	access, id, _, _, _, err := issueTokens(
-		key, keyID, "us-east-1_Pool1", "client-1", user, nil, "",
+		key, keyID, "us-east-1_Pool1", "client1", user, nil, "",
 		600, 7200,
 	)
 	require.NoError(t, err)
@@ -392,7 +392,7 @@ func TestResolveValiditySeconds(t *testing.T) {
 func TestBuildAndParseSessionToken_RoundTrip(t *testing.T) {
 	key, keyID := genTestKey(t)
 	poolID := "us-east-1_Pool1"
-	clientID := "client-1"
+	clientID := "client1"
 	username := "alice"
 
 	token, err := buildSessionToken(

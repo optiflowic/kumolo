@@ -253,7 +253,7 @@ func TestSignUp_EmptyPassword(t *testing.T) {
 	})
 	w := doOp(t, ro, "SignUp", string(body))
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrType(t, w, ErrTypeInvalidPasswordException)
+	assertErrType(t, w, ErrTypeInvalidParameterException)
 }
 
 func TestSignUp_InvalidClientId(t *testing.T) {
@@ -911,7 +911,7 @@ func TestInitiateAuth_RefreshTokenAuth_HonorsClientTokenValidity(t *testing.T) {
 // TestInitiateAuth_RefreshTokenAuth_DisabledUser uses a mockStore because AdminDisableUser
 // also deletes refresh tokens, which would mask the Enabled check this test targets.
 func TestInitiateAuth_RefreshTokenAuth_DisabledUser(t *testing.T) {
-	poolID, clientID := "us-east-1_TestPool", "client-1"
+	poolID, clientID := "us-east-1_TestPool", "client1"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice", Enabled: false}
 
 	ro := &Router{storage: &mockStore{
@@ -1114,7 +1114,7 @@ func TestRespondToAuthChallenge_InvalidSession(t *testing.T) {
 	_, clientID := setupPool(t, ro)
 	body, _ := json.Marshal(map[string]any{
 		"ClientId": clientID, "ChallengeName": "NEW_PASSWORD_REQUIRED",
-		"Session":            "not-a-valid-jwt",
+		"Session":            "not-a-valid-session-jwt",
 		"ChallengeResponses": map[string]string{"USERNAME": "u", "NEW_PASSWORD": "NewPass123!"},
 	})
 	w := doOp(t, ro, "RespondToAuthChallenge", string(body))
@@ -1214,14 +1214,14 @@ func TestRespondToAuthChallenge_MissingNewPassword(t *testing.T) {
 func TestRespondToAuthChallenge_MissingClientId(t *testing.T) {
 	ro := newTestRouter(t)
 	w := doOp(t, ro, "RespondToAuthChallenge",
-		`{"ChallengeName":"NEW_PASSWORD_REQUIRED","Session":"x"}`)
+		`{"ChallengeName":"NEW_PASSWORD_REQUIRED","Session":"invalid-session-token"}`)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assertErrType(t, w, ErrTypeInvalidParameterException)
 }
 
 func TestRespondToAuthChallenge_MissingChallengeName(t *testing.T) {
 	ro := newTestRouter(t)
-	w := doOp(t, ro, "RespondToAuthChallenge", `{"ClientId":"x","Session":"x"}`)
+	w := doOp(t, ro, "RespondToAuthChallenge", `{"ClientId":"x","Session":"invalid-session-token"}`)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assertErrType(t, w, ErrTypeInvalidParameterException)
 }
@@ -1238,7 +1238,7 @@ func TestRespondToAuthChallenge_UnsupportedChallenge(t *testing.T) {
 	ro := newTestRouter(t)
 	_, clientID := setupPool(t, ro)
 	body, _ := json.Marshal(map[string]string{
-		"ClientId": clientID, "ChallengeName": "SMS_MFA", "Session": "x",
+		"ClientId": clientID, "ChallengeName": "SMS_MFA", "Session": "invalid-session-token",
 	})
 	w := doOp(t, ro, "RespondToAuthChallenge", string(body))
 	assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -1248,7 +1248,9 @@ func TestRespondToAuthChallenge_UnsupportedChallenge(t *testing.T) {
 func TestRespondToAuthChallenge_InvalidClientId(t *testing.T) {
 	ro := newTestRouter(t)
 	body, _ := json.Marshal(map[string]string{
-		"ClientId": "nonexistent", "ChallengeName": "NEW_PASSWORD_REQUIRED", "Session": "x",
+		"ClientId":      "nonexistent",
+		"ChallengeName": "NEW_PASSWORD_REQUIRED",
+		"Session":       "invalid-session-token",
 	})
 	w := doOp(t, ro, "RespondToAuthChallenge", string(body))
 	assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -1260,7 +1262,9 @@ func TestRespondToAuthChallenge_GetPoolError(t *testing.T) {
 		getPoolForClient: func(string) (string, error) { return "", errors.New("db error") },
 	}}
 	body, _ := json.Marshal(map[string]string{
-		"ClientId": "c", "ChallengeName": "NEW_PASSWORD_REQUIRED", "Session": "s",
+		"ClientId":      "c",
+		"ChallengeName": "NEW_PASSWORD_REQUIRED",
+		"Session":       "invalid-session-token",
 	})
 	w := doOp(t, ro, "RespondToAuthChallenge", string(body))
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
@@ -1795,7 +1799,9 @@ func TestRespondToAuthChallenge_GetOrCreateKeysError(t *testing.T) {
 		},
 	}}
 	body, _ := json.Marshal(map[string]string{
-		"ClientId": "c", "ChallengeName": "NEW_PASSWORD_REQUIRED", "Session": "s",
+		"ClientId":      "c",
+		"ChallengeName": "NEW_PASSWORD_REQUIRED",
+		"Session":       "invalid-session-token",
 	})
 	w := doOp(t, ro, "RespondToAuthChallenge", string(body))
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
@@ -2493,7 +2499,7 @@ func TestRevokeToken_MissingToken(t *testing.T) {
 
 func TestRevokeToken_UnknownClient(t *testing.T) {
 	ro := newTestRouter(t)
-	body, _ := json.Marshal(map[string]string{"ClientId": "no-such-client", "Token": "tok"})
+	body, _ := json.Marshal(map[string]string{"ClientId": "nosuchclient", "Token": "tok"})
 	w := doOp(t, ro, "RevokeToken", string(body))
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assertErrType(t, w, ErrTypeResourceNotFoundException)

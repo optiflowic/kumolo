@@ -1162,6 +1162,13 @@ func TestAdminUpdateUserAttributes_ValidationErrors(t *testing.T) {
 			map[string]any{"UserPoolId": poolID, "Username": "alice"},
 		},
 		{
+			"empty UserAttributes",
+			map[string]any{
+				"UserPoolId": poolID, "Username": "alice",
+				"UserAttributes": []map[string]string{},
+			},
+		},
+		{
 			"sub immutable",
 			map[string]any{
 				"UserPoolId": poolID, "Username": "alice",
