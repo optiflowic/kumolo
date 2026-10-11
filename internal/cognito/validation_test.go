@@ -107,6 +107,34 @@ func TestValidateInput_Violations(t *testing.T) {
 				`constraint: Member must have value greater than or equal to 1`,
 		},
 		{
+			name: "member name in another case",
+			op:   "ListUserPools",
+			body: `{"maxresults":0}`,
+			want: `1 validation error detected: Value '0' at 'maxResults' failed to satisfy ` +
+				`constraint: Member must have value greater than or equal to 1`,
+		},
+		{
+			name: "duplicate member in another case",
+			op:   "ListUserPools",
+			body: `{"MaxResults":1,"maxResults":0}`,
+			want: `1 validation error detected: Value '0' at 'maxResults' failed to satisfy ` +
+				`constraint: Member must have value greater than or equal to 1`,
+		},
+		{
+			name: "invalid value followed by a null duplicate",
+			op:   "ListUserPoolClients",
+			body: `{"UserPoolId":"us-east-1_abc","MaxResults":0,"MaxResults":null}`,
+			want: `1 validation error detected: Value '0' at 'maxResults' failed to satisfy ` +
+				`constraint: Member must have value greater than or equal to 1`,
+		},
+		{
+			name: "required member whose last occurrence is null",
+			op:   "DescribeUserPool",
+			body: `{"UserPoolId":"us-east-1_abc","UserPoolId":null}`,
+			want: `1 validation error detected: Value null at 'userPoolId' failed to satisfy ` +
+				`constraint: Member must not be null`,
+		},
+		{
 			name: "one entry per violating member",
 			op:   "AdminGetUser",
 			body: `{"UserPoolId":"!!!"}`,
@@ -140,6 +168,16 @@ func TestValidateInput_Passes(t *testing.T) {
 		{name: "length at the limit", op: "CreateUserPool", body: fmt.Sprintf(
 			`{"PoolName":"pool","EmailVerificationSubject":%q}`, strings.Repeat("あ", 140),
 		)},
+		{
+			name: "null followed by a valid duplicate",
+			op:   "DescribeUserPool",
+			body: `{"UserPoolId":null,"userPoolId":"us-east-1_abc123XYZ"}`,
+		},
+		{
+			name: "member the model does not constrain",
+			op:   "ListUserPools",
+			body: `{"MaxResults":1,"Other":{"a":[1]}}`,
+		},
 		{name: "unknown operation", op: "NoSuchOperation", body: `{"UserPoolId":"!!!"}`},
 		{name: "body is not JSON", op: "DescribeUserPool", body: `not-json`},
 		{name: "body is not an object", op: "DescribeUserPool", body: `[]`},
@@ -205,6 +243,26 @@ func TestRouter_ValidatesInputBeforeResourceLookup(t *testing.T) {
 			require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
 			assert.Equal(t, ErrTypeInvalidParameterException, resp.Type)
 			assert.Contains(t, resp.Message, "validation error detected")
+		})
+	}
+}
+
+// Handlers decode member names case-insensitively, so a differently-cased duplicate must
+// not carry an unvalidated value past validateInput.
+func TestRouter_CaseVariantMemberCannotBypassValidation(t *testing.T) {
+	ro := newTestRouter(t)
+	poolID := createPool(t, ro, "pool")
+	for op, body := range map[string]string{
+		"ListUserPools":       `{"MaxResults":1,"maxResults":0}`,
+		"ListUserPoolClients": fmt.Sprintf(`{"UserPoolId":%q,"maxResults":0}`, poolID),
+		"DescribeUserPoolClient": fmt.Sprintf(
+			`{"UserPoolId":%q,"ClientId":"abcdefghijklmnopqrstuvwxyz","userPoolId":"../x"}`, poolID,
+		),
+	} {
+		t.Run(op, func(t *testing.T) {
+			w := doOp(t, ro, op, body)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assertErrType(t, w, ErrTypeInvalidParameterException)
 		})
 	}
 }

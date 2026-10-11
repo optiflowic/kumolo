@@ -1,6 +1,7 @@
 package cognito
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -47,26 +48,49 @@ type memberRule struct {
 // It runs before any handler, so a constraint violation is reported ahead of resource
 // lookups and token verification, as on AWS. A body that is not a JSON object passes;
 // the handler reports it.
+//
+// Handlers decode with encoding/json, which matches member names case-insensitively and
+// keeps the last of duplicate keys. Every occurrence is therefore checked, under the same
+// name matching, so no value reaches a handler unvalidated.
 func validateInput(op string, body []byte) (message string, ok bool) {
-	var members map[string]json.RawMessage
-	if err := json.Unmarshal(body, &members); err != nil {
+	if !json.Valid(body) {
+		return "", true
+	}
+	dec := json.NewDecoder(bytes.NewReader(body))
+	if start, _ := dec.Token(); start != json.Delim('{') {
 		return "", true
 	}
 
-	var violations []string
-	for _, rule := range inputRules[op] {
-		raw, present := members[rule.name]
-		if !present || string(raw) == "null" {
-			if rule.required {
-				violations = append(
-					violations,
-					violation(rule.name, "null", "Member must not be null"),
-				)
-			}
+	rules := inputRules[op]
+	found := make([][]string, len(rules))
+	present := make([]bool, len(rules))
+	for dec.More() {
+		// The body is valid JSON, so reading a key and its value cannot fail.
+		keyToken, _ := dec.Token()
+		key, _ := keyToken.(string)
+		var raw json.RawMessage
+		_ = dec.Decode(&raw)
+
+		i := slices.IndexFunc(rules, func(r memberRule) bool {
+			return strings.EqualFold(r.name, key)
+		})
+		if i < 0 {
 			continue
 		}
-		if rule.shape != nil {
-			violations = append(violations, rule.shape.check(rule.name, raw)...)
+		present[i] = string(raw) != "null"
+		if present[i] && rules[i].shape != nil {
+			found[i] = append(found[i], rules[i].shape.check(rules[i].name, raw)...)
+		}
+	}
+
+	var violations []string
+	for i, rule := range rules {
+		violations = append(violations, found[i]...)
+		if rule.required && !present[i] {
+			violations = append(
+				violations,
+				violation(rule.name, "null", "Member must not be null"),
+			)
 		}
 	}
 	if len(violations) == 0 {

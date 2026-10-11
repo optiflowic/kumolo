@@ -81,9 +81,14 @@ several violations in one request, and the rejection of an empty-string enum mem
   is not reported by this step. The handler rejects the body with `InvalidParameterException`
   (`invalid request body`); AWS returns `SerializationException`.
 - Length is counted in Unicode code points.
-- Violations are listed in alphabetical order of the member name. The order AWS uses for
-  several violations in one request is not known.
-- Member names are matched case-sensitively in this step.
+- Violations are listed in alphabetical order of the member name. Within one member the
+  order is pattern, enum, maximum, minimum. The order AWS uses, across members or within one,
+  is not confirmed.
+- Member names are matched case-insensitively and every occurrence of a duplicated member is
+  checked, because that is how the handlers decode the body (a differently-cased or repeated
+  name would otherwise reach a handler unvalidated). A required member counts as missing when
+  its last occurrence is `null`. How AWS treats a wrongly-cased or duplicated member name is
+  not confirmed; the SDKs, the AWS CLI and Terraform never send one.
 - `ClientId` on `DescribeUserPoolClient`, `UpdateUserPoolClient` and `DeleteUserPoolClient`
   must additionally be in the form kumolo issues (26 lower-case alphanumerics); see
   `user_pool_client.md`.
