@@ -1,17 +1,21 @@
-//go:build ignore
-
 // uncovered prints uncovered blocks that lack an unreachable: or untestable: annotation.
-// Usage: go run tools/uncovered/main.go [-exclude path]... [coverage.out]
+// Usage: go run ./tools/uncovered [-exclude path]... [coverage.out]
 package main
 
 import (
-	"bufio"
 	"flag"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"io"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
+
+	"golang.org/x/tools/cover"
 )
 
 var exempt = regexp.MustCompile(`\b(unreachable|untestable):`)
@@ -22,101 +26,57 @@ func (e *excludeList) String() string     { return strings.Join(*e, ",") }
 func (e *excludeList) Set(v string) error { *e = append(*e, v); return nil }
 
 func main() {
-	profile, excludes := parseFlags()
-	module := modulePrefix()
-	if err := processCoverage(profile, module, excludes); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+	// untestable: process entry point
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
-func parseFlags() (string, excludeList) {
+func run(args []string, stdout, stderr io.Writer) int {
 	var excludes excludeList
-	flag.Var(&excludes, "exclude", "file path to exclude (repeatable)")
-	flag.Parse()
-	profile := "coverage.out"
-	if flag.NArg() > 0 {
-		profile = flag.Arg(0)
+	fs := flag.NewFlagSet("uncovered", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Var(&excludes, "exclude", "file path to exclude (repeatable)")
+	if err := fs.Parse(args); err != nil {
+		return 2
 	}
-	return profile, excludes
+	profile := "coverage.out"
+	if fs.NArg() > 0 {
+		profile = fs.Arg(0)
+	}
+	if err := report(stdout, profile, modulePrefix(), excludes); err != nil {
+		_, _ = fmt.Fprintln(stderr, err)
+		return 1
+	}
+	return 0
 }
 
-func processCoverage(profile, module string, excludes excludeList) error {
-	f, err := os.Open(profile)
+func report(w io.Writer, profile, module string, excludes excludeList) error {
+	profiles, err := cover.ParseProfiles(profile)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-
-	seen := map[string]bool{}
-	s := bufio.NewScanner(f)
-	for s.Scan() {
-		line := s.Text()
-		if strings.HasPrefix(line, "mode:") {
-			continue
-		}
-		// format: pkg/file.go:startLine.startCol,endLine.endCol numStmts count
-		parts := strings.Fields(line)
-		if len(parts) != 3 || parts[2] != "0" {
-			continue
-		}
-
-		loc := parts[0]
-		colon := strings.LastIndex(loc, ":")
-		if colon < 0 {
-			continue
-		}
-		filePath := loc[:colon]
-		lineRange := loc[colon+1:]
-
-		comma := strings.Index(lineRange, ",")
-		if comma < 0 {
-			continue
-		}
-		startDot := strings.Index(lineRange[:comma], ".")
-		endPart := lineRange[comma+1:]
-		endDot := strings.Index(endPart, ".")
-		if startDot < 0 || endDot < 0 {
-			continue
-		}
-		startLine, err := strconv.Atoi(lineRange[:startDot])
-		if err != nil {
-			continue
-		}
-		endLine, err := strconv.Atoi(endPart[:endDot])
-		if err != nil {
-			continue
-		}
-
-		localPath := strings.TrimPrefix(filePath, module+"/")
+	for _, p := range profiles {
+		localPath := strings.TrimPrefix(p.FileName, module+"/")
 		if isExcluded(localPath, excludes) {
 			continue
 		}
-
-		src, err := os.ReadFile(localPath)
+		src, err := parseSource(localPath)
 		if err != nil {
-			continue
+			return err
 		}
-		srcLines := strings.Split(string(src), "\n")
-		if startLine < 1 || endLine > len(srcLines) {
-			continue
-		}
-		if hasExempt(srcLines[startLine-1 : endLine]) {
-			continue
-		}
-
-		var key string
-		if startLine == endLine {
-			key = fmt.Sprintf("%s:%d", localPath, startLine)
-		} else {
-			key = fmt.Sprintf("%s:%d-%d", localPath, startLine, endLine)
-		}
-		if !seen[key] {
-			seen[key] = true
-			fmt.Println(key)
+		for _, b := range p.Blocks {
+			if b.Count != 0 || src.exempt(b) {
+				continue
+			}
+			lines := strconv.Itoa(b.StartLine)
+			if b.EndLine != b.StartLine {
+				lines += "-" + strconv.Itoa(b.EndLine)
+			}
+			if _, err := fmt.Fprintf(w, "%s:%s\n", localPath, lines); err != nil {
+				return err
+			}
 		}
 	}
-	return s.Err()
+	return nil
 }
 
 func isExcluded(path string, excludes []string) bool {
@@ -128,29 +88,100 @@ func isExcluded(path string, excludes []string) bool {
 	return false
 }
 
-func hasExempt(block []string) bool {
-	for _, l := range block {
-		if exempt.MatchString(l) {
-			return true
+// opener is the brace or case colon that opens a statement list, paired with
+// the list's first statement (the opener itself when the list is empty).
+type opener struct {
+	open, first token.Pos
+}
+
+type source struct {
+	file        *token.File
+	annotations []token.Pos
+	openers     []opener
+}
+
+func parseSource(path string) (*source, error) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, path, nil, parser.ParseComments|parser.SkipObjectResolution)
+	if err != nil {
+		return nil, err
+	}
+	s := &source{file: fset.File(f.FileStart)}
+	for _, group := range f.Comments {
+		for _, c := range group.List {
+			if exempt.MatchString(c.Text) {
+				s.annotations = append(s.annotations, c.Pos())
+			}
 		}
 	}
-	return false
+	for n := range ast.Preorder(f) {
+		switch n := n.(type) {
+		case *ast.BlockStmt:
+			s.addOpener(n.Lbrace, n.List)
+		case *ast.CaseClause:
+			s.addOpener(n.Colon, n.Body)
+		case *ast.CommClause:
+			s.addOpener(n.Colon, n.Body)
+		}
+	}
+	return s, nil
+}
+
+func (s *source) addOpener(open token.Pos, list []ast.Stmt) {
+	first := open
+	if len(list) > 0 {
+		first = list[0].Pos()
+	}
+	s.openers = append(s.openers, opener{open: open, first: first})
+}
+
+// exempt reports whether an annotation comment belongs to the block. A profile
+// block starts at its first statement, so a block that begins a statement list
+// is widened to the list's opener: that covers a comment trailing the opening
+// line and comment lines between the opener and the statement. A comment after
+// the block's end counts only up to the next opener on that line, where it
+// belongs to the list being opened.
+func (s *source) exempt(b cover.ProfileBlock) bool {
+	start, ok := s.pos(b.StartLine, b.StartCol)
+	if !ok {
+		return false
+	}
+	end, ok := s.pos(b.EndLine, b.EndCol)
+	if !ok {
+		return false
+	}
+	for _, o := range s.openers {
+		if o.open <= start && start <= o.first {
+			start = o.open
+			break
+		}
+	}
+	return slices.ContainsFunc(s.annotations, func(a token.Pos) bool {
+		if a < start || s.file.Line(a) > b.EndLine {
+			return false
+		}
+		return !slices.ContainsFunc(s.openers, func(o opener) bool {
+			return end <= o.open && o.open < a
+		})
+	})
+}
+
+func (s *source) pos(line, col int) (token.Pos, bool) {
+	if line < 1 || line > s.file.LineCount() {
+		return token.NoPos, false
+	}
+	return s.file.LineStart(line) + token.Pos(col-1), true
 }
 
 func modulePrefix() string {
-	f, err := os.Open("go.mod")
+	goMod, err := os.ReadFile("go.mod")
 	if err != nil {
 		return ""
 	}
-	defer f.Close()
-	s := bufio.NewScanner(f)
-	for s.Scan() {
-		if line := s.Text(); strings.HasPrefix(line, "module ") {
+	for line := range strings.Lines(string(goMod)) {
+		if strings.HasPrefix(line, "module ") {
 			return strings.Fields(line)[1]
 		}
-	}
-	if err := s.Err(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
 	}
 	return ""
 }
