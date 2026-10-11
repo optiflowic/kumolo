@@ -1,4 +1,4 @@
-.PHONY: all install build run fmt fmt-check vet lint test cover uncovered integration e2e e2e-browser e2e-terraform verify tidy clean
+.PHONY: all install build run fmt fmt-check vet lint test cover uncovered integration e2e e2e-browser e2e-terraform gencases verify tidy clean
 
 BUILD_DIR = build
 BINARY_NAME = $(BUILD_DIR)/kumolo
@@ -44,6 +44,19 @@ uncovered: cover
 
 integration:
 	go test -race -count=1 -timeout 120s ./tests/integration/...
+
+# gencases regenerates the Cognito input validation cases from the botocore model bundled
+# with awscli2 (default dev shell). Review the diff and update
+# tests/integration/testdata/cognito_validation_gaps.txt when cases change.
+BOTOCORE_DATA = $(shell echo $$(dirname $$(readlink -f $$(command -v aws)))/../lib/python*/site-packages/awscli/botocore/data)
+
+gencases:
+	go run tools/gencases/main.go \
+	  -model $$(ls $(BOTOCORE_DATA)/cognito-idp/*/service-2.json | tail -1) \
+	  -router internal/cognito/router.go \
+	  -error InvalidParameterException \
+	  -service cognito-idp \
+	  -out tests/integration/testdata/cognito_validation.json
 
 e2e:
 	./e2e/aws-cli/s3.sh
