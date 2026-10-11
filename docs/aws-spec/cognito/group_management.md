@@ -15,6 +15,10 @@ SDK structs: `cognitoidentityprovider.CreateGroupInput`, `GroupType`, etc.
 
 Last verified: 2026-06-28
 
+All operations return `InvalidParameterException` (400) when a top-level member violates the
+model (required, pattern, length, range), before the pool, group or user is looked up. See
+`input_validation.md`.
+
 ## GroupType shape
 
 ```json
@@ -59,6 +63,8 @@ Last verified: 2026-06-28
 
 - Required: `UserPoolId`
 - Optional: `Limit` (0–60), `NextToken`
+- `Limit` 0 or omitted returns up to 60 entries; a value outside 0–60 returns
+  `InvalidParameterException`. Same for `AdminListGroupsForUser` and `ListUsersInGroup`.
 - Response 200: `{"Groups": [GroupType], "NextToken": "string"}`
 - Pagination: cursor-based; `NextToken` omitted when no more pages
 

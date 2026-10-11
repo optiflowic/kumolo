@@ -32,7 +32,7 @@ HTTP 200 + empty body `{}`
 | ResourceNotFoundException | 400  | pool not found |
 | UserNotFoundException     | 400  | username not found |
 | InvalidPasswordException  | 400  | password fails pool's password policy |
-| InvalidParameterException | 400  | missing required field |
+| InvalidParameterException | 400  | input violates a model constraint (see `input_validation.md`) |
 | InternalErrorException    | 500  | storage failure |
 
 ## kumolo deviations

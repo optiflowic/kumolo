@@ -31,7 +31,7 @@ HTTP 200 with an empty body: `{}`.
 
 | Error type                 | HTTP | Trigger |
 |-----------------------------|------|---------|
-| InvalidParameterException   | 400  | missing `AccessToken` |
+| InvalidParameterException   | 400  | input violates a model constraint (see `input_validation.md`) |
 | NotAuthorizedException      | 400  | invalid/expired/revoked access token, wrong `token_use` |
 | UserNotFoundException       | 400  | token's `sub` has no matching user |
 | InternalErrorException      | 500  | storage failure |

@@ -68,7 +68,7 @@ HTTP 200 with an empty body: `{}`.
 
 | Error type                 | HTTP | Trigger |
 |-----------------------------|------|---------|
-| InvalidParameterException   | 400  | missing `AccessToken`/`AttributeName`(/`Code`), unsupported `AttributeName`, no value set for the attribute (`GetUserAttributeVerificationCode` only) |
+| InvalidParameterException   | 400  | input violates a model constraint (see `input_validation.md`), unsupported `AttributeName`, no value set for the attribute (`GetUserAttributeVerificationCode` only) |
 | NotAuthorizedException      | 400  | invalid/expired/revoked access token, wrong `token_use` |
 | UserNotFoundException       | 400  | token's `sub` has no matching user |
 | CodeMismatchException       | 400  | `VerifyUserAttribute`: code doesn't match (or no code is pending) |

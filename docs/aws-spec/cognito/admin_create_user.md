@@ -55,7 +55,7 @@ HTTP 200 + `{"User": UserType}`
 | ResourceNotFoundException   | 400  | pool not found |
 | UsernameExistsException     | 400  | username already taken |
 | InvalidPasswordException    | 400  | password fails pool's password policy |
-| InvalidParameterException   | 400  | missing required field |
+| InvalidParameterException   | 400  | input violates a model constraint (see `input_validation.md`) |
 | InternalErrorException      | 500  | storage failure |
 
 ## Errors NOT implemented (return InternalErrorException or omit)

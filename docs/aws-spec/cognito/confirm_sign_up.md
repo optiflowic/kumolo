@@ -30,7 +30,7 @@ HTTP 200 with empty body on success.
 
 | Error | HTTP | Condition |
 |-------|------|-----------|
-| InvalidParameterException | 400 | Missing required field |
+| InvalidParameterException | 400 | input violates a model constraint (see `input_validation.md`) |
 | ResourceNotFoundException | 400 | ClientId not found |
 | UserNotFoundException | 400 | Username not found in pool |
 | NotAuthorizedException | 400 | User already CONFIRMED |

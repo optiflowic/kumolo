@@ -56,7 +56,7 @@ HTTP 200:
 
 | Error type                 | HTTP | Trigger |
 |-----------------------------|------|---------|
-| InvalidParameterException   | 400  | missing `AccessToken`/`UserAttributes`, attempt to modify `sub` |
+| InvalidParameterException   | 400  | input violates a model constraint (see `input_validation.md`), empty `UserAttributes`, attempt to modify `sub` |
 | NotAuthorizedException      | 400  | invalid/expired/revoked access token, wrong `token_use` |
 | UserNotFoundException       | 400  | token's `sub` has no matching user (e.g. the user was deleted after the token was issued) |
 | InternalErrorException      | 500  | storage failure |

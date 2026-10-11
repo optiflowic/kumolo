@@ -29,7 +29,7 @@ return 200 without error.
 
 | Error type               | HTTP | Condition                              |
 |--------------------------|------|----------------------------------------|
-| InvalidParameterException | 400 | ClientId or Token missing              |
+| InvalidParameterException | 400 | input violates a model constraint (see `input_validation.md`) |
 | ResourceNotFoundException | 400 | ClientId not found (unknown pool)      |
 | UnauthorizedException     | 400 | Token belongs to a different ClientId  |
 | InternalErrorException    | 500 | Storage failure                        |

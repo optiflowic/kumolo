@@ -10,7 +10,7 @@ Last verified: 2026-07-25
 |-------|----------|-------|
 | ClientId | Yes | App client ID |
 | ChallengeName | Yes | See supported challenges below |
-| Session | Yes | Opaque session token from InitiateAuth response |
+| Session | Yes | Opaque session token from InitiateAuth response (20–4096 chars; optional in the model, required by kumolo) |
 | ChallengeResponses | No | Key-value pairs; required fields depend on ChallengeName |
 | ClientMetadata | No | kumolo ignores |
 | AnalyticsMetadata | No | kumolo ignores |
@@ -101,7 +101,7 @@ Same as InitiateAuth success: `AuthenticationResult` with AccessToken, IdToken, 
 
 | Error | HTTP | Condition |
 |-------|------|-----------|
-| InvalidParameterException | 400 | Missing required field or unsupported challenge |
+| InvalidParameterException | 400 | input violates a model constraint (see `input_validation.md`), missing `Session`, or a challenge kumolo does not support |
 | ResourceNotFoundException | 400 | ClientId not found |
 | UserNotFoundException | 400 | Username in ChallengeResponses not found |
 | NotAuthorizedException | 400 | Session is invalid or expired, (PASSWORD_VERIFIER) SRP signature verification failed, (SOFTWARE_TOKEN_MFA) MFA was disabled after the challenge was issued, or the user is disabled |

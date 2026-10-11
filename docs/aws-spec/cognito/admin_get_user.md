@@ -43,7 +43,7 @@ HTTP 200:
 |---------------------------|------|---------|
 | ResourceNotFoundException | 400  | pool not found |
 | UserNotFoundException     | 400  | username not found |
-| InvalidParameterException | 400  | missing required field |
+| InvalidParameterException | 400  | input violates a model constraint (see `input_validation.md`) |
 | InternalErrorException    | 500  | storage failure |
 
 ## kumolo deviations
