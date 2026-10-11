@@ -101,7 +101,7 @@ func processCoverage(profile, module string, excludes excludeList) error {
 		if startLine < 1 || endLine > len(srcLines) {
 			continue
 		}
-		if hasExempt(srcLines[startLine-1 : endLine]) {
+		if hasExempt(srcLines[exemptStart(srcLines, startLine):endLine]) {
 			continue
 		}
 
@@ -126,6 +126,17 @@ func isExcluded(path string, excludes []string) bool {
 		}
 	}
 	return false
+}
+
+// exemptStart returns the index of the block's first line, moved up over the
+// comment lines directly above it: the profile range starts at the first
+// statement, so an annotation placed right after the opening brace is outside it.
+func exemptStart(srcLines []string, startLine int) int {
+	i := startLine - 1
+	for i > 0 && strings.HasPrefix(strings.TrimSpace(srcLines[i-1]), "//") {
+		i--
+	}
+	return i
 }
 
 func hasExempt(block []string) bool {
