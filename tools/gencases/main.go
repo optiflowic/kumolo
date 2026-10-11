@@ -223,18 +223,29 @@ func casesFor(m *model, op, errType string) ([]testCase, []string) {
 				continue
 			}
 			str := valid.(string)
+			skip := func(desc string) {
+				skipped = append(skipped, fmt.Sprintf("%s: %s: no %s value", op, name, desc))
+			}
 			if s.Max != nil && *s.Max < 10000 {
 				if v, ok := resize(s, str, int(*s.Max)+1); ok {
 					add("too long", name, v)
+				} else {
+					skip("too long")
 				}
 			}
 			if s.Min != nil && *s.Min > 1 {
 				if v, ok := resize(s, str, int(*s.Min)-1); ok {
 					add("too short", name, v)
+				} else {
+					skip("too short")
 				}
 			}
-			if v, ok := invalidPattern(s); ok {
-				add("invalid pattern", name, v)
+			if s.Pattern != "" {
+				if v, ok := invalidPattern(s); ok {
+					add("invalid pattern", name, v)
+				} else {
+					skip("invalid pattern")
+				}
 			}
 		case "integer", "long":
 			if s.Min != nil {
@@ -263,7 +274,14 @@ func validValue(m *model, name string, depth int) (any, error) {
 			return v, nil
 		}
 		for _, c := range candidates {
-			if v, ok := resize(s, c, len(c)); ok {
+			n := len([]rune(c))
+			if s.Min != nil && float64(n) < *s.Min {
+				n = int(*s.Min)
+			}
+			if !inRange(s, n) {
+				continue
+			}
+			if v, ok := resize(s, c, n); ok {
 				return v, nil
 			}
 		}
@@ -306,7 +324,7 @@ func validValue(m *model, name string, depth int) (any, error) {
 }
 
 // resize pads or truncates v to n characters and reports whether the result still
-// matches the pattern. Length is checked separately by the caller's intent.
+// matches the pattern.
 func resize(s shape, v string, n int) (string, bool) {
 	if n < 0 {
 		return "", false
@@ -319,10 +337,6 @@ func resize(s shape, v string, n int) (string, bool) {
 		r = append(r, r[len(r)-1])
 	}
 	out := string(r[:n])
-	if n == len([]rune(v)) || inRange(s, n) {
-		return out, matches(s, out)
-	}
-	// Out-of-range values only need to keep the pattern, so the length is the only violation.
 	return out, n == 0 || matches(s, out)
 }
 

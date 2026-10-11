@@ -3629,11 +3629,20 @@
     }
   ],
   "skipped": [
+    "CreateGroup: RoleArn: no too short value",
     "CreateUserPool: EmailVerificationMessage: no sample for EmailVerificationMessageType (pattern \"[\\\\p{L}\\\\p{M}\\\\p{S}\\\\p{N}\\\\p{P}\\\\s*]*\\\\{####\\\\}[\\\\p{L}\\\\p{M}\\\\p{S}\\\\p{N}\\\\p{P}\\\\s*]*\")",
+    "CreateUserPool: EmailVerificationSubject: no invalid pattern value",
     "CreateUserPool: SmsAuthenticationMessage: no sample for SmsVerificationMessageType (pattern \".*\\\\{####\\\\}.*\")",
     "CreateUserPool: SmsVerificationMessage: no sample for SmsVerificationMessageType (pattern \".*\\\\{####\\\\}.*\")",
+    "GetUserAttributeVerificationCode: AttributeName: no invalid pattern value",
+    "ListTagsForResource: ResourceArn: no too short value",
+    "TagResource: ResourceArn: no too short value",
+    "UntagResource: ResourceArn: no too short value",
+    "UpdateGroup: RoleArn: no too short value",
     "UpdateUserPool: EmailVerificationMessage: no sample for EmailVerificationMessageType (pattern \"[\\\\p{L}\\\\p{M}\\\\p{S}\\\\p{N}\\\\p{P}\\\\s*]*\\\\{####\\\\}[\\\\p{L}\\\\p{M}\\\\p{S}\\\\p{N}\\\\p{P}\\\\s*]*\")",
+    "UpdateUserPool: EmailVerificationSubject: no invalid pattern value",
     "UpdateUserPool: SmsAuthenticationMessage: no sample for SmsVerificationMessageType (pattern \".*\\\\{####\\\\}.*\")",
-    "UpdateUserPool: SmsVerificationMessage: no sample for SmsVerificationMessageType (pattern \".*\\\\{####\\\\}.*\")"
+    "UpdateUserPool: SmsVerificationMessage: no sample for SmsVerificationMessageType (pattern \".*\\\\{####\\\\}.*\")",
+    "VerifyUserAttribute: AttributeName: no invalid pattern value"
   ]
 }
