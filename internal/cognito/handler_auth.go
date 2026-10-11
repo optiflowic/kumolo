@@ -85,24 +85,6 @@ func (ro *Router) handleSignUp(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
-	if req.ClientID == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"ClientId is required",
-		)
-		return
-	}
-	if req.Username == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"Username is required",
-		)
-		return
-	}
 
 	poolID, err := ro.storage.GetPoolIDForClient(req.ClientID)
 	if err != nil {
@@ -277,29 +259,6 @@ func (ro *Router) handleConfirmSignUp(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
-	if req.ClientID == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"ClientId is required",
-		)
-		return
-	}
-	if req.Username == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"Username is required",
-		)
-		return
-	}
-	if req.ConfirmationCode == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-			"ConfirmationCode is required")
-		return
-	}
 
 	poolID, err := ro.storage.GetPoolIDForClient(req.ClientID)
 	if err != nil {
@@ -384,24 +343,6 @@ func (ro *Router) handleInitiateAuth(w http.ResponseWriter, body []byte) {
 			http.StatusBadRequest,
 			ErrTypeInvalidParameterException,
 			"invalid request body",
-		)
-		return
-	}
-	if req.ClientID == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"ClientId is required",
-		)
-		return
-	}
-	if req.AuthFlow == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"AuthFlow is required",
 		)
 		return
 	}
@@ -799,20 +740,6 @@ func (ro *Router) handleRespondToAuthChallenge(w http.ResponseWriter, body []byt
 		)
 		return
 	}
-	if req.ClientID == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"ClientId is required",
-		)
-		return
-	}
-	if req.ChallengeName == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-			"ChallengeName is required")
-		return
-	}
 	if req.Session == "" {
 		writeError(
 			w,
@@ -985,16 +912,6 @@ func (ro *Router) handleResendConfirmationCode(w http.ResponseWriter, body []byt
 			"invalid request body")
 		return
 	}
-	if req.ClientID == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-			"ClientId is required")
-		return
-	}
-	if req.Username == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-			"Username is required")
-		return
-	}
 
 	poolID, err := ro.storage.GetPoolIDForClient(req.ClientID)
 	if err != nil {
@@ -1066,16 +983,6 @@ func (ro *Router) handleRevokeToken(w http.ResponseWriter, body []byte) {
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
 			"invalid request body")
-		return
-	}
-	if req.ClientID == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-			"ClientId is required")
-		return
-	}
-	if req.Token == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-			"Token is required")
 		return
 	}
 

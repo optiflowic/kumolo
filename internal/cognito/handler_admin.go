@@ -55,24 +55,6 @@ func (ro *Router) handleAdminCreateUser(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
-	if req.UserPoolID == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"UserPoolId is required",
-		)
-		return
-	}
-	if req.Username == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"Username is required",
-		)
-		return
-	}
 	pool, err := ro.storage.GetUserPool(req.UserPoolID)
 	if err != nil {
 		if errors.Is(err, errUserPoolNotFound) {
@@ -195,24 +177,6 @@ func (ro *Router) handleAdminGetUser(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
-	if req.UserPoolID == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"UserPoolId is required",
-		)
-		return
-	}
-	if req.Username == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"Username is required",
-		)
-		return
-	}
 
 	if _, err := ro.storage.GetUserPool(req.UserPoolID); err != nil {
 		if errors.Is(err, errUserPoolNotFound) {
@@ -267,33 +231,6 @@ func (ro *Router) handleAdminSetUserPassword(w http.ResponseWriter, body []byte)
 			http.StatusBadRequest,
 			ErrTypeInvalidParameterException,
 			"invalid request body",
-		)
-		return
-	}
-	if req.UserPoolID == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"UserPoolId is required",
-		)
-		return
-	}
-	if req.Username == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"Username is required",
-		)
-		return
-	}
-	if req.Password == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"Password is required",
 		)
 		return
 	}
@@ -370,24 +307,6 @@ func (ro *Router) handleAdminConfirmSignUp(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
-	if req.UserPoolID == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"UserPoolId is required",
-		)
-		return
-	}
-	if req.Username == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"Username is required",
-		)
-		return
-	}
 
 	pool, err := ro.storage.GetUserPool(req.UserPoolID)
 	if err != nil {
@@ -440,24 +359,6 @@ func (ro *Router) handleAdminDeleteUser(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
-	if req.UserPoolID == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"UserPoolId is required",
-		)
-		return
-	}
-	if req.Username == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"Username is required",
-		)
-		return
-	}
 
 	if _, err := ro.storage.GetUserPool(req.UserPoolID); err != nil {
 		if errors.Is(err, errUserPoolNotFound) {
@@ -496,16 +397,6 @@ func (ro *Router) handleAdminDisableUser(w http.ResponseWriter, body []byte) {
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
 			"invalid request body")
-		return
-	}
-	if req.UserPoolID == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-			"UserPoolId is required")
-		return
-	}
-	if req.Username == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-			"Username is required")
 		return
 	}
 
@@ -565,16 +456,6 @@ func (ro *Router) handleAdminEnableUser(w http.ResponseWriter, body []byte) {
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
 			"invalid request body")
-		return
-	}
-	if req.UserPoolID == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-			"UserPoolId is required")
-		return
-	}
-	if req.Username == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-			"Username is required")
 		return
 	}
 
@@ -685,16 +566,6 @@ func (ro *Router) handleAdminUpdateUserAttributes(w http.ResponseWriter, body []
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
 			"invalid request body")
-		return
-	}
-	if req.UserPoolID == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-			"UserPoolId is required")
-		return
-	}
-	if req.Username == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-			"Username is required")
 		return
 	}
 	if len(req.UserAttributes) == 0 {
@@ -834,15 +705,6 @@ func (ro *Router) handleListUsers(w http.ResponseWriter, body []byte) {
 			http.StatusBadRequest,
 			ErrTypeInvalidParameterException,
 			"invalid request body",
-		)
-		return
-	}
-	if req.UserPoolID == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"UserPoolId is required",
 		)
 		return
 	}

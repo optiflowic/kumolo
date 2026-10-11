@@ -71,15 +71,6 @@ func decodeGetUserToken(w http.ResponseWriter, body []byte) (string, bool) {
 		)
 		return "", false
 	}
-	if req.AccessToken == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"AccessToken is required",
-		)
-		return "", false
-	}
 	return req.AccessToken, true
 }
 
@@ -222,11 +213,6 @@ func (ro *Router) handleGetUserAttributeVerificationCode(w http.ResponseWriter, 
 			"invalid request body")
 		return
 	}
-	if req.AccessToken == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-			"AccessToken is required")
-		return
-	}
 	if !verifiableAttr(req.AttributeName) {
 		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
 			"AttributeName must be email or phone_number")
@@ -320,19 +306,9 @@ func (ro *Router) handleVerifyUserAttribute(w http.ResponseWriter, body []byte) 
 			"invalid request body")
 		return
 	}
-	if req.AccessToken == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-			"AccessToken is required")
-		return
-	}
 	if !verifiableAttr(req.AttributeName) {
 		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
 			"AttributeName must be email or phone_number")
-		return
-	}
-	if req.Code == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-			"Code is required")
 		return
 	}
 
@@ -396,11 +372,6 @@ func (ro *Router) handleDeleteUser(w http.ResponseWriter, body []byte) {
 			"invalid request body")
 		return
 	}
-	if req.AccessToken == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-			"AccessToken is required")
-		return
-	}
 
 	poolID, ok := poolIDFromToken(w, req.AccessToken)
 	if !ok {
@@ -447,11 +418,6 @@ func (ro *Router) handleGlobalSignOut(w http.ResponseWriter, body []byte) {
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
 			"invalid request body")
-		return
-	}
-	if req.AccessToken == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-			"AccessToken is required")
 		return
 	}
 
@@ -510,11 +476,6 @@ func (ro *Router) handleUpdateUserAttributes(w http.ResponseWriter, body []byte)
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
 			"invalid request body")
-		return
-	}
-	if req.AccessToken == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-			"AccessToken is required")
 		return
 	}
 	if len(req.UserAttributes) == 0 {
