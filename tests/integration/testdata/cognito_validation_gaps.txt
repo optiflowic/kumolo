@@ -1,13 +1,5 @@
 # Generated cases kumolo does not pass yet. Remove a line when it is fixed.
 
-# Invalid input is accepted (200).
-CreateUserPool/DeletionProtection invalid enum
-CreateUserPool/EmailVerificationSubject too long
-CreateUserPool/EmailVerificationSubject too short
-CreateUserPool/MfaConfiguration invalid enum
-CreateUserPool/UserPoolTier invalid enum
-ListUserPools/NextToken too short
-
 # Token check (NotAuthorizedException) happens before input validation.
 AssociateSoftwareToken/AccessToken invalid pattern
 ChangePassword/AccessToken invalid pattern

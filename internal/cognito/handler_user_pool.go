@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"slices"
+	"unicode/utf8"
 
 	"github.com/optiflowic/kumolo/internal/sigv4"
 )
@@ -17,6 +19,14 @@ const (
 )
 
 var rePoolName = regexp.MustCompile(`^[\w\s+=,.@-]{1,128}$`)
+
+const emailVerificationSubjectMaxLen = 140
+
+var (
+	mfaConfigurationValues   = []string{"OFF", "ON", "OPTIONAL"}
+	deletionProtectionValues = []string{"ACTIVE", "INACTIVE"}
+	userPoolTierValues       = []string{"LITE", "ESSENTIALS", "PLUS"}
+)
 
 // resolveRegion determines the region for a new user pool. Fallback order: the SigV4
 // credential scope on the request (reflects the caller's SDK/CLI configuration) →
@@ -199,7 +209,7 @@ type createUserPoolRequest struct {
 	UserPoolTags                map[string]string `json:"UserPoolTags"`
 	UserPoolTier                string            `json:"UserPoolTier"`
 	EmailVerificationMessage    string            `json:"EmailVerificationMessage"`
-	EmailVerificationSubject    string            `json:"EmailVerificationSubject"`
+	EmailVerificationSubject    *string           `json:"EmailVerificationSubject"`
 	SmsAuthenticationMessage    string            `json:"SmsAuthenticationMessage"`
 	SmsVerificationMessage      string            `json:"SmsVerificationMessage"`
 }
@@ -256,6 +266,49 @@ func (ro *Router) handleCreateUserPool(w http.ResponseWriter, r *http.Request, b
 			"PoolName must be 1-128 characters and match pattern [\\w\\s+=,.@-]+",
 		)
 		return
+	}
+	if req.MfaConfiguration != "" &&
+		!slices.Contains(mfaConfigurationValues, req.MfaConfiguration) {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"MfaConfiguration must be one of OFF, ON, OPTIONAL",
+		)
+		return
+	}
+	if req.DeletionProtection != "" &&
+		!slices.Contains(deletionProtectionValues, req.DeletionProtection) {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"DeletionProtection must be one of ACTIVE, INACTIVE",
+		)
+		return
+	}
+	if req.UserPoolTier != "" && !slices.Contains(userPoolTierValues, req.UserPoolTier) {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			ErrTypeInvalidParameterException,
+			"UserPoolTier must be one of LITE, ESSENTIALS, PLUS",
+		)
+		return
+	}
+	var emailVerificationSubject string
+	if req.EmailVerificationSubject != nil {
+		emailVerificationSubject = *req.EmailVerificationSubject
+		n := utf8.RuneCountInString(emailVerificationSubject)
+		if n < 1 || n > emailVerificationSubjectMaxLen {
+			writeError(
+				w,
+				http.StatusBadRequest,
+				ErrTypeInvalidParameterException,
+				"EmailVerificationSubject must be 1-140 characters",
+			)
+			return
+		}
 	}
 
 	poolID, err := generatePoolID(ro.resolveRegion(r))
@@ -317,7 +370,7 @@ func (ro *Router) handleCreateUserPool(w http.ResponseWriter, r *http.Request, b
 		UserPoolTags:                req.UserPoolTags,
 		UserPoolTier:                defaultStr(req.UserPoolTier, "ESSENTIALS"),
 		EmailVerificationMessage:    req.EmailVerificationMessage,
-		EmailVerificationSubject:    req.EmailVerificationSubject,
+		EmailVerificationSubject:    emailVerificationSubject,
 		SmsAuthenticationMessage:    req.SmsAuthenticationMessage,
 		SmsVerificationMessage:      req.SmsVerificationMessage,
 	}
@@ -687,8 +740,8 @@ type userPoolDescription struct {
 
 func (ro *Router) handleListUserPools(w http.ResponseWriter, body []byte) {
 	var req struct {
-		MaxResults *int   `json:"MaxResults"`
-		NextToken  string `json:"NextToken"`
+		MaxResults *int    `json:"MaxResults"`
+		NextToken  *string `json:"NextToken"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(
@@ -713,8 +766,21 @@ func (ro *Router) handleListUserPools(w http.ResponseWriter, body []byte) {
 			"MaxResults must be between 1 and 60")
 		return
 	}
+	var startToken string
+	if req.NextToken != nil {
+		startToken = *req.NextToken
+		if startToken == "" {
+			writeError(
+				w,
+				http.StatusBadRequest,
+				ErrTypeInvalidParameterException,
+				"NextToken must be at least 1 character",
+			)
+			return
+		}
+	}
 
-	pools, nextToken, err := ro.storage.ListUserPools(*req.MaxResults, req.NextToken)
+	pools, nextToken, err := ro.storage.ListUserPools(*req.MaxResults, startToken)
 	if err != nil {
 		if errors.Is(err, errInvalidNextToken) {
 			writeError(
