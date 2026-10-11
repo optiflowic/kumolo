@@ -92,13 +92,20 @@ func TestCognitoIntegration_InputValidation(t *testing.T) {
 			}
 
 			if gaps[c.Name] {
+				require.Lessf(
+					t,
+					resp.StatusCode,
+					http.StatusInternalServerError,
+					"known gap returned a server error: %q",
+					respBody,
+				)
 				if problem == "" {
-					t.Fatal("passes now; remove it from cognito_validation_gaps.txt")
+					require.FailNow(t, "passes now; remove it from cognito_validation_gaps.txt")
 				}
 				t.Skip("known gap: " + problem)
 			}
 			if problem != "" {
-				t.Fatal(problem)
+				require.FailNow(t, problem)
 			}
 		})
 	}
