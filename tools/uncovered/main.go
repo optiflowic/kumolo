@@ -16,7 +16,7 @@ import (
 
 var (
 	exempt        = regexp.MustCompile(`\b(unreachable|untestable):`)
-	openerComment = regexp.MustCompile(`[{:]\s*//`)
+	openerComment = regexp.MustCompile(`[{:]\s+//`)
 )
 
 type excludeList []string
