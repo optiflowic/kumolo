@@ -14,7 +14,10 @@ import (
 	"strings"
 )
 
-var exempt = regexp.MustCompile(`\b(unreachable|untestable):`)
+var (
+	exempt        = regexp.MustCompile(`\b(unreachable|untestable):`)
+	openerComment = regexp.MustCompile(`[{:]\s*//`)
+)
 
 type excludeList []string
 
@@ -129,11 +132,15 @@ func isExcluded(path string, excludes []string) bool {
 }
 
 // exemptStart returns the index of the block's first line, moved up over the
-// comment lines directly above it: the profile range starts at the first
-// statement, so an annotation placed right after the opening brace is outside it.
+// comment lines directly above it and the trailing comment of the line that
+// opens the block: the profile range starts at the first statement, so an
+// annotation placed on or right after the opening line is outside it.
 func exemptStart(srcLines []string, startLine int) int {
 	i := startLine - 1
 	for i > 0 && strings.HasPrefix(strings.TrimSpace(srcLines[i-1]), "//") {
+		i--
+	}
+	if i > 0 && openerComment.MatchString(srcLines[i-1]) {
 		i--
 	}
 	return i
