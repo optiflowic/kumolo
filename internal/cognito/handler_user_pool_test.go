@@ -719,6 +719,10 @@ func TestCreateUserPool_ValidOptionalFields(t *testing.T) {
 		},
 		{name: "UserPoolTier PLUS", body: `{"PoolName":"pool","UserPoolTier":"PLUS"}`},
 		{
+			name: "empty enum members are treated as omitted",
+			body: `{"PoolName":"pool","MfaConfiguration":"","DeletionProtection":"","UserPoolTier":""}`,
+		},
+		{
 			name: "EmailVerificationSubject null",
 			body: `{"PoolName":"pool","EmailVerificationSubject":null}`,
 		},
@@ -747,6 +751,20 @@ func TestListUserPools_EmptyNextToken(t *testing.T) {
 	var resp errResponse
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
 	assert.Equal(t, ErrTypeInvalidParameterException, resp.Type)
+}
+
+func TestListUserPools_NullNextToken(t *testing.T) {
+	ro := newTestRouter(t)
+	createPool(t, ro, "pool-0")
+
+	w := doOp(t, ro, "ListUserPools", `{"MaxResults":10,"NextToken":null}`)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp struct {
+		UserPools []userPoolDescription `json:"UserPools"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Len(t, resp.UserPools, 1)
 }
 
 func TestListUserPools_MissingMaxResults(t *testing.T) {
