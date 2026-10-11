@@ -240,7 +240,7 @@ func casesFor(m *model, op, errType string) ([]testCase, []string) {
 					skip("too long")
 				}
 			}
-			if s.Min != nil && *s.Min > 1 {
+			if s.Min != nil && *s.Min > 0 {
 				if v, ok := resize(s, str, int(*s.Min)-1); ok {
 					add("too short", name, v)
 				} else {
