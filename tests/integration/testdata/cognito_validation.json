@@ -1,0 +1,3639 @@
+{
+  "service": "cognito-idp",
+  "api_version": "2016-04-18",
+  "json_version": "1.1",
+  "target_prefix": "AWSCognitoIdentityProviderService",
+  "cases": [
+    {
+      "name": "AdminAddUserToGroup/base",
+      "operation": "AdminAddUserToGroup",
+      "body": {
+        "GroupName": "abc123",
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123"
+      }
+    },
+    {
+      "name": "AdminAddUserToGroup/UserPoolId missing",
+      "operation": "AdminAddUserToGroup",
+      "body": {
+        "GroupName": "abc123",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminAddUserToGroup/Username missing",
+      "operation": "AdminAddUserToGroup",
+      "body": {
+        "GroupName": "abc123",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminAddUserToGroup/GroupName missing",
+      "operation": "AdminAddUserToGroup",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminAddUserToGroup/GroupName too long",
+      "operation": "AdminAddUserToGroup",
+      "body": {
+        "GroupName": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333",
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminAddUserToGroup/GroupName invalid pattern",
+      "operation": "AdminAddUserToGroup",
+      "body": {
+        "GroupName": " ",
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminAddUserToGroup/UserPoolId too long",
+      "operation": "AdminAddUserToGroup",
+      "body": {
+        "GroupName": "abc123",
+        "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminAddUserToGroup/UserPoolId invalid pattern",
+      "operation": "AdminAddUserToGroup",
+      "body": {
+        "GroupName": "abc123",
+        "UserPoolId": "!!!",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminAddUserToGroup/Username too long",
+      "operation": "AdminAddUserToGroup",
+      "body": {
+        "GroupName": "abc123",
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminAddUserToGroup/Username invalid pattern",
+      "operation": "AdminAddUserToGroup",
+      "body": {
+        "GroupName": "abc123",
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": " "
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminConfirmSignUp/base",
+      "operation": "AdminConfirmSignUp",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123"
+      }
+    },
+    {
+      "name": "AdminConfirmSignUp/UserPoolId missing",
+      "operation": "AdminConfirmSignUp",
+      "body": {
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminConfirmSignUp/Username missing",
+      "operation": "AdminConfirmSignUp",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminConfirmSignUp/UserPoolId too long",
+      "operation": "AdminConfirmSignUp",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminConfirmSignUp/UserPoolId invalid pattern",
+      "operation": "AdminConfirmSignUp",
+      "body": {
+        "UserPoolId": "!!!",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminConfirmSignUp/Username too long",
+      "operation": "AdminConfirmSignUp",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminConfirmSignUp/Username invalid pattern",
+      "operation": "AdminConfirmSignUp",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": " "
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminCreateUser/base",
+      "operation": "AdminCreateUser",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123"
+      }
+    },
+    {
+      "name": "AdminCreateUser/UserPoolId missing",
+      "operation": "AdminCreateUser",
+      "body": {
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminCreateUser/Username missing",
+      "operation": "AdminCreateUser",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminCreateUser/MessageAction invalid enum",
+      "operation": "AdminCreateUser",
+      "body": {
+        "MessageAction": "INVALID_ENUM_VALUE",
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminCreateUser/TemporaryPassword too long",
+      "operation": "AdminCreateUser",
+      "body": {
+        "TemporaryPassword": "Passw0rd!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!",
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminCreateUser/TemporaryPassword invalid pattern",
+      "operation": "AdminCreateUser",
+      "body": {
+        "TemporaryPassword": " ",
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminCreateUser/UserPoolId too long",
+      "operation": "AdminCreateUser",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminCreateUser/UserPoolId invalid pattern",
+      "operation": "AdminCreateUser",
+      "body": {
+        "UserPoolId": "!!!",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminCreateUser/Username too long",
+      "operation": "AdminCreateUser",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminCreateUser/Username invalid pattern",
+      "operation": "AdminCreateUser",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": " "
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminDeleteUser/base",
+      "operation": "AdminDeleteUser",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123"
+      }
+    },
+    {
+      "name": "AdminDeleteUser/UserPoolId missing",
+      "operation": "AdminDeleteUser",
+      "body": {
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminDeleteUser/Username missing",
+      "operation": "AdminDeleteUser",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminDeleteUser/UserPoolId too long",
+      "operation": "AdminDeleteUser",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminDeleteUser/UserPoolId invalid pattern",
+      "operation": "AdminDeleteUser",
+      "body": {
+        "UserPoolId": "!!!",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminDeleteUser/Username too long",
+      "operation": "AdminDeleteUser",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminDeleteUser/Username invalid pattern",
+      "operation": "AdminDeleteUser",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": " "
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminDisableUser/base",
+      "operation": "AdminDisableUser",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123"
+      }
+    },
+    {
+      "name": "AdminDisableUser/UserPoolId missing",
+      "operation": "AdminDisableUser",
+      "body": {
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminDisableUser/Username missing",
+      "operation": "AdminDisableUser",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminDisableUser/UserPoolId too long",
+      "operation": "AdminDisableUser",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminDisableUser/UserPoolId invalid pattern",
+      "operation": "AdminDisableUser",
+      "body": {
+        "UserPoolId": "!!!",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminDisableUser/Username too long",
+      "operation": "AdminDisableUser",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminDisableUser/Username invalid pattern",
+      "operation": "AdminDisableUser",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": " "
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminEnableUser/base",
+      "operation": "AdminEnableUser",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123"
+      }
+    },
+    {
+      "name": "AdminEnableUser/UserPoolId missing",
+      "operation": "AdminEnableUser",
+      "body": {
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminEnableUser/Username missing",
+      "operation": "AdminEnableUser",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminEnableUser/UserPoolId too long",
+      "operation": "AdminEnableUser",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminEnableUser/UserPoolId invalid pattern",
+      "operation": "AdminEnableUser",
+      "body": {
+        "UserPoolId": "!!!",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminEnableUser/Username too long",
+      "operation": "AdminEnableUser",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminEnableUser/Username invalid pattern",
+      "operation": "AdminEnableUser",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": " "
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminGetUser/base",
+      "operation": "AdminGetUser",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123"
+      }
+    },
+    {
+      "name": "AdminGetUser/UserPoolId missing",
+      "operation": "AdminGetUser",
+      "body": {
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminGetUser/Username missing",
+      "operation": "AdminGetUser",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminGetUser/UserPoolId too long",
+      "operation": "AdminGetUser",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminGetUser/UserPoolId invalid pattern",
+      "operation": "AdminGetUser",
+      "body": {
+        "UserPoolId": "!!!",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminGetUser/Username too long",
+      "operation": "AdminGetUser",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminGetUser/Username invalid pattern",
+      "operation": "AdminGetUser",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": " "
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminListGroupsForUser/base",
+      "operation": "AdminListGroupsForUser",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123"
+      }
+    },
+    {
+      "name": "AdminListGroupsForUser/Username missing",
+      "operation": "AdminListGroupsForUser",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminListGroupsForUser/UserPoolId missing",
+      "operation": "AdminListGroupsForUser",
+      "body": {
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminListGroupsForUser/Limit below min",
+      "operation": "AdminListGroupsForUser",
+      "body": {
+        "Limit": -1,
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminListGroupsForUser/Limit above max",
+      "operation": "AdminListGroupsForUser",
+      "body": {
+        "Limit": 61,
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminListGroupsForUser/NextToken invalid pattern",
+      "operation": "AdminListGroupsForUser",
+      "body": {
+        "NextToken": " ",
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminListGroupsForUser/UserPoolId too long",
+      "operation": "AdminListGroupsForUser",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminListGroupsForUser/UserPoolId invalid pattern",
+      "operation": "AdminListGroupsForUser",
+      "body": {
+        "UserPoolId": "!!!",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminListGroupsForUser/Username too long",
+      "operation": "AdminListGroupsForUser",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminListGroupsForUser/Username invalid pattern",
+      "operation": "AdminListGroupsForUser",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": " "
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminRemoveUserFromGroup/base",
+      "operation": "AdminRemoveUserFromGroup",
+      "body": {
+        "GroupName": "abc123",
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123"
+      }
+    },
+    {
+      "name": "AdminRemoveUserFromGroup/UserPoolId missing",
+      "operation": "AdminRemoveUserFromGroup",
+      "body": {
+        "GroupName": "abc123",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminRemoveUserFromGroup/Username missing",
+      "operation": "AdminRemoveUserFromGroup",
+      "body": {
+        "GroupName": "abc123",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminRemoveUserFromGroup/GroupName missing",
+      "operation": "AdminRemoveUserFromGroup",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminRemoveUserFromGroup/GroupName too long",
+      "operation": "AdminRemoveUserFromGroup",
+      "body": {
+        "GroupName": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333",
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminRemoveUserFromGroup/GroupName invalid pattern",
+      "operation": "AdminRemoveUserFromGroup",
+      "body": {
+        "GroupName": " ",
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminRemoveUserFromGroup/UserPoolId too long",
+      "operation": "AdminRemoveUserFromGroup",
+      "body": {
+        "GroupName": "abc123",
+        "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminRemoveUserFromGroup/UserPoolId invalid pattern",
+      "operation": "AdminRemoveUserFromGroup",
+      "body": {
+        "GroupName": "abc123",
+        "UserPoolId": "!!!",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminRemoveUserFromGroup/Username too long",
+      "operation": "AdminRemoveUserFromGroup",
+      "body": {
+        "GroupName": "abc123",
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminRemoveUserFromGroup/Username invalid pattern",
+      "operation": "AdminRemoveUserFromGroup",
+      "body": {
+        "GroupName": "abc123",
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": " "
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminSetUserPassword/base",
+      "operation": "AdminSetUserPassword",
+      "body": {
+        "Password": "Passw0rd!",
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123"
+      }
+    },
+    {
+      "name": "AdminSetUserPassword/UserPoolId missing",
+      "operation": "AdminSetUserPassword",
+      "body": {
+        "Password": "Passw0rd!",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminSetUserPassword/Username missing",
+      "operation": "AdminSetUserPassword",
+      "body": {
+        "Password": "Passw0rd!",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminSetUserPassword/Password missing",
+      "operation": "AdminSetUserPassword",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminSetUserPassword/Password too long",
+      "operation": "AdminSetUserPassword",
+      "body": {
+        "Password": "Passw0rd!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!",
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminSetUserPassword/Password invalid pattern",
+      "operation": "AdminSetUserPassword",
+      "body": {
+        "Password": " ",
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminSetUserPassword/UserPoolId too long",
+      "operation": "AdminSetUserPassword",
+      "body": {
+        "Password": "Passw0rd!",
+        "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminSetUserPassword/UserPoolId invalid pattern",
+      "operation": "AdminSetUserPassword",
+      "body": {
+        "Password": "Passw0rd!",
+        "UserPoolId": "!!!",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminSetUserPassword/Username too long",
+      "operation": "AdminSetUserPassword",
+      "body": {
+        "Password": "Passw0rd!",
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminSetUserPassword/Username invalid pattern",
+      "operation": "AdminSetUserPassword",
+      "body": {
+        "Password": "Passw0rd!",
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": " "
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminUpdateUserAttributes/base",
+      "operation": "AdminUpdateUserAttributes",
+      "body": {
+        "UserAttributes": [
+          {
+            "Name": "email"
+          }
+        ],
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123"
+      }
+    },
+    {
+      "name": "AdminUpdateUserAttributes/UserPoolId missing",
+      "operation": "AdminUpdateUserAttributes",
+      "body": {
+        "UserAttributes": [
+          {
+            "Name": "email"
+          }
+        ],
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminUpdateUserAttributes/Username missing",
+      "operation": "AdminUpdateUserAttributes",
+      "body": {
+        "UserAttributes": [
+          {
+            "Name": "email"
+          }
+        ],
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminUpdateUserAttributes/UserAttributes missing",
+      "operation": "AdminUpdateUserAttributes",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminUpdateUserAttributes/UserPoolId too long",
+      "operation": "AdminUpdateUserAttributes",
+      "body": {
+        "UserAttributes": [
+          {
+            "Name": "email"
+          }
+        ],
+        "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminUpdateUserAttributes/UserPoolId invalid pattern",
+      "operation": "AdminUpdateUserAttributes",
+      "body": {
+        "UserAttributes": [
+          {
+            "Name": "email"
+          }
+        ],
+        "UserPoolId": "!!!",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminUpdateUserAttributes/Username too long",
+      "operation": "AdminUpdateUserAttributes",
+      "body": {
+        "UserAttributes": [
+          {
+            "Name": "email"
+          }
+        ],
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminUpdateUserAttributes/Username invalid pattern",
+      "operation": "AdminUpdateUserAttributes",
+      "body": {
+        "UserAttributes": [
+          {
+            "Name": "email"
+          }
+        ],
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": " "
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AssociateSoftwareToken/base",
+      "operation": "AssociateSoftwareToken",
+      "body": {
+        "AccessToken": "abc.def.ghi"
+      }
+    },
+    {
+      "name": "AssociateSoftwareToken/AccessToken invalid pattern",
+      "operation": "AssociateSoftwareToken",
+      "body": {
+        "AccessToken": "!!!"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AssociateSoftwareToken/Session too long",
+      "operation": "AssociateSoftwareToken",
+      "body": {
+        "AccessToken": "abc.def.ghi",
+        "Session": "abc12333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AssociateSoftwareToken/Session too short",
+      "operation": "AssociateSoftwareToken",
+      "body": {
+        "AccessToken": "abc.def.ghi",
+        "Session": "abc1233333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ChangePassword/base",
+      "operation": "ChangePassword",
+      "body": {
+        "AccessToken": "abc.def.ghi",
+        "ProposedPassword": "Passw0rd!"
+      }
+    },
+    {
+      "name": "ChangePassword/ProposedPassword missing",
+      "operation": "ChangePassword",
+      "body": {
+        "AccessToken": "abc.def.ghi"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ChangePassword/AccessToken missing",
+      "operation": "ChangePassword",
+      "body": {
+        "ProposedPassword": "Passw0rd!"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ChangePassword/AccessToken invalid pattern",
+      "operation": "ChangePassword",
+      "body": {
+        "AccessToken": "!!!",
+        "ProposedPassword": "Passw0rd!"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ChangePassword/PreviousPassword too long",
+      "operation": "ChangePassword",
+      "body": {
+        "AccessToken": "abc.def.ghi",
+        "PreviousPassword": "Passw0rd!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!",
+        "ProposedPassword": "Passw0rd!"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ChangePassword/PreviousPassword invalid pattern",
+      "operation": "ChangePassword",
+      "body": {
+        "AccessToken": "abc.def.ghi",
+        "PreviousPassword": " ",
+        "ProposedPassword": "Passw0rd!"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ChangePassword/ProposedPassword too long",
+      "operation": "ChangePassword",
+      "body": {
+        "AccessToken": "abc.def.ghi",
+        "ProposedPassword": "Passw0rd!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ChangePassword/ProposedPassword invalid pattern",
+      "operation": "ChangePassword",
+      "body": {
+        "AccessToken": "abc.def.ghi",
+        "ProposedPassword": " "
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ConfirmForgotPassword/base",
+      "operation": "ConfirmForgotPassword",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "ConfirmationCode": "abc123",
+        "Password": "Passw0rd!",
+        "Username": "abc123"
+      }
+    },
+    {
+      "name": "ConfirmForgotPassword/ClientId missing",
+      "operation": "ConfirmForgotPassword",
+      "body": {
+        "ConfirmationCode": "abc123",
+        "Password": "Passw0rd!",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ConfirmForgotPassword/Username missing",
+      "operation": "ConfirmForgotPassword",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "ConfirmationCode": "abc123",
+        "Password": "Passw0rd!"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ConfirmForgotPassword/ConfirmationCode missing",
+      "operation": "ConfirmForgotPassword",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "Password": "Passw0rd!",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ConfirmForgotPassword/Password missing",
+      "operation": "ConfirmForgotPassword",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "ConfirmationCode": "abc123",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ConfirmForgotPassword/ClientId too long",
+      "operation": "ConfirmForgotPassword",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+        "ConfirmationCode": "abc123",
+        "Password": "Passw0rd!",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ConfirmForgotPassword/ClientId invalid pattern",
+      "operation": "ConfirmForgotPassword",
+      "body": {
+        "ClientId": "!!!",
+        "ConfirmationCode": "abc123",
+        "Password": "Passw0rd!",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ConfirmForgotPassword/ConfirmationCode too long",
+      "operation": "ConfirmForgotPassword",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "ConfirmationCode": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333",
+        "Password": "Passw0rd!",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ConfirmForgotPassword/ConfirmationCode invalid pattern",
+      "operation": "ConfirmForgotPassword",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "ConfirmationCode": " ",
+        "Password": "Passw0rd!",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ConfirmForgotPassword/Password too long",
+      "operation": "ConfirmForgotPassword",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "ConfirmationCode": "abc123",
+        "Password": "Passw0rd!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ConfirmForgotPassword/Password invalid pattern",
+      "operation": "ConfirmForgotPassword",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "ConfirmationCode": "abc123",
+        "Password": " ",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ConfirmForgotPassword/SecretHash too long",
+      "operation": "ConfirmForgotPassword",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "ConfirmationCode": "abc123",
+        "Password": "Passw0rd!",
+        "SecretHash": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ConfirmForgotPassword/SecretHash invalid pattern",
+      "operation": "ConfirmForgotPassword",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "ConfirmationCode": "abc123",
+        "Password": "Passw0rd!",
+        "SecretHash": "!!!",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ConfirmForgotPassword/Username too long",
+      "operation": "ConfirmForgotPassword",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "ConfirmationCode": "abc123",
+        "Password": "Passw0rd!",
+        "Username": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ConfirmForgotPassword/Username invalid pattern",
+      "operation": "ConfirmForgotPassword",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "ConfirmationCode": "abc123",
+        "Password": "Passw0rd!",
+        "Username": " "
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ConfirmSignUp/base",
+      "operation": "ConfirmSignUp",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "ConfirmationCode": "abc123",
+        "Username": "abc123"
+      }
+    },
+    {
+      "name": "ConfirmSignUp/ClientId missing",
+      "operation": "ConfirmSignUp",
+      "body": {
+        "ConfirmationCode": "abc123",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ConfirmSignUp/Username missing",
+      "operation": "ConfirmSignUp",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "ConfirmationCode": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ConfirmSignUp/ConfirmationCode missing",
+      "operation": "ConfirmSignUp",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ConfirmSignUp/ClientId too long",
+      "operation": "ConfirmSignUp",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+        "ConfirmationCode": "abc123",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ConfirmSignUp/ClientId invalid pattern",
+      "operation": "ConfirmSignUp",
+      "body": {
+        "ClientId": "!!!",
+        "ConfirmationCode": "abc123",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ConfirmSignUp/ConfirmationCode too long",
+      "operation": "ConfirmSignUp",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "ConfirmationCode": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ConfirmSignUp/ConfirmationCode invalid pattern",
+      "operation": "ConfirmSignUp",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "ConfirmationCode": " ",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ConfirmSignUp/SecretHash too long",
+      "operation": "ConfirmSignUp",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "ConfirmationCode": "abc123",
+        "SecretHash": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ConfirmSignUp/SecretHash invalid pattern",
+      "operation": "ConfirmSignUp",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "ConfirmationCode": "abc123",
+        "SecretHash": "!!!",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ConfirmSignUp/Session too long",
+      "operation": "ConfirmSignUp",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "ConfirmationCode": "abc123",
+        "Session": "abc12333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ConfirmSignUp/Session too short",
+      "operation": "ConfirmSignUp",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "ConfirmationCode": "abc123",
+        "Session": "abc1233333333333333",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ConfirmSignUp/Username too long",
+      "operation": "ConfirmSignUp",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "ConfirmationCode": "abc123",
+        "Username": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ConfirmSignUp/Username invalid pattern",
+      "operation": "ConfirmSignUp",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "ConfirmationCode": "abc123",
+        "Username": " "
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "CreateGroup/base",
+      "operation": "CreateGroup",
+      "body": {
+        "GroupName": "abc123",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      }
+    },
+    {
+      "name": "CreateGroup/GroupName missing",
+      "operation": "CreateGroup",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "CreateGroup/UserPoolId missing",
+      "operation": "CreateGroup",
+      "body": {
+        "GroupName": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "CreateGroup/Description too long",
+      "operation": "CreateGroup",
+      "body": {
+        "Description": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333",
+        "GroupName": "abc123",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "CreateGroup/GroupName too long",
+      "operation": "CreateGroup",
+      "body": {
+        "GroupName": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "CreateGroup/GroupName invalid pattern",
+      "operation": "CreateGroup",
+      "body": {
+        "GroupName": " ",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "CreateGroup/Precedence below min",
+      "operation": "CreateGroup",
+      "body": {
+        "GroupName": "abc123",
+        "Precedence": -1,
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "CreateGroup/RoleArn too long",
+      "operation": "CreateGroup",
+      "body": {
+        "GroupName": "abc123",
+        "RoleArn": "arn:aws:cognito-idp:us-east-1:123456789012:userpool/us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "CreateGroup/RoleArn invalid pattern",
+      "operation": "CreateGroup",
+      "body": {
+        "GroupName": "abc123",
+        "RoleArn": "!!!!!!!!!!!!!!!!!!!!",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "CreateGroup/UserPoolId too long",
+      "operation": "CreateGroup",
+      "body": {
+        "GroupName": "abc123",
+        "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "CreateGroup/UserPoolId invalid pattern",
+      "operation": "CreateGroup",
+      "body": {
+        "GroupName": "abc123",
+        "UserPoolId": "!!!"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "CreateUserPool/base",
+      "operation": "CreateUserPool",
+      "body": {
+        "PoolName": "abc123"
+      }
+    },
+    {
+      "name": "CreateUserPool/PoolName missing",
+      "operation": "CreateUserPool",
+      "body": {},
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "CreateUserPool/DeletionProtection invalid enum",
+      "operation": "CreateUserPool",
+      "body": {
+        "DeletionProtection": "INVALID_ENUM_VALUE",
+        "PoolName": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "CreateUserPool/EmailVerificationSubject too long",
+      "operation": "CreateUserPool",
+      "body": {
+        "EmailVerificationSubject": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333",
+        "PoolName": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "CreateUserPool/MfaConfiguration invalid enum",
+      "operation": "CreateUserPool",
+      "body": {
+        "MfaConfiguration": "INVALID_ENUM_VALUE",
+        "PoolName": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "CreateUserPool/PoolName too long",
+      "operation": "CreateUserPool",
+      "body": {
+        "PoolName": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "CreateUserPool/PoolName invalid pattern",
+      "operation": "CreateUserPool",
+      "body": {
+        "PoolName": "!!!"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "CreateUserPool/UserPoolTier invalid enum",
+      "operation": "CreateUserPool",
+      "body": {
+        "PoolName": "abc123",
+        "UserPoolTier": "INVALID_ENUM_VALUE"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "CreateUserPoolClient/base",
+      "operation": "CreateUserPoolClient",
+      "body": {
+        "ClientName": "abc123",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      }
+    },
+    {
+      "name": "CreateUserPoolClient/UserPoolId missing",
+      "operation": "CreateUserPoolClient",
+      "body": {
+        "ClientName": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "CreateUserPoolClient/ClientName missing",
+      "operation": "CreateUserPoolClient",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "CreateUserPoolClient/AccessTokenValidity below min",
+      "operation": "CreateUserPoolClient",
+      "body": {
+        "AccessTokenValidity": 0,
+        "ClientName": "abc123",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "CreateUserPoolClient/AccessTokenValidity above max",
+      "operation": "CreateUserPoolClient",
+      "body": {
+        "AccessTokenValidity": 86401,
+        "ClientName": "abc123",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "CreateUserPoolClient/AuthSessionValidity below min",
+      "operation": "CreateUserPoolClient",
+      "body": {
+        "AuthSessionValidity": 2,
+        "ClientName": "abc123",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "CreateUserPoolClient/AuthSessionValidity above max",
+      "operation": "CreateUserPoolClient",
+      "body": {
+        "AuthSessionValidity": 16,
+        "ClientName": "abc123",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "CreateUserPoolClient/ClientName too long",
+      "operation": "CreateUserPoolClient",
+      "body": {
+        "ClientName": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "CreateUserPoolClient/ClientName invalid pattern",
+      "operation": "CreateUserPoolClient",
+      "body": {
+        "ClientName": "!!!",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "CreateUserPoolClient/ClientSecret too long",
+      "operation": "CreateUserPoolClient",
+      "body": {
+        "ClientName": "abc123",
+        "ClientSecret": "abc12333333333333333333333333333333333333333333333333333333333333",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "CreateUserPoolClient/ClientSecret too short",
+      "operation": "CreateUserPoolClient",
+      "body": {
+        "ClientName": "abc123",
+        "ClientSecret": "abc12333333333333333333",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "CreateUserPoolClient/ClientSecret invalid pattern",
+      "operation": "CreateUserPoolClient",
+      "body": {
+        "ClientName": "abc123",
+        "ClientSecret": "!!!!!!!!!!!!!!!!!!!!!!!!",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "CreateUserPoolClient/DefaultRedirectURI too long",
+      "operation": "CreateUserPoolClient",
+      "body": {
+        "ClientName": "abc123",
+        "DefaultRedirectURI": "abc12333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "CreateUserPoolClient/DefaultRedirectURI invalid pattern",
+      "operation": "CreateUserPoolClient",
+      "body": {
+        "ClientName": "abc123",
+        "DefaultRedirectURI": " ",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "CreateUserPoolClient/IdTokenValidity below min",
+      "operation": "CreateUserPoolClient",
+      "body": {
+        "ClientName": "abc123",
+        "IdTokenValidity": 0,
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "CreateUserPoolClient/IdTokenValidity above max",
+      "operation": "CreateUserPoolClient",
+      "body": {
+        "ClientName": "abc123",
+        "IdTokenValidity": 86401,
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "CreateUserPoolClient/PreventUserExistenceErrors invalid enum",
+      "operation": "CreateUserPoolClient",
+      "body": {
+        "ClientName": "abc123",
+        "PreventUserExistenceErrors": "INVALID_ENUM_VALUE",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "CreateUserPoolClient/RefreshTokenValidity below min",
+      "operation": "CreateUserPoolClient",
+      "body": {
+        "ClientName": "abc123",
+        "RefreshTokenValidity": -1,
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "CreateUserPoolClient/RefreshTokenValidity above max",
+      "operation": "CreateUserPoolClient",
+      "body": {
+        "ClientName": "abc123",
+        "RefreshTokenValidity": 315360001,
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "CreateUserPoolClient/UserPoolId too long",
+      "operation": "CreateUserPoolClient",
+      "body": {
+        "ClientName": "abc123",
+        "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "CreateUserPoolClient/UserPoolId invalid pattern",
+      "operation": "CreateUserPoolClient",
+      "body": {
+        "ClientName": "abc123",
+        "UserPoolId": "!!!"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "DeleteGroup/base",
+      "operation": "DeleteGroup",
+      "body": {
+        "GroupName": "abc123",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      }
+    },
+    {
+      "name": "DeleteGroup/GroupName missing",
+      "operation": "DeleteGroup",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "DeleteGroup/UserPoolId missing",
+      "operation": "DeleteGroup",
+      "body": {
+        "GroupName": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "DeleteGroup/GroupName too long",
+      "operation": "DeleteGroup",
+      "body": {
+        "GroupName": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "DeleteGroup/GroupName invalid pattern",
+      "operation": "DeleteGroup",
+      "body": {
+        "GroupName": " ",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "DeleteGroup/UserPoolId too long",
+      "operation": "DeleteGroup",
+      "body": {
+        "GroupName": "abc123",
+        "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "DeleteGroup/UserPoolId invalid pattern",
+      "operation": "DeleteGroup",
+      "body": {
+        "GroupName": "abc123",
+        "UserPoolId": "!!!"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "DeleteUser/base",
+      "operation": "DeleteUser",
+      "body": {
+        "AccessToken": "abc.def.ghi"
+      }
+    },
+    {
+      "name": "DeleteUser/AccessToken missing",
+      "operation": "DeleteUser",
+      "body": {},
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "DeleteUser/AccessToken invalid pattern",
+      "operation": "DeleteUser",
+      "body": {
+        "AccessToken": "!!!"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "DeleteUserPool/base",
+      "operation": "DeleteUserPool",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ"
+      }
+    },
+    {
+      "name": "DeleteUserPool/UserPoolId missing",
+      "operation": "DeleteUserPool",
+      "body": {},
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "DeleteUserPool/UserPoolId too long",
+      "operation": "DeleteUserPool",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "DeleteUserPool/UserPoolId invalid pattern",
+      "operation": "DeleteUserPool",
+      "body": {
+        "UserPoolId": "!!!"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "DeleteUserPoolClient/base",
+      "operation": "DeleteUserPoolClient",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      }
+    },
+    {
+      "name": "DeleteUserPoolClient/UserPoolId missing",
+      "operation": "DeleteUserPoolClient",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "DeleteUserPoolClient/ClientId missing",
+      "operation": "DeleteUserPoolClient",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "DeleteUserPoolClient/ClientId too long",
+      "operation": "DeleteUserPoolClient",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "DeleteUserPoolClient/ClientId invalid pattern",
+      "operation": "DeleteUserPoolClient",
+      "body": {
+        "ClientId": "!!!",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "DeleteUserPoolClient/UserPoolId too long",
+      "operation": "DeleteUserPoolClient",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "DeleteUserPoolClient/UserPoolId invalid pattern",
+      "operation": "DeleteUserPoolClient",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "UserPoolId": "!!!"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "DescribeUserPool/base",
+      "operation": "DescribeUserPool",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ"
+      }
+    },
+    {
+      "name": "DescribeUserPool/UserPoolId missing",
+      "operation": "DescribeUserPool",
+      "body": {},
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "DescribeUserPool/UserPoolId too long",
+      "operation": "DescribeUserPool",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "DescribeUserPool/UserPoolId invalid pattern",
+      "operation": "DescribeUserPool",
+      "body": {
+        "UserPoolId": "!!!"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "DescribeUserPoolClient/base",
+      "operation": "DescribeUserPoolClient",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      }
+    },
+    {
+      "name": "DescribeUserPoolClient/UserPoolId missing",
+      "operation": "DescribeUserPoolClient",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "DescribeUserPoolClient/ClientId missing",
+      "operation": "DescribeUserPoolClient",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "DescribeUserPoolClient/ClientId too long",
+      "operation": "DescribeUserPoolClient",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "DescribeUserPoolClient/ClientId invalid pattern",
+      "operation": "DescribeUserPoolClient",
+      "body": {
+        "ClientId": "!!!",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "DescribeUserPoolClient/UserPoolId too long",
+      "operation": "DescribeUserPoolClient",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "DescribeUserPoolClient/UserPoolId invalid pattern",
+      "operation": "DescribeUserPoolClient",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "UserPoolId": "!!!"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ForgotPassword/base",
+      "operation": "ForgotPassword",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "Username": "abc123"
+      }
+    },
+    {
+      "name": "ForgotPassword/ClientId missing",
+      "operation": "ForgotPassword",
+      "body": {
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ForgotPassword/Username missing",
+      "operation": "ForgotPassword",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ForgotPassword/ClientId too long",
+      "operation": "ForgotPassword",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ForgotPassword/ClientId invalid pattern",
+      "operation": "ForgotPassword",
+      "body": {
+        "ClientId": "!!!",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ForgotPassword/SecretHash too long",
+      "operation": "ForgotPassword",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "SecretHash": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ForgotPassword/SecretHash invalid pattern",
+      "operation": "ForgotPassword",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "SecretHash": "!!!",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ForgotPassword/Username too long",
+      "operation": "ForgotPassword",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "Username": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ForgotPassword/Username invalid pattern",
+      "operation": "ForgotPassword",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "Username": " "
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "GetGroup/base",
+      "operation": "GetGroup",
+      "body": {
+        "GroupName": "abc123",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      }
+    },
+    {
+      "name": "GetGroup/GroupName missing",
+      "operation": "GetGroup",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "GetGroup/UserPoolId missing",
+      "operation": "GetGroup",
+      "body": {
+        "GroupName": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "GetGroup/GroupName too long",
+      "operation": "GetGroup",
+      "body": {
+        "GroupName": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "GetGroup/GroupName invalid pattern",
+      "operation": "GetGroup",
+      "body": {
+        "GroupName": " ",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "GetGroup/UserPoolId too long",
+      "operation": "GetGroup",
+      "body": {
+        "GroupName": "abc123",
+        "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "GetGroup/UserPoolId invalid pattern",
+      "operation": "GetGroup",
+      "body": {
+        "GroupName": "abc123",
+        "UserPoolId": "!!!"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "GetUser/base",
+      "operation": "GetUser",
+      "body": {
+        "AccessToken": "abc.def.ghi"
+      }
+    },
+    {
+      "name": "GetUser/AccessToken missing",
+      "operation": "GetUser",
+      "body": {},
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "GetUser/AccessToken invalid pattern",
+      "operation": "GetUser",
+      "body": {
+        "AccessToken": "!!!"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "GetUserAttributeVerificationCode/base",
+      "operation": "GetUserAttributeVerificationCode",
+      "body": {
+        "AccessToken": "abc.def.ghi",
+        "AttributeName": "email"
+      }
+    },
+    {
+      "name": "GetUserAttributeVerificationCode/AccessToken missing",
+      "operation": "GetUserAttributeVerificationCode",
+      "body": {
+        "AttributeName": "email"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "GetUserAttributeVerificationCode/AttributeName missing",
+      "operation": "GetUserAttributeVerificationCode",
+      "body": {
+        "AccessToken": "abc.def.ghi"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "GetUserAttributeVerificationCode/AccessToken invalid pattern",
+      "operation": "GetUserAttributeVerificationCode",
+      "body": {
+        "AccessToken": "!!!",
+        "AttributeName": "email"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "GetUserAttributeVerificationCode/AttributeName too long",
+      "operation": "GetUserAttributeVerificationCode",
+      "body": {
+        "AccessToken": "abc.def.ghi",
+        "AttributeName": "emailllllllllllllllllllllllllllll"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "GetUserPoolMfaConfig/base",
+      "operation": "GetUserPoolMfaConfig",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ"
+      }
+    },
+    {
+      "name": "GetUserPoolMfaConfig/UserPoolId missing",
+      "operation": "GetUserPoolMfaConfig",
+      "body": {},
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "GetUserPoolMfaConfig/UserPoolId too long",
+      "operation": "GetUserPoolMfaConfig",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "GetUserPoolMfaConfig/UserPoolId invalid pattern",
+      "operation": "GetUserPoolMfaConfig",
+      "body": {
+        "UserPoolId": "!!!"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "GlobalSignOut/base",
+      "operation": "GlobalSignOut",
+      "body": {
+        "AccessToken": "abc.def.ghi"
+      }
+    },
+    {
+      "name": "GlobalSignOut/AccessToken missing",
+      "operation": "GlobalSignOut",
+      "body": {},
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "GlobalSignOut/AccessToken invalid pattern",
+      "operation": "GlobalSignOut",
+      "body": {
+        "AccessToken": "!!!"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "InitiateAuth/base",
+      "operation": "InitiateAuth",
+      "body": {
+        "AuthFlow": "USER_SRP_AUTH",
+        "ClientId": "abcdefghijklmnopqrstuvwxyz"
+      }
+    },
+    {
+      "name": "InitiateAuth/AuthFlow missing",
+      "operation": "InitiateAuth",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "InitiateAuth/ClientId missing",
+      "operation": "InitiateAuth",
+      "body": {
+        "AuthFlow": "USER_SRP_AUTH"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "InitiateAuth/AuthFlow invalid enum",
+      "operation": "InitiateAuth",
+      "body": {
+        "AuthFlow": "INVALID_ENUM_VALUE",
+        "ClientId": "abcdefghijklmnopqrstuvwxyz"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "InitiateAuth/ClientId too long",
+      "operation": "InitiateAuth",
+      "body": {
+        "AuthFlow": "USER_SRP_AUTH",
+        "ClientId": "abcdefghijklmnopqrstuvwxyzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "InitiateAuth/ClientId invalid pattern",
+      "operation": "InitiateAuth",
+      "body": {
+        "AuthFlow": "USER_SRP_AUTH",
+        "ClientId": "!!!"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "InitiateAuth/Session too long",
+      "operation": "InitiateAuth",
+      "body": {
+        "AuthFlow": "USER_SRP_AUTH",
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "Session": "abc12333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "InitiateAuth/Session too short",
+      "operation": "InitiateAuth",
+      "body": {
+        "AuthFlow": "USER_SRP_AUTH",
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "Session": "abc1233333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListGroups/base",
+      "operation": "ListGroups",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ"
+      }
+    },
+    {
+      "name": "ListGroups/UserPoolId missing",
+      "operation": "ListGroups",
+      "body": {},
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListGroups/Limit below min",
+      "operation": "ListGroups",
+      "body": {
+        "Limit": -1,
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListGroups/Limit above max",
+      "operation": "ListGroups",
+      "body": {
+        "Limit": 61,
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListGroups/NextToken invalid pattern",
+      "operation": "ListGroups",
+      "body": {
+        "NextToken": " ",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListGroups/UserPoolId too long",
+      "operation": "ListGroups",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListGroups/UserPoolId invalid pattern",
+      "operation": "ListGroups",
+      "body": {
+        "UserPoolId": "!!!"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListTagsForResource/base",
+      "operation": "ListTagsForResource",
+      "body": {
+        "ResourceArn": "arn:aws:cognito-idp:us-east-1:123456789012:userpool/us-east-1_abc123XYZ"
+      }
+    },
+    {
+      "name": "ListTagsForResource/ResourceArn missing",
+      "operation": "ListTagsForResource",
+      "body": {},
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListTagsForResource/ResourceArn too long",
+      "operation": "ListTagsForResource",
+      "body": {
+        "ResourceArn": "arn:aws:cognito-idp:us-east-1:123456789012:userpool/us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListTagsForResource/ResourceArn invalid pattern",
+      "operation": "ListTagsForResource",
+      "body": {
+        "ResourceArn": "!!!!!!!!!!!!!!!!!!!!"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListUserPoolClients/base",
+      "operation": "ListUserPoolClients",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ"
+      }
+    },
+    {
+      "name": "ListUserPoolClients/UserPoolId missing",
+      "operation": "ListUserPoolClients",
+      "body": {},
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListUserPoolClients/MaxResults below min",
+      "operation": "ListUserPoolClients",
+      "body": {
+        "MaxResults": 0,
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListUserPoolClients/MaxResults above max",
+      "operation": "ListUserPoolClients",
+      "body": {
+        "MaxResults": 61,
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListUserPoolClients/NextToken invalid pattern",
+      "operation": "ListUserPoolClients",
+      "body": {
+        "NextToken": " ",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListUserPoolClients/UserPoolId too long",
+      "operation": "ListUserPoolClients",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListUserPoolClients/UserPoolId invalid pattern",
+      "operation": "ListUserPoolClients",
+      "body": {
+        "UserPoolId": "!!!"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListUserPools/base",
+      "operation": "ListUserPools",
+      "body": {
+        "MaxResults": 1
+      }
+    },
+    {
+      "name": "ListUserPools/MaxResults missing",
+      "operation": "ListUserPools",
+      "body": {},
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListUserPools/MaxResults below min",
+      "operation": "ListUserPools",
+      "body": {
+        "MaxResults": 0
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListUserPools/MaxResults above max",
+      "operation": "ListUserPools",
+      "body": {
+        "MaxResults": 61
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListUserPools/NextToken invalid pattern",
+      "operation": "ListUserPools",
+      "body": {
+        "MaxResults": 1,
+        "NextToken": " "
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListUsers/base",
+      "operation": "ListUsers",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ"
+      }
+    },
+    {
+      "name": "ListUsers/UserPoolId missing",
+      "operation": "ListUsers",
+      "body": {},
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListUsers/Filter too long",
+      "operation": "ListUsers",
+      "body": {
+        "Filter": "abc12333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListUsers/Limit below min",
+      "operation": "ListUsers",
+      "body": {
+        "Limit": -1,
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListUsers/Limit above max",
+      "operation": "ListUsers",
+      "body": {
+        "Limit": 61,
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListUsers/PaginationToken invalid pattern",
+      "operation": "ListUsers",
+      "body": {
+        "PaginationToken": " ",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListUsers/UserPoolId too long",
+      "operation": "ListUsers",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListUsers/UserPoolId invalid pattern",
+      "operation": "ListUsers",
+      "body": {
+        "UserPoolId": "!!!"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListUsersInGroup/base",
+      "operation": "ListUsersInGroup",
+      "body": {
+        "GroupName": "abc123",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      }
+    },
+    {
+      "name": "ListUsersInGroup/UserPoolId missing",
+      "operation": "ListUsersInGroup",
+      "body": {
+        "GroupName": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListUsersInGroup/GroupName missing",
+      "operation": "ListUsersInGroup",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListUsersInGroup/GroupName too long",
+      "operation": "ListUsersInGroup",
+      "body": {
+        "GroupName": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListUsersInGroup/GroupName invalid pattern",
+      "operation": "ListUsersInGroup",
+      "body": {
+        "GroupName": " ",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListUsersInGroup/Limit below min",
+      "operation": "ListUsersInGroup",
+      "body": {
+        "GroupName": "abc123",
+        "Limit": -1,
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListUsersInGroup/Limit above max",
+      "operation": "ListUsersInGroup",
+      "body": {
+        "GroupName": "abc123",
+        "Limit": 61,
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListUsersInGroup/NextToken invalid pattern",
+      "operation": "ListUsersInGroup",
+      "body": {
+        "GroupName": "abc123",
+        "NextToken": " ",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListUsersInGroup/UserPoolId too long",
+      "operation": "ListUsersInGroup",
+      "body": {
+        "GroupName": "abc123",
+        "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListUsersInGroup/UserPoolId invalid pattern",
+      "operation": "ListUsersInGroup",
+      "body": {
+        "GroupName": "abc123",
+        "UserPoolId": "!!!"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ResendConfirmationCode/base",
+      "operation": "ResendConfirmationCode",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "Username": "abc123"
+      }
+    },
+    {
+      "name": "ResendConfirmationCode/ClientId missing",
+      "operation": "ResendConfirmationCode",
+      "body": {
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ResendConfirmationCode/Username missing",
+      "operation": "ResendConfirmationCode",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ResendConfirmationCode/ClientId too long",
+      "operation": "ResendConfirmationCode",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ResendConfirmationCode/ClientId invalid pattern",
+      "operation": "ResendConfirmationCode",
+      "body": {
+        "ClientId": "!!!",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ResendConfirmationCode/SecretHash too long",
+      "operation": "ResendConfirmationCode",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "SecretHash": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ResendConfirmationCode/SecretHash invalid pattern",
+      "operation": "ResendConfirmationCode",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "SecretHash": "!!!",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ResendConfirmationCode/Username too long",
+      "operation": "ResendConfirmationCode",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "Username": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ResendConfirmationCode/Username invalid pattern",
+      "operation": "ResendConfirmationCode",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "Username": " "
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "RespondToAuthChallenge/base",
+      "operation": "RespondToAuthChallenge",
+      "body": {
+        "ChallengeName": "SMS_MFA",
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "Session": "abcdefghijklmnopqrstuvwxyz"
+      }
+    },
+    {
+      "name": "RespondToAuthChallenge/ClientId missing",
+      "operation": "RespondToAuthChallenge",
+      "body": {
+        "ChallengeName": "SMS_MFA",
+        "Session": "abcdefghijklmnopqrstuvwxyz"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "RespondToAuthChallenge/ChallengeName missing",
+      "operation": "RespondToAuthChallenge",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "Session": "abcdefghijklmnopqrstuvwxyz"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "RespondToAuthChallenge/ChallengeName invalid enum",
+      "operation": "RespondToAuthChallenge",
+      "body": {
+        "ChallengeName": "INVALID_ENUM_VALUE",
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "Session": "abcdefghijklmnopqrstuvwxyz"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "RespondToAuthChallenge/ClientId too long",
+      "operation": "RespondToAuthChallenge",
+      "body": {
+        "ChallengeName": "SMS_MFA",
+        "ClientId": "abcdefghijklmnopqrstuvwxyzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+        "Session": "abcdefghijklmnopqrstuvwxyz"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "RespondToAuthChallenge/ClientId invalid pattern",
+      "operation": "RespondToAuthChallenge",
+      "body": {
+        "ChallengeName": "SMS_MFA",
+        "ClientId": "!!!",
+        "Session": "abcdefghijklmnopqrstuvwxyz"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "RespondToAuthChallenge/Session too long",
+      "operation": "RespondToAuthChallenge",
+      "body": {
+        "ChallengeName": "SMS_MFA",
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "Session": "abc12333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "RespondToAuthChallenge/Session too short",
+      "operation": "RespondToAuthChallenge",
+      "body": {
+        "ChallengeName": "SMS_MFA",
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "Session": "abc1233333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "RevokeToken/base",
+      "operation": "RevokeToken",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "Token": "abc.def.ghi"
+      }
+    },
+    {
+      "name": "RevokeToken/Token missing",
+      "operation": "RevokeToken",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "RevokeToken/ClientId missing",
+      "operation": "RevokeToken",
+      "body": {
+        "Token": "abc.def.ghi"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "RevokeToken/ClientId too long",
+      "operation": "RevokeToken",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+        "Token": "abc.def.ghi"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "RevokeToken/ClientId invalid pattern",
+      "operation": "RevokeToken",
+      "body": {
+        "ClientId": "!!!",
+        "Token": "abc.def.ghi"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "RevokeToken/ClientSecret too long",
+      "operation": "RevokeToken",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "ClientSecret": "abc12333333333333333333333333333333333333333333333333333333333333",
+        "Token": "abc.def.ghi"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "RevokeToken/ClientSecret too short",
+      "operation": "RevokeToken",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "ClientSecret": "abc12333333333333333333",
+        "Token": "abc.def.ghi"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "RevokeToken/ClientSecret invalid pattern",
+      "operation": "RevokeToken",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "ClientSecret": "!!!!!!!!!!!!!!!!!!!!!!!!",
+        "Token": "abc.def.ghi"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "RevokeToken/Token invalid pattern",
+      "operation": "RevokeToken",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "Token": "!!!"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "SetUserMFAPreference/base",
+      "operation": "SetUserMFAPreference",
+      "body": {
+        "AccessToken": "abc.def.ghi"
+      }
+    },
+    {
+      "name": "SetUserMFAPreference/AccessToken missing",
+      "operation": "SetUserMFAPreference",
+      "body": {},
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "SetUserMFAPreference/AccessToken invalid pattern",
+      "operation": "SetUserMFAPreference",
+      "body": {
+        "AccessToken": "!!!"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "SetUserPoolMfaConfig/base",
+      "operation": "SetUserPoolMfaConfig",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ"
+      }
+    },
+    {
+      "name": "SetUserPoolMfaConfig/UserPoolId missing",
+      "operation": "SetUserPoolMfaConfig",
+      "body": {},
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "SetUserPoolMfaConfig/MfaConfiguration invalid enum",
+      "operation": "SetUserPoolMfaConfig",
+      "body": {
+        "MfaConfiguration": "INVALID_ENUM_VALUE",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "SetUserPoolMfaConfig/UserPoolId too long",
+      "operation": "SetUserPoolMfaConfig",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "SetUserPoolMfaConfig/UserPoolId invalid pattern",
+      "operation": "SetUserPoolMfaConfig",
+      "body": {
+        "UserPoolId": "!!!"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "SignUp/base",
+      "operation": "SignUp",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "Username": "abc123"
+      }
+    },
+    {
+      "name": "SignUp/ClientId missing",
+      "operation": "SignUp",
+      "body": {
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "SignUp/Username missing",
+      "operation": "SignUp",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "SignUp/ClientId too long",
+      "operation": "SignUp",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "SignUp/ClientId invalid pattern",
+      "operation": "SignUp",
+      "body": {
+        "ClientId": "!!!",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "SignUp/Password too long",
+      "operation": "SignUp",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "Password": "Passw0rd!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "SignUp/Password invalid pattern",
+      "operation": "SignUp",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "Password": " ",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "SignUp/SecretHash too long",
+      "operation": "SignUp",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "SecretHash": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "SignUp/SecretHash invalid pattern",
+      "operation": "SignUp",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "SecretHash": "!!!",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "SignUp/Username too long",
+      "operation": "SignUp",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "Username": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "SignUp/Username invalid pattern",
+      "operation": "SignUp",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "Username": " "
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "TagResource/base",
+      "operation": "TagResource",
+      "body": {
+        "ResourceArn": "arn:aws:cognito-idp:us-east-1:123456789012:userpool/us-east-1_abc123XYZ",
+        "Tags": {
+          "abc123": "abc123"
+        }
+      }
+    },
+    {
+      "name": "TagResource/ResourceArn missing",
+      "operation": "TagResource",
+      "body": {
+        "Tags": {
+          "abc123": "abc123"
+        }
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "TagResource/Tags missing",
+      "operation": "TagResource",
+      "body": {
+        "ResourceArn": "arn:aws:cognito-idp:us-east-1:123456789012:userpool/us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "TagResource/ResourceArn too long",
+      "operation": "TagResource",
+      "body": {
+        "ResourceArn": "arn:aws:cognito-idp:us-east-1:123456789012:userpool/us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ",
+        "Tags": {
+          "abc123": "abc123"
+        }
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "TagResource/ResourceArn invalid pattern",
+      "operation": "TagResource",
+      "body": {
+        "ResourceArn": "!!!!!!!!!!!!!!!!!!!!",
+        "Tags": {
+          "abc123": "abc123"
+        }
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UntagResource/base",
+      "operation": "UntagResource",
+      "body": {
+        "ResourceArn": "arn:aws:cognito-idp:us-east-1:123456789012:userpool/us-east-1_abc123XYZ",
+        "TagKeys": [
+          "abc123"
+        ]
+      }
+    },
+    {
+      "name": "UntagResource/ResourceArn missing",
+      "operation": "UntagResource",
+      "body": {
+        "TagKeys": [
+          "abc123"
+        ]
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UntagResource/TagKeys missing",
+      "operation": "UntagResource",
+      "body": {
+        "ResourceArn": "arn:aws:cognito-idp:us-east-1:123456789012:userpool/us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UntagResource/ResourceArn too long",
+      "operation": "UntagResource",
+      "body": {
+        "ResourceArn": "arn:aws:cognito-idp:us-east-1:123456789012:userpool/us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ",
+        "TagKeys": [
+          "abc123"
+        ]
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UntagResource/ResourceArn invalid pattern",
+      "operation": "UntagResource",
+      "body": {
+        "ResourceArn": "!!!!!!!!!!!!!!!!!!!!",
+        "TagKeys": [
+          "abc123"
+        ]
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateGroup/base",
+      "operation": "UpdateGroup",
+      "body": {
+        "GroupName": "abc123",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      }
+    },
+    {
+      "name": "UpdateGroup/GroupName missing",
+      "operation": "UpdateGroup",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateGroup/UserPoolId missing",
+      "operation": "UpdateGroup",
+      "body": {
+        "GroupName": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateGroup/Description too long",
+      "operation": "UpdateGroup",
+      "body": {
+        "Description": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333",
+        "GroupName": "abc123",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateGroup/GroupName too long",
+      "operation": "UpdateGroup",
+      "body": {
+        "GroupName": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateGroup/GroupName invalid pattern",
+      "operation": "UpdateGroup",
+      "body": {
+        "GroupName": " ",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateGroup/Precedence below min",
+      "operation": "UpdateGroup",
+      "body": {
+        "GroupName": "abc123",
+        "Precedence": -1,
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateGroup/RoleArn too long",
+      "operation": "UpdateGroup",
+      "body": {
+        "GroupName": "abc123",
+        "RoleArn": "arn:aws:cognito-idp:us-east-1:123456789012:userpool/us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateGroup/RoleArn invalid pattern",
+      "operation": "UpdateGroup",
+      "body": {
+        "GroupName": "abc123",
+        "RoleArn": "!!!!!!!!!!!!!!!!!!!!",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateGroup/UserPoolId too long",
+      "operation": "UpdateGroup",
+      "body": {
+        "GroupName": "abc123",
+        "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateGroup/UserPoolId invalid pattern",
+      "operation": "UpdateGroup",
+      "body": {
+        "GroupName": "abc123",
+        "UserPoolId": "!!!"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateUserAttributes/base",
+      "operation": "UpdateUserAttributes",
+      "body": {
+        "AccessToken": "abc.def.ghi",
+        "UserAttributes": [
+          {
+            "Name": "email"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UpdateUserAttributes/UserAttributes missing",
+      "operation": "UpdateUserAttributes",
+      "body": {
+        "AccessToken": "abc.def.ghi"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateUserAttributes/AccessToken missing",
+      "operation": "UpdateUserAttributes",
+      "body": {
+        "UserAttributes": [
+          {
+            "Name": "email"
+          }
+        ]
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateUserAttributes/AccessToken invalid pattern",
+      "operation": "UpdateUserAttributes",
+      "body": {
+        "AccessToken": "!!!",
+        "UserAttributes": [
+          {
+            "Name": "email"
+          }
+        ]
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateUserPool/base",
+      "operation": "UpdateUserPool",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ"
+      }
+    },
+    {
+      "name": "UpdateUserPool/UserPoolId missing",
+      "operation": "UpdateUserPool",
+      "body": {},
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateUserPool/DeletionProtection invalid enum",
+      "operation": "UpdateUserPool",
+      "body": {
+        "DeletionProtection": "INVALID_ENUM_VALUE",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateUserPool/EmailVerificationSubject too long",
+      "operation": "UpdateUserPool",
+      "body": {
+        "EmailVerificationSubject": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateUserPool/MfaConfiguration invalid enum",
+      "operation": "UpdateUserPool",
+      "body": {
+        "MfaConfiguration": "INVALID_ENUM_VALUE",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateUserPool/PoolName too long",
+      "operation": "UpdateUserPool",
+      "body": {
+        "PoolName": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateUserPool/PoolName invalid pattern",
+      "operation": "UpdateUserPool",
+      "body": {
+        "PoolName": "!!!",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateUserPool/UserPoolId too long",
+      "operation": "UpdateUserPool",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateUserPool/UserPoolId invalid pattern",
+      "operation": "UpdateUserPool",
+      "body": {
+        "UserPoolId": "!!!"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateUserPool/UserPoolTier invalid enum",
+      "operation": "UpdateUserPool",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "UserPoolTier": "INVALID_ENUM_VALUE"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateUserPoolClient/base",
+      "operation": "UpdateUserPoolClient",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      }
+    },
+    {
+      "name": "UpdateUserPoolClient/UserPoolId missing",
+      "operation": "UpdateUserPoolClient",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateUserPoolClient/ClientId missing",
+      "operation": "UpdateUserPoolClient",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateUserPoolClient/AccessTokenValidity below min",
+      "operation": "UpdateUserPoolClient",
+      "body": {
+        "AccessTokenValidity": 0,
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateUserPoolClient/AccessTokenValidity above max",
+      "operation": "UpdateUserPoolClient",
+      "body": {
+        "AccessTokenValidity": 86401,
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateUserPoolClient/AuthSessionValidity below min",
+      "operation": "UpdateUserPoolClient",
+      "body": {
+        "AuthSessionValidity": 2,
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateUserPoolClient/AuthSessionValidity above max",
+      "operation": "UpdateUserPoolClient",
+      "body": {
+        "AuthSessionValidity": 16,
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateUserPoolClient/ClientId too long",
+      "operation": "UpdateUserPoolClient",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateUserPoolClient/ClientId invalid pattern",
+      "operation": "UpdateUserPoolClient",
+      "body": {
+        "ClientId": "!!!",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateUserPoolClient/ClientName too long",
+      "operation": "UpdateUserPoolClient",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "ClientName": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateUserPoolClient/ClientName invalid pattern",
+      "operation": "UpdateUserPoolClient",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "ClientName": "!!!",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateUserPoolClient/DefaultRedirectURI too long",
+      "operation": "UpdateUserPoolClient",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "DefaultRedirectURI": "abc12333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateUserPoolClient/DefaultRedirectURI invalid pattern",
+      "operation": "UpdateUserPoolClient",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "DefaultRedirectURI": " ",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateUserPoolClient/IdTokenValidity below min",
+      "operation": "UpdateUserPoolClient",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "IdTokenValidity": 0,
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateUserPoolClient/IdTokenValidity above max",
+      "operation": "UpdateUserPoolClient",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "IdTokenValidity": 86401,
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateUserPoolClient/PreventUserExistenceErrors invalid enum",
+      "operation": "UpdateUserPoolClient",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "PreventUserExistenceErrors": "INVALID_ENUM_VALUE",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateUserPoolClient/RefreshTokenValidity below min",
+      "operation": "UpdateUserPoolClient",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "RefreshTokenValidity": -1,
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateUserPoolClient/RefreshTokenValidity above max",
+      "operation": "UpdateUserPoolClient",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "RefreshTokenValidity": 315360001,
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateUserPoolClient/UserPoolId too long",
+      "operation": "UpdateUserPoolClient",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateUserPoolClient/UserPoolId invalid pattern",
+      "operation": "UpdateUserPoolClient",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "UserPoolId": "!!!"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "VerifySoftwareToken/base",
+      "operation": "VerifySoftwareToken",
+      "body": {
+        "AccessToken": "abc.def.ghi",
+        "UserCode": "123456"
+      }
+    },
+    {
+      "name": "VerifySoftwareToken/UserCode missing",
+      "operation": "VerifySoftwareToken",
+      "body": {
+        "AccessToken": "abc.def.ghi"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "VerifySoftwareToken/AccessToken invalid pattern",
+      "operation": "VerifySoftwareToken",
+      "body": {
+        "AccessToken": "!!!",
+        "UserCode": "123456"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "VerifySoftwareToken/Session too long",
+      "operation": "VerifySoftwareToken",
+      "body": {
+        "AccessToken": "abc.def.ghi",
+        "Session": "abc12333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333",
+        "UserCode": "123456"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "VerifySoftwareToken/Session too short",
+      "operation": "VerifySoftwareToken",
+      "body": {
+        "AccessToken": "abc.def.ghi",
+        "Session": "abc1233333333333333",
+        "UserCode": "123456"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "VerifySoftwareToken/UserCode too long",
+      "operation": "VerifySoftwareToken",
+      "body": {
+        "AccessToken": "abc.def.ghi",
+        "UserCode": "1234566"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "VerifySoftwareToken/UserCode too short",
+      "operation": "VerifySoftwareToken",
+      "body": {
+        "AccessToken": "abc.def.ghi",
+        "UserCode": "12345"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "VerifySoftwareToken/UserCode invalid pattern",
+      "operation": "VerifySoftwareToken",
+      "body": {
+        "AccessToken": "abc.def.ghi",
+        "UserCode": "!!!!!!"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "VerifyUserAttribute/base",
+      "operation": "VerifyUserAttribute",
+      "body": {
+        "AccessToken": "abc.def.ghi",
+        "AttributeName": "email",
+        "Code": "abc123"
+      }
+    },
+    {
+      "name": "VerifyUserAttribute/AccessToken missing",
+      "operation": "VerifyUserAttribute",
+      "body": {
+        "AttributeName": "email",
+        "Code": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "VerifyUserAttribute/AttributeName missing",
+      "operation": "VerifyUserAttribute",
+      "body": {
+        "AccessToken": "abc.def.ghi",
+        "Code": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "VerifyUserAttribute/Code missing",
+      "operation": "VerifyUserAttribute",
+      "body": {
+        "AccessToken": "abc.def.ghi",
+        "AttributeName": "email"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "VerifyUserAttribute/AccessToken invalid pattern",
+      "operation": "VerifyUserAttribute",
+      "body": {
+        "AccessToken": "!!!",
+        "AttributeName": "email",
+        "Code": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "VerifyUserAttribute/AttributeName too long",
+      "operation": "VerifyUserAttribute",
+      "body": {
+        "AccessToken": "abc.def.ghi",
+        "AttributeName": "emailllllllllllllllllllllllllllll",
+        "Code": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "VerifyUserAttribute/Code too long",
+      "operation": "VerifyUserAttribute",
+      "body": {
+        "AccessToken": "abc.def.ghi",
+        "AttributeName": "email",
+        "Code": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "VerifyUserAttribute/Code invalid pattern",
+      "operation": "VerifyUserAttribute",
+      "body": {
+        "AccessToken": "abc.def.ghi",
+        "AttributeName": "email",
+        "Code": " "
+      },
+      "expect": "InvalidParameterException"
+    }
+  ],
+  "skipped": [
+    "CreateUserPool: EmailVerificationMessage: no sample for EmailVerificationMessageType (pattern \"[\\\\p{L}\\\\p{M}\\\\p{S}\\\\p{N}\\\\p{P}\\\\s*]*\\\\{####\\\\}[\\\\p{L}\\\\p{M}\\\\p{S}\\\\p{N}\\\\p{P}\\\\s*]*\")",
+    "CreateUserPool: SmsAuthenticationMessage: no sample for SmsVerificationMessageType (pattern \".*\\\\{####\\\\}.*\")",
+    "CreateUserPool: SmsVerificationMessage: no sample for SmsVerificationMessageType (pattern \".*\\\\{####\\\\}.*\")",
+    "UpdateUserPool: EmailVerificationMessage: no sample for EmailVerificationMessageType (pattern \"[\\\\p{L}\\\\p{M}\\\\p{S}\\\\p{N}\\\\p{P}\\\\s*]*\\\\{####\\\\}[\\\\p{L}\\\\p{M}\\\\p{S}\\\\p{N}\\\\p{P}\\\\s*]*\")",
+    "UpdateUserPool: SmsAuthenticationMessage: no sample for SmsVerificationMessageType (pattern \".*\\\\{####\\\\}.*\")",
+    "UpdateUserPool: SmsVerificationMessage: no sample for SmsVerificationMessageType (pattern \".*\\\\{####\\\\}.*\")"
+  ]
+}
