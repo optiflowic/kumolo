@@ -1,4 +1,4 @@
-.PHONY: all install build run fmt fmt-check vet lint test cover uncovered integration e2e e2e-browser e2e-terraform gencases verify tidy clean
+.PHONY: all install build run fmt fmt-check vet lint test cover uncovered integration e2e e2e-browser e2e-terraform gencases genvalidation verify tidy clean
 
 BUILD_DIR = build
 BINARY_NAME = $(BUILD_DIR)/kumolo
@@ -48,15 +48,29 @@ integration:
 # gencases regenerates the Cognito input validation cases from the botocore model bundled
 # with awscli2 (default dev shell). Review the diff and update
 # tests/integration/testdata/cognito_validation_gaps.txt when cases change.
+#
+# genvalidation regenerates the constraint table kumolo enforces from the same model. Run
+# both when the model is updated or an operation is added to the router.
+#
+# Pass COGNITO_MODEL=<service-2.json> to use a newer model than the bundled one. Do not
+# commit output from a model older than the one the committed files were generated from.
 BOTOCORE_DATA = $(shell echo $$(dirname $$(readlink -f $$(command -v aws)))/../lib/python*/site-packages/awscli/botocore/data)
+COGNITO_MODEL ?= $(shell ls $(BOTOCORE_DATA)/cognito-idp/*/service-2.json | tail -1)
 
 gencases:
 	go run tools/gencases/main.go \
-	  -model $$(ls $(BOTOCORE_DATA)/cognito-idp/*/service-2.json | tail -1) \
+	  -model $(COGNITO_MODEL) \
 	  -router internal/cognito/router.go \
 	  -error InvalidParameterException \
 	  -service cognito-idp \
 	  -out tests/integration/testdata/cognito_validation.json
+
+genvalidation:
+	go run tools/genvalidation/main.go \
+	  -model $(COGNITO_MODEL) \
+	  -router internal/cognito/router.go \
+	  -package cognito \
+	  -out internal/cognito/validation_gen.go
 
 e2e:
 	./e2e/aws-cli/s3.sh
