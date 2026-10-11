@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"regexp"
 	"slices"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/optiflowic/kumolo/internal/sigv4"
@@ -238,6 +239,36 @@ type updateUserPoolRequest struct {
 	SmsVerificationMessage      string            `json:"SmsVerificationMessage"`
 }
 
+// validateCreateUserPoolRequest returns the error message for the first invalid field.
+func validateCreateUserPoolRequest(req *createUserPoolRequest) (message string, ok bool) {
+	if req.PoolName == "" {
+		return "PoolName is required", false
+	}
+	if !rePoolName.MatchString(req.PoolName) {
+		return "PoolName must be 1-128 characters and match pattern [\\w\\s+=,.@-]+", false
+	}
+	enums := []struct {
+		name, value string
+		allowed     []string
+	}{
+		{"MfaConfiguration", req.MfaConfiguration, mfaConfigurationValues},
+		{"DeletionProtection", req.DeletionProtection, deletionProtectionValues},
+		{"UserPoolTier", req.UserPoolTier, userPoolTierValues},
+	}
+	for _, e := range enums {
+		if e.value != "" && !slices.Contains(e.allowed, e.value) {
+			return e.name + " must be one of " + strings.Join(e.allowed, ", "), false
+		}
+	}
+	if subject := req.EmailVerificationSubject; subject != nil {
+		n := utf8.RuneCountInString(*subject)
+		if n < 1 || n > emailVerificationSubjectMaxLen {
+			return "EmailVerificationSubject must be 1-140 characters", false
+		}
+	}
+	return "", true
+}
+
 func (ro *Router) handleCreateUserPool(w http.ResponseWriter, r *http.Request, body []byte) {
 	var req createUserPoolRequest
 	if err := json.Unmarshal(body, &req); err != nil {
@@ -249,66 +280,13 @@ func (ro *Router) handleCreateUserPool(w http.ResponseWriter, r *http.Request, b
 		)
 		return
 	}
-	if req.PoolName == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"PoolName is required",
-		)
-		return
-	}
-	if !rePoolName.MatchString(req.PoolName) {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"PoolName must be 1-128 characters and match pattern [\\w\\s+=,.@-]+",
-		)
-		return
-	}
-	if req.MfaConfiguration != "" &&
-		!slices.Contains(mfaConfigurationValues, req.MfaConfiguration) {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"MfaConfiguration must be one of OFF, ON, OPTIONAL",
-		)
-		return
-	}
-	if req.DeletionProtection != "" &&
-		!slices.Contains(deletionProtectionValues, req.DeletionProtection) {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"DeletionProtection must be one of ACTIVE, INACTIVE",
-		)
-		return
-	}
-	if req.UserPoolTier != "" && !slices.Contains(userPoolTierValues, req.UserPoolTier) {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"UserPoolTier must be one of LITE, ESSENTIALS, PLUS",
-		)
+	if msg, ok := validateCreateUserPoolRequest(&req); !ok {
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException, msg)
 		return
 	}
 	var emailVerificationSubject string
 	if req.EmailVerificationSubject != nil {
 		emailVerificationSubject = *req.EmailVerificationSubject
-		n := utf8.RuneCountInString(emailVerificationSubject)
-		if n < 1 || n > emailVerificationSubjectMaxLen {
-			writeError(
-				w,
-				http.StatusBadRequest,
-				ErrTypeInvalidParameterException,
-				"EmailVerificationSubject must be 1-140 characters",
-			)
-			return
-		}
 	}
 
 	poolID, err := generatePoolID(ro.resolveRegion(r))
