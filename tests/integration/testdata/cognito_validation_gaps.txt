@@ -3,8 +3,10 @@
 # Invalid input is accepted (200).
 CreateUserPool/DeletionProtection invalid enum
 CreateUserPool/EmailVerificationSubject too long
+CreateUserPool/EmailVerificationSubject too short
 CreateUserPool/MfaConfiguration invalid enum
 CreateUserPool/UserPoolTier invalid enum
+ListUserPools/NextToken too short
 
 # Token check (NotAuthorizedException) happens before input validation.
 AssociateSoftwareToken/AccessToken invalid pattern
@@ -64,6 +66,7 @@ AdminGetUser/Username too long
 AdminListGroupsForUser/Limit above max
 AdminListGroupsForUser/Limit below min
 AdminListGroupsForUser/NextToken invalid pattern
+AdminListGroupsForUser/NextToken too short
 AdminListGroupsForUser/UserPoolId invalid pattern
 AdminListGroupsForUser/UserPoolId too long
 AdminListGroupsForUser/Username invalid pattern
@@ -92,6 +95,7 @@ ConfirmForgotPassword/Password invalid pattern
 ConfirmForgotPassword/Password too long
 ConfirmForgotPassword/SecretHash invalid pattern
 ConfirmForgotPassword/SecretHash too long
+ConfirmForgotPassword/SecretHash too short
 ConfirmForgotPassword/Username invalid pattern
 ConfirmForgotPassword/Username too long
 ConfirmSignUp/ClientId invalid pattern
@@ -100,6 +104,7 @@ ConfirmSignUp/ConfirmationCode invalid pattern
 ConfirmSignUp/ConfirmationCode too long
 ConfirmSignUp/SecretHash invalid pattern
 ConfirmSignUp/SecretHash too long
+ConfirmSignUp/SecretHash too short
 ConfirmSignUp/Session too long
 ConfirmSignUp/Session too short
 ConfirmSignUp/Username invalid pattern
@@ -118,6 +123,7 @@ CreateUserPoolClient/AuthSessionValidity above max
 CreateUserPoolClient/AuthSessionValidity below min
 CreateUserPoolClient/DefaultRedirectURI invalid pattern
 CreateUserPoolClient/DefaultRedirectURI too long
+CreateUserPoolClient/DefaultRedirectURI too short
 CreateUserPoolClient/IdTokenValidity above max
 CreateUserPoolClient/IdTokenValidity below min
 CreateUserPoolClient/PreventUserExistenceErrors invalid enum
@@ -138,6 +144,7 @@ ForgotPassword/ClientId invalid pattern
 ForgotPassword/ClientId too long
 ForgotPassword/SecretHash invalid pattern
 ForgotPassword/SecretHash too long
+ForgotPassword/SecretHash too short
 ForgotPassword/Username invalid pattern
 ForgotPassword/Username too long
 GetGroup/GroupName invalid pattern
@@ -154,14 +161,17 @@ InitiateAuth/Session too short
 ListGroups/Limit above max
 ListGroups/Limit below min
 ListGroups/NextToken invalid pattern
+ListGroups/NextToken too short
 ListGroups/UserPoolId invalid pattern
 ListGroups/UserPoolId too long
 ListUserPoolClients/NextToken invalid pattern
+ListUserPoolClients/NextToken too short
 ListUserPoolClients/UserPoolId too long
 ListUsers/Filter too long
 ListUsers/Limit above max
 ListUsers/Limit below min
 ListUsers/PaginationToken invalid pattern
+ListUsers/PaginationToken too short
 ListUsers/UserPoolId invalid pattern
 ListUsers/UserPoolId too long
 ListUsersInGroup/GroupName invalid pattern
@@ -169,12 +179,14 @@ ListUsersInGroup/GroupName too long
 ListUsersInGroup/Limit above max
 ListUsersInGroup/Limit below min
 ListUsersInGroup/NextToken invalid pattern
+ListUsersInGroup/NextToken too short
 ListUsersInGroup/UserPoolId invalid pattern
 ListUsersInGroup/UserPoolId too long
 ResendConfirmationCode/ClientId invalid pattern
 ResendConfirmationCode/ClientId too long
 ResendConfirmationCode/SecretHash invalid pattern
 ResendConfirmationCode/SecretHash too long
+ResendConfirmationCode/SecretHash too short
 ResendConfirmationCode/Username invalid pattern
 ResendConfirmationCode/Username too long
 RespondToAuthChallenge/ChallengeName invalid enum
@@ -197,6 +209,7 @@ SignUp/Password invalid pattern
 SignUp/Password too long
 SignUp/SecretHash invalid pattern
 SignUp/SecretHash too long
+SignUp/SecretHash too short
 SignUp/Username invalid pattern
 SignUp/Username too long
 UpdateGroup/Description too long
@@ -209,9 +222,11 @@ UpdateGroup/UserPoolId invalid pattern
 UpdateGroup/UserPoolId too long
 UpdateUserPool/DeletionProtection invalid enum
 UpdateUserPool/EmailVerificationSubject too long
+UpdateUserPool/EmailVerificationSubject too short
 UpdateUserPool/MfaConfiguration invalid enum
 UpdateUserPool/PoolName invalid pattern
 UpdateUserPool/PoolName too long
+UpdateUserPool/PoolName too short
 UpdateUserPool/UserPoolId invalid pattern
 UpdateUserPool/UserPoolId too long
 UpdateUserPool/UserPoolTier invalid enum
@@ -219,8 +234,10 @@ UpdateUserPoolClient/AccessTokenValidity above max
 UpdateUserPoolClient/AccessTokenValidity below min
 UpdateUserPoolClient/AuthSessionValidity above max
 UpdateUserPoolClient/AuthSessionValidity below min
+UpdateUserPoolClient/ClientName too short
 UpdateUserPoolClient/DefaultRedirectURI invalid pattern
 UpdateUserPoolClient/DefaultRedirectURI too long
+UpdateUserPoolClient/DefaultRedirectURI too short
 UpdateUserPoolClient/IdTokenValidity above max
 UpdateUserPoolClient/IdTokenValidity below min
 UpdateUserPoolClient/PreventUserExistenceErrors invalid enum

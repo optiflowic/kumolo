@@ -51,6 +51,16 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "AdminAddUserToGroup/GroupName too short",
+      "operation": "AdminAddUserToGroup",
+      "body": {
+        "GroupName": "",
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "AdminAddUserToGroup/GroupName invalid pattern",
       "operation": "AdminAddUserToGroup",
       "body": {
@@ -66,6 +76,16 @@
       "body": {
         "GroupName": "abc123",
         "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminAddUserToGroup/UserPoolId too short",
+      "operation": "AdminAddUserToGroup",
+      "body": {
+        "GroupName": "abc123",
+        "UserPoolId": "",
         "Username": "abc123"
       },
       "expect": "InvalidParameterException"
@@ -87,6 +107,16 @@
         "GroupName": "abc123",
         "UserPoolId": "us-east-1_abc123XYZ",
         "Username": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminAddUserToGroup/Username too short",
+      "operation": "AdminAddUserToGroup",
+      "body": {
+        "GroupName": "abc123",
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": ""
       },
       "expect": "InvalidParameterException"
     },
@@ -134,6 +164,15 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "AdminConfirmSignUp/UserPoolId too short",
+      "operation": "AdminConfirmSignUp",
+      "body": {
+        "UserPoolId": "",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "AdminConfirmSignUp/UserPoolId invalid pattern",
       "operation": "AdminConfirmSignUp",
       "body": {
@@ -148,6 +187,15 @@
       "body": {
         "UserPoolId": "us-east-1_abc123XYZ",
         "Username": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminConfirmSignUp/Username too short",
+      "operation": "AdminConfirmSignUp",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": ""
       },
       "expect": "InvalidParameterException"
     },
@@ -224,6 +272,15 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "AdminCreateUser/UserPoolId too short",
+      "operation": "AdminCreateUser",
+      "body": {
+        "UserPoolId": "",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "AdminCreateUser/UserPoolId invalid pattern",
       "operation": "AdminCreateUser",
       "body": {
@@ -238,6 +295,15 @@
       "body": {
         "UserPoolId": "us-east-1_abc123XYZ",
         "Username": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminCreateUser/Username too short",
+      "operation": "AdminCreateUser",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": ""
       },
       "expect": "InvalidParameterException"
     },
@@ -284,6 +350,15 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "AdminDeleteUser/UserPoolId too short",
+      "operation": "AdminDeleteUser",
+      "body": {
+        "UserPoolId": "",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "AdminDeleteUser/UserPoolId invalid pattern",
       "operation": "AdminDeleteUser",
       "body": {
@@ -298,6 +373,15 @@
       "body": {
         "UserPoolId": "us-east-1_abc123XYZ",
         "Username": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminDeleteUser/Username too short",
+      "operation": "AdminDeleteUser",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": ""
       },
       "expect": "InvalidParameterException"
     },
@@ -344,6 +428,15 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "AdminDisableUser/UserPoolId too short",
+      "operation": "AdminDisableUser",
+      "body": {
+        "UserPoolId": "",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "AdminDisableUser/UserPoolId invalid pattern",
       "operation": "AdminDisableUser",
       "body": {
@@ -358,6 +451,15 @@
       "body": {
         "UserPoolId": "us-east-1_abc123XYZ",
         "Username": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminDisableUser/Username too short",
+      "operation": "AdminDisableUser",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": ""
       },
       "expect": "InvalidParameterException"
     },
@@ -404,6 +506,15 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "AdminEnableUser/UserPoolId too short",
+      "operation": "AdminEnableUser",
+      "body": {
+        "UserPoolId": "",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "AdminEnableUser/UserPoolId invalid pattern",
       "operation": "AdminEnableUser",
       "body": {
@@ -418,6 +529,15 @@
       "body": {
         "UserPoolId": "us-east-1_abc123XYZ",
         "Username": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminEnableUser/Username too short",
+      "operation": "AdminEnableUser",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": ""
       },
       "expect": "InvalidParameterException"
     },
@@ -464,6 +584,15 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "AdminGetUser/UserPoolId too short",
+      "operation": "AdminGetUser",
+      "body": {
+        "UserPoolId": "",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "AdminGetUser/UserPoolId invalid pattern",
       "operation": "AdminGetUser",
       "body": {
@@ -478,6 +607,15 @@
       "body": {
         "UserPoolId": "us-east-1_abc123XYZ",
         "Username": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminGetUser/Username too short",
+      "operation": "AdminGetUser",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": ""
       },
       "expect": "InvalidParameterException"
     },
@@ -535,6 +673,16 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "AdminListGroupsForUser/NextToken too short",
+      "operation": "AdminListGroupsForUser",
+      "body": {
+        "NextToken": "",
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "AdminListGroupsForUser/NextToken invalid pattern",
       "operation": "AdminListGroupsForUser",
       "body": {
@@ -554,6 +702,15 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "AdminListGroupsForUser/UserPoolId too short",
+      "operation": "AdminListGroupsForUser",
+      "body": {
+        "UserPoolId": "",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "AdminListGroupsForUser/UserPoolId invalid pattern",
       "operation": "AdminListGroupsForUser",
       "body": {
@@ -568,6 +725,15 @@
       "body": {
         "UserPoolId": "us-east-1_abc123XYZ",
         "Username": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminListGroupsForUser/Username too short",
+      "operation": "AdminListGroupsForUser",
+      "body": {
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": ""
       },
       "expect": "InvalidParameterException"
     },
@@ -627,6 +793,16 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "AdminRemoveUserFromGroup/GroupName too short",
+      "operation": "AdminRemoveUserFromGroup",
+      "body": {
+        "GroupName": "",
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "AdminRemoveUserFromGroup/GroupName invalid pattern",
       "operation": "AdminRemoveUserFromGroup",
       "body": {
@@ -642,6 +818,16 @@
       "body": {
         "GroupName": "abc123",
         "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminRemoveUserFromGroup/UserPoolId too short",
+      "operation": "AdminRemoveUserFromGroup",
+      "body": {
+        "GroupName": "abc123",
+        "UserPoolId": "",
         "Username": "abc123"
       },
       "expect": "InvalidParameterException"
@@ -663,6 +849,16 @@
         "GroupName": "abc123",
         "UserPoolId": "us-east-1_abc123XYZ",
         "Username": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminRemoveUserFromGroup/Username too short",
+      "operation": "AdminRemoveUserFromGroup",
+      "body": {
+        "GroupName": "abc123",
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": ""
       },
       "expect": "InvalidParameterException"
     },
@@ -743,6 +939,16 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "AdminSetUserPassword/UserPoolId too short",
+      "operation": "AdminSetUserPassword",
+      "body": {
+        "Password": "Passw0rd!",
+        "UserPoolId": "",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "AdminSetUserPassword/UserPoolId invalid pattern",
       "operation": "AdminSetUserPassword",
       "body": {
@@ -759,6 +965,16 @@
         "Password": "Passw0rd!",
         "UserPoolId": "us-east-1_abc123XYZ",
         "Username": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminSetUserPassword/Username too short",
+      "operation": "AdminSetUserPassword",
+      "body": {
+        "Password": "Passw0rd!",
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": ""
       },
       "expect": "InvalidParameterException"
     },
@@ -835,6 +1051,20 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "AdminUpdateUserAttributes/UserPoolId too short",
+      "operation": "AdminUpdateUserAttributes",
+      "body": {
+        "UserAttributes": [
+          {
+            "Name": "email"
+          }
+        ],
+        "UserPoolId": "",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "AdminUpdateUserAttributes/UserPoolId invalid pattern",
       "operation": "AdminUpdateUserAttributes",
       "body": {
@@ -859,6 +1089,20 @@
         ],
         "UserPoolId": "us-east-1_abc123XYZ",
         "Username": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "AdminUpdateUserAttributes/Username too short",
+      "operation": "AdminUpdateUserAttributes",
+      "body": {
+        "UserAttributes": [
+          {
+            "Name": "email"
+          }
+        ],
+        "UserPoolId": "us-east-1_abc123XYZ",
+        "Username": ""
       },
       "expect": "InvalidParameterException"
     },
@@ -1042,6 +1286,17 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "ConfirmForgotPassword/ClientId too short",
+      "operation": "ConfirmForgotPassword",
+      "body": {
+        "ClientId": "",
+        "ConfirmationCode": "abc123",
+        "Password": "Passw0rd!",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "ConfirmForgotPassword/ClientId invalid pattern",
       "operation": "ConfirmForgotPassword",
       "body": {
@@ -1058,6 +1313,17 @@
       "body": {
         "ClientId": "abcdefghijklmnopqrstuvwxyz",
         "ConfirmationCode": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333",
+        "Password": "Passw0rd!",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ConfirmForgotPassword/ConfirmationCode too short",
+      "operation": "ConfirmForgotPassword",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "ConfirmationCode": "",
         "Password": "Passw0rd!",
         "Username": "abc123"
       },
@@ -1109,6 +1375,18 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "ConfirmForgotPassword/SecretHash too short",
+      "operation": "ConfirmForgotPassword",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "ConfirmationCode": "abc123",
+        "Password": "Passw0rd!",
+        "SecretHash": "",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "ConfirmForgotPassword/SecretHash invalid pattern",
       "operation": "ConfirmForgotPassword",
       "body": {
@@ -1128,6 +1406,17 @@
         "ConfirmationCode": "abc123",
         "Password": "Passw0rd!",
         "Username": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ConfirmForgotPassword/Username too short",
+      "operation": "ConfirmForgotPassword",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "ConfirmationCode": "abc123",
+        "Password": "Passw0rd!",
+        "Username": ""
       },
       "expect": "InvalidParameterException"
     },
@@ -1189,6 +1478,16 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "ConfirmSignUp/ClientId too short",
+      "operation": "ConfirmSignUp",
+      "body": {
+        "ClientId": "",
+        "ConfirmationCode": "abc123",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "ConfirmSignUp/ClientId invalid pattern",
       "operation": "ConfirmSignUp",
       "body": {
@@ -1204,6 +1503,16 @@
       "body": {
         "ClientId": "abcdefghijklmnopqrstuvwxyz",
         "ConfirmationCode": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ConfirmSignUp/ConfirmationCode too short",
+      "operation": "ConfirmSignUp",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "ConfirmationCode": "",
         "Username": "abc123"
       },
       "expect": "InvalidParameterException"
@@ -1225,6 +1534,17 @@
         "ClientId": "abcdefghijklmnopqrstuvwxyz",
         "ConfirmationCode": "abc123",
         "SecretHash": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ConfirmSignUp/SecretHash too short",
+      "operation": "ConfirmSignUp",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "ConfirmationCode": "abc123",
+        "SecretHash": "",
         "Username": "abc123"
       },
       "expect": "InvalidParameterException"
@@ -1269,6 +1589,16 @@
         "ClientId": "abcdefghijklmnopqrstuvwxyz",
         "ConfirmationCode": "abc123",
         "Username": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ConfirmSignUp/Username too short",
+      "operation": "ConfirmSignUp",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "ConfirmationCode": "abc123",
+        "Username": ""
       },
       "expect": "InvalidParameterException"
     },
@@ -1326,6 +1656,15 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "CreateGroup/GroupName too short",
+      "operation": "CreateGroup",
+      "body": {
+        "GroupName": "",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "CreateGroup/GroupName invalid pattern",
       "operation": "CreateGroup",
       "body": {
@@ -1374,6 +1713,15 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "CreateGroup/UserPoolId too short",
+      "operation": "CreateGroup",
+      "body": {
+        "GroupName": "abc123",
+        "UserPoolId": ""
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "CreateGroup/UserPoolId invalid pattern",
       "operation": "CreateGroup",
       "body": {
@@ -1414,6 +1762,15 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "CreateUserPool/EmailVerificationSubject too short",
+      "operation": "CreateUserPool",
+      "body": {
+        "EmailVerificationSubject": "",
+        "PoolName": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "CreateUserPool/MfaConfiguration invalid enum",
       "operation": "CreateUserPool",
       "body": {
@@ -1427,6 +1784,14 @@
       "operation": "CreateUserPool",
       "body": {
         "PoolName": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "CreateUserPool/PoolName too short",
+      "operation": "CreateUserPool",
+      "body": {
+        "PoolName": ""
       },
       "expect": "InvalidParameterException"
     },
@@ -1521,6 +1886,15 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "CreateUserPoolClient/ClientName too short",
+      "operation": "CreateUserPoolClient",
+      "body": {
+        "ClientName": "",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "CreateUserPoolClient/ClientName invalid pattern",
       "operation": "CreateUserPoolClient",
       "body": {
@@ -1565,6 +1939,16 @@
       "body": {
         "ClientName": "abc123",
         "DefaultRedirectURI": "abc12333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "CreateUserPoolClient/DefaultRedirectURI too short",
+      "operation": "CreateUserPoolClient",
+      "body": {
+        "ClientName": "abc123",
+        "DefaultRedirectURI": "",
         "UserPoolId": "us-east-1_abc123XYZ"
       },
       "expect": "InvalidParameterException"
@@ -1639,6 +2023,15 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "CreateUserPoolClient/UserPoolId too short",
+      "operation": "CreateUserPoolClient",
+      "body": {
+        "ClientName": "abc123",
+        "UserPoolId": ""
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "CreateUserPoolClient/UserPoolId invalid pattern",
       "operation": "CreateUserPoolClient",
       "body": {
@@ -1681,6 +2074,15 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "DeleteGroup/GroupName too short",
+      "operation": "DeleteGroup",
+      "body": {
+        "GroupName": "",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "DeleteGroup/GroupName invalid pattern",
       "operation": "DeleteGroup",
       "body": {
@@ -1695,6 +2097,15 @@
       "body": {
         "GroupName": "abc123",
         "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "DeleteGroup/UserPoolId too short",
+      "operation": "DeleteGroup",
+      "body": {
+        "GroupName": "abc123",
+        "UserPoolId": ""
       },
       "expect": "InvalidParameterException"
     },
@@ -1750,6 +2161,14 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "DeleteUserPool/UserPoolId too short",
+      "operation": "DeleteUserPool",
+      "body": {
+        "UserPoolId": ""
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "DeleteUserPool/UserPoolId invalid pattern",
       "operation": "DeleteUserPool",
       "body": {
@@ -1791,6 +2210,15 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "DeleteUserPoolClient/ClientId too short",
+      "operation": "DeleteUserPoolClient",
+      "body": {
+        "ClientId": "",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "DeleteUserPoolClient/ClientId invalid pattern",
       "operation": "DeleteUserPoolClient",
       "body": {
@@ -1805,6 +2233,15 @@
       "body": {
         "ClientId": "abcdefghijklmnopqrstuvwxyz",
         "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "DeleteUserPoolClient/UserPoolId too short",
+      "operation": "DeleteUserPoolClient",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "UserPoolId": ""
       },
       "expect": "InvalidParameterException"
     },
@@ -1835,6 +2272,14 @@
       "operation": "DescribeUserPool",
       "body": {
         "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "DescribeUserPool/UserPoolId too short",
+      "operation": "DescribeUserPool",
+      "body": {
+        "UserPoolId": ""
       },
       "expect": "InvalidParameterException"
     },
@@ -1880,6 +2325,15 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "DescribeUserPoolClient/ClientId too short",
+      "operation": "DescribeUserPoolClient",
+      "body": {
+        "ClientId": "",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "DescribeUserPoolClient/ClientId invalid pattern",
       "operation": "DescribeUserPoolClient",
       "body": {
@@ -1894,6 +2348,15 @@
       "body": {
         "ClientId": "abcdefghijklmnopqrstuvwxyz",
         "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "DescribeUserPoolClient/UserPoolId too short",
+      "operation": "DescribeUserPoolClient",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "UserPoolId": ""
       },
       "expect": "InvalidParameterException"
     },
@@ -1940,6 +2403,15 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "ForgotPassword/ClientId too short",
+      "operation": "ForgotPassword",
+      "body": {
+        "ClientId": "",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "ForgotPassword/ClientId invalid pattern",
       "operation": "ForgotPassword",
       "body": {
@@ -1954,6 +2426,16 @@
       "body": {
         "ClientId": "abcdefghijklmnopqrstuvwxyz",
         "SecretHash": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ForgotPassword/SecretHash too short",
+      "operation": "ForgotPassword",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "SecretHash": "",
         "Username": "abc123"
       },
       "expect": "InvalidParameterException"
@@ -1974,6 +2456,15 @@
       "body": {
         "ClientId": "abcdefghijklmnopqrstuvwxyz",
         "Username": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ForgotPassword/Username too short",
+      "operation": "ForgotPassword",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "Username": ""
       },
       "expect": "InvalidParameterException"
     },
@@ -2020,6 +2511,15 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "GetGroup/GroupName too short",
+      "operation": "GetGroup",
+      "body": {
+        "GroupName": "",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "GetGroup/GroupName invalid pattern",
       "operation": "GetGroup",
       "body": {
@@ -2034,6 +2534,15 @@
       "body": {
         "GroupName": "abc123",
         "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "GetGroup/UserPoolId too short",
+      "operation": "GetGroup",
+      "body": {
+        "GroupName": "abc123",
+        "UserPoolId": ""
       },
       "expect": "InvalidParameterException"
     },
@@ -2110,6 +2619,15 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "GetUserAttributeVerificationCode/AttributeName too short",
+      "operation": "GetUserAttributeVerificationCode",
+      "body": {
+        "AccessToken": "abc.def.ghi",
+        "AttributeName": ""
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "GetUserPoolMfaConfig/base",
       "operation": "GetUserPoolMfaConfig",
       "body": {
@@ -2127,6 +2645,14 @@
       "operation": "GetUserPoolMfaConfig",
       "body": {
         "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "GetUserPoolMfaConfig/UserPoolId too short",
+      "operation": "GetUserPoolMfaConfig",
+      "body": {
+        "UserPoolId": ""
       },
       "expect": "InvalidParameterException"
     },
@@ -2202,6 +2728,15 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "InitiateAuth/ClientId too short",
+      "operation": "InitiateAuth",
+      "body": {
+        "AuthFlow": "USER_SRP_AUTH",
+        "ClientId": ""
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "InitiateAuth/ClientId invalid pattern",
       "operation": "InitiateAuth",
       "body": {
@@ -2262,6 +2797,15 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "ListGroups/NextToken too short",
+      "operation": "ListGroups",
+      "body": {
+        "NextToken": "",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "ListGroups/NextToken invalid pattern",
       "operation": "ListGroups",
       "body": {
@@ -2275,6 +2819,14 @@
       "operation": "ListGroups",
       "body": {
         "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListGroups/UserPoolId too short",
+      "operation": "ListGroups",
+      "body": {
+        "UserPoolId": ""
       },
       "expect": "InvalidParameterException"
     },
@@ -2347,6 +2899,15 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "ListUserPoolClients/NextToken too short",
+      "operation": "ListUserPoolClients",
+      "body": {
+        "NextToken": "",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "ListUserPoolClients/NextToken invalid pattern",
       "operation": "ListUserPoolClients",
       "body": {
@@ -2360,6 +2921,14 @@
       "operation": "ListUserPoolClients",
       "body": {
         "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListUserPoolClients/UserPoolId too short",
+      "operation": "ListUserPoolClients",
+      "body": {
+        "UserPoolId": ""
       },
       "expect": "InvalidParameterException"
     },
@@ -2397,6 +2966,15 @@
       "operation": "ListUserPools",
       "body": {
         "MaxResults": 61
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListUserPools/NextToken too short",
+      "operation": "ListUserPools",
+      "body": {
+        "MaxResults": 1,
+        "NextToken": ""
       },
       "expect": "InvalidParameterException"
     },
@@ -2450,6 +3028,15 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "ListUsers/PaginationToken too short",
+      "operation": "ListUsers",
+      "body": {
+        "PaginationToken": "",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "ListUsers/PaginationToken invalid pattern",
       "operation": "ListUsers",
       "body": {
@@ -2463,6 +3050,14 @@
       "operation": "ListUsers",
       "body": {
         "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListUsers/UserPoolId too short",
+      "operation": "ListUsers",
+      "body": {
+        "UserPoolId": ""
       },
       "expect": "InvalidParameterException"
     },
@@ -2508,6 +3103,15 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "ListUsersInGroup/GroupName too short",
+      "operation": "ListUsersInGroup",
+      "body": {
+        "GroupName": "",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "ListUsersInGroup/GroupName invalid pattern",
       "operation": "ListUsersInGroup",
       "body": {
@@ -2537,6 +3141,16 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "ListUsersInGroup/NextToken too short",
+      "operation": "ListUsersInGroup",
+      "body": {
+        "GroupName": "abc123",
+        "NextToken": "",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "ListUsersInGroup/NextToken invalid pattern",
       "operation": "ListUsersInGroup",
       "body": {
@@ -2552,6 +3166,15 @@
       "body": {
         "GroupName": "abc123",
         "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ListUsersInGroup/UserPoolId too short",
+      "operation": "ListUsersInGroup",
+      "body": {
+        "GroupName": "abc123",
+        "UserPoolId": ""
       },
       "expect": "InvalidParameterException"
     },
@@ -2598,6 +3221,15 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "ResendConfirmationCode/ClientId too short",
+      "operation": "ResendConfirmationCode",
+      "body": {
+        "ClientId": "",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "ResendConfirmationCode/ClientId invalid pattern",
       "operation": "ResendConfirmationCode",
       "body": {
@@ -2612,6 +3244,16 @@
       "body": {
         "ClientId": "abcdefghijklmnopqrstuvwxyz",
         "SecretHash": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ResendConfirmationCode/SecretHash too short",
+      "operation": "ResendConfirmationCode",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "SecretHash": "",
         "Username": "abc123"
       },
       "expect": "InvalidParameterException"
@@ -2632,6 +3274,15 @@
       "body": {
         "ClientId": "abcdefghijklmnopqrstuvwxyz",
         "Username": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "ResendConfirmationCode/Username too short",
+      "operation": "ResendConfirmationCode",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "Username": ""
       },
       "expect": "InvalidParameterException"
     },
@@ -2687,6 +3338,16 @@
       "body": {
         "ChallengeName": "SMS_MFA",
         "ClientId": "abcdefghijklmnopqrstuvwxyzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+        "Session": "abcdefghijklmnopqrstuvwxyz"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "RespondToAuthChallenge/ClientId too short",
+      "operation": "RespondToAuthChallenge",
+      "body": {
+        "ChallengeName": "SMS_MFA",
+        "ClientId": "",
         "Session": "abcdefghijklmnopqrstuvwxyz"
       },
       "expect": "InvalidParameterException"
@@ -2750,6 +3411,15 @@
       "operation": "RevokeToken",
       "body": {
         "ClientId": "abcdefghijklmnopqrstuvwxyzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+        "Token": "abc.def.ghi"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "RevokeToken/ClientId too short",
+      "operation": "RevokeToken",
+      "body": {
+        "ClientId": "",
         "Token": "abc.def.ghi"
       },
       "expect": "InvalidParameterException"
@@ -2854,6 +3524,14 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "SetUserPoolMfaConfig/UserPoolId too short",
+      "operation": "SetUserPoolMfaConfig",
+      "body": {
+        "UserPoolId": ""
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "SetUserPoolMfaConfig/UserPoolId invalid pattern",
       "operation": "SetUserPoolMfaConfig",
       "body": {
@@ -2890,6 +3568,15 @@
       "operation": "SignUp",
       "body": {
         "ClientId": "abcdefghijklmnopqrstuvwxyzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "SignUp/ClientId too short",
+      "operation": "SignUp",
+      "body": {
+        "ClientId": "",
         "Username": "abc123"
       },
       "expect": "InvalidParameterException"
@@ -2934,6 +3621,16 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "SignUp/SecretHash too short",
+      "operation": "SignUp",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "SecretHash": "",
+        "Username": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "SignUp/SecretHash invalid pattern",
       "operation": "SignUp",
       "body": {
@@ -2949,6 +3646,15 @@
       "body": {
         "ClientId": "abcdefghijklmnopqrstuvwxyz",
         "Username": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "SignUp/Username too short",
+      "operation": "SignUp",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "Username": ""
       },
       "expect": "InvalidParameterException"
     },
@@ -3105,6 +3811,15 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "UpdateGroup/GroupName too short",
+      "operation": "UpdateGroup",
+      "body": {
+        "GroupName": "",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "UpdateGroup/GroupName invalid pattern",
       "operation": "UpdateGroup",
       "body": {
@@ -3149,6 +3864,15 @@
       "body": {
         "GroupName": "abc123",
         "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateGroup/UserPoolId too short",
+      "operation": "UpdateGroup",
+      "body": {
+        "GroupName": "abc123",
+        "UserPoolId": ""
       },
       "expect": "InvalidParameterException"
     },
@@ -3238,6 +3962,15 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "UpdateUserPool/EmailVerificationSubject too short",
+      "operation": "UpdateUserPool",
+      "body": {
+        "EmailVerificationSubject": "",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "UpdateUserPool/MfaConfiguration invalid enum",
       "operation": "UpdateUserPool",
       "body": {
@@ -3256,6 +3989,15 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "UpdateUserPool/PoolName too short",
+      "operation": "UpdateUserPool",
+      "body": {
+        "PoolName": "",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "UpdateUserPool/PoolName invalid pattern",
       "operation": "UpdateUserPool",
       "body": {
@@ -3269,6 +4011,14 @@
       "operation": "UpdateUserPool",
       "body": {
         "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateUserPool/UserPoolId too short",
+      "operation": "UpdateUserPool",
+      "body": {
+        "UserPoolId": ""
       },
       "expect": "InvalidParameterException"
     },
@@ -3363,6 +4113,15 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "UpdateUserPoolClient/ClientId too short",
+      "operation": "UpdateUserPoolClient",
+      "body": {
+        "ClientId": "",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "UpdateUserPoolClient/ClientId invalid pattern",
       "operation": "UpdateUserPoolClient",
       "body": {
@@ -3377,6 +4136,16 @@
       "body": {
         "ClientId": "abcdefghijklmnopqrstuvwxyz",
         "ClientName": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateUserPoolClient/ClientName too short",
+      "operation": "UpdateUserPoolClient",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "ClientName": "",
         "UserPoolId": "us-east-1_abc123XYZ"
       },
       "expect": "InvalidParameterException"
@@ -3397,6 +4166,16 @@
       "body": {
         "ClientId": "abcdefghijklmnopqrstuvwxyz",
         "DefaultRedirectURI": "abc12333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333",
+        "UserPoolId": "us-east-1_abc123XYZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateUserPoolClient/DefaultRedirectURI too short",
+      "operation": "UpdateUserPoolClient",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "DefaultRedirectURI": "",
         "UserPoolId": "us-east-1_abc123XYZ"
       },
       "expect": "InvalidParameterException"
@@ -3467,6 +4246,15 @@
       "body": {
         "ClientId": "abcdefghijklmnopqrstuvwxyz",
         "UserPoolId": "us-east-1_abc123XYZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "UpdateUserPoolClient/UserPoolId too short",
+      "operation": "UpdateUserPoolClient",
+      "body": {
+        "ClientId": "abcdefghijklmnopqrstuvwxyz",
+        "UserPoolId": ""
       },
       "expect": "InvalidParameterException"
     },
@@ -3608,12 +4396,32 @@
       "expect": "InvalidParameterException"
     },
     {
+      "name": "VerifyUserAttribute/AttributeName too short",
+      "operation": "VerifyUserAttribute",
+      "body": {
+        "AccessToken": "abc.def.ghi",
+        "AttributeName": "",
+        "Code": "abc123"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
       "name": "VerifyUserAttribute/Code too long",
       "operation": "VerifyUserAttribute",
       "body": {
         "AccessToken": "abc.def.ghi",
         "AttributeName": "email",
         "Code": "abc123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": "InvalidParameterException"
+    },
+    {
+      "name": "VerifyUserAttribute/Code too short",
+      "operation": "VerifyUserAttribute",
+      "body": {
+        "AccessToken": "abc.def.ghi",
+        "AttributeName": "email",
+        "Code": ""
       },
       "expect": "InvalidParameterException"
     },
