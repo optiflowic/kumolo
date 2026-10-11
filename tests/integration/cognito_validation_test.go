@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -42,7 +43,9 @@ func TestCognitoIntegration_InputValidation(t *testing.T) {
 
 	clients := newTestClients(t)
 
+	seen := map[string]bool{}
 	for _, c := range vc.Cases {
+		seen[c.Name] = true
 		t.Run(c.Name, func(t *testing.T) {
 			body, err := json.Marshal(c.Body)
 			require.NoError(t, err)
@@ -59,10 +62,21 @@ func TestCognitoIntegration_InputValidation(t *testing.T) {
 				Type    string `json:"__type"`
 				Message string `json:"message"`
 			}
-			_ = json.NewDecoder(resp.Body).Decode(&got)
+			respBody, err := io.ReadAll(resp.Body)
+			require.NoError(t, err)
+			decodeErr := json.Unmarshal(respBody, &got)
 
 			problem := ""
 			switch {
+			case decodeErr != nil:
+				problem = fmt.Sprintf("response is not JSON: %d %q", resp.StatusCode, respBody)
+			case c.Expect == "" && resp.StatusCode >= http.StatusInternalServerError,
+				c.Expect == "" && resp.StatusCode >= http.StatusMultipleChoices && got.Type == "":
+				problem = fmt.Sprintf(
+					"base request did not reach the handler: %d %q",
+					resp.StatusCode,
+					respBody,
+				)
 			case c.Expect == "" && got.Type == "InvalidParameterException":
 				// The base request must get past validation, otherwise the other cases
 				// for this operation could pass for the wrong reason.
@@ -87,6 +101,15 @@ func TestCognitoIntegration_InputValidation(t *testing.T) {
 				t.Fatal(problem)
 			}
 		})
+	}
+
+	for name := range gaps {
+		require.Truef(
+			t,
+			seen[name],
+			"%q matches no generated case; remove it from the gaps list",
+			name,
+		)
 	}
 }
 
