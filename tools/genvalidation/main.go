@@ -184,10 +184,13 @@ func constrained(s shape) bool {
 
 func shapeLiteral(s shape) (string, error) {
 	var b bytes.Buffer
-	if s.Type == "string" {
+	switch s.Type {
+	case "string":
 		b.WriteString("kind: kindString")
-	} else {
+	case "integer", "long":
 		b.WriteString("kind: kindInteger")
+	default:
+		return "", fmt.Errorf("unsupported shape type %q", s.Type)
 	}
 	if s.Sensitive {
 		b.WriteString(", sensitive: true")
