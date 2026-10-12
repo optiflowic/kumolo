@@ -13,6 +13,10 @@ sdk_types:
 last_verified: 2026-07-12
 ---
 
+Top-level string and integer members of all five operations are validated against the model
+before the handler runs (see `input_validation.md`), so a constraint violation is reported
+ahead of `ResourceNotFoundException`.
+
 ## CreateUserPoolClient
 
 Creates an app client in a user pool.
@@ -53,6 +57,10 @@ Creates an app client in a user pool.
 Returns the same `ClientSecret` that was generated/provided on creation.
 
 **Errors**: `InvalidParameterException` (400), `ResourceNotFoundException` (400, pool or client not found), `InternalErrorException` (500).
+
+**kumolo deviation**: a `ClientId` that satisfies the model pattern but is not in the form
+kumolo issues (26 lowercase alphanumeric chars) returns `InvalidParameterException`; AWS
+returns `ResourceNotFoundException`. Same for `UpdateUserPoolClient` and `DeleteUserPoolClient`.
 
 ## UpdateUserPoolClient
 

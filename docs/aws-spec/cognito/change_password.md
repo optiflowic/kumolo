@@ -36,7 +36,7 @@ HTTP 200 with an empty body: `{}`.
 
 | Error type                | HTTP | Trigger |
 |----------------------------|------|---------|
-| InvalidParameterException  | 400  | missing `AccessToken`/`ProposedPassword` |
+| InvalidParameterException  | 400  | input violates a model constraint (see `input_validation.md`) |
 | NotAuthorizedException     | 400  | invalid/expired/revoked access token, wrong `token_use`, missing `PreviousPassword` when the user has a password, or `PreviousPassword` mismatch |
 | UserNotFoundException      | 400  | token's `sub` has no matching user |
 | InvalidPasswordException   | 400  | `ProposedPassword` fails the pool's password policy |

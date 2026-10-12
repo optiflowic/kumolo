@@ -23,7 +23,7 @@ func TestCreateUserPoolClient_WriteClientJSONError(t *testing.T) {
 	}
 	err := s.CreateUserPoolClient(&UserPoolClientMetadata{
 		UserPoolID: poolID,
-		ClientID:   "client-1",
+		ClientID:   "client1",
 		ClientName: "test",
 	})
 	require.Error(t, err)
@@ -91,13 +91,13 @@ func TestDeleteClientsDirLocked_ClientIndexDeleteError(t *testing.T) {
 
 	require.NoError(t, s.CreateUserPoolClient(&UserPoolClientMetadata{
 		UserPoolID: poolID,
-		ClientID:   "client-1",
+		ClientID:   "client1",
 		ClientName: "test",
 	}))
 
 	storageErr := errors.New("permission denied")
 	realRemoveFile := s.removeFile
-	clientIndexPath := filepath.Join("client_index", "client-1.json")
+	clientIndexPath := filepath.Join("client_index", "client1.json")
 	s.removeFile = func(name string) error {
 		if name == clientIndexPath {
 			return storageErr
@@ -116,7 +116,7 @@ func TestDeleteClientsDirLocked_RemoveDirError(t *testing.T) {
 
 	require.NoError(t, s.CreateUserPoolClient(&UserPoolClientMetadata{
 		UserPoolID: poolID,
-		ClientID:   "client-1",
+		ClientID:   "client1",
 		ClientName: "test",
 	}))
 

@@ -64,7 +64,7 @@ HTTP 200:
 | Error type                | HTTP | Trigger |
 |----------------------------|------|---------|
 | ResourceNotFoundException  | 400  | pool not found |
-| InvalidParameterException  | 400  | `Limit` out of `[1, 60]`, malformed `Filter` string, unsupported filter attribute, invalid pagination token |
+| InvalidParameterException  | 400  | input violates a model constraint (see `input_validation.md`), `Limit` of 0, malformed `Filter` string, unsupported filter attribute, invalid pagination token |
 | InternalErrorException     | 500  | storage failure |
 
 ## kumolo deviations

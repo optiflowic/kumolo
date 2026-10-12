@@ -128,6 +128,7 @@ func TestTagResource(t *testing.T) {
 		{"invalid JSON body", "invalid-json", http.StatusBadRequest},
 		{"missing ResourceArn", `{"Tags":{"k":"v"}}`, http.StatusBadRequest},
 		{"invalid ARN", `{"ResourceArn":"not-an-arn","Tags":{"k":"v"}}`, http.StatusBadRequest},
+		{"ARN of another service", `{"ResourceArn":"arn:aws:s3:us-east-1:000000000000:userpool/us-east-1_x","Tags":{"k":"v"}}`, http.StatusBadRequest},
 		{"empty Tags", fmt.Sprintf(`{"ResourceArn":%q,"Tags":{}}`, poolARNFromID("us-east-1_x")), http.StatusBadRequest},
 		{"pool not found", fmt.Sprintf(`{"ResourceArn":%q,"Tags":{"k":"v"}}`, poolARNFromID("us-east-1_notexist")), http.StatusBadRequest},
 	} {
@@ -210,6 +211,7 @@ func TestUntagResource(t *testing.T) {
 		{"invalid JSON body", "invalid-json", http.StatusBadRequest},
 		{"missing ResourceArn", `{"TagKeys":["k"]}`, http.StatusBadRequest},
 		{"invalid ARN", `{"ResourceArn":"bad","TagKeys":["k"]}`, http.StatusBadRequest},
+		{"ARN of another service", `{"ResourceArn":"arn:aws:s3:us-east-1:000000000000:userpool/us-east-1_x","TagKeys":["k"]}`, http.StatusBadRequest},
 		{"empty TagKeys", fmt.Sprintf(`{"ResourceArn":%q,"TagKeys":[]}`, poolARNFromID("us-east-1_x")), http.StatusBadRequest},
 		{"pool not found", fmt.Sprintf(`{"ResourceArn":%q,"TagKeys":["k"]}`, poolARNFromID("us-east-1_notexist")), http.StatusBadRequest},
 	} {
@@ -267,6 +269,7 @@ func TestListTagsForResource(t *testing.T) {
 		{"invalid JSON body", "invalid-json", http.StatusBadRequest},
 		{"missing ResourceArn", `{}`, http.StatusBadRequest},
 		{"invalid ARN", `{"ResourceArn":"bad"}`, http.StatusBadRequest},
+		{"ARN of another service", `{"ResourceArn":"arn:aws:s3:us-east-1:000000000000:userpool/us-east-1_x"}`, http.StatusBadRequest},
 		{"pool not found", fmt.Sprintf(`{"ResourceArn":%q}`, poolARNFromID("us-east-1_notexist")), http.StatusBadRequest},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -45,4 +45,6 @@ ResourceArn must resolve to an existing user pool. kumolo derives pool ID from t
 
 ## kumolo deviations
 
-- ARN pattern is validated only for minimum/maximum length (20–2048); regex is not applied.
+- `ResourceArn` is validated against the model's ARN pattern and length (20–2048) before the
+  handler runs (see `input_validation.md`). An ARN that passes but is not a
+  `cognito-idp` `userpool/` ARN returns `InvalidParameterException`.

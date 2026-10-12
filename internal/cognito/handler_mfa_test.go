@@ -220,7 +220,7 @@ func TestAssociateSoftwareToken_StorageUpdateError(t *testing.T) {
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
 	token, _, _, _, _, err := issueTokens(
-		key, "kid", poolID, "client-1", user, nil, "", accessTokenExpiry, accessTokenExpiry,
+		key, "kid", poolID, "client1", user, nil, "", accessTokenExpiry, accessTokenExpiry,
 	)
 	require.NoError(t, err)
 
@@ -263,7 +263,7 @@ func TestAssociateSoftwareToken_TokenRevoked(t *testing.T) {
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
 	token, _, _, _, _, err := issueTokens(
-		key, "kid", poolID, "client-1", user, nil, "", accessTokenExpiry, accessTokenExpiry,
+		key, "kid", poolID, "client1", user, nil, "", accessTokenExpiry, accessTokenExpiry,
 	)
 	require.NoError(t, err)
 
@@ -283,7 +283,7 @@ func TestAssociateSoftwareToken_UpdateUserRaceNotFound(t *testing.T) {
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
 	token, _, _, _, _, err := issueTokens(
-		key, "kid", poolID, "client-1", user, nil, "", accessTokenExpiry, accessTokenExpiry,
+		key, "kid", poolID, "client1", user, nil, "", accessTokenExpiry, accessTokenExpiry,
 	)
 	require.NoError(t, err)
 
@@ -428,7 +428,7 @@ func TestVerifySoftwareToken_StorageUpdateError(t *testing.T) {
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
 	token, _, _, _, _, err := issueTokens(
-		key, "kid", poolID, "client-1", user, nil, "", accessTokenExpiry, accessTokenExpiry,
+		key, "kid", poolID, "client1", user, nil, "", accessTokenExpiry, accessTokenExpiry,
 	)
 	require.NoError(t, err)
 
@@ -491,7 +491,7 @@ func TestVerifySoftwareToken_TokenRevoked(t *testing.T) {
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
 	token, _, _, _, _, err := issueTokens(
-		key, "kid", poolID, "client-1", user, nil, "", accessTokenExpiry, accessTokenExpiry,
+		key, "kid", poolID, "client1", user, nil, "", accessTokenExpiry, accessTokenExpiry,
 	)
 	require.NoError(t, err)
 
@@ -511,7 +511,7 @@ func TestVerifySoftwareToken_UpdateUserRaceNotFound(t *testing.T) {
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
 	token, _, _, _, _, err := issueTokens(
-		key, "kid", poolID, "client-1", user, nil, "", accessTokenExpiry, accessTokenExpiry,
+		key, "kid", poolID, "client1", user, nil, "", accessTokenExpiry, accessTokenExpiry,
 	)
 	require.NoError(t, err)
 
@@ -685,7 +685,7 @@ func TestSetUserMFAPreference_StorageUpdateError(t *testing.T) {
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
 	token, _, _, _, _, err := issueTokens(
-		key, "kid", poolID, "client-1", user, nil, "", accessTokenExpiry, accessTokenExpiry,
+		key, "kid", poolID, "client1", user, nil, "", accessTokenExpiry, accessTokenExpiry,
 	)
 	require.NoError(t, err)
 
@@ -708,7 +708,7 @@ func TestSetUserMFAPreference_GetUserPoolStorageError(t *testing.T) {
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
 	token, _, _, _, _, err := issueTokens(
-		key, "kid", poolID, "client-1", user, nil, "", accessTokenExpiry, accessTokenExpiry,
+		key, "kid", poolID, "client1", user, nil, "", accessTokenExpiry, accessTokenExpiry,
 	)
 	require.NoError(t, err)
 
@@ -771,7 +771,7 @@ func TestSetUserMFAPreference_TokenRevoked(t *testing.T) {
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
 	token, _, _, _, _, err := issueTokens(
-		key, "kid", poolID, "client-1", user, nil, "", accessTokenExpiry, accessTokenExpiry,
+		key, "kid", poolID, "client1", user, nil, "", accessTokenExpiry, accessTokenExpiry,
 	)
 	require.NoError(t, err)
 
@@ -791,7 +791,7 @@ func TestSetUserMFAPreference_UpdateUserRaceNotFound(t *testing.T) {
 	poolID := "us-east-1_TestPool"
 	user := &UserMetadata{Username: "alice", Sub: "sub-alice"}
 	token, _, _, _, _, err := issueTokens(
-		key, "kid", poolID, "client-1", user, nil, "", accessTokenExpiry, accessTokenExpiry,
+		key, "kid", poolID, "client1", user, nil, "", accessTokenExpiry, accessTokenExpiry,
 	)
 	require.NoError(t, err)
 
@@ -1019,7 +1019,7 @@ func TestSoftwareTokenMFA_RespondInvalidSession(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{
 		"ClientId":      clientID,
 		"ChallengeName": "SOFTWARE_TOKEN_MFA",
-		"Session":       "not-a-valid-jwt",
+		"Session":       "not-a-valid-session-jwt",
 		"ChallengeResponses": map[string]string{
 			"USERNAME": "alice", "SOFTWARE_TOKEN_MFA_CODE": "123456",
 		},
@@ -1254,7 +1254,7 @@ func TestSoftwareTokenMFA_GetPoolKeysStorageError(t *testing.T) {
 		},
 	}}
 	body, _ := json.Marshal(map[string]any{
-		"ClientId": "c", "ChallengeName": "SOFTWARE_TOKEN_MFA", "Session": "s",
+		"ClientId": "c", "ChallengeName": "SOFTWARE_TOKEN_MFA", "Session": "invalid-session-token",
 		"ChallengeResponses": map[string]string{
 			"USERNAME": "u", "SOFTWARE_TOKEN_MFA_CODE": "123456",
 		},
@@ -1635,14 +1635,14 @@ func TestMFASetup_GetUserPoolInternalError(t *testing.T) {
 		getErr: errors.New("boom"),
 	}}
 
-	w := doInitAuth(t, ro, "client-1", "alice", "Password123!")
+	w := doInitAuth(t, ro, "client1", "alice", "Password123!")
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 	assertErrType(t, w, ErrTypeInternalErrorException)
 }
 
 func TestAssociateSoftwareTokenSession_InvalidJWT(t *testing.T) {
 	ro := newTestRouter(t)
-	body, _ := json.Marshal(map[string]string{"Session": "not-a-valid-jwt"})
+	body, _ := json.Marshal(map[string]string{"Session": "not-a-valid-session-jwt"})
 	w := doOp(t, ro, "AssociateSoftwareToken", string(body))
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assertErrType(t, w, ErrTypeNotAuthorizedException)
@@ -1800,7 +1800,9 @@ func TestVerifySoftwareTokenSession_NeitherAccessTokenNorSessionRejected(t *test
 
 func TestVerifySoftwareTokenSession_InvalidSession(t *testing.T) {
 	ro := newTestRouter(t)
-	body, _ := json.Marshal(map[string]string{"Session": "not-a-valid-jwt", "UserCode": "123456"})
+	body, _ := json.Marshal(
+		map[string]string{"Session": "not-a-valid-session-jwt", "UserCode": "123456"},
+	)
 	w := doOp(t, ro, "VerifySoftwareToken", string(body))
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assertErrType(t, w, ErrTypeNotAuthorizedException)
@@ -1910,7 +1912,7 @@ func TestMFASetupChallenge_PoolKeysInternalError(t *testing.T) {
 		},
 	}}
 	body, _ := json.Marshal(map[string]any{
-		"ClientId": "c", "ChallengeName": "MFA_SETUP", "Session": "irrelevant",
+		"ClientId": "c", "ChallengeName": "MFA_SETUP", "Session": "invalid-session-token",
 		"ChallengeResponses": map[string]string{"USERNAME": "alice"},
 	})
 	w := doOp(t, ro, "RespondToAuthChallenge", string(body))
@@ -2013,7 +2015,7 @@ func TestMFASetupChallenge_InvalidSession(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{
 		"ClientId":           clientID,
 		"ChallengeName":      "MFA_SETUP",
-		"Session":            "not-a-valid-jwt",
+		"Session":            "not-a-valid-session-jwt",
 		"ChallengeResponses": map[string]string{"USERNAME": "alice"},
 	})
 	w := doOp(t, ro, "RespondToAuthChallenge", string(body))

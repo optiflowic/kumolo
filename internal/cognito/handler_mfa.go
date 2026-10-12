@@ -138,11 +138,6 @@ func (ro *Router) handleVerifySoftwareToken(w http.ResponseWriter, body []byte) 
 			"invalid request body")
 		return
 	}
-	if req.UserCode == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-			"UserCode is required")
-		return
-	}
 	if req.AccessToken != "" && req.Session != "" {
 		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
 			"Only one of AccessToken or Session may be provided")
@@ -526,11 +521,6 @@ func (ro *Router) handleSetUserMFAPreference(w http.ResponseWriter, body []byte)
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
 			"invalid request body")
-		return
-	}
-	if req.AccessToken == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-			"AccessToken is required")
 		return
 	}
 

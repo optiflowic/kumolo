@@ -40,7 +40,7 @@ HTTP 200 with an empty body: `{}`.
 
 | Error type                 | HTTP | Trigger |
 |-----------------------------|------|---------|
-| InvalidParameterException   | 400  | missing `UserPoolId`/`Username`/`UserAttributes`, attempt to modify `sub` |
+| InvalidParameterException   | 400  | input violates a model constraint (see `input_validation.md`), empty `UserAttributes`, attempt to modify `sub` |
 | ResourceNotFoundException   | 400  | pool not found |
 | UserNotFoundException       | 400  | user not found |
 | InternalErrorException      | 500  | storage failure |

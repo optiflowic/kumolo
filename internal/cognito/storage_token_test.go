@@ -26,7 +26,7 @@ func TestGenerateUUID(t *testing.T) {
 
 func makeRT(poolID, token string) *refreshTokenData {
 	return &refreshTokenData{
-		Token: token, PoolID: poolID, ClientID: "client-1",
+		Token: token, PoolID: poolID, ClientID: "client1",
 		Username: "alice", Sub: "sub-alice", IssuedAt: nowUnix(),
 	}
 }

@@ -44,12 +44,15 @@ work unchanged, since the region is parsed from the ID rather than tracked separ
 ## CreateUserPool
 
 - Required: `PoolName` (1–128 chars, pattern `[\w\s+=,.@-]+`)
-- Validated optional members (omitted or JSON `null` skips the check):
+- Validated optional members (omitted or JSON `null` skips the check; an explicit empty
+  string is a value and is rejected). Enforced by the shared step in `input_validation.md`:
   - `MfaConfiguration`: `OFF` | `ON` | `OPTIONAL`
   - `DeletionProtection`: `ACTIVE` | `INACTIVE`
   - `UserPoolTier`: `LITE` | `ESSENTIALS` | `PLUS`
-  - `EmailVerificationSubject`: 1–140 characters, counted as Unicode code points; an explicit
-    empty string is rejected
+  - `EmailVerificationSubject`: 1–140 characters, pattern `[\p{L}\p{M}\p{S}\p{N}\p{P}\s]+`
+  - `EmailVerificationMessage`: 6–20000 characters, must contain `{####}`
+  - `SmsVerificationMessage`, `SmsAuthenticationMessage`: 6–140 characters, must contain
+    `{####}`
 - A violation returns InvalidParameterException (400) and no pool is created
 - Returns: `{"UserPool": {...}}` HTTP 200
 - Response includes generated `Id`, `Arn`, `CreationDate`, `LastModifiedDate`, `Status: "Active"`, `EstimatedNumberOfUsers: 0`
@@ -63,7 +66,9 @@ work unchanged, since the region is parsed from the ID rather than tracked separ
 
 ## DescribeUserPool
 
-- Required: `UserPoolId`
+- Required: `UserPoolId` (1–55 chars, pattern `[\w-]+_[0-9a-zA-Z]+`). A value that breaks the
+  constraint returns InvalidParameterException, not ResourceNotFoundException. The same
+  applies to `UserPoolId` on every other operation.
 - Returns: `{"UserPool": {...}}` HTTP 200 (same shape as CreateUserPool response)
 - Errors: ResourceNotFoundException (400), InvalidParameterException (400), InternalErrorException (500)
 
@@ -75,6 +80,10 @@ work unchanged, since the region is parsed from the ID rather than tracked separ
   `AccountRecoverySetting`, `UserAttributeUpdateSettings`, `UserPoolAddOns`, `VerificationMessageTemplate`,
   `UserPoolTags`, `UserPoolTier`, `AutoVerifiedAttributes`, `SmsAuthenticationMessage`,
   `SmsVerificationMessage`, `EmailVerificationMessage`, `EmailVerificationSubject`
+- `PoolName`, `MfaConfiguration`, `DeletionProtection`, `UserPoolTier`, `EmailVerificationSubject`,
+  `EmailVerificationMessage`, `SmsVerificationMessage` and `SmsAuthenticationMessage` have the
+  same constraints as on `CreateUserPool`. A violation returns InvalidParameterException (400)
+  and leaves the pool unchanged, whether or not the pool exists.
 - Immutable after creation (not accepted in Update): `Schema`, `AliasAttributes`, `UsernameAttributes`, `UsernameConfiguration`
 - Returns: `{}` HTTP 200
 - Errors: ResourceNotFoundException (400), InvalidParameterException (400), InternalErrorException (500)
@@ -84,7 +93,7 @@ work unchanged, since the region is parsed from the ID rather than tracked separ
 - Required: `UserPoolId`
 - Returns: `{}` HTTP 200
 - Rejects deletion with InvalidParameterException when the pool's `DeletionProtection` is `"ACTIVE"`; caller must first `UpdateUserPool` it to `"INACTIVE"`
-- Errors: ResourceNotFoundException (400), InvalidParameterException (400 — missing `UserPoolId` or `DeletionProtection` is `"ACTIVE"`), InternalErrorException (500)
+- Errors: ResourceNotFoundException (400), InvalidParameterException (400 — invalid `UserPoolId` or `DeletionProtection` is `"ACTIVE"`), InternalErrorException (500)
 
 ## ListUserPools
 
@@ -141,10 +150,7 @@ JSON on `CreateUserPool`/`UpdateUserPool`/`DescribeUserPool`, and consumed by `F
   resolution" above), not a real AWS availability constraint — kumolo does not validate that
   the region is a real AWS region name. Fixed account: `000000000000`.
 - No SMS/email delivery; no Lambda trigger invocation
-- `CreateUserPool` does not check the model's character-class pattern for
-  `EmailVerificationSubject`, and an empty-string enum member (`MfaConfiguration`,
-  `DeletionProtection`, `UserPoolTier`) is treated as omitted rather than rejected
-- `UpdateUserPool` does not validate the enum and length constraints that `CreateUserPool`
-  enforces
+- Members nested inside `Policies`, `Schema`, `LambdaConfig` and the other structure members
+  are not validated against the model (see `input_validation.md`)
 - `EstimatedNumberOfUsers` always returns 0 (user counting not yet implemented)
 - `Policies.PasswordPolicy` enforcement: see `docs/aws-spec/cognito/password_policy.md`

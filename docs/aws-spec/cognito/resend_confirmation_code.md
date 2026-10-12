@@ -31,7 +31,7 @@ Last verified: 2026-06-28
 
 | Error | HTTP | Condition |
 |-------|------|-----------|
-| InvalidParameterException | 400 | Missing ClientId or Username |
+| InvalidParameterException | 400 | input violates a model constraint (see `input_validation.md`) |
 | ResourceNotFoundException | 400 | ClientId not found in any pool |
 | UserNotFoundException | 400 | Username not found in the pool |
 | NotAuthorizedException | 400 | User is not in UNCONFIRMED status (e.g. already CONFIRMED, or FORCE_CHANGE_PASSWORD for admin-created users); message includes the actual current status string |

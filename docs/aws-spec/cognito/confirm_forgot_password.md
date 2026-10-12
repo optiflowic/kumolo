@@ -40,7 +40,7 @@ HTTP 200 with an empty body: `{}`.
 
 | Error type                | HTTP | Trigger |
 |----------------------------|------|---------|
-| InvalidParameterException  | 400  | missing `ClientId`/`Username`/`ConfirmationCode`/`Password` |
+| InvalidParameterException  | 400  | input violates a model constraint (see `input_validation.md`) |
 | ResourceNotFoundException  | 400  | `ClientId` not found in any pool |
 | UserNotFoundException      | 400  | `Username` not found in the resolved pool |
 | UserNotConfirmedException  | 400  | user status is `UNCONFIRMED` |

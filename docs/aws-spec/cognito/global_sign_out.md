@@ -35,7 +35,7 @@ HTTP 200, empty body `{}`.
 
 | Error type               | HTTP | Condition                                        |
 |--------------------------|------|--------------------------------------------------|
-| InvalidParameterException | 400 | AccessToken missing                              |
+| InvalidParameterException | 400 | input violates a model constraint (see `input_validation.md`) |
 | NotAuthorizedException    | 400 | Invalid, expired, or already-revoked access token |
 | InternalErrorException    | 500 | Storage failure                                  |
 

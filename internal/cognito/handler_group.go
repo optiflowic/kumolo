@@ -50,24 +50,6 @@ func (ro *Router) handleCreateGroup(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
-	if req.UserPoolID == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"UserPoolId is required",
-		)
-		return
-	}
-	if req.GroupName == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"GroupName is required",
-		)
-		return
-	}
 
 	if _, err := ro.groups.GetUserPool(req.UserPoolID); err != nil {
 		if errors.Is(err, errUserPoolNotFound) {
@@ -135,24 +117,6 @@ func (ro *Router) handleDeleteGroup(w http.ResponseWriter, body []byte) {
 		)
 		return
 	}
-	if req.UserPoolID == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"UserPoolId is required",
-		)
-		return
-	}
-	if req.GroupName == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"GroupName is required",
-		)
-		return
-	}
 
 	if _, err := ro.groups.GetUserPool(req.UserPoolID); err != nil {
 		if errors.Is(err, errUserPoolNotFound) {
@@ -210,24 +174,6 @@ func (ro *Router) handleGetGroup(w http.ResponseWriter, body []byte) {
 			http.StatusBadRequest,
 			ErrTypeInvalidParameterException,
 			"invalid request body",
-		)
-		return
-	}
-	if req.UserPoolID == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"UserPoolId is required",
-		)
-		return
-	}
-	if req.GroupName == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"GroupName is required",
 		)
 		return
 	}
@@ -292,24 +238,6 @@ func (ro *Router) handleUpdateGroup(w http.ResponseWriter, body []byte) {
 			http.StatusBadRequest,
 			ErrTypeInvalidParameterException,
 			"invalid request body",
-		)
-		return
-	}
-	if req.UserPoolID == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"UserPoolId is required",
-		)
-		return
-	}
-	if req.GroupName == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"GroupName is required",
 		)
 		return
 	}
@@ -387,15 +315,6 @@ func (ro *Router) handleListGroups(w http.ResponseWriter, body []byte) {
 			http.StatusBadRequest,
 			ErrTypeInvalidParameterException,
 			"invalid request body",
-		)
-		return
-	}
-	if req.UserPoolID == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"UserPoolId is required",
 		)
 		return
 	}
@@ -484,33 +403,6 @@ func (ro *Router) parseGroupMembershipRequest(
 			http.StatusBadRequest,
 			ErrTypeInvalidParameterException,
 			"invalid request body",
-		)
-		return req, false
-	}
-	if req.UserPoolID == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"UserPoolId is required",
-		)
-		return req, false
-	}
-	if req.GroupName == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"GroupName is required",
-		)
-		return req, false
-	}
-	if req.Username == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"Username is required",
 		)
 		return req, false
 	}
@@ -631,24 +523,6 @@ func (ro *Router) handleAdminListGroupsForUser(w http.ResponseWriter, body []byt
 		)
 		return
 	}
-	if req.UserPoolID == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"UserPoolId is required",
-		)
-		return
-	}
-	if req.Username == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"Username is required",
-		)
-		return
-	}
 
 	if _, err := ro.groups.GetUserPool(req.UserPoolID); err != nil {
 		if errors.Is(err, errUserPoolNotFound) {
@@ -742,24 +616,6 @@ func (ro *Router) handleListUsersInGroup(w http.ResponseWriter, body []byte) {
 			http.StatusBadRequest,
 			ErrTypeInvalidParameterException,
 			"invalid request body",
-		)
-		return
-	}
-	if req.UserPoolID == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"UserPoolId is required",
-		)
-		return
-	}
-	if req.GroupName == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"GroupName is required",
 		)
 		return
 	}

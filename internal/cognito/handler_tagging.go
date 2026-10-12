@@ -41,15 +41,6 @@ func poolIDFromARN(arn string) (string, bool) {
 // resolvePoolID validates ResourceArn and returns the pool ID.
 // Writes a 400 response and returns ("", false) on any failure.
 func resolvePoolID(w http.ResponseWriter, resourceArn string) (string, bool) {
-	if resourceArn == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"ResourceArn is required",
-		)
-		return "", false
-	}
 	poolID, ok := poolIDFromARN(resourceArn)
 	if !ok {
 		writeError(

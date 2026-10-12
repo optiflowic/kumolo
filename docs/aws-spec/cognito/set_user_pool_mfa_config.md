@@ -29,7 +29,7 @@
 
 | Error type                | HTTP | Condition                      |
 |---------------------------|------|--------------------------------|
-| InvalidParameterException | 400  | UserPoolId missing             |
+| InvalidParameterException | 400  | input violates a model constraint (see `input_validation.md`) |
 | ResourceNotFoundException | 400  | Pool not found                 |
 | InternalErrorException    | 500  | Storage failure                |
 

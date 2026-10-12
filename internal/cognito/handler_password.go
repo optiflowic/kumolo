@@ -148,16 +148,6 @@ func (ro *Router) handleForgotPassword(w http.ResponseWriter, body []byte) {
 			"invalid request body")
 		return
 	}
-	if req.ClientID == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-			"ClientId is required")
-		return
-	}
-	if req.Username == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-			"Username is required")
-		return
-	}
 
 	poolID, err := ro.storage.GetPoolIDForClient(req.ClientID)
 	if err != nil {
@@ -246,26 +236,6 @@ func (ro *Router) handleConfirmForgotPassword(w http.ResponseWriter, body []byte
 			"invalid request body")
 		return
 	}
-	if req.ClientID == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-			"ClientId is required")
-		return
-	}
-	if req.Username == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-			"Username is required")
-		return
-	}
-	if req.ConfirmationCode == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-			"ConfirmationCode is required")
-		return
-	}
-	if req.Password == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-			"Password is required")
-		return
-	}
 
 	poolID, err := ro.storage.GetPoolIDForClient(req.ClientID)
 	if err != nil {
@@ -350,16 +320,6 @@ func (ro *Router) handleChangePassword(w http.ResponseWriter, body []byte) {
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
 			"invalid request body")
-		return
-	}
-	if req.AccessToken == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-			"AccessToken is required")
-		return
-	}
-	if req.ProposedPassword == "" {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-			"ProposedPassword is required")
 		return
 	}
 

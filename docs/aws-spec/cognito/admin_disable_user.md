@@ -37,7 +37,7 @@ HTTP 200 with an empty body: `{}`.
 
 | Error type                 | HTTP | Trigger |
 |-----------------------------|------|---------|
-| InvalidParameterException   | 400  | missing `UserPoolId`/`Username` |
+| InvalidParameterException   | 400  | input violates a model constraint (see `input_validation.md`) |
 | ResourceNotFoundException   | 400  | pool not found |
 | UserNotFoundException       | 400  | user not found |
 | InternalErrorException      | 500  | storage failure |

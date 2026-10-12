@@ -36,7 +36,7 @@ Last verified: 2026-09-06
 
 | Error | HTTP | Condition |
 |-------|------|-----------|
-| InvalidParameterException | 400 | Missing ClientId or Username |
+| InvalidParameterException | 400 | input violates a model constraint (see `input_validation.md`), including an empty `Password` |
 | ResourceNotFoundException | 400 | ClientId not found in any pool |
 | UsernameExistsException | 400 | Username already registered in this pool |
 | InvalidPasswordException | 400 | Password too short or doesn't meet requirements |

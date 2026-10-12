@@ -52,7 +52,7 @@ HTTP 200:
 
 | Error type                | HTTP | Trigger |
 |----------------------------|------|---------|
-| InvalidParameterException  | 400  | missing `ClientId`/`Username`; no eligible recovery mechanism |
+| InvalidParameterException  | 400  | input violates a model constraint (see `input_validation.md`); no eligible recovery mechanism |
 | ResourceNotFoundException  | 400  | `ClientId` not found in any pool |
 | UserNotFoundException      | 400  | `Username` not found in the resolved pool |
 | InternalErrorException     | 500  | storage failure |

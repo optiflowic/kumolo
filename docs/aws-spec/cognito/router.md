@@ -20,12 +20,18 @@ Last verified: 2026-06-22
 
 No namespace prefix (unlike DynamoDB which uses `com.amazonaws.dynamodb...#ExceptionName`).
 
+## Input Validation
+
+Every dispatched operation is validated against the AWS model before its handler runs, so a
+constraint violation takes precedence over resource and token errors. See
+`input_validation.md`.
+
 ## Common Errors
 
 | Error Type | HTTP Status | Notes |
 |-----------|------------|-------|
 | UnknownOperationException | 400 | Unrecognized operation name (AWS docs say 404; kumolo uses 400 — needs verification against real AWS) |
-| InvalidParameterException | 400 | Missing or malformed input |
+| InvalidParameterException | 400 | Input violates a model constraint (see `input_validation.md`), or an operation-specific check fails |
 | NotAuthorizedException | 400 | Invalid credentials or token |
 | ResourceNotFoundException | 400 | User pool or client not found |
 | UserNotFoundException | 400 | User does not exist |

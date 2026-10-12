@@ -75,7 +75,7 @@ Or, when a challenge is required:
 
 | Error | HTTP | Condition |
 |-------|------|-----------|
-| InvalidParameterException | 400 | Missing required field or unsupported AuthFlow |
+| InvalidParameterException | 400 | input violates a model constraint (see `input_validation.md`), or an AuthFlow kumolo does not support |
 | ResourceNotFoundException | 400 | ClientId not found |
 | UserNotFoundException | 400 | Username not found (USER_PASSWORD_AUTH, USER_SRP_AUTH) |
 | UserNotConfirmedException | 400 | User is UNCONFIRMED |

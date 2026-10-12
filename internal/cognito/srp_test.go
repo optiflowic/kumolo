@@ -294,7 +294,7 @@ func TestUserSRPAuth_GetUserStorageError(t *testing.T) {
 	client, err := srptest.NewSRPClient()
 	require.NoError(t, err)
 
-	w := doInitSRPAuth(t, ro, "client-1", map[string]string{
+	w := doInitSRPAuth(t, ro, "client1", map[string]string{
 		"USERNAME": "eve", "SRP_A": client.AHex(),
 	})
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
@@ -316,7 +316,7 @@ func TestUserSRPAuth_GetPoolKeysStorageError(t *testing.T) {
 	client, err := srptest.NewSRPClient()
 	require.NoError(t, err)
 
-	w := doInitSRPAuth(t, ro, "client-1", map[string]string{
+	w := doInitSRPAuth(t, ro, "client1", map[string]string{
 		"USERNAME": "frank", "SRP_A": client.AHex(),
 	})
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
@@ -392,7 +392,7 @@ func TestPasswordVerifierChallenge_MissingRequiredFields(t *testing.T) {
 	ro := newTestRouter(t)
 	_, clientID := setupPool(t, ro)
 
-	w := doPasswordVerifier(t, ro, clientID, "some-session", map[string]string{})
+	w := doPasswordVerifier(t, ro, clientID, "invalid-session-token", map[string]string{})
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assertErrType(t, w, ErrTypeInvalidParameterException)
 }
@@ -499,7 +499,7 @@ func TestPasswordVerifierChallenge_GetPoolKeysStorageError(t *testing.T) {
 	ro := &Router{storage: &mockStore{
 		getPoolForClient: func(string) (string, error) { return "us-east-1_test", nil },
 	}}
-	w := doPasswordVerifier(t, ro, "client-1", "some-session", map[string]string{
+	w := doPasswordVerifier(t, ro, "client1", "invalid-session-token", map[string]string{
 		"PASSWORD_CLAIM_SECRET_BLOCK": "AAAA",
 		"TIMESTAMP":                   "x",
 		"PASSWORD_CLAIM_SIGNATURE":    "AAAA",

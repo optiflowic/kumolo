@@ -16,12 +16,7 @@ const (
 	clientSecretChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 )
 
-var (
-	reClientName   = regexp.MustCompile(`^[\w\s+=,.@-]{1,128}$`)
-	reClientSecret = regexp.MustCompile(`^[\w+]+$`)
-	reClientID     = regexp.MustCompile(`^[a-z0-9]{26}$`)
-	reUserPoolID   = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
-)
+var reClientID = regexp.MustCompile(`^[a-z0-9]{26}$`)
 
 func generateClientID() (string, error) {
 	const n = len(clientIDChars)
@@ -121,36 +116,8 @@ func derefBool(p *bool, def bool) bool {
 	return *p
 }
 
-// validatePoolID writes a 400 error and returns false if poolID fails validation.
-func validatePoolID(w http.ResponseWriter, poolID string) bool {
-	if poolID == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"UserPoolId is required",
-		)
-		return false
-	}
-	if !reUserPoolID.MatchString(poolID) {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-			"UserPoolId contains invalid characters")
-		return false
-	}
-	return true
-}
-
 // validateClientID writes a 400 error and returns false if clientID fails validation.
 func validateClientID(w http.ResponseWriter, clientID string) bool {
-	if clientID == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"ClientId is required",
-		)
-		return false
-	}
 	if !reClientID.MatchString(clientID) {
 		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
 			"ClientId contains invalid characters")
@@ -165,36 +132,10 @@ func validateCreateUserPoolClientRequest(
 	w http.ResponseWriter,
 	req *createUserPoolClientRequest,
 ) bool {
-	if req.ClientName == "" {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			ErrTypeInvalidParameterException,
-			"ClientName is required",
-		)
-		return false
-	}
-	if !reClientName.MatchString(req.ClientName) {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-			"ClientName must be 1-128 characters and match pattern [\\w\\s+=,.@-]+")
-		return false
-	}
 	if req.GenerateSecret && req.ClientSecret != "" {
 		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
 			"Cannot specify both GenerateSecret and ClientSecret")
 		return false
-	}
-	if !req.GenerateSecret && req.ClientSecret != "" {
-		if len(req.ClientSecret) < 24 || len(req.ClientSecret) > 64 {
-			writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-				"ClientSecret length must be between 24 and 64 characters")
-			return false
-		}
-		if !reClientSecret.MatchString(req.ClientSecret) {
-			writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-				`ClientSecret must match pattern [\w+]+`)
-			return false
-		}
 	}
 	return true
 }
@@ -250,9 +191,6 @@ func (ro *Router) handleCreateUserPoolClient(w http.ResponseWriter, body []byte)
 			ErrTypeInvalidParameterException,
 			"invalid request body",
 		)
-		return
-	}
-	if !validatePoolID(w, req.UserPoolId) {
 		return
 	}
 	if !validateCreateUserPoolClientRequest(w, &req) {
@@ -312,9 +250,6 @@ func (ro *Router) handleDescribeUserPoolClient(w http.ResponseWriter, body []byt
 		)
 		return
 	}
-	if !validatePoolID(w, req.UserPoolId) {
-		return
-	}
 	if !validateClientID(w, req.ClientId) {
 		return
 	}
@@ -344,15 +279,7 @@ func (ro *Router) handleUpdateUserPoolClient(w http.ResponseWriter, body []byte)
 		)
 		return
 	}
-	if !validatePoolID(w, req.UserPoolId) {
-		return
-	}
 	if !validateClientID(w, req.ClientId) {
-		return
-	}
-	if req.ClientName != "" && !reClientName.MatchString(req.ClientName) {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-			"ClientName must be 1-128 characters and match pattern [\\w\\s+=,.@-]+")
 		return
 	}
 
@@ -420,9 +347,6 @@ func (ro *Router) handleDeleteUserPoolClient(w http.ResponseWriter, body []byte)
 		)
 		return
 	}
-	if !validatePoolID(w, req.UserPoolId) {
-		return
-	}
 	if !validateClientID(w, req.ClientId) {
 		return
 	}
@@ -461,18 +385,10 @@ func (ro *Router) handleListUserPoolClients(w http.ResponseWriter, body []byte) 
 		)
 		return
 	}
-	if !validatePoolID(w, req.UserPoolId) {
-		return
-	}
 
 	maxResults := 60
 	if req.MaxResults != nil {
 		maxResults = *req.MaxResults
-		if maxResults < 1 || maxResults > 60 {
-			writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-				"MaxResults must be between 1 and 60")
-			return
-		}
 	}
 
 	clients, nextToken, err := ro.storage.ListUserPoolClients(
