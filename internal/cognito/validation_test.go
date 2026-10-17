@@ -476,6 +476,9 @@ func TestInputShape_RenderOmittedMembers(t *testing.T) {
 		"developerOnlyAttribute=null, mutable=null, required=null, "+
 		"numberAttributeConstraints=null, stringAttributeConstraints=null)", got)
 
+	got = shapeSchemaAttributeType.render(map[string]any{"Name": "a", "Mutable": true})
+	assert.Contains(t, got, "mutable=true")
+
 	got = shapeRecoveryOptionType.render(map[string]any{"Name": "admin_only"})
 	assert.Equal(t, "RecoveryOptionType(priority=0, name=admin_only)", got)
 }

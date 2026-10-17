@@ -195,7 +195,7 @@ func (s *inputShape) broken(v any) []string {
 		str, size, unit = v, int64(utf8.RuneCountInString(v)), "length"
 	case int64:
 		size = v
-	default:
+	default: // unreachable: string and integer shapes decode to string and int64
 		return nil
 	}
 	if s.max != nil && size > *s.max {
