@@ -134,7 +134,7 @@ func TestGetUser_InvalidJSON(t *testing.T) {
 	ro := newTestRouter(t)
 	w := doOp(t, ro, "GetUser", `{invalid}`)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrType(t, w, ErrTypeInvalidParameterException)
+	assertErrType(t, w, ErrTypeSerializationException)
 }
 
 func TestGetUser_MalformedJWT_NotThreeParts(t *testing.T) {
@@ -565,7 +565,7 @@ func TestGlobalSignOut_InvalidJSON(t *testing.T) {
 	ro := newTestRouter(t)
 	w := doOp(t, ro, "GlobalSignOut", `{bad}`)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrType(t, w, ErrTypeInvalidParameterException)
+	assertErrType(t, w, ErrTypeSerializationException)
 }
 
 func TestGlobalSignOut_InvalidToken(t *testing.T) {
@@ -1035,7 +1035,7 @@ func TestUpdateUserAttributes_InvalidJSON(t *testing.T) {
 	ro := newTestRouter(t)
 	w := doOp(t, ro, "UpdateUserAttributes", `not json`)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrType(t, w, ErrTypeInvalidParameterException)
+	assertErrType(t, w, ErrTypeSerializationException)
 }
 
 func TestUpdateUserAttributes_InvalidToken(t *testing.T) {
@@ -1299,7 +1299,7 @@ func TestGetUserAttributeVerificationCode_InvalidJSON(t *testing.T) {
 	ro := newTestRouter(t)
 	w := doOp(t, ro, "GetUserAttributeVerificationCode", `not json`)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrType(t, w, ErrTypeInvalidParameterException)
+	assertErrType(t, w, ErrTypeSerializationException)
 }
 
 func TestGetUserAttributeVerificationCode_InvalidToken(t *testing.T) {
@@ -1567,7 +1567,7 @@ func TestVerifyUserAttribute_InvalidJSON(t *testing.T) {
 	ro := newTestRouter(t)
 	w := doOp(t, ro, "VerifyUserAttribute", `not json`)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrType(t, w, ErrTypeInvalidParameterException)
+	assertErrType(t, w, ErrTypeSerializationException)
 }
 
 func TestVerifyUserAttribute_InvalidToken(t *testing.T) {
@@ -1776,7 +1776,7 @@ func TestDeleteUser_InvalidJSON(t *testing.T) {
 	ro := newTestRouter(t)
 	w := doOp(t, ro, "DeleteUser", `not json`)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrType(t, w, ErrTypeInvalidParameterException)
+	assertErrType(t, w, ErrTypeSerializationException)
 }
 
 func TestDeleteUser_InvalidToken(t *testing.T) {

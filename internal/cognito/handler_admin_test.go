@@ -634,7 +634,7 @@ func TestAdminOps_InvalidBody(t *testing.T) {
 		t.Run(op, func(t *testing.T) {
 			w := doOp(t, ro, op, "invalid-json")
 			assert.Equal(t, http.StatusBadRequest, w.Code)
-			assertErrType(t, w, ErrTypeInvalidParameterException)
+			assertErrType(t, w, ErrTypeSerializationException)
 		})
 	}
 }
@@ -946,7 +946,7 @@ func TestListUsers_InvalidJSON(t *testing.T) {
 	ro := newTestRouter(t)
 	w := doOp(t, ro, "ListUsers", `not json`)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrType(t, w, ErrTypeInvalidParameterException)
+	assertErrType(t, w, ErrTypeSerializationException)
 }
 
 func TestListUsers_InvalidPaginationToken(t *testing.T) {
@@ -1190,7 +1190,7 @@ func TestAdminUpdateUserAttributes_InvalidJSON(t *testing.T) {
 	ro := newTestRouter(t)
 	w := doOp(t, ro, "AdminUpdateUserAttributes", `not json`)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrType(t, w, ErrTypeInvalidParameterException)
+	assertErrType(t, w, ErrTypeSerializationException)
 }
 
 func TestAdminUpdateUserAttributes_UserPoolNotFound(t *testing.T) {
@@ -1372,14 +1372,14 @@ func TestAdminDisableUser_InvalidJSON(t *testing.T) {
 	ro := newTestRouter(t)
 	w := doOp(t, ro, "AdminDisableUser", `not json`)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrType(t, w, ErrTypeInvalidParameterException)
+	assertErrType(t, w, ErrTypeSerializationException)
 }
 
 func TestAdminEnableUser_InvalidJSON(t *testing.T) {
 	ro := newTestRouter(t)
 	w := doOp(t, ro, "AdminEnableUser", `not json`)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrType(t, w, ErrTypeInvalidParameterException)
+	assertErrType(t, w, ErrTypeSerializationException)
 }
 
 func TestAdminDisableUser_UserPoolNotFound(t *testing.T) {

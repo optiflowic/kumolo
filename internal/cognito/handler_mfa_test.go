@@ -162,7 +162,7 @@ func TestAssociateSoftwareToken_InvalidJSON(t *testing.T) {
 	ro := newTestRouter(t)
 	w := doOp(t, ro, "AssociateSoftwareToken", `not json`)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrType(t, w, ErrTypeInvalidParameterException)
+	assertErrType(t, w, ErrTypeSerializationException)
 }
 
 func TestAssociateSoftwareToken_InvalidToken(t *testing.T) {
@@ -346,7 +346,7 @@ func TestVerifySoftwareToken_InvalidJSON(t *testing.T) {
 	ro := newTestRouter(t)
 	w := doOp(t, ro, "VerifySoftwareToken", `not json`)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrType(t, w, ErrTypeInvalidParameterException)
+	assertErrType(t, w, ErrTypeSerializationException)
 }
 
 func TestVerifySoftwareToken_MissingAccessToken(t *testing.T) {
@@ -647,7 +647,7 @@ func TestSetUserMFAPreference_InvalidJSON(t *testing.T) {
 	ro := newTestRouter(t)
 	w := doOp(t, ro, "SetUserMFAPreference", `not json`)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrType(t, w, ErrTypeInvalidParameterException)
+	assertErrType(t, w, ErrTypeSerializationException)
 }
 
 func TestSetUserMFAPreference_InvalidToken(t *testing.T) {

@@ -1,8 +1,6 @@
 package cognito
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"regexp"
 	"slices"
@@ -17,6 +15,10 @@ type shapeKind int
 const (
 	kindString shapeKind = iota + 1
 	kindInteger
+	kindBoolean
+	kindStructure
+	kindList
+	kindMap
 )
 
 type inputPattern struct {
@@ -28,65 +30,36 @@ func mustPattern(src string) *inputPattern {
 	return &inputPattern{src: src, re: regexp.MustCompile(`^(?:` + src + `)$`)}
 }
 
-// inputShape holds the constraints the AWS model puts on a scalar shape.
+// inputShape is one shape of the AWS model: its type, its constraints and, for a
+// structure, list or map, the shapes it contains.
 type inputShape struct {
-	kind      shapeKind
-	sensitive bool
-	min, max  *int64 // length for strings, value for integers
-	pattern   *inputPattern
-	enum      []string
+	kind       shapeKind
+	sensitive  bool
+	min, max   *int64 // length for strings, lists and maps; value for integers
+	pattern    *inputPattern
+	enum       []string
+	members    []memberRule // structure
+	member     *inputShape  // list
+	key, value *inputShape  // map
 }
 
-// memberRule is one top-level input member. A nil shape means only presence is checked.
 type memberRule struct {
 	name     string
 	required bool
 	shape    *inputShape
 }
 
-// validateInput checks the request against the AWS model constraints in inputRules.
-// It runs before any handler, so a constraint violation is reported ahead of resource
-// lookups and token verification, as on AWS. A body that is not a JSON object passes;
-// the handler reports it.
-//
-// Handlers decode with encoding/json, which matches member names case-insensitively and
-// keeps the last of duplicate keys. Every occurrence is therefore checked, under the same
-// name matching, so no value reaches a handler unvalidated.
-func validateInput(op string, body []byte) (message string, ok bool) {
-	if !json.Valid(body) {
-		return "", true
-	}
-	dec := json.NewDecoder(bytes.NewReader(body))
-	if start, _ := dec.Token(); start != json.Delim('{') {
-		return "", true
-	}
-
-	rules := inputRules[op]
-	found := make([][]string, len(rules))
-	present := make([]bool, len(rules))
-	for dec.More() {
-		// The body is valid JSON, so reading a key and its value cannot fail.
-		keyToken, _ := dec.Token()
-		key, _ := keyToken.(string)
-		var raw json.RawMessage
-		_ = dec.Decode(&raw)
-
-		i := slices.IndexFunc(rules, func(r memberRule) bool {
-			return strings.EqualFold(r.name, key)
-		})
-		if i < 0 {
-			continue
-		}
-		present[i] = string(raw) != "null"
-		if present[i] && rules[i].shape != nil {
-			found[i] = append(found[i], rules[i].shape.check(rules[i].name, raw)...)
-		}
-	}
-
+// validateInput checks the top-level members of a decoded request against the AWS model
+// constraints. It runs before any handler, so a constraint violation is reported ahead of
+// resource lookups and token verification, as on AWS.
+func validateInput(in *inputShape, input map[string]any) (message string, ok bool) {
 	var violations []string
-	for i, rule := range rules {
-		violations = append(violations, found[i]...)
-		if rule.required && !present[i] {
+	for _, rule := range in.members {
+		v, present := input[rule.name]
+		if present {
+			violations = append(violations, rule.shape.check(rule.name, v)...)
+		}
+		if rule.required && !present {
 			violations = append(
 				violations,
 				violation(rule.name, "null", "Member must not be null"),
@@ -105,9 +78,9 @@ func validateInput(op string, body []byte) (message string, ok bool) {
 		len(violations), noun, strings.Join(violations, "; ")), false
 }
 
-// check returns one violation per broken constraint. A value of the wrong JSON type
-// returns none; the handler's own decoding reports it.
-func (s *inputShape) check(name string, raw json.RawMessage) []string {
+// check returns one violation per broken constraint of a scalar value decoded by
+// decodeInput.
+func (s *inputShape) check(name string, value any) []string {
 	var (
 		shown    string
 		size     int64
@@ -116,10 +89,7 @@ func (s *inputShape) check(name string, raw json.RawMessage) []string {
 	)
 	switch s.kind {
 	case kindString:
-		var v string
-		if err := json.Unmarshal(raw, &v); err != nil {
-			return nil
-		}
+		v := value.(string)
 		shown, size, sizeUnit = "'"+v+"'", int64(utf8.RuneCountInString(v)), "length"
 		if s.pattern != nil && !s.pattern.re.MatchString(v) {
 			out = append(out, "Member must satisfy regular expression pattern: "+s.pattern.src)
@@ -129,11 +99,10 @@ func (s *inputShape) check(name string, raw json.RawMessage) []string {
 				"Member must satisfy enum value set: ["+strings.Join(s.enum, ", ")+"]")
 		}
 	case kindInteger:
-		var v int64
-		if err := json.Unmarshal(raw, &v); err != nil {
-			return nil
-		}
+		v := value.(int64)
 		shown, size = "'"+strconv.FormatInt(v, 10)+"'", v
+	default:
+		return nil
 	}
 	if s.max != nil && size > *s.max {
 		out = append(

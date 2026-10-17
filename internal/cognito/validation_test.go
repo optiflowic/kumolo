@@ -107,23 +107,9 @@ func TestValidateInput_Violations(t *testing.T) {
 				`constraint: Member must have value greater than or equal to 1`,
 		},
 		{
-			name: "member name in another case",
+			name: "last of duplicate members",
 			op:   "ListUserPools",
-			body: `{"maxresults":0}`,
-			want: `1 validation error detected: Value '0' at 'maxResults' failed to satisfy ` +
-				`constraint: Member must have value greater than or equal to 1`,
-		},
-		{
-			name: "duplicate member in another case",
-			op:   "ListUserPools",
-			body: `{"MaxResults":1,"maxResults":0}`,
-			want: `1 validation error detected: Value '0' at 'maxResults' failed to satisfy ` +
-				`constraint: Member must have value greater than or equal to 1`,
-		},
-		{
-			name: "invalid value followed by a null duplicate",
-			op:   "ListUserPoolClients",
-			body: `{"UserPoolId":"us-east-1_abc","MaxResults":0,"MaxResults":null}`,
+			body: `{"MaxResults":1,"MaxResults":0}`,
 			want: `1 validation error detected: Value '0' at 'maxResults' failed to satisfy ` +
 				`constraint: Member must have value greater than or equal to 1`,
 		},
@@ -145,7 +131,7 @@ func TestValidateInput_Violations(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			msg, ok := validateInput(tt.op, []byte(tt.body))
+			msg, ok := validateBody(t, tt.op, tt.body)
 			assert.False(t, ok)
 			assert.Equal(t, tt.want, msg)
 		})
@@ -171,39 +157,40 @@ func TestValidateInput_Passes(t *testing.T) {
 		{
 			name: "null followed by a valid duplicate",
 			op:   "DescribeUserPool",
-			body: `{"UserPoolId":null,"userPoolId":"us-east-1_abc123XYZ"}`,
+			body: `{"UserPoolId":null,"UserPoolId":"us-east-1_abc123XYZ"}`,
 		},
 		{
-			name: "member the model does not constrain",
+			name: "invalid value followed by a null duplicate",
+			op:   "ListUserPoolClients",
+			body: `{"UserPoolId":"us-east-1_abc","MaxResults":0,"MaxResults":null}`,
+		},
+		{
+			name: "member name in another case",
+			op:   "ListUserPools",
+			body: `{"MaxResults":1,"maxresults":0}`,
+		},
+		{
+			name: "member the model does not declare",
 			op:   "ListUserPools",
 			body: `{"MaxResults":1,"Other":{"a":[1]}}`,
 		},
-		{name: "unknown operation", op: "NoSuchOperation", body: `{"UserPoolId":"!!!"}`},
-		{name: "body is not JSON", op: "DescribeUserPool", body: `not-json`},
-		{name: "body is not an object", op: "DescribeUserPool", body: `[]`},
-		{name: "string member of another type", op: "DescribeUserPool", body: `{"UserPoolId":42}`},
-		{name: "integer member of another type", op: "ListUserPools", body: `{"MaxResults":"x"}`},
+		{name: "integer with a fraction", op: "ListUserPools", body: `{"MaxResults":60.9}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			msg, ok := validateInput(tt.op, []byte(tt.body))
+			msg, ok := validateBody(t, tt.op, tt.body)
 			assert.True(t, ok)
 			assert.Empty(t, msg)
 		})
 	}
 }
 
-// Members of the wrong JSON type pass validateInput and are rejected by the handler.
-func TestRouter_WrongMemberTypeIsRejectedByHandler(t *testing.T) {
-	ro := newTestRouter(t)
-	for op, body := range map[string]string{
-		"DescribeUserPool": `{"UserPoolId":42}`,
-		"ListUserPools":    `{"MaxResults":"x"}`,
-	} {
-		w := doOp(t, ro, op, body)
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assertErrType(t, w, ErrTypeInvalidParameterException)
-	}
+func validateBody(t *testing.T, op, body string) (string, bool) {
+	t.Helper()
+	in := inputRules[op]
+	input, serr := decodeInput(in, []byte(body))
+	require.Nil(t, serr)
+	return validateInput(in, input)
 }
 
 func TestRouter_ValidatesInputBeforeResourceLookup(t *testing.T) {
@@ -247,24 +234,18 @@ func TestRouter_ValidatesInputBeforeResourceLookup(t *testing.T) {
 	}
 }
 
-// Handlers decode member names case-insensitively, so a differently-cased duplicate must
-// not carry an unvalidated value past validateInput.
-func TestRouter_CaseVariantMemberCannotBypassValidation(t *testing.T) {
+// Handlers decode member names case-insensitively, so the router must hand them only the
+// exact-case members decodeInput kept.
+func TestRouter_IgnoresMemberNameInAnotherCase(t *testing.T) {
 	ro := newTestRouter(t)
 	poolID := createPool(t, ro, "pool")
-	for op, body := range map[string]string{
-		"ListUserPools":       `{"MaxResults":1,"maxResults":0}`,
-		"ListUserPoolClients": fmt.Sprintf(`{"UserPoolId":%q,"maxResults":0}`, poolID),
-		"DescribeUserPoolClient": fmt.Sprintf(
-			`{"UserPoolId":%q,"ClientId":"abcdefghijklmnopqrstuvwxyz","userPoolId":"../x"}`, poolID,
-		),
-	} {
-		t.Run(op, func(t *testing.T) {
-			w := doOp(t, ro, op, body)
-			assert.Equal(t, http.StatusBadRequest, w.Code)
-			assertErrType(t, w, ErrTypeInvalidParameterException)
-		})
-	}
+
+	w := doOp(t, ro, "ListUserPools", `{"MaxResults":1,"maxResults":0}`)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	w = doOp(t, ro, "DescribeUserPool", fmt.Sprintf(`{"userPoolId":%q}`, poolID))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeInvalidParameterException)
 }
 
 // A new operation needs `make genvalidation`; without it the router would dispatch

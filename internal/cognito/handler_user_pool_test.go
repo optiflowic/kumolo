@@ -288,10 +288,14 @@ func TestCreateUserPool_InvalidSchema(t *testing.T) {
 	ro := newTestRouter(t)
 	w := doOp(t, ro, "CreateUserPool", `{"PoolName":"pool","Schema":42}`)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeSerializationException)
 
-	var resp errResponse
-	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
-	assert.Equal(t, ErrTypeInvalidParameterException, resp.Type)
+	// The handler's own guard, for a body that bypasses decodeInput.
+	w = httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/", nil)
+	ro.dispatch(w, r, "CreateUserPool", []byte(`{"PoolName":"pool","Schema":42}`))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrType(t, w, ErrTypeInvalidParameterException)
 }
 
 func TestListUserPools_InvalidNextToken(t *testing.T) {
@@ -323,7 +327,7 @@ func TestCreateUserPool_InvalidBody(t *testing.T) {
 
 	var resp errResponse
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
-	assert.Equal(t, ErrTypeInvalidParameterException, resp.Type)
+	assert.Equal(t, ErrTypeSerializationException, resp.Type)
 }
 
 func TestCreateUserPool_InvalidPoolName(t *testing.T) {
@@ -1072,7 +1076,7 @@ func TestGetUserPoolMfaConfig_Errors(t *testing.T) {
 			router:     func(t *testing.T) *Router { return newTestRouter(t) },
 			body:       `not-json`,
 			wantStatus: http.StatusBadRequest,
-			wantType:   ErrTypeInvalidParameterException,
+			wantType:   ErrTypeSerializationException,
 		},
 	}
 	for _, tc := range tests {
@@ -1267,7 +1271,7 @@ func TestSetUserPoolMfaConfig_Errors(t *testing.T) {
 			router:     func(t *testing.T) *Router { return newTestRouter(t) },
 			body:       `not-json`,
 			wantStatus: http.StatusBadRequest,
-			wantType:   ErrTypeInvalidParameterException,
+			wantType:   ErrTypeSerializationException,
 		},
 	}
 	for _, tc := range tests {

@@ -135,6 +135,10 @@ func TestWriteError_BrokenWriter(t *testing.T) {
 	writeError(newFailWriter(), http.StatusBadRequest, ErrTypeInvalidParameterException, "test")
 }
 
+func TestWriteSerializationError_BrokenWriter(t *testing.T) {
+	writeSerializationError(newFailWriter(), "test")
+}
+
 func TestWriteJSON_BrokenWriter(t *testing.T) {
 	// exercises the slog.Warn path when json encoding fails due to a broken writer
 	writeJSON(newFailWriter(), http.StatusOK, map[string]string{"key": "value"})

@@ -2,6 +2,7 @@ package cognito
 
 import (
 	"crypto/rsa"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -165,10 +166,22 @@ func (ro *Router) serveHTTP(w http.ResponseWriter, r *http.Request, op string) {
 		)
 		return
 	}
-	if msg, ok := validateInput(op, body); !ok {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException, msg)
-		return
+	if in, ok := inputRules[op]; ok {
+		input, serr := decodeInput(in, body)
+		if serr != nil {
+			writeSerializationError(w, serr.message)
+			return
+		}
+		if msg, ok := validateInput(in, input); !ok {
+			writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException, msg)
+			return
+		}
+		body, _ = json.Marshal(input) // holds only JSON-encodable values
 	}
+	ro.dispatch(w, r, op, body)
+}
+
+func (ro *Router) dispatch(w http.ResponseWriter, r *http.Request, op string, body []byte) {
 	switch op {
 	case "CreateUserPool":
 		ro.handleCreateUserPool(w, r, body)
