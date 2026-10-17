@@ -493,6 +493,16 @@ func TestCognitoIntegration_UserPoolClient(t *testing.T) {
 		assert.Equal(t, "ResourceNotFoundException", apiErrorCode(err))
 	})
 
+	// A ClientId the model allows but no client can have (issue #626).
+	t.Run("DescribeUserPoolClient_NotFound_UnissuedForm", func(t *testing.T) {
+		_, err := c.DescribeUserPoolClient(ctx, &awscognito.DescribeUserPoolClientInput{
+			UserPoolId: aws.String(poolID),
+			ClientId:   aws.String("abc"),
+		})
+		require.Error(t, err)
+		assert.Equal(t, "ResourceNotFoundException", apiErrorCode(err))
+	})
+
 	t.Run("UpdateUserPoolClient", func(t *testing.T) {
 		created, err := c.CreateUserPoolClient(ctx, &awscognito.CreateUserPoolClientInput{
 			UserPoolId: aws.String(poolID),
