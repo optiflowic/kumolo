@@ -2152,6 +2152,15 @@ else
   fail "UpdateUserPool — expected InvalidParameterException at autoVerifiedAttributes"
 fi
 
+# A ClientId the model allows but kumolo never issues names no client (#626).
+UNISSUED_JSON=$($AWS describe-user-pool-client --user-pool-id "$POOL_ID" \
+  --client-id abc 2>&1) || true
+if echo "$UNISSUED_JSON" | grep -q "ResourceNotFoundException"; then
+  ok "DescribeUserPoolClient — ResourceNotFoundException for an unissued ClientId"
+else
+  fail "DescribeUserPoolClient — expected ResourceNotFoundException for an unissued ClientId"
+fi
+
 # ---------------------------------------------------------------------------
 # Cleanup
 # ---------------------------------------------------------------------------

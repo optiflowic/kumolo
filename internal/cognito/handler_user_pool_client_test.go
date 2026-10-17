@@ -159,23 +159,25 @@ func TestCreateUserPoolClient_BothGenerateSecretAndClientSecret(t *testing.T) {
 	assert.Equal(t, "Cannot specify both GenerateSecret and ClientSecret", resp.Message)
 }
 
-// kumolo only issues 26-character lowercase client IDs and rejects any other form,
-// including ones the AWS model pattern allows.
-func TestUserPoolClient_ClientIDNotInKumoloFormat(t *testing.T) {
+// A ClientId the model allows but kumolo never issues names no client. Verified against
+// real AWS (issue #626): ResourceNotFoundException, as for any unknown client.
+func TestUserPoolClient_ClientIDNotIssued(t *testing.T) {
 	ro := newTestRouter(t)
 	poolID := createPool(t, ro, "pool")
+	clientID := createClient(t, ro, poolID, "app")
 	for _, op := range []string{
 		"DescribeUserPoolClient", "UpdateUserPoolClient", "DeleteUserPoolClient",
 	} {
-		t.Run(op, func(t *testing.T) {
-			w := doOp(t, ro, op, fmt.Sprintf(`{"UserPoolId":%q,"ClientId":"ABC"}`, poolID))
-			assert.Equal(t, http.StatusBadRequest, w.Code)
+		for _, id := range []string{"abc", strings.ToUpper(clientID)} {
+			t.Run(op+"/"+id, func(t *testing.T) {
+				w := doOp(t, ro, op, fmt.Sprintf(`{"UserPoolId":%q,"ClientId":%q}`, poolID, id))
+				assert.Equal(t, http.StatusBadRequest, w.Code)
 
-			var resp errResponse
-			require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
-			assert.Equal(t, ErrTypeInvalidParameterException, resp.Type)
-			assert.Equal(t, "ClientId contains invalid characters", resp.Message)
-		})
+				var resp errResponse
+				require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+				assert.Equal(t, ErrTypeResourceNotFoundException, resp.Type)
+			})
+		}
 	}
 }
 

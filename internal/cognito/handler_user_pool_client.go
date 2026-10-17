@@ -116,11 +116,14 @@ func derefBool(p *bool, def bool) bool {
 	return *p
 }
 
-// validateClientID writes a 400 error and returns false if clientID fails validation.
-func validateClientID(w http.ResponseWriter, clientID string) bool {
+// requireIssuedClientID writes ResourceNotFoundException and returns false when clientID is
+// not in the form kumolo issues. No stored client can have such an ID, and rejecting it
+// before the lookup keeps a differently cased ID from matching a client file on a
+// case-insensitive filesystem.
+func requireIssuedClientID(w http.ResponseWriter, clientID string) bool {
 	if !reClientID.MatchString(clientID) {
-		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
-			"ClientId contains invalid characters")
+		writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException,
+			msgUserPoolClientNotFound)
 		return false
 	}
 	return true
@@ -250,7 +253,7 @@ func (ro *Router) handleDescribeUserPoolClient(w http.ResponseWriter, body []byt
 		)
 		return
 	}
-	if !validateClientID(w, req.ClientId) {
+	if !requireIssuedClientID(w, req.ClientId) {
 		return
 	}
 
@@ -258,7 +261,7 @@ func (ro *Router) handleDescribeUserPoolClient(w http.ResponseWriter, body []byt
 	if err != nil {
 		if errors.Is(err, errUserPoolClientNotFound) {
 			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException,
-				"User pool client not found.")
+				msgUserPoolClientNotFound)
 			return
 		}
 		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
@@ -279,7 +282,7 @@ func (ro *Router) handleUpdateUserPoolClient(w http.ResponseWriter, body []byte)
 		)
 		return
 	}
-	if !validateClientID(w, req.ClientId) {
+	if !requireIssuedClientID(w, req.ClientId) {
 		return
 	}
 
@@ -323,7 +326,7 @@ func (ro *Router) handleUpdateUserPoolClient(w http.ResponseWriter, body []byte)
 	if err != nil {
 		if errors.Is(err, errUserPoolClientNotFound) {
 			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException,
-				"User pool client not found.")
+				msgUserPoolClientNotFound)
 			return
 		}
 		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
@@ -347,14 +350,14 @@ func (ro *Router) handleDeleteUserPoolClient(w http.ResponseWriter, body []byte)
 		)
 		return
 	}
-	if !validateClientID(w, req.ClientId) {
+	if !requireIssuedClientID(w, req.ClientId) {
 		return
 	}
 
 	if err := ro.storage.DeleteUserPoolClient(req.UserPoolId, req.ClientId); err != nil {
 		if errors.Is(err, errUserPoolClientNotFound) {
 			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException,
-				"User pool client not found.")
+				msgUserPoolClientNotFound)
 			return
 		}
 		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
