@@ -22,9 +22,9 @@ No namespace prefix (unlike DynamoDB which uses `com.amazonaws.dynamodb...#Excep
 
 ## Input Validation
 
-Every dispatched operation is validated against the AWS model before its handler runs, so a
-constraint violation takes precedence over resource and token errors. See
-`input_validation.md`.
+Every dispatched operation reads the body as its input shape (`input_deserialization.md`) and
+then validates it against the AWS model (`input_validation.md`) before its handler runs, so a
+serialization error or constraint violation takes precedence over resource and token errors.
 
 ## Common Errors
 
@@ -32,6 +32,7 @@ constraint violation takes precedence over resource and token errors. See
 |-----------|------------|-------|
 | UnknownOperationException | 400 | Unrecognized operation name (AWS docs say 404; kumolo uses 400 — needs verification against real AWS) |
 | InvalidParameterException | 400 | Input violates a model constraint (see `input_validation.md`), or an operation-specific check fails |
+| SerializationException | 400 | Body cannot be read as the input shape (see `input_deserialization.md`) |
 | NotAuthorizedException | 400 | Invalid credentials or token |
 | ResourceNotFoundException | 400 | User pool or client not found |
 | UserNotFoundException | 400 | User does not exist |
