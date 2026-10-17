@@ -148,7 +148,7 @@ func TestTagResource(t *testing.T) {
 	t.Run("tag key too long", func(t *testing.T) {
 		ro := newTestRouter(t)
 		arn := poolARNFromID(createPool(t, ro, "tag-pool"))
-		longKey := strings.Repeat("k", maxTagKeyLength+1)
+		longKey := strings.Repeat("k", 129)
 		w := doOp(t, ro, "TagResource",
 			fmt.Sprintf(`{"ResourceArn":%q,"Tags":{%q:"v"}}`, arn, longKey))
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -157,7 +157,7 @@ func TestTagResource(t *testing.T) {
 	t.Run("tag value too long", func(t *testing.T) {
 		ro := newTestRouter(t)
 		arn := poolARNFromID(createPool(t, ro, "tag-pool"))
-		longVal := strings.Repeat("v", maxTagValueLength+1)
+		longVal := strings.Repeat("v", 257)
 		w := doOp(t, ro, "TagResource",
 			fmt.Sprintf(`{"ResourceArn":%q,"Tags":{"k":%q}}`, arn, longVal))
 		assert.Equal(t, http.StatusBadRequest, w.Code)

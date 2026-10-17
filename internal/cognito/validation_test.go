@@ -36,25 +36,39 @@ func TestValidateInput_Violations(t *testing.T) {
 			want: `1 validation error detected: Value at 'accessToken' failed to satisfy ` +
 				`constraint: Member must satisfy regular expression pattern: [A-Za-z0-9-_=.]+`,
 		},
+		// Verified against real AWS (issue #624): a missing UserPoolId is reported alone,
+		// before any other constraint.
 		{
-			name: "required member missing",
-			op:   "DescribeUserPool",
-			body: `{}`,
-			want: `1 validation error detected: Value null at 'userPoolId' failed to satisfy ` +
-				`constraint: Member must not be null`,
+			name: "UserPoolId missing",
+			op:   "AdminGetUser",
+			body: `{"Username":""}`,
+			want: `UserPoolId must not be null`,
 		},
 		{
-			name: "required member null",
+			name: "UserPoolId null",
 			op:   "DescribeUserPool",
 			body: `{"UserPoolId":null}`,
-			want: `1 validation error detected: Value null at 'userPoolId' failed to satisfy ` +
-				`constraint: Member must not be null`,
+			want: `UserPoolId must not be null`,
+		},
+		{
+			name: "UserPoolId whose last occurrence is null",
+			op:   "DescribeUserPool",
+			body: `{"UserPoolId":"us-east-1_abc","UserPoolId":null}`,
+			want: `UserPoolId must not be null`,
 		},
 		{
 			name: "required member without scalar constraints",
 			op:   "TagResource",
 			body: `{"ResourceArn":"arn:aws:cognito-idp:us-east-1:000000000000:userpool/us-east-1_a"}`,
 			want: `1 validation error detected: Value null at 'tags' failed to satisfy ` +
+				`constraint: Member must not be null`,
+		},
+		{
+			// Verified against real AWS (issue #624).
+			name: "sensitive member missing",
+			op:   "GetUser",
+			body: `{}`,
+			want: `1 validation error detected: Value at 'accessToken' failed to satisfy ` +
 				`constraint: Member must not be null`,
 		},
 		{
@@ -66,13 +80,14 @@ func TestValidateInput_Violations(t *testing.T) {
 				`Member must have length less than or equal to 55`,
 		},
 		{
-			name: "empty string breaks pattern and minimum length",
+			// Verified against real AWS (issue #624): length before pattern.
+			name: "empty string breaks minimum length and pattern",
 			op:   "DescribeUserPool",
 			body: `{"UserPoolId":""}`,
 			want: `2 validation errors detected: Value '' at 'userPoolId' failed to satisfy ` +
-				`constraint: Member must satisfy regular expression pattern: [\w-]+_[0-9a-zA-Z]+; ` +
+				`constraint: Member must have length greater than or equal to 1; ` +
 				`Value '' at 'userPoolId' failed to satisfy constraint: ` +
-				`Member must have length greater than or equal to 1`,
+				`Member must satisfy regular expression pattern: [\w-]+_[0-9a-zA-Z]+`,
 		},
 		{
 			name: "length counts characters, not bytes",
@@ -86,11 +101,30 @@ func TestValidateInput_Violations(t *testing.T) {
 				`Member must have length less than or equal to 140`,
 		},
 		{
-			name: "enum",
-			op:   "SetUserPoolMfaConfig",
-			body: `{"UserPoolId":"us-east-1_abc","MfaConfiguration":"MAYBE"}`,
-			want: `1 validation error detected: Value 'MAYBE' at 'mfaConfiguration' failed to ` +
-				`satisfy constraint: Member must satisfy enum value set: [OFF, ON, OPTIONAL]`,
+			// Verified against real AWS (issue #624): enum values and members in Java
+			// HashSet / HashMap order.
+			name: "enums across members",
+			op:   "UpdateUserPool",
+			body: `{"UserPoolId":"us-east-1_abc","MfaConfiguration":"X","UserPoolTier":"X",` +
+				`"DeletionProtection":"X"}`,
+			want: `3 validation errors detected: ` +
+				`Value 'X' at 'mfaConfiguration' failed to satisfy constraint: ` +
+				`Member must satisfy enum value set: [OPTIONAL, OFF, ON]; ` +
+				`Value 'X' at 'deletionProtection' failed to satisfy constraint: ` +
+				`Member must satisfy enum value set: [ACTIVE, INACTIVE]; ` +
+				`Value 'X' at 'userPoolTier' failed to satisfy constraint: ` +
+				`Member must satisfy enum value set: [ESSENTIALS, LITE, PLUS]`,
+		},
+		{
+			// Verified against real AWS (issue #624).
+			name: "members in HashMap order, not alphabetical",
+			op:   "AdminCreateUser",
+			body: `{"MessageAction":"BOGUS","UserPoolId":"!!!","Username":"u"}`,
+			want: `2 validation errors detected: ` +
+				`Value 'BOGUS' at 'messageAction' failed to satisfy constraint: ` +
+				`Member must satisfy enum value set: [SUPPRESS, RESEND]; ` +
+				`Value '!!!' at 'userPoolId' failed to satisfy constraint: ` +
+				`Member must satisfy regular expression pattern: [\w-]+_[0-9a-zA-Z]+`,
 		},
 		{
 			name: "integer above maximum",
@@ -114,19 +148,162 @@ func TestValidateInput_Violations(t *testing.T) {
 				`constraint: Member must have value greater than or equal to 1`,
 		},
 		{
-			name: "required member whose last occurrence is null",
-			op:   "DescribeUserPool",
-			body: `{"UserPoolId":"us-east-1_abc","UserPoolId":null}`,
-			want: `1 validation error detected: Value null at 'userPoolId' failed to satisfy ` +
-				`constraint: Member must not be null`,
+			// Verified against real AWS (issue #624).
+			name: "required members around a pattern violation",
+			op:   "AdminAddUserToGroup",
+			body: `{"UserPoolId":"!!!"}`,
+			want: `3 validation errors detected: ` +
+				`Value null at 'groupName' failed to satisfy constraint: Member must not be null; ` +
+				`Value '!!!' at 'userPoolId' failed to satisfy constraint: ` +
+				`Member must satisfy regular expression pattern: [\w-]+_[0-9a-zA-Z]+; ` +
+				`Value at 'username' failed to satisfy constraint: Member must not be null`,
 		},
 		{
-			name: "one entry per violating member",
-			op:   "AdminGetUser",
-			body: `{"UserPoolId":"!!!"}`,
-			want: `2 validation errors detected: Value '!!!' at 'userPoolId' failed to satisfy ` +
-				`constraint: Member must satisfy regular expression pattern: [\w-]+_[0-9a-zA-Z]+; ` +
-				`Value null at 'username' failed to satisfy constraint: Member must not be null`,
+			// Verified against real AWS (issue #624).
+			name: "list of structures",
+			op:   "AdminUpdateUserAttributes",
+			body: `{"UserPoolId":"us-east-1_abc","Username":"u","UserAttributes":` +
+				`[{"Name":"` + strings.Repeat("a", 33) + `","Value":"x"},{"Value":"y"}]}`,
+			want: `2 validation errors detected: Value '` + strings.Repeat("a", 33) +
+				`' at 'userAttributes.1.member.name' failed to satisfy constraint: ` +
+				`Member must have length less than or equal to 32; ` +
+				`Value null at 'userAttributes.2.member.name' failed to satisfy constraint: ` +
+				`Member must not be null`,
+		},
+		{
+			// Verified against real AWS (issue #624).
+			name: "list enum, nested range and map value",
+			op:   "UpdateUserPool",
+			body: `{"UserPoolId":"us-east-1_abc","AutoVerifiedAttributes":["bogus"],` +
+				`"UserPoolTags":{"k":"` + strings.Repeat("v", 257) + `"},` +
+				`"Policies":{"PasswordPolicy":{"MinimumLength":100}}}`,
+			want: `3 validation errors detected: ` +
+				`Value '[bogus]' at 'autoVerifiedAttributes' failed to satisfy constraint: ` +
+				`Member must satisfy constraint: ` +
+				`[Member must satisfy enum value set: [phone_number, email]]; ` +
+				`Value '100' at 'policies.passwordPolicy.minimumLength' failed to satisfy ` +
+				`constraint: Member must have value less than or equal to 99; ` +
+				`Value '{k=` + strings.Repeat("v", 257) + `}' at 'userPoolTags' failed to ` +
+				`satisfy constraint: Map value must satisfy constraint: ` +
+				`[Member must have length less than or equal to 256, ` +
+				`Member must have length greater than or equal to 0]`,
+		},
+		{
+			// Verified against real AWS (issue #624), except the pattern: AWS prints
+			// [\p{L}\p{M}\p{S}\p{N}\p{P}]+, while the published model has the one below.
+			name: "list of strings with every member constraint",
+			op:   "ListUsers",
+			body: `{"UserPoolId":"us-east-1_abc","AttributesToGet":` +
+				`["` + strings.Repeat("b", 34) + `","a",""]}`,
+			want: `1 validation error detected: Value '[` + strings.Repeat("b", 34) +
+				`, a, ]' at 'attributesToGet' failed to satisfy constraint: ` +
+				`Member must satisfy constraint: ` +
+				`[Member must have length less than or equal to 32, ` +
+				`Member must have length greater than or equal to 1, ` +
+				`Member must satisfy regular expression pattern: ` +
+				`[\p{L}\p{M}\p{S}\p{N}\p{P}\t\n\r ]+]`,
+		},
+		{
+			// Verified against real AWS (issue #624).
+			name: "map keys and values",
+			op:   "UpdateUserPool",
+			body: `{"UserPoolId":"us-east-1_abc","UserPoolTags":{"` + strings.Repeat("k", 129) +
+				`":"` + strings.Repeat("v", 257) + `"}}`,
+			want: `2 validation errors detected: Value '{` + strings.Repeat("k", 129) + `=` +
+				strings.Repeat("v", 257) + `}' at 'userPoolTags' failed to satisfy constraint: ` +
+				`Map keys must satisfy constraint: ` +
+				`[Member must have length less than or equal to 128, ` +
+				`Member must have length greater than or equal to 1]; ` +
+				`Value '{` + strings.Repeat("k", 129) + `=` + strings.Repeat("v", 257) +
+				`}' at 'userPoolTags' failed to satisfy constraint: ` +
+				`Map value must satisfy constraint: ` +
+				`[Member must have length less than or equal to 256, ` +
+				`Member must have length greater than or equal to 0]`,
+		},
+		{
+			// Verified against real AWS (issue #624), except the enum: AWS lists 12 values,
+			// three of them not in the published model.
+			name: "list sizes",
+			op:   "UpdateUserPoolClient",
+			body: `{"UserPoolId":"us-east-1_abc","ClientId":"abcdefghijklmnopqrstuvwxyz",` +
+				`"ExplicitAuthFlows":["BOGUS"],"AllowedOAuthFlows":["code","code","code","code"]}`,
+			want: `2 validation errors detected: ` +
+				`Value '[code, code, code, code]' at 'allowedOAuthFlows' failed to satisfy ` +
+				`constraint: Member must have length less than or equal to 3; ` +
+				`Value '[BOGUS]' at 'explicitAuthFlows' failed to satisfy constraint: ` +
+				`Member must satisfy constraint: [Member must satisfy enum value set: ` +
+				`[ALLOW_CUSTOM_AUTH, ALLOW_USER_PASSWORD_AUTH, ADMIN_NO_SRP_AUTH, ` +
+				`USER_PASSWORD_AUTH, ALLOW_ADMIN_USER_PASSWORD_AUTH, ALLOW_USER_AUTH, ` +
+				`CUSTOM_AUTH_FLOW_ONLY, ALLOW_USER_SRP_AUTH, ALLOW_REFRESH_TOKEN_AUTH]]`,
+		},
+		{
+			name: "list with a null element",
+			op:   "UpdateUserPoolClient",
+			body: `{"UserPoolId":"us-east-1_abc","ClientId":"abcdefghijklmnopqrstuvwxyz",` +
+				`"AllowedOAuthFlows":["code",null,"code","code"]}`,
+			want: `1 validation error detected: Value '[code, null, code, code]' at ` +
+				`'allowedOAuthFlows' failed to satisfy constraint: ` +
+				`Member must have length less than or equal to 3`,
+		},
+		{
+			// Verified against real AWS (issue #624).
+			name: "empty list below minimum",
+			op:   "UpdateUserPool",
+			body: `{"UserPoolId":"us-east-1_abc","AccountRecoverySetting":{"RecoveryMechanisms":[]}}`,
+			want: `1 validation error detected: Value '[]' at ` +
+				`'accountRecoverySetting.recoveryMechanisms' failed to satisfy constraint: ` +
+				`Member must have length greater than or equal to 1`,
+		},
+		{
+			// Verified against real AWS (issue #624).
+			name: "omitted integer inside a structure is 0",
+			op:   "UpdateUserPool",
+			body: `{"UserPoolId":"us-east-1_abc","AccountRecoverySetting":` +
+				`{"RecoveryMechanisms":[{"Name":"verified_email"}]}}`,
+			want: `1 validation error detected: Value '0' at ` +
+				`'accountRecoverySetting.recoveryMechanisms.1.member.priority' failed to ` +
+				`satisfy constraint: Member must have value greater than or equal to 1`,
+		},
+		{
+			// Verified against real AWS (issue #624).
+			name: "empty password policy",
+			op:   "UpdateUserPool",
+			body: `{"UserPoolId":"us-east-1_abc","Policies":{"PasswordPolicy":{}}}`,
+			want: `1 validation error detected: Value '0' at ` +
+				`'policies.passwordPolicy.minimumLength' failed to satisfy constraint: ` +
+				`Member must have value greater than or equal to 6`,
+		},
+		{
+			// Verified against real AWS (issue #624).
+			name: "map of structures",
+			op:   "UpdateUserPool",
+			body: `{"UserPoolId":"us-east-1_abc","AcrConfiguration":` +
+				`{"Level1":{"AcrValue":"bad value"},"Level2":{}}}`,
+			want: `2 validation errors detected: ` +
+				`Value null at 'acrConfiguration.Level2.member.acrValue' failed to satisfy ` +
+				`constraint: Member must not be null; ` +
+				`Value 'bad value' at 'acrConfiguration.Level1.member.acrValue' failed to ` +
+				`satisfy constraint: Member must satisfy regular expression pattern: ` +
+				`[\x21\x23-\x5B\x5D-\x7E]+`,
+		},
+		{
+			// Verified against real AWS (issue #624).
+			name: "map size and keys with structure values",
+			op:   "UpdateUserPool",
+			body: `{"UserPoolId":"us-east-1_abc","AcrConfiguration":{"Level1":{"AcrValue":"a"},` +
+				`"Level2":{"AcrValue":"b"},"Level3":{"AcrValue":"c"},"Level4":{"AcrValue":"d"},` +
+				`"Level5":{"AcrValue":"e"}}}`,
+			want: `2 validation errors detected: Value '{` +
+				`Level4=AcrLevelConfigType(acrValue=d), Level5=AcrLevelConfigType(acrValue=e), ` +
+				`Level2=AcrLevelConfigType(acrValue=b), Level3=AcrLevelConfigType(acrValue=c), ` +
+				`Level1=AcrLevelConfigType(acrValue=a)}' at 'acrConfiguration' failed to ` +
+				`satisfy constraint: Member must have length less than or equal to 4; ` +
+				`Value '{` +
+				`Level4=AcrLevelConfigType(acrValue=d), Level5=AcrLevelConfigType(acrValue=e), ` +
+				`Level2=AcrLevelConfigType(acrValue=b), Level3=AcrLevelConfigType(acrValue=c), ` +
+				`Level1=AcrLevelConfigType(acrValue=a)}' at 'acrConfiguration' failed to ` +
+				`satisfy constraint: Map keys must satisfy constraint: ` +
+				`[Member must satisfy regular expression pattern: Level[1-4]]`,
 		},
 	}
 	for _, tt := range tests {

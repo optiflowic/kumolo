@@ -2130,6 +2130,31 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Nested input validation (#624)
+# ---------------------------------------------------------------------------
+# The CLI does not check maximum lengths or enums client-side, so these requests reach
+# kumolo, which must reject them the way AWS does.
+LONG_ATTR=$(printf 'a%.0s' {1..33})
+NESTED_JSON=$($AWS admin-update-user-attributes \
+  --user-pool-id "$POOL_ID" --username "$USERNAME" \
+  --user-attributes "Name=${LONG_ATTR},Value=x" 2>&1) || true
+if echo "$NESTED_JSON" | grep -q "InvalidParameterException" &&
+  echo "$NESTED_JSON" | grep -q "userAttributes.1.member.name"; then
+  ok "AdminUpdateUserAttributes — nested attribute name over 32 characters rejected"
+else
+  fail "AdminUpdateUserAttributes — expected InvalidParameterException at userAttributes.1.member.name"
+fi
+
+NESTED_JSON=$($AWS update-user-pool --user-pool-id "$POOL_ID" \
+  --auto-verified-attributes bogus 2>&1) || true
+if echo "$NESTED_JSON" | grep -q "InvalidParameterException" &&
+  echo "$NESTED_JSON" | grep -q "autoVerifiedAttributes"; then
+  ok "UpdateUserPool — list member outside the enum rejected"
+else
+  fail "UpdateUserPool — expected InvalidParameterException at autoVerifiedAttributes"
+fi
+
+# ---------------------------------------------------------------------------
 # Cleanup
 # ---------------------------------------------------------------------------
 # Only clear CLIENT_ID / POOL_ID after a successful delete so the EXIT-trap
