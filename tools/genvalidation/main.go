@@ -93,7 +93,9 @@ func run(modelPath, routerPath, pkg, outPath string) error {
 		if !ok || o.Input == nil {
 			return fmt.Errorf("%s: no input shape in model", op)
 		}
-		markUsed(m.Shapes, o.Input.Shape, used)
+		if err := markUsed(m.Shapes, o.Input.Shape, used); err != nil {
+			return fmt.Errorf("%s: %w", op, err)
+		}
 		fmt.Fprintf(&inputs, "%q: shape%s,\n", op, o.Input.Shape)
 	}
 
@@ -148,20 +150,29 @@ func implementedOps(routerPath string) ([]string, error) {
 	return ops, nil
 }
 
-func markUsed(shapes map[string]shape, name string, used map[string]bool) {
+func markUsed(shapes map[string]shape, name string, used map[string]bool) error {
 	if used[name] {
-		return
+		return nil
+	}
+	s, ok := shapes[name]
+	if !ok {
+		return fmt.Errorf("shape %s not found in model", name)
 	}
 	used[name] = true
-	s := shapes[name]
+	refs := make([]*member, 0, len(s.Members)+3)
 	for _, m := range s.Members {
-		markUsed(shapes, m.Shape, used)
+		refs = append(refs, &m)
 	}
-	for _, m := range []*member{s.Member, s.Key, s.Value} {
-		if m != nil {
-			markUsed(shapes, m.Shape, used)
+	refs = append(refs, s.Member, s.Key, s.Value)
+	for _, m := range refs {
+		if m == nil {
+			continue
+		}
+		if err := markUsed(shapes, m.Shape, used); err != nil {
+			return err
 		}
 	}
+	return nil
 }
 
 func shapeLiteral(s shape) (string, error) {
