@@ -141,8 +141,11 @@ func decodeString(tok json.Token) (any, *serializationError) {
 		return t, nil
 	case json.Number:
 		return nil, &serializationError{message: "NUMBER_VALUE can not be converted to a String"}
+	case bool:
+		return nil, &serializationError{message: boolToken(t) + " can not be converted to a String"}
 	}
-	return nil, &serializationError{message: boolToken(tok) + " can not be converted to a String"}
+	// unreachable: decodeValue passes only string, json.Number and bool tokens.
+	return nil, &serializationError{}
 }
 
 // decodeInteger truncates a fraction toward zero and clamps to the 32-bit range.
@@ -153,8 +156,13 @@ func decodeInteger(tok json.Token) (any, *serializationError) {
 		return int64(math.Max(math.MinInt32, math.Min(math.MaxInt32, math.Trunc(f)))), nil
 	case string:
 		return nil, &serializationError{message: "STRING_VALUE can not be converted to an Integer"}
+	case bool:
+		return nil, &serializationError{
+			message: boolToken(t) + " can not be converted to an Integer",
+		}
 	}
-	return nil, &serializationError{message: boolToken(tok) + " can not be converted to an Integer"}
+	// unreachable: decodeValue passes only string, json.Number and bool tokens.
+	return nil, &serializationError{}
 }
 
 func decodeBoolean(tok json.Token) (any, *serializationError) {
@@ -163,18 +171,21 @@ func decodeBoolean(tok json.Token) (any, *serializationError) {
 		return t, nil
 	case json.Number:
 		return nil, &serializationError{message: "NUMBER_VALUE can not be converted to a Boolean"}
+	case string:
+		switch strings.ToLower(t) {
+		case "true", "t", "yes", "y", "1":
+			return true, nil
+		case "false", "f", "no", "n", "0":
+			return false, nil
+		}
+		return nil, &serializationError{message: "STRING_VALUE can not be converted to an Boolean"}
 	}
-	switch strings.ToLower(tok.(string)) {
-	case "true", "t", "yes", "y", "1":
-		return true, nil
-	case "false", "f", "no", "n", "0":
-		return false, nil
-	}
-	return nil, &serializationError{message: "STRING_VALUE can not be converted to an Boolean"}
+	// unreachable: decodeValue passes only string, json.Number and bool tokens.
+	return nil, &serializationError{}
 }
 
-func boolToken(tok json.Token) string {
-	if tok.(bool) {
+func boolToken(b bool) string {
+	if b {
 		return "TRUE_VALUE"
 	}
 	return "FALSE_VALUE"
