@@ -25,7 +25,8 @@
 
 | Error type                        | HTTP | Condition                                                     |
 |-------------------------------------|------|-----------------------------------------------------------------|
-| InvalidParameterException          | 400  | Invalid request body, input violates a model constraint (see `input_validation.md`), both AccessToken and Session provided, or neither provided |
+| InvalidParameterException          | 400  | Input violates a model constraint (see `input_validation.md`), both AccessToken and Session provided, or neither provided |
+| SerializationException | 400 | Body cannot be read as the input shape (see `input_deserialization.md`) |
 | NotAuthorizedException             | 400  | Invalid/expired/revoked access token, or invalid/expired/wrong-challenge Session |
 | UserNotFoundException              | 400  | Token's `sub` (or Session's `username`) does not resolve to a stored user |
 | SoftwareTokenMFANotFoundException  | 400  | No pending secret — `AssociateSoftwareToken` was never called (or was already verified) |

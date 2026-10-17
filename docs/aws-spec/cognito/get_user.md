@@ -50,7 +50,8 @@
 
 | Code | HTTP | Condition |
 |---|---|---|
-| `InvalidParameterException` | 400 | input violates a model constraint (see `input_validation.md`) or unparseable request body |
+| `InvalidParameterException` | 400 | input violates a model constraint (see `input_validation.md`) |
+| SerializationException | 400 | Body cannot be read as the input shape (see `input_deserialization.md`) |
 | `NotAuthorizedException` | 400 | Malformed JWT, invalid signature, expired token, wrong `token_use`, or unknown pool |
 | `UserNotFoundException` | 400 | `sub` not found in the pool |
 | `InternalErrorException` | 500 | Storage failure |
