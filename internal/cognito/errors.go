@@ -25,6 +25,8 @@ const (
 	ErrTypeSerializationException            = "SerializationException"
 )
 
+const msgUserPoolClientNotFound = "User pool client not found."
+
 type responseRecorder struct {
 	http.ResponseWriter
 	status        int

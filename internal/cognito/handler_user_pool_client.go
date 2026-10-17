@@ -123,7 +123,7 @@ func derefBool(p *bool, def bool) bool {
 func requireIssuedClientID(w http.ResponseWriter, clientID string) bool {
 	if !reClientID.MatchString(clientID) {
 		writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException,
-			"User pool client not found.")
+			msgUserPoolClientNotFound)
 		return false
 	}
 	return true
@@ -261,7 +261,7 @@ func (ro *Router) handleDescribeUserPoolClient(w http.ResponseWriter, body []byt
 	if err != nil {
 		if errors.Is(err, errUserPoolClientNotFound) {
 			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException,
-				"User pool client not found.")
+				msgUserPoolClientNotFound)
 			return
 		}
 		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
@@ -326,7 +326,7 @@ func (ro *Router) handleUpdateUserPoolClient(w http.ResponseWriter, body []byte)
 	if err != nil {
 		if errors.Is(err, errUserPoolClientNotFound) {
 			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException,
-				"User pool client not found.")
+				msgUserPoolClientNotFound)
 			return
 		}
 		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
@@ -357,7 +357,7 @@ func (ro *Router) handleDeleteUserPoolClient(w http.ResponseWriter, body []byte)
 	if err := ro.storage.DeleteUserPoolClient(req.UserPoolId, req.ClientId); err != nil {
 		if errors.Is(err, errUserPoolClientNotFound) {
 			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException,
-				"User pool client not found.")
+				msgUserPoolClientNotFound)
 			return
 		}
 		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
