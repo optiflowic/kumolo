@@ -119,8 +119,5 @@ observation above; AWS's implementation is not visible.
   which `decodeInput` does not keep.
 - Sensitive members inside a printed list, map or structure value are printed as is; how AWS
   prints them is not confirmed.
-- `ClientId` on `DescribeUserPoolClient`, `UpdateUserPoolClient` and `DeleteUserPoolClient`
-  must additionally be in the form kumolo issues (26 lower-case alphanumerics); see
-  `user_pool_client.md` (#626).
 - The SRP `Session` kumolo issues is about 2,600 characters, longer than the sessions AWS
   issues but within the model limit of 4096.

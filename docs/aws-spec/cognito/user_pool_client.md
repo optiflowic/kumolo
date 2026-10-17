@@ -58,9 +58,12 @@ Returns the same `ClientSecret` that was generated/provided on creation.
 
 **Errors**: `InvalidParameterException` (400), `ResourceNotFoundException` (400, pool or client not found), `InternalErrorException` (500).
 
-**kumolo deviation**: a `ClientId` that satisfies the model pattern but is not in the form
-kumolo issues (26 lowercase alphanumeric chars) returns `InvalidParameterException`; AWS
-returns `ResourceNotFoundException`. Same for `UpdateUserPoolClient` and `DeleteUserPoolClient`.
+A `ClientId` that satisfies the model pattern but is not in the form kumolo issues (26
+lowercase alphanumeric chars) cannot name a stored client and returns
+`ResourceNotFoundException` without a storage lookup, as AWS does for an unknown client
+(verified 2026-10-17, #626). The check also keeps a differently cased ID from matching on a
+case-insensitive filesystem; AWS client IDs are case-sensitive. Same for `UpdateUserPoolClient`
+and `DeleteUserPoolClient`.
 
 ## UpdateUserPoolClient
 
