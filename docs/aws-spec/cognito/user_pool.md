@@ -150,7 +150,5 @@ JSON on `CreateUserPool`/`UpdateUserPool`/`DescribeUserPool`, and consumed by `F
   resolution" above), not a real AWS availability constraint — kumolo does not validate that
   the region is a real AWS region name. Fixed account: `000000000000`.
 - No SMS/email delivery; no Lambda trigger invocation
-- Members nested inside `Policies`, `Schema`, `LambdaConfig` and the other structure members
-  are not validated against the model (see `input_validation.md`)
 - `EstimatedNumberOfUsers` always returns 0 (user counting not yet implemented)
 - `Policies.PasswordPolicy` enforcement: see `docs/aws-spec/cognito/password_policy.md`
