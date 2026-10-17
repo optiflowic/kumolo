@@ -303,7 +303,11 @@ func (s *inputShape) render(v any) string {
 	m := v.(map[string]any)
 	parts := make([]string, 0, len(s.members))
 	for _, mem := range s.members {
-		parts = append(parts, lowerFirst(mem.name)+"="+mem.shape.render(m[mem.name]))
+		val := m[mem.name]
+		if val == nil && mem.shape.kind == kindInteger {
+			val = int64(0) // as checkStructure reads it
+		}
+		parts = append(parts, lowerFirst(mem.name)+"="+mem.shape.render(val))
 	}
 	return s.name + "(" + strings.Join(parts, ", ") + ")"
 }

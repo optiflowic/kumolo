@@ -266,6 +266,22 @@ func TestValidateInput_Violations(t *testing.T) {
 		},
 		{
 			// Verified against real AWS (issue #624).
+			name: "printed structure shows an omitted integer as 0",
+			op:   "UpdateUserPool",
+			body: `{"UserPoolId":"us-east-1_abc","AccountRecoverySetting":{"RecoveryMechanisms":[` +
+				`{"Name":"verified_email","Priority":1},{"Name":"verified_phone_number"},` +
+				`{"Name":"admin_only","Priority":2}]}}`,
+			want: `2 validation errors detected: Value '[` +
+				`RecoveryOptionType(priority=1, name=verified_email), ` +
+				`RecoveryOptionType(priority=0, name=verified_phone_number), ` +
+				`RecoveryOptionType(priority=2, name=admin_only)]' at ` +
+				`'accountRecoverySetting.recoveryMechanisms' failed to satisfy constraint: ` +
+				`Member must have length less than or equal to 2; ` +
+				`Value '0' at 'accountRecoverySetting.recoveryMechanisms.2.member.priority' ` +
+				`failed to satisfy constraint: Member must have value greater than or equal to 1`,
+		},
+		{
+			// Verified against real AWS (issue #624).
 			name: "empty password policy",
 			op:   "UpdateUserPool",
 			body: `{"UserPoolId":"us-east-1_abc","Policies":{"PasswordPolicy":{}}}`,
@@ -450,4 +466,16 @@ func TestSessionType_FitsLongestIssuedSession(t *testing.T) {
 
 	_, resp := initSRPChallenge(t, ro, clientID, username)
 	assert.LessOrEqual(t, int64(len(resp.Session)), *shapeSessionType.max)
+}
+
+// Verified against real AWS (issue #624): omitted integers print as 0, every other
+// omitted member as null.
+func TestInputShape_RenderOmittedMembers(t *testing.T) {
+	got := shapeSchemaAttributeType.render(map[string]any{"Name": "a"})
+	assert.Equal(t, "SchemaAttributeType(name=a, attributeDataType=null, "+
+		"developerOnlyAttribute=null, mutable=null, required=null, "+
+		"numberAttributeConstraints=null, stringAttributeConstraints=null)", got)
+
+	got = shapeRecoveryOptionType.render(map[string]any{"Name": "admin_only"})
+	assert.Equal(t, "RecoveryOptionType(priority=0, name=admin_only)", got)
 }

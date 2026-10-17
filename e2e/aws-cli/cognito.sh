@@ -2138,8 +2138,7 @@ LONG_ATTR=$(printf 'a%.0s' {1..33})
 NESTED_JSON=$($AWS admin-update-user-attributes \
   --user-pool-id "$POOL_ID" --username "$USERNAME" \
   --user-attributes "Name=${LONG_ATTR},Value=x" 2>&1) || true
-if echo "$NESTED_JSON" | grep -q "InvalidParameterException" &&
-  echo "$NESTED_JSON" | grep -q "userAttributes.1.member.name"; then
+if echo "$NESTED_JSON" | grep -qF "Value '${LONG_ATTR}' at 'userAttributes.1.member.name' failed to satisfy constraint: Member must have length less than or equal to 32"; then
   ok "AdminUpdateUserAttributes — nested attribute name over 32 characters rejected"
 else
   fail "AdminUpdateUserAttributes — expected InvalidParameterException at userAttributes.1.member.name"
@@ -2147,8 +2146,7 @@ fi
 
 NESTED_JSON=$($AWS update-user-pool --user-pool-id "$POOL_ID" \
   --auto-verified-attributes bogus 2>&1) || true
-if echo "$NESTED_JSON" | grep -q "InvalidParameterException" &&
-  echo "$NESTED_JSON" | grep -q "autoVerifiedAttributes"; then
+if echo "$NESTED_JSON" | grep -qF "Value '[bogus]' at 'autoVerifiedAttributes' failed to satisfy constraint: Member must satisfy constraint: [Member must satisfy enum value set: [phone_number, email]]"; then
   ok "UpdateUserPool — list member outside the enum rejected"
 else
   fail "UpdateUserPool — expected InvalidParameterException at autoVerifiedAttributes"
