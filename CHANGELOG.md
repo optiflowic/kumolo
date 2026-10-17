@@ -5,14 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.3] - 2026-10-17
+## [0.4.3] - 2026-10-18
 
 ### Fixed
 
 #### Cognito
 
 - Requests are now validated against the AWS model (required, length, pattern, enum, range) before any resource lookup or token verification, so a constraint violation returns `InvalidParameterException` instead of `ResourceNotFoundException` or `NotAuthorizedException`
+- Validation now also covers nested members (structure members, list elements, map keys and values, list and map sizes), and violation messages match AWS's format, including member paths such as `userAttributes.1.member.name`
 - `CreateUserPool` and `UpdateUserPool` now reject invalid `MfaConfiguration`, `DeletionProtection`, and `UserPoolTier` values and an out-of-range `EmailVerificationSubject` instead of storing them
+- A body that cannot be read as the operation's input (malformed JSON, a value of the wrong type) now returns `SerializationException` instead of `InvalidParameterException`; member names are matched case-sensitively, unknown members are ignored, and the last of duplicate members wins, as on AWS
+- `DescribeUserPoolClient`, `UpdateUserPoolClient`, and `DeleteUserPoolClient` now return `ResourceNotFoundException` instead of `InvalidParameterException` for a `ClientId` that names no client
 
 ## [0.4.2] - 2026-10-04
 
