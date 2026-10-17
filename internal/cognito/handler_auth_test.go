@@ -565,9 +565,15 @@ func TestConfirmSignUp_AutoVerifiesPhoneNumberAttribute(t *testing.T) {
 	assert.Equal(t, "true", verified)
 }
 
+// Input validation rejects an unknown name, so the stored value is set directly, as for a
+// pool persisted before validation covered list members.
 func TestConfirmSignUp_AutoVerifyIgnoresUnknownAttributeName(t *testing.T) {
 	ro := newTestRouter(t)
-	poolID, clientID := setupPoolWithAutoVerify(t, ro, []string{"custom:foo"})
+	poolID, clientID := setupPoolWithAutoVerify(t, ro, nil)
+	require.NoError(t, ro.storage.UpdateUserPool(poolID, func(m *UserPoolMetadata) error {
+		m.AutoVerifiedAttributes = []string{"custom:foo"}
+		return nil
+	}))
 	signUpUser(t, ro, clientID, "alice", "Password123!")
 	confirmUser(t, ro, clientID, "alice")
 

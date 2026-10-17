@@ -144,8 +144,7 @@ func decodeString(tok json.Token) (any, *serializationError) {
 	case bool:
 		return nil, &serializationError{message: boolToken(t) + " can not be converted to a String"}
 	}
-	// unreachable: decodeValue passes only string, json.Number and bool tokens.
-	return nil, &serializationError{}
+	return nil, &serializationError{} // unreachable: decodeValue passes string, json.Number or bool
 }
 
 // decodeInteger truncates a fraction toward zero and clamps to the 32-bit range.
@@ -161,8 +160,7 @@ func decodeInteger(tok json.Token) (any, *serializationError) {
 			message: boolToken(t) + " can not be converted to an Integer",
 		}
 	}
-	// unreachable: decodeValue passes only string, json.Number and bool tokens.
-	return nil, &serializationError{}
+	return nil, &serializationError{} // unreachable: decodeValue passes string, json.Number or bool
 }
 
 func decodeBoolean(tok json.Token) (any, *serializationError) {
@@ -180,8 +178,7 @@ func decodeBoolean(tok json.Token) (any, *serializationError) {
 		}
 		return nil, &serializationError{message: "STRING_VALUE can not be converted to an Boolean"}
 	}
-	// unreachable: decodeValue passes only string, json.Number and bool tokens.
-	return nil, &serializationError{}
+	return nil, &serializationError{} // unreachable: decodeValue passes string, json.Number or bool
 }
 
 func boolToken(b bool) string {

@@ -38,21 +38,49 @@ type model struct {
 }
 
 type shape struct {
-	Type      string            `json:"type"`
-	Required  []string          `json:"required"`
-	Members   map[string]member `json:"members"`
-	Member    *member           `json:"member"`
-	Key       *member           `json:"key"`
-	Value     *member           `json:"value"`
-	Enum      []string          `json:"enum"`
-	Min       *float64          `json:"min"`
-	Max       *float64          `json:"max"`
-	Pattern   string            `json:"pattern"`
-	Sensitive bool              `json:"sensitive"`
+	Type      string   `json:"type"`
+	Required  []string `json:"required"`
+	Members   members  `json:"members"`
+	Member    *member  `json:"member"`
+	Key       *member  `json:"key"`
+	Value     *member  `json:"value"`
+	Enum      []string `json:"enum"`
+	Min       *float64 `json:"min"`
+	Max       *float64 `json:"max"`
+	Pattern   string   `json:"pattern"`
+	Sensitive bool     `json:"sensitive"`
 }
 
 type member struct {
 	Shape string `json:"shape"`
+}
+
+// members keeps the model's declaration order, which AWS follows when it prints a structure
+// value in a validation message.
+type members []namedMember
+
+type namedMember struct {
+	name string
+	member
+}
+
+func (ms *members) UnmarshalJSON(data []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	if _, err := dec.Token(); err != nil {
+		return err
+	}
+	for dec.More() {
+		key, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		var m member
+		if err := dec.Decode(&m); err != nil {
+			return err
+		}
+		*ms = append(*ms, namedMember{name: key.(string), member: m})
+	}
+	return nil
 }
 
 func main() {
@@ -114,7 +142,7 @@ func run(modelPath, routerPath, pkg, outPath string) error {
 	)
 	fmt.Fprintf(&out, "package %s\n\nvar (\n", pkg)
 	for _, name := range shapeNames {
-		lit, err := shapeLiteral(m.Shapes[name])
+		lit, err := shapeLiteral(name, m.Shapes[name])
 		if err != nil {
 			return fmt.Errorf("shape %s: %w", name, err)
 		}
@@ -161,7 +189,7 @@ func markUsed(shapes map[string]shape, name string, used map[string]bool) error 
 	used[name] = true
 	refs := make([]*member, 0, len(s.Members)+3)
 	for _, m := range s.Members {
-		refs = append(refs, &m)
+		refs = append(refs, &m.member)
 	}
 	refs = append(refs, s.Member, s.Key, s.Value)
 	for _, m := range refs {
@@ -175,26 +203,21 @@ func markUsed(shapes map[string]shape, name string, used map[string]bool) error 
 	return nil
 }
 
-func shapeLiteral(s shape) (string, error) {
+func shapeLiteral(name string, s shape) (string, error) {
 	var b bytes.Buffer
 	switch s.Type {
 	case "structure":
-		b.WriteString("kind: kindStructure, members: []memberRule{")
+		fmt.Fprintf(&b, "kind: kindStructure, name: %q, members: []memberRule{", name)
 		required := map[string]bool{}
-		for _, name := range s.Required {
-			required[name] = true
+		for _, r := range s.Required {
+			required[r] = true
 		}
-		names := make([]string, 0, len(s.Members))
-		for name := range s.Members {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		for _, name := range names {
-			fmt.Fprintf(&b, "{name: %q, ", name)
-			if required[name] {
+		for _, m := range s.Members {
+			fmt.Fprintf(&b, "{name: %q, ", m.name)
+			if required[m.name] {
 				b.WriteString("required: true, ")
 			}
-			fmt.Fprintf(&b, "shape: shape%s},", s.Members[name].Shape)
+			fmt.Fprintf(&b, "shape: shape%s},", m.Shape)
 		}
 		b.WriteString("}")
 	case "list":

@@ -185,3 +185,48 @@ func TestCognitoIntegration_SerializationException(t *testing.T) {
 		})
 	}
 }
+
+// TestCognitoIntegration_NestedValidation sends requests that break a constraint inside a
+// list, map or structure member. Messages verified against real AWS (issue #624).
+func TestCognitoIntegration_NestedValidation(t *testing.T) {
+	clients := newTestClients(t)
+	tests := []struct {
+		name string
+		op   string
+		body string
+		want string
+	}{
+		{"list of structures", "AdminUpdateUserAttributes",
+			`{"UserPoolId":"us-east-1_abc","Username":"u","UserAttributes":[{"Value":"y"}]}`,
+			`1 validation error detected: Value null at 'userAttributes.1.member.name' ` +
+				`failed to satisfy constraint: Member must not be null`},
+		{"nested structure", "UpdateUserPool",
+			`{"UserPoolId":"us-east-1_abc","Policies":{"PasswordPolicy":{}}}`,
+			`1 validation error detected: Value '0' at 'policies.passwordPolicy.minimumLength' ` +
+				`failed to satisfy constraint: Member must have value greater than or equal to 6`},
+		{"missing UserPoolId", "AdminGetUser", `{"Username":""}`, `UserPoolId must not be null`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, err := http.NewRequest(
+				http.MethodPost, clients.baseURL+"/", strings.NewReader(tt.body),
+			)
+			require.NoError(t, err)
+			req.Header.Set("Content-Type", "application/x-amz-json-1.1")
+			req.Header.Set("X-Amz-Target", "AWSCognitoIdentityProviderService."+tt.op)
+
+			resp, err := http.DefaultClient.Do(req)
+			require.NoError(t, err)
+			defer func() { _ = resp.Body.Close() }()
+			var got struct {
+				Type    string `json:"__type"`
+				Message string `json:"message"`
+			}
+			require.NoError(t, json.NewDecoder(resp.Body).Decode(&got))
+
+			require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+			require.Equal(t, "InvalidParameterException", got.Type)
+			require.Equal(t, tt.want, got.Message)
+		})
+	}
+}

@@ -67,6 +67,9 @@ if a consuming test asserts on exact message text.
   `true`, `MinimumLength=8`). Fields omitted from the blob — including the whole `Policies` blob being
   absent or malformed — inherit the default rather than being zeroed out; `MinimumLength` additionally
   falls back to the default when present but non-positive.
+  On `CreateUserPool`/`UpdateUserPool` a `PasswordPolicy` without `MinimumLength` is rejected by
+  input validation (read as 0, below the minimum of 6), so the fallbacks apply to pools without
+  `Policies` and to pools persisted before nested validation.
 - `validatePassword(policy, password)` returns the formatted message and `ok=false` on the first violated
   rule.
 - `internal/cognito/handler_password.go`: `prehashPassword` (SHA-256, then base64-standard-encoded, 44

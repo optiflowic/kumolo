@@ -139,10 +139,10 @@ JSON on `CreateUserPool`/`UpdateUserPool`/`DescribeUserPool`, and consumed by `F
 
 - `Name`: `verified_email` | `verified_phone_number` | `admin_only` (1-2 array entries)
 - `Priority`: `1` (highest) or `2`
+- Input validation (`input_validation.md`) enforces the `Name` enum, the `Priority` range (an
+  omitted `Priority` is read as 0 and rejected) and the 1-2 entry list size.
 - `admin_only` is mutually exclusive with the other mechanisms per AWS docs; kumolo does not
-  validate this — it is passed through as-is.
-- kumolo does not validate `Name`/`Priority` values or uniqueness on write, matching the
-  pass-through treatment of other JSON blob fields (`Policies`, `LambdaConfig`, etc.).
+  validate this or the uniqueness of entries — they are passed through as-is.
 
 ## kumolo Deviations
 
@@ -150,7 +150,5 @@ JSON on `CreateUserPool`/`UpdateUserPool`/`DescribeUserPool`, and consumed by `F
   resolution" above), not a real AWS availability constraint — kumolo does not validate that
   the region is a real AWS region name. Fixed account: `000000000000`.
 - No SMS/email delivery; no Lambda trigger invocation
-- Members nested inside `Policies`, `Schema`, `LambdaConfig` and the other structure members
-  are not validated against the model (see `input_validation.md`)
 - `EstimatedNumberOfUsers` always returns 0 (user counting not yet implemented)
 - `Policies.PasswordPolicy` enforcement: see `docs/aws-spec/cognito/password_policy.md`
