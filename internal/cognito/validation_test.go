@@ -3,6 +3,7 @@ package cognito
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"os"
 	"regexp"
@@ -481,4 +482,21 @@ func TestInputShape_RenderOmittedMembers(t *testing.T) {
 
 	got = shapeRecoveryOptionType.render(map[string]any{"Name": "admin_only"})
 	assert.Equal(t, "RecoveryOptionType(priority=0, name=admin_only)", got)
+}
+
+func TestHashCapacity(t *testing.T) {
+	tests := []struct {
+		n    int
+		want uint32
+	}{
+		{0, 16},
+		{12, 16},
+		{13, 32},
+		{24, 32},
+		{25, 64},
+		{math.MaxInt, 1 << 30},
+	}
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, hashCapacity(tt.n), "n=%d", tt.n)
+	}
 }

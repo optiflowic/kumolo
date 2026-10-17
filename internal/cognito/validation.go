@@ -341,10 +341,13 @@ func javaBucket(s string, capacity uint32) uint32 {
 	return (h ^ h>>16) & (capacity - 1)
 }
 
+// javaMaxCapacity is Java HashMap's MAXIMUM_CAPACITY; the table stops growing there.
+const javaMaxCapacity uint32 = 1 << 30
+
 // hashCapacity is the table size of a Java HashMap after n insertions.
 func hashCapacity(n int) uint32 {
 	c := uint32(16)
-	for n > int(c)*3/4 {
+	for c < javaMaxCapacity && n > int(c)*3/4 {
 		c *= 2
 	}
 	return c
