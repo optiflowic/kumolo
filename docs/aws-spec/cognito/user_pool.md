@@ -139,8 +139,10 @@ JSON on `CreateUserPool`/`UpdateUserPool`/`DescribeUserPool`, and consumed by `F
 
 - `Name`: `verified_email` | `verified_phone_number` | `admin_only` (1-2 array entries)
 - `Priority`: `1` (highest) or `2`
+- Input validation (`input_validation.md`) enforces the `Name` enum, the `Priority` range (an
+  omitted `Priority` is read as 0 and rejected) and the 1-2 entry list size.
 - `admin_only` is mutually exclusive with the other mechanisms per AWS docs; kumolo does not
-  validate this — it is passed through as-is.
+  validate this or the uniqueness of entries — they are passed through as-is.
 - kumolo does not validate `Name`/`Priority` values or uniqueness on write, matching the
   pass-through treatment of other JSON blob fields (`Policies`, `LambdaConfig`, etc.).
 

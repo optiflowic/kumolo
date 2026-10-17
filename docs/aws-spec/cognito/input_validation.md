@@ -34,6 +34,9 @@ Applies to every operation the router dispatches (all `case "<Operation>":` entr
 - An omitted integer member of a nested structure is checked as 0
   (`Policies.PasswordPolicy` without `MinimumLength`, `RecoveryMechanisms[]` without
   `Priority`).
+- In a printed structure value an omitted integer member is also `0`
+  (`RecoveryOptionType(priority=0, name=verified_phone_number)`); omitted boolean, string and
+  structure members print `null` (`developerOnlyAttribute=null`).
 - An explicit empty string is a value. It fails `min >= 1`, any pattern that needs one
   character, and any enum.
 - A `null` list element or map value is not checked.
@@ -85,7 +88,7 @@ pool that does not exist. Observed and reproduced exactly:
   `[ACTIVE, INACTIVE]`, `[phone_number, email]`.
 - Nested paths and printed values for lists of structures, lists of strings, maps of strings,
   maps of structures (`{Level4=AcrLevelConfigType(acrValue=d), ...}`), list and map sizes, and
-  the omitted nested integers read as 0.
+  the omitted nested integers read as 0 and printed as 0 (omitted booleans print `null`).
 - Length in code points: 2048 emoji pass a 2048 limit.
 
 Fitted, not derived: the 64-entry member table and the enum/map table sizes match every
