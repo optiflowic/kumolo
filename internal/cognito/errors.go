@@ -22,6 +22,7 @@ const (
 	ErrTypeUnauthorizedException             = "UnauthorizedException"
 	ErrTypeLimitExceededException            = "LimitExceededException"
 	ErrTypeSoftwareTokenMFANotFoundException = "SoftwareTokenMFANotFoundException"
+	ErrTypeSerializationException            = "SerializationException"
 )
 
 type responseRecorder struct {
@@ -91,6 +92,24 @@ func writeError(w http.ResponseWriter, status int, errType, message string) {
 	w.Header().Set("Content-Type", "application/x-amz-json-1.1")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(errResponse{Type: errType, Message: message}); err != nil {
+		slog.Warn("failed to encode Cognito error response", "err", err)
+	}
+}
+
+// writeSerializationError writes the body AWS sends for a SerializationException: the
+// message is under "Message" and is left out when empty.
+func writeSerializationError(w http.ResponseWriter, message string) {
+	if rec, ok := w.(*responseRecorder); ok {
+		rec.errCode = ErrTypeSerializationException
+		rec.errMsg = message
+	}
+	w.Header().Set("Content-Type", "application/x-amz-json-1.1")
+	w.WriteHeader(http.StatusBadRequest)
+	resp := struct {
+		Type    string `json:"__type"`
+		Message string `json:"Message,omitempty"`
+	}{Type: ErrTypeSerializationException, Message: message}
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		slog.Warn("failed to encode Cognito error response", "err", err)
 	}
 }

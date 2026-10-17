@@ -219,7 +219,7 @@ func TestForgotPassword_InvalidJSON(t *testing.T) {
 	ro := newTestRouter(t)
 	w := doOp(t, ro, "ForgotPassword", `{invalid}`)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrType(t, w, ErrTypeInvalidParameterException)
+	assertErrType(t, w, ErrTypeSerializationException)
 }
 
 func TestForgotPassword_ClientNotFound(t *testing.T) {
@@ -402,7 +402,7 @@ func TestConfirmForgotPassword_InvalidJSON(t *testing.T) {
 	ro := newTestRouter(t)
 	w := doOp(t, ro, "ConfirmForgotPassword", `{invalid}`)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrType(t, w, ErrTypeInvalidParameterException)
+	assertErrType(t, w, ErrTypeSerializationException)
 }
 
 func TestConfirmForgotPassword_ClientNotFound(t *testing.T) {
@@ -625,7 +625,7 @@ func TestChangePassword_InvalidJSON(t *testing.T) {
 	ro := newTestRouter(t)
 	w := doOp(t, ro, "ChangePassword", `{invalid}`)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrType(t, w, ErrTypeInvalidParameterException)
+	assertErrType(t, w, ErrTypeSerializationException)
 }
 
 func TestChangePassword_InvalidAccessToken(t *testing.T) {

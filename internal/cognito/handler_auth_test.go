@@ -1936,28 +1936,28 @@ func TestSignUp_InvalidBody(t *testing.T) {
 	ro := newTestRouter(t)
 	w := doOp(t, ro, "SignUp", `not-json`)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrType(t, w, ErrTypeInvalidParameterException)
+	assertErrType(t, w, ErrTypeSerializationException)
 }
 
 func TestConfirmSignUp_InvalidBody(t *testing.T) {
 	ro := newTestRouter(t)
 	w := doOp(t, ro, "ConfirmSignUp", `not-json`)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrType(t, w, ErrTypeInvalidParameterException)
+	assertErrType(t, w, ErrTypeSerializationException)
 }
 
 func TestInitiateAuth_InvalidBody(t *testing.T) {
 	ro := newTestRouter(t)
 	w := doOp(t, ro, "InitiateAuth", `not-json`)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrType(t, w, ErrTypeInvalidParameterException)
+	assertErrType(t, w, ErrTypeSerializationException)
 }
 
 func TestRespondToAuthChallenge_InvalidBody(t *testing.T) {
 	ro := newTestRouter(t)
 	w := doOp(t, ro, "RespondToAuthChallenge", `not-json`)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrType(t, w, ErrTypeInvalidParameterException)
+	assertErrType(t, w, ErrTypeSerializationException)
 }
 
 // ── handleNewPasswordRequired: wrong challenge claim ──────────────────────────
@@ -2295,7 +2295,7 @@ func TestResendConfirmationCode_InvalidJSON(t *testing.T) {
 	ro := newTestRouter(t)
 	w := doOp(t, ro, "ResendConfirmationCode", `{invalid`)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrType(t, w, ErrTypeInvalidParameterException)
+	assertErrType(t, w, ErrTypeSerializationException)
 }
 
 func TestResendConfirmationCode_GetPoolStorageError(t *testing.T) {
@@ -2509,7 +2509,7 @@ func TestRevokeToken_InvalidJSON(t *testing.T) {
 	ro := newTestRouter(t)
 	w := doOp(t, ro, "RevokeToken", `{bad}`)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrType(t, w, ErrTypeInvalidParameterException)
+	assertErrType(t, w, ErrTypeSerializationException)
 }
 
 func TestRevokeToken_GetPoolIDStorageError(t *testing.T) {

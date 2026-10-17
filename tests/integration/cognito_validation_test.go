@@ -137,3 +137,51 @@ func readGaps(t *testing.T) map[string]bool {
 	require.NoError(t, s.Err())
 	return gaps
 }
+
+// TestCognitoIntegration_SerializationException sends bodies that cannot be read as the
+// input shape. Responses verified against real AWS (issue #625).
+func TestCognitoIntegration_SerializationException(t *testing.T) {
+	clients := newTestClients(t)
+	tests := []struct {
+		name string
+		op   string
+		body string
+		want string
+	}{
+		{"malformed JSON", "DescribeUserPool", `{`, `{"__type":"SerializationException"}`},
+		{
+			"number as string",
+			"DescribeUserPool",
+			`{"UserPoolId":123}`,
+			`{"__type":"SerializationException","Message":"NUMBER_VALUE can not be converted to a String"}`,
+		},
+		{
+			"string as integer",
+			"ListUserPools",
+			`{"MaxResults":"5"}`,
+			`{"__type":"SerializationException","Message":"STRING_VALUE can not be converted to an Integer"}`,
+		},
+		{"scalar as list", "AdminUpdateUserAttributes",
+			`{"UserPoolId":"us-east-1_a","Username":"u","UserAttributes":1}`,
+			`{"__type":"SerializationException","Message":"Expected list or null"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, err := http.NewRequest(
+				http.MethodPost, clients.baseURL+"/", strings.NewReader(tt.body),
+			)
+			require.NoError(t, err)
+			req.Header.Set("Content-Type", "application/x-amz-json-1.1")
+			req.Header.Set("X-Amz-Target", "AWSCognitoIdentityProviderService."+tt.op)
+
+			resp, err := http.DefaultClient.Do(req)
+			require.NoError(t, err)
+			defer func() { _ = resp.Body.Close() }()
+			got, err := io.ReadAll(resp.Body)
+			require.NoError(t, err)
+
+			require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+			require.JSONEq(t, tt.want, string(got))
+		})
+	}
+}

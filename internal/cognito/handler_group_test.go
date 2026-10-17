@@ -542,7 +542,7 @@ func TestGroupHandlers_Validation(t *testing.T) {
 		// ── CreateGroup ────────────────────────────────────────────────────────
 		{"CreateGroup/invalid body", "CreateGroup",
 			func(*testing.T, *Router) string { return "not-json" },
-			http.StatusBadRequest, ErrTypeInvalidParameterException},
+			http.StatusBadRequest, ErrTypeSerializationException},
 		{"CreateGroup/missing pool ID", "CreateGroup",
 			static(map[string]any{"GroupName": "admins"}),
 			http.StatusBadRequest, ErrTypeInvalidParameterException},
@@ -556,7 +556,7 @@ func TestGroupHandlers_Validation(t *testing.T) {
 		// ── DeleteGroup ────────────────────────────────────────────────────────
 		{"DeleteGroup/invalid body", "DeleteGroup",
 			func(*testing.T, *Router) string { return "not-json" },
-			http.StatusBadRequest, ErrTypeInvalidParameterException},
+			http.StatusBadRequest, ErrTypeSerializationException},
 		{"DeleteGroup/missing pool ID", "DeleteGroup",
 			static(map[string]any{"GroupName": "admins"}),
 			http.StatusBadRequest, ErrTypeInvalidParameterException},
@@ -570,7 +570,7 @@ func TestGroupHandlers_Validation(t *testing.T) {
 		// ── GetGroup ───────────────────────────────────────────────────────────
 		{"GetGroup/invalid body", "GetGroup",
 			func(*testing.T, *Router) string { return "not-json" },
-			http.StatusBadRequest, ErrTypeInvalidParameterException},
+			http.StatusBadRequest, ErrTypeSerializationException},
 		{"GetGroup/missing pool ID", "GetGroup",
 			static(map[string]any{"GroupName": "admins"}),
 			http.StatusBadRequest, ErrTypeInvalidParameterException},
@@ -584,7 +584,7 @@ func TestGroupHandlers_Validation(t *testing.T) {
 		// ── UpdateGroup ────────────────────────────────────────────────────────
 		{"UpdateGroup/invalid body", "UpdateGroup",
 			func(*testing.T, *Router) string { return "not-json" },
-			http.StatusBadRequest, ErrTypeInvalidParameterException},
+			http.StatusBadRequest, ErrTypeSerializationException},
 		{"UpdateGroup/missing pool ID", "UpdateGroup",
 			static(map[string]any{"GroupName": "admins"}),
 			http.StatusBadRequest, ErrTypeInvalidParameterException},
@@ -598,7 +598,7 @@ func TestGroupHandlers_Validation(t *testing.T) {
 		// ── ListGroups ─────────────────────────────────────────────────────────
 		{"ListGroups/invalid body", "ListGroups",
 			func(*testing.T, *Router) string { return "not-json" },
-			http.StatusBadRequest, ErrTypeInvalidParameterException},
+			http.StatusBadRequest, ErrTypeSerializationException},
 		{"ListGroups/missing pool ID", "ListGroups",
 			func(*testing.T, *Router) string { return `{}` },
 			http.StatusBadRequest, ErrTypeInvalidParameterException},
@@ -609,7 +609,7 @@ func TestGroupHandlers_Validation(t *testing.T) {
 		// ── AdminAddUserToGroup ────────────────────────────────────────────────
 		{"AdminAddUserToGroup/invalid body", "AdminAddUserToGroup",
 			func(*testing.T, *Router) string { return "not-json" },
-			http.StatusBadRequest, ErrTypeInvalidParameterException},
+			http.StatusBadRequest, ErrTypeSerializationException},
 		{"AdminAddUserToGroup/missing pool ID", "AdminAddUserToGroup",
 			static(map[string]any{"GroupName": "admins", "Username": "alice"}),
 			http.StatusBadRequest, ErrTypeInvalidParameterException},
@@ -636,7 +636,7 @@ func TestGroupHandlers_Validation(t *testing.T) {
 		// ── AdminRemoveUserFromGroup ───────────────────────────────────────────
 		{"AdminRemoveUserFromGroup/invalid body", "AdminRemoveUserFromGroup",
 			func(*testing.T, *Router) string { return "not-json" },
-			http.StatusBadRequest, ErrTypeInvalidParameterException},
+			http.StatusBadRequest, ErrTypeSerializationException},
 		{"AdminRemoveUserFromGroup/missing pool ID", "AdminRemoveUserFromGroup",
 			static(map[string]any{"GroupName": "admins", "Username": "alice"}),
 			http.StatusBadRequest, ErrTypeInvalidParameterException},
@@ -666,7 +666,7 @@ func TestGroupHandlers_Validation(t *testing.T) {
 		// ── AdminListGroupsForUser ─────────────────────────────────────────────
 		{"AdminListGroupsForUser/invalid body", "AdminListGroupsForUser",
 			func(*testing.T, *Router) string { return "not-json" },
-			http.StatusBadRequest, ErrTypeInvalidParameterException},
+			http.StatusBadRequest, ErrTypeSerializationException},
 		{"AdminListGroupsForUser/missing pool ID", "AdminListGroupsForUser",
 			static(map[string]any{"Username": "alice"}),
 			http.StatusBadRequest, ErrTypeInvalidParameterException},
@@ -680,7 +680,7 @@ func TestGroupHandlers_Validation(t *testing.T) {
 		// ── ListUsersInGroup ───────────────────────────────────────────────────
 		{"ListUsersInGroup/invalid body", "ListUsersInGroup",
 			func(*testing.T, *Router) string { return "not-json" },
-			http.StatusBadRequest, ErrTypeInvalidParameterException},
+			http.StatusBadRequest, ErrTypeSerializationException},
 		{"ListUsersInGroup/missing pool ID", "ListUsersInGroup",
 			static(map[string]any{"GroupName": "admins"}),
 			http.StatusBadRequest, ErrTypeInvalidParameterException},

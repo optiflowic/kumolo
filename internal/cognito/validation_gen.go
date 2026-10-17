@@ -3,308 +3,269 @@
 package cognito
 
 var (
-	shapeAccessTokenValidityType        = &inputShape{kind: kindInteger, min: new(int64(1)), max: new(int64(86400))}
-	shapeArnType                        = &inputShape{kind: kindString, min: new(int64(20)), max: new(int64(2048)), pattern: mustPattern("arn:[\\w+=/,.@-]+:[\\w+=/,.@-]+:([\\w+=/,.@-]*)?:[0-9]+:[\\w+=/,.@-]+(:[\\w+=/,.@-]+)?(:[\\w+=/,.@-]+)?")}
-	shapeAttributeNameType              = &inputShape{kind: kindString, min: new(int64(1)), max: new(int64(32)), pattern: mustPattern("[\\p{L}\\p{M}\\p{S}\\p{N}\\p{P}\\t\\n\\r ]+")}
-	shapeAuthFlowType                   = &inputShape{kind: kindString, enum: []string{"USER_SRP_AUTH", "REFRESH_TOKEN_AUTH", "REFRESH_TOKEN", "CUSTOM_AUTH", "ADMIN_NO_SRP_AUTH", "USER_PASSWORD_AUTH", "ADMIN_USER_PASSWORD_AUTH", "USER_AUTH"}}
-	shapeAuthSessionValidityType        = &inputShape{kind: kindInteger, min: new(int64(3)), max: new(int64(15))}
-	shapeChallengeNameType              = &inputShape{kind: kindString, enum: []string{"SMS_MFA", "EMAIL_OTP", "SOFTWARE_TOKEN_MFA", "SELECT_MFA_TYPE", "MFA_SETUP", "PASSWORD_VERIFIER", "CUSTOM_CHALLENGE", "SELECT_CHALLENGE", "DEVICE_SRP_AUTH", "DEVICE_PASSWORD_VERIFIER", "ADMIN_NO_SRP_AUTH", "NEW_PASSWORD_REQUIRED", "SMS_OTP", "PASSWORD", "WEB_AUTHN", "PASSWORD_SRP"}}
-	shapeClientIdType                   = &inputShape{kind: kindString, sensitive: true, min: new(int64(1)), max: new(int64(128)), pattern: mustPattern("[\\w+]+")}
-	shapeClientNameType                 = &inputShape{kind: kindString, min: new(int64(1)), max: new(int64(128)), pattern: mustPattern("[\\w\\s+=,.@-]+")}
-	shapeClientSecretType               = &inputShape{kind: kindString, sensitive: true, min: new(int64(24)), max: new(int64(64)), pattern: mustPattern("[\\w+]+")}
-	shapeConfirmationCodeType           = &inputShape{kind: kindString, min: new(int64(1)), max: new(int64(2048)), pattern: mustPattern("[\\S]+")}
-	shapeDeletionProtectionType         = &inputShape{kind: kindString, enum: []string{"ACTIVE", "INACTIVE"}}
-	shapeDescriptionType                = &inputShape{kind: kindString, max: new(int64(2048))}
-	shapeEmailVerificationMessageType   = &inputShape{kind: kindString, min: new(int64(6)), max: new(int64(20000)), pattern: mustPattern("[\\p{L}\\p{M}\\p{S}\\p{N}\\p{P}\\s*]*\\{####\\}[\\p{L}\\p{M}\\p{S}\\p{N}\\p{P}\\s*]*")}
-	shapeEmailVerificationSubjectType   = &inputShape{kind: kindString, min: new(int64(1)), max: new(int64(140)), pattern: mustPattern("[\\p{L}\\p{M}\\p{S}\\p{N}\\p{P}\\s]+")}
-	shapeGroupNameType                  = &inputShape{kind: kindString, min: new(int64(1)), max: new(int64(128)), pattern: mustPattern("[\\p{L}\\p{M}\\p{S}\\p{N}\\p{P}]+")}
-	shapeIdTokenValidityType            = &inputShape{kind: kindInteger, min: new(int64(1)), max: new(int64(86400))}
-	shapeMessageActionType              = &inputShape{kind: kindString, enum: []string{"RESEND", "SUPPRESS"}}
-	shapePaginationKey                  = &inputShape{kind: kindString, min: new(int64(1)), max: new(int64(131072)), pattern: mustPattern("[\\S]+")}
-	shapePaginationKeyType              = &inputShape{kind: kindString, min: new(int64(1)), pattern: mustPattern("[\\S]+")}
-	shapePasswordType                   = &inputShape{kind: kindString, sensitive: true, max: new(int64(256)), pattern: mustPattern("[\\S]+")}
-	shapePoolQueryLimitType             = &inputShape{kind: kindInteger, min: new(int64(1)), max: new(int64(60))}
-	shapePrecedenceType                 = &inputShape{kind: kindInteger, min: new(int64(0))}
-	shapePreventUserExistenceErrorTypes = &inputShape{kind: kindString, enum: []string{"LEGACY", "ENABLED"}}
-	shapeQueryLimit                     = &inputShape{kind: kindInteger, min: new(int64(1)), max: new(int64(60))}
-	shapeQueryLimitType                 = &inputShape{kind: kindInteger, min: new(int64(0)), max: new(int64(60))}
-	shapeRedirectUrlType                = &inputShape{kind: kindString, min: new(int64(1)), max: new(int64(1024)), pattern: mustPattern("[\\p{L}\\p{M}\\p{S}\\p{N}\\p{P}]+")}
-	shapeRefreshTokenValidityType       = &inputShape{kind: kindInteger, min: new(int64(0)), max: new(int64(315360000))}
-	shapeSearchPaginationTokenType      = &inputShape{kind: kindString, min: new(int64(1)), pattern: mustPattern("[\\S]+")}
-	shapeSecretHashType                 = &inputShape{kind: kindString, sensitive: true, min: new(int64(1)), max: new(int64(128)), pattern: mustPattern("[\\w+=/]+")}
-	shapeSessionType                    = &inputShape{kind: kindString, sensitive: true, min: new(int64(20)), max: new(int64(4096))}
-	shapeSmsVerificationMessageType     = &inputShape{kind: kindString, min: new(int64(6)), max: new(int64(140)), pattern: mustPattern(".*\\{####\\}.*")}
-	shapeSoftwareTokenMFAUserCodeType   = &inputShape{kind: kindString, sensitive: true, min: new(int64(6)), max: new(int64(6)), pattern: mustPattern("[0-9]+")}
-	shapeStringType                     = &inputShape{kind: kindString, min: new(int64(0)), max: new(int64(131072))}
-	shapeTokenModelType                 = &inputShape{kind: kindString, sensitive: true, pattern: mustPattern("[A-Za-z0-9-_=.]+")}
-	shapeUserFilterType                 = &inputShape{kind: kindString, max: new(int64(256))}
-	shapeUserPoolIdType                 = &inputShape{kind: kindString, min: new(int64(1)), max: new(int64(55)), pattern: mustPattern("[\\w-]+_[0-9a-zA-Z]+")}
-	shapeUserPoolMfaType                = &inputShape{kind: kindString, enum: []string{"OFF", "ON", "OPTIONAL"}}
-	shapeUserPoolNameType               = &inputShape{kind: kindString, min: new(int64(1)), max: new(int64(128)), pattern: mustPattern("[\\w\\s+=,.@-]+")}
-	shapeUserPoolTierType               = &inputShape{kind: kindString, enum: []string{"LITE", "ESSENTIALS", "PLUS"}}
-	shapeUsernameType                   = &inputShape{kind: kindString, sensitive: true, min: new(int64(1)), max: new(int64(128)), pattern: mustPattern("[\\p{L}\\p{M}\\p{S}\\p{N}\\p{P}]+")}
+	shapeAccessTokenValidityType                       = &inputShape{kind: kindInteger, min: new(int64(1)), max: new(int64(86400))}
+	shapeAccountRecoverySettingType                    = &inputShape{kind: kindStructure, members: []memberRule{{name: "RecoveryMechanisms", shape: shapeRecoveryMechanismsType}}}
+	shapeAcrConfigurationType                          = &inputShape{kind: kindMap, key: shapeAcrLevelKeyType, value: shapeAcrLevelConfigType, min: new(int64(0)), max: new(int64(4))}
+	shapeAcrLevelConfigType                            = &inputShape{kind: kindStructure, members: []memberRule{{name: "AcrValue", required: true, shape: shapeAcrValueType}}}
+	shapeAcrLevelKeyType                               = &inputShape{kind: kindString, pattern: mustPattern("Level[1-4]")}
+	shapeAcrValueType                                  = &inputShape{kind: kindString, min: new(int64(1)), max: new(int64(64)), pattern: mustPattern("[\\x21\\x23-\\x5B\\x5D-\\x7E]+")}
+	shapeAdminAddUserToGroupRequest                    = &inputShape{kind: kindStructure, members: []memberRule{{name: "GroupName", required: true, shape: shapeGroupNameType}, {name: "UserPoolId", required: true, shape: shapeUserPoolIdType}, {name: "Username", required: true, shape: shapeUsernameType}}}
+	shapeAdminConfirmSignUpRequest                     = &inputShape{kind: kindStructure, members: []memberRule{{name: "ClientMetadata", shape: shapeClientMetadataType}, {name: "UserPoolId", required: true, shape: shapeUserPoolIdType}, {name: "Username", required: true, shape: shapeUsernameType}}}
+	shapeAdminCreateUserConfigType                     = &inputShape{kind: kindStructure, members: []memberRule{{name: "AllowAdminCreateUserOnly", shape: shapeBooleanType}, {name: "InviteMessageTemplate", shape: shapeMessageTemplateType}, {name: "UnusedAccountValidityDays", shape: shapeAdminCreateUserUnusedAccountValidityDaysType}}}
+	shapeAdminCreateUserRequest                        = &inputShape{kind: kindStructure, members: []memberRule{{name: "ClientMetadata", shape: shapeClientMetadataType}, {name: "DesiredDeliveryMediums", shape: shapeDeliveryMediumListType}, {name: "ForceAliasCreation", shape: shapeForceAliasCreation}, {name: "MessageAction", shape: shapeMessageActionType}, {name: "TemporaryPassword", shape: shapePasswordType}, {name: "UserAttributes", shape: shapeAttributeListType}, {name: "UserPoolId", required: true, shape: shapeUserPoolIdType}, {name: "Username", required: true, shape: shapeUsernameType}, {name: "ValidationData", shape: shapeAttributeListType}}}
+	shapeAdminCreateUserUnusedAccountValidityDaysType  = &inputShape{kind: kindInteger, min: new(int64(0)), max: new(int64(365))}
+	shapeAdminDeleteUserRequest                        = &inputShape{kind: kindStructure, members: []memberRule{{name: "UserPoolId", required: true, shape: shapeUserPoolIdType}, {name: "Username", required: true, shape: shapeUsernameType}}}
+	shapeAdminDisableUserRequest                       = &inputShape{kind: kindStructure, members: []memberRule{{name: "UserPoolId", required: true, shape: shapeUserPoolIdType}, {name: "Username", required: true, shape: shapeUsernameType}}}
+	shapeAdminEnableUserRequest                        = &inputShape{kind: kindStructure, members: []memberRule{{name: "UserPoolId", required: true, shape: shapeUserPoolIdType}, {name: "Username", required: true, shape: shapeUsernameType}}}
+	shapeAdminGetUserRequest                           = &inputShape{kind: kindStructure, members: []memberRule{{name: "UserPoolId", required: true, shape: shapeUserPoolIdType}, {name: "Username", required: true, shape: shapeUsernameType}}}
+	shapeAdminListGroupsForUserRequest                 = &inputShape{kind: kindStructure, members: []memberRule{{name: "Limit", shape: shapeQueryLimitType}, {name: "NextToken", shape: shapePaginationKey}, {name: "UserPoolId", required: true, shape: shapeUserPoolIdType}, {name: "Username", required: true, shape: shapeUsernameType}}}
+	shapeAdminRemoveUserFromGroupRequest               = &inputShape{kind: kindStructure, members: []memberRule{{name: "GroupName", required: true, shape: shapeGroupNameType}, {name: "UserPoolId", required: true, shape: shapeUserPoolIdType}, {name: "Username", required: true, shape: shapeUsernameType}}}
+	shapeAdminSetUserPasswordRequest                   = &inputShape{kind: kindStructure, members: []memberRule{{name: "Password", required: true, shape: shapePasswordType}, {name: "Permanent", shape: shapeBooleanType}, {name: "UserPoolId", required: true, shape: shapeUserPoolIdType}, {name: "Username", required: true, shape: shapeUsernameType}}}
+	shapeAdminUpdateUserAttributesRequest              = &inputShape{kind: kindStructure, members: []memberRule{{name: "ClientMetadata", shape: shapeClientMetadataType}, {name: "UserAttributes", required: true, shape: shapeAttributeListType}, {name: "UserPoolId", required: true, shape: shapeUserPoolIdType}, {name: "Username", required: true, shape: shapeUsernameType}}}
+	shapeAdvancedSecurityAdditionalFlowsType           = &inputShape{kind: kindStructure, members: []memberRule{{name: "CustomAuthMode", shape: shapeAdvancedSecurityEnabledModeType}}}
+	shapeAdvancedSecurityEnabledModeType               = &inputShape{kind: kindString, enum: []string{"AUDIT", "ENFORCED"}}
+	shapeAdvancedSecurityModeType                      = &inputShape{kind: kindString, enum: []string{"OFF", "AUDIT", "ENFORCED"}}
+	shapeAliasAttributeType                            = &inputShape{kind: kindString, enum: []string{"phone_number", "email", "preferred_username"}}
+	shapeAliasAttributesListType                       = &inputShape{kind: kindList, member: shapeAliasAttributeType}
+	shapeAllowedFirstAuthFactorsListType               = &inputShape{kind: kindList, member: shapeAuthFactorType, min: new(int64(1)), max: new(int64(5))}
+	shapeAnalyticsConfigurationType                    = &inputShape{kind: kindStructure, members: []memberRule{{name: "ApplicationArn", shape: shapeArnType}, {name: "ApplicationId", shape: shapeHexStringType}, {name: "ExternalId", shape: shapeStringType}, {name: "RoleArn", shape: shapeArnType}, {name: "UserDataShared", shape: shapeBooleanType}}}
+	shapeAnalyticsMetadataType                         = &inputShape{kind: kindStructure, members: []memberRule{{name: "AnalyticsEndpointId", shape: shapeStringType}}}
+	shapeArnType                                       = &inputShape{kind: kindString, min: new(int64(20)), max: new(int64(2048)), pattern: mustPattern("arn:[\\w+=/,.@-]+:[\\w+=/,.@-]+:([\\w+=/,.@-]*)?:[0-9]+:[\\w+=/,.@-]+(:[\\w+=/,.@-]+)?(:[\\w+=/,.@-]+)?")}
+	shapeAssociateSoftwareTokenRequest                 = &inputShape{kind: kindStructure, members: []memberRule{{name: "AccessToken", shape: shapeTokenModelType}, {name: "Session", shape: shapeSessionType}}}
+	shapeAttributeDataType                             = &inputShape{kind: kindString, enum: []string{"String", "Number", "DateTime", "Boolean"}}
+	shapeAttributeListType                             = &inputShape{kind: kindList, member: shapeAttributeType}
+	shapeAttributeNameType                             = &inputShape{kind: kindString, min: new(int64(1)), max: new(int64(32)), pattern: mustPattern("[\\p{L}\\p{M}\\p{S}\\p{N}\\p{P}\\t\\n\\r ]+")}
+	shapeAttributeType                                 = &inputShape{kind: kindStructure, members: []memberRule{{name: "Name", required: true, shape: shapeAttributeNameType}, {name: "Value", shape: shapeAttributeValueType}}}
+	shapeAttributeValueType                            = &inputShape{kind: kindString, sensitive: true, max: new(int64(2048))}
+	shapeAttributesRequireVerificationBeforeUpdateType = &inputShape{kind: kindList, member: shapeVerifiedAttributeType}
+	shapeAuthFactorType                                = &inputShape{kind: kindString, enum: []string{"PASSWORD", "EMAIL_OTP", "SMS_OTP", "WEB_AUTHN", "SOFTWARE_TOKEN"}}
+	shapeAuthFlowType                                  = &inputShape{kind: kindString, enum: []string{"USER_SRP_AUTH", "REFRESH_TOKEN_AUTH", "REFRESH_TOKEN", "CUSTOM_AUTH", "ADMIN_NO_SRP_AUTH", "USER_PASSWORD_AUTH", "ADMIN_USER_PASSWORD_AUTH", "USER_AUTH"}}
+	shapeAuthParametersType                            = &inputShape{kind: kindMap, key: shapeStringType, value: shapeStringType, sensitive: true}
+	shapeAuthSessionValidityType                       = &inputShape{kind: kindInteger, min: new(int64(3)), max: new(int64(15))}
+	shapeBooleanType                                   = &inputShape{kind: kindBoolean}
+	shapeCallbackURLsListType                          = &inputShape{kind: kindList, member: shapeRedirectUrlType, min: new(int64(0)), max: new(int64(100))}
+	shapeChallengeNameType                             = &inputShape{kind: kindString, enum: []string{"SMS_MFA", "EMAIL_OTP", "SOFTWARE_TOKEN_MFA", "SELECT_MFA_TYPE", "MFA_SETUP", "PASSWORD_VERIFIER", "CUSTOM_CHALLENGE", "SELECT_CHALLENGE", "DEVICE_SRP_AUTH", "DEVICE_PASSWORD_VERIFIER", "ADMIN_NO_SRP_AUTH", "NEW_PASSWORD_REQUIRED", "SMS_OTP", "PASSWORD", "WEB_AUTHN", "PASSWORD_SRP"}}
+	shapeChallengeResponsesType                        = &inputShape{kind: kindMap, key: shapeStringType, value: shapeStringType, sensitive: true}
+	shapeChangePasswordRequest                         = &inputShape{kind: kindStructure, members: []memberRule{{name: "AccessToken", required: true, shape: shapeTokenModelType}, {name: "PreviousPassword", shape: shapePasswordType}, {name: "ProposedPassword", required: true, shape: shapePasswordType}}}
+	shapeClientIdType                                  = &inputShape{kind: kindString, sensitive: true, min: new(int64(1)), max: new(int64(128)), pattern: mustPattern("[\\w+]+")}
+	shapeClientMetadataType                            = &inputShape{kind: kindMap, key: shapeStringType, value: shapeStringType}
+	shapeClientNameType                                = &inputShape{kind: kindString, min: new(int64(1)), max: new(int64(128)), pattern: mustPattern("[\\w\\s+=,.@-]+")}
+	shapeClientPermissionListType                      = &inputShape{kind: kindList, member: shapeClientPermissionType}
+	shapeClientPermissionType                          = &inputShape{kind: kindString, min: new(int64(1)), max: new(int64(2048))}
+	shapeClientSecretType                              = &inputShape{kind: kindString, sensitive: true, min: new(int64(24)), max: new(int64(64)), pattern: mustPattern("[\\w+]+")}
+	shapeConfirmForgotPasswordRequest                  = &inputShape{kind: kindStructure, members: []memberRule{{name: "AnalyticsMetadata", shape: shapeAnalyticsMetadataType}, {name: "ClientId", required: true, shape: shapeClientIdType}, {name: "ClientMetadata", shape: shapeClientMetadataType}, {name: "ConfirmationCode", required: true, shape: shapeConfirmationCodeType}, {name: "Password", required: true, shape: shapePasswordType}, {name: "SecretHash", shape: shapeSecretHashType}, {name: "UserContextData", shape: shapeUserContextDataType}, {name: "Username", required: true, shape: shapeUsernameType}}}
+	shapeConfirmSignUpRequest                          = &inputShape{kind: kindStructure, members: []memberRule{{name: "AnalyticsMetadata", shape: shapeAnalyticsMetadataType}, {name: "ClientId", required: true, shape: shapeClientIdType}, {name: "ClientMetadata", shape: shapeClientMetadataType}, {name: "ConfirmationCode", required: true, shape: shapeConfirmationCodeType}, {name: "ForceAliasCreation", shape: shapeForceAliasCreation}, {name: "SecretHash", shape: shapeSecretHashType}, {name: "Session", shape: shapeSessionType}, {name: "UserContextData", shape: shapeUserContextDataType}, {name: "Username", required: true, shape: shapeUsernameType}}}
+	shapeConfirmationCodeType                          = &inputShape{kind: kindString, min: new(int64(1)), max: new(int64(2048)), pattern: mustPattern("[\\S]+")}
+	shapeCreateGroupRequest                            = &inputShape{kind: kindStructure, members: []memberRule{{name: "Description", shape: shapeDescriptionType}, {name: "GroupName", required: true, shape: shapeGroupNameType}, {name: "Precedence", shape: shapePrecedenceType}, {name: "RoleArn", shape: shapeArnType}, {name: "UserPoolId", required: true, shape: shapeUserPoolIdType}}}
+	shapeCreateUserPoolClientRequest                   = &inputShape{kind: kindStructure, members: []memberRule{{name: "AccessTokenValidity", shape: shapeAccessTokenValidityType}, {name: "AllowedOAuthFlows", shape: shapeOAuthFlowsType}, {name: "AllowedOAuthFlowsUserPoolClient", shape: shapeBooleanType}, {name: "AllowedOAuthScopes", shape: shapeScopeListType}, {name: "AnalyticsConfiguration", shape: shapeAnalyticsConfigurationType}, {name: "AuthSessionValidity", shape: shapeAuthSessionValidityType}, {name: "CallbackURLs", shape: shapeCallbackURLsListType}, {name: "ClientName", required: true, shape: shapeClientNameType}, {name: "ClientSecret", shape: shapeClientSecretType}, {name: "DefaultRedirectURI", shape: shapeRedirectUrlType}, {name: "EnablePropagateAdditionalUserContextData", shape: shapeWrappedBooleanType}, {name: "EnableTokenRevocation", shape: shapeWrappedBooleanType}, {name: "ExplicitAuthFlows", shape: shapeExplicitAuthFlowsListType}, {name: "GenerateSecret", shape: shapeGenerateSecret}, {name: "IdTokenValidity", shape: shapeIdTokenValidityType}, {name: "LogoutURLs", shape: shapeLogoutURLsListType}, {name: "PreventUserExistenceErrors", shape: shapePreventUserExistenceErrorTypes}, {name: "ReadAttributes", shape: shapeClientPermissionListType}, {name: "RefreshTokenRotation", shape: shapeRefreshTokenRotationType}, {name: "RefreshTokenValidity", shape: shapeRefreshTokenValidityType}, {name: "SupportedIdentityProviders", shape: shapeSupportedIdentityProvidersListType}, {name: "TokenValidityUnits", shape: shapeTokenValidityUnitsType}, {name: "UserPoolId", required: true, shape: shapeUserPoolIdType}, {name: "WriteAttributes", shape: shapeClientPermissionListType}}}
+	shapeCreateUserPoolRequest                         = &inputShape{kind: kindStructure, members: []memberRule{{name: "AccountRecoverySetting", shape: shapeAccountRecoverySettingType}, {name: "AcrConfiguration", shape: shapeAcrConfigurationType}, {name: "AdminCreateUserConfig", shape: shapeAdminCreateUserConfigType}, {name: "AliasAttributes", shape: shapeAliasAttributesListType}, {name: "AutoVerifiedAttributes", shape: shapeVerifiedAttributesListType}, {name: "DeletionProtection", shape: shapeDeletionProtectionType}, {name: "DeviceConfiguration", shape: shapeDeviceConfigurationType}, {name: "EmailConfiguration", shape: shapeEmailConfigurationType}, {name: "EmailVerificationMessage", shape: shapeEmailVerificationMessageType}, {name: "EmailVerificationSubject", shape: shapeEmailVerificationSubjectType}, {name: "IssuerConfiguration", shape: shapeIssuerConfigurationType}, {name: "KeyConfiguration", shape: shapeKeyConfigurationType}, {name: "LambdaConfig", shape: shapeLambdaConfigType}, {name: "MfaConfiguration", shape: shapeUserPoolMfaType}, {name: "Policies", shape: shapeUserPoolPolicyType}, {name: "PoolName", required: true, shape: shapeUserPoolNameType}, {name: "Schema", shape: shapeSchemaAttributesListType}, {name: "SmsAuthenticationMessage", shape: shapeSmsVerificationMessageType}, {name: "SmsConfiguration", shape: shapeSmsConfigurationType}, {name: "SmsVerificationMessage", shape: shapeSmsVerificationMessageType}, {name: "UserAttributeUpdateSettings", shape: shapeUserAttributeUpdateSettingsType}, {name: "UserPoolAddOns", shape: shapeUserPoolAddOnsType}, {name: "UserPoolTags", shape: shapeUserPoolTagsType}, {name: "UserPoolTier", shape: shapeUserPoolTierType}, {name: "UsernameAttributes", shape: shapeUsernameAttributesListType}, {name: "UsernameConfiguration", shape: shapeUsernameConfigurationType}, {name: "VerificationMessageTemplate", shape: shapeVerificationMessageTemplateType}}}
+	shapeCustomAttributeNameType                       = &inputShape{kind: kindString, min: new(int64(1)), max: new(int64(20)), pattern: mustPattern("[\\p{L}\\p{M}\\p{S}\\p{N}\\p{P}]+")}
+	shapeCustomEmailLambdaVersionConfigType            = &inputShape{kind: kindStructure, members: []memberRule{{name: "LambdaArn", required: true, shape: shapeArnType}, {name: "LambdaVersion", required: true, shape: shapeCustomEmailSenderLambdaVersionType}}}
+	shapeCustomEmailSenderLambdaVersionType            = &inputShape{kind: kindString, enum: []string{"V1_0"}}
+	shapeCustomSMSLambdaVersionConfigType              = &inputShape{kind: kindStructure, members: []memberRule{{name: "LambdaArn", required: true, shape: shapeArnType}, {name: "LambdaVersion", required: true, shape: shapeCustomSMSSenderLambdaVersionType}}}
+	shapeCustomSMSSenderLambdaVersionType              = &inputShape{kind: kindString, enum: []string{"V1_0"}}
+	shapeDefaultEmailOptionType                        = &inputShape{kind: kindString, enum: []string{"CONFIRM_WITH_LINK", "CONFIRM_WITH_CODE"}}
+	shapeDeleteGroupRequest                            = &inputShape{kind: kindStructure, members: []memberRule{{name: "GroupName", required: true, shape: shapeGroupNameType}, {name: "UserPoolId", required: true, shape: shapeUserPoolIdType}}}
+	shapeDeleteUserPoolClientRequest                   = &inputShape{kind: kindStructure, members: []memberRule{{name: "ClientId", required: true, shape: shapeClientIdType}, {name: "UserPoolId", required: true, shape: shapeUserPoolIdType}}}
+	shapeDeleteUserPoolRequest                         = &inputShape{kind: kindStructure, members: []memberRule{{name: "UserPoolId", required: true, shape: shapeUserPoolIdType}}}
+	shapeDeleteUserRequest                             = &inputShape{kind: kindStructure, members: []memberRule{{name: "AccessToken", required: true, shape: shapeTokenModelType}}}
+	shapeDeletionProtectionType                        = &inputShape{kind: kindString, enum: []string{"ACTIVE", "INACTIVE"}}
+	shapeDeliveryMediumListType                        = &inputShape{kind: kindList, member: shapeDeliveryMediumType}
+	shapeDeliveryMediumType                            = &inputShape{kind: kindString, enum: []string{"SMS", "EMAIL"}}
+	shapeDescribeUserPoolClientRequest                 = &inputShape{kind: kindStructure, members: []memberRule{{name: "ClientId", required: true, shape: shapeClientIdType}, {name: "UserPoolId", required: true, shape: shapeUserPoolIdType}}}
+	shapeDescribeUserPoolRequest                       = &inputShape{kind: kindStructure, members: []memberRule{{name: "UserPoolId", required: true, shape: shapeUserPoolIdType}}}
+	shapeDescriptionType                               = &inputShape{kind: kindString, max: new(int64(2048))}
+	shapeDeviceConfigurationType                       = &inputShape{kind: kindStructure, members: []memberRule{{name: "ChallengeRequiredOnNewDevice", shape: shapeBooleanType}, {name: "DeviceOnlyRememberedOnUserPrompt", shape: shapeBooleanType}}}
+	shapeEmailAddressType                              = &inputShape{kind: kindString, pattern: mustPattern("[\\p{L}\\p{M}\\p{S}\\p{N}\\p{P}]+@[\\p{L}\\p{M}\\p{S}\\p{N}\\p{P}]+")}
+	shapeEmailConfigurationType                        = &inputShape{kind: kindStructure, members: []memberRule{{name: "ConfigurationSet", shape: shapeSESConfigurationSet}, {name: "EmailSendingAccount", shape: shapeEmailSendingAccountType}, {name: "From", shape: shapeStringType}, {name: "ReplyToEmailAddress", shape: shapeEmailAddressType}, {name: "SourceArn", shape: shapeArnType}}}
+	shapeEmailInviteMessageType                        = &inputShape{kind: kindString, min: new(int64(6)), max: new(int64(20000)), pattern: mustPattern("[\\p{L}\\p{M}\\p{S}\\p{N}\\p{P}\\s*]*")}
+	shapeEmailMfaConfigType                            = &inputShape{kind: kindStructure, members: []memberRule{{name: "Message", shape: shapeEmailMfaMessageType}, {name: "Subject", shape: shapeEmailMfaSubjectType}}}
+	shapeEmailMfaMessageType                           = &inputShape{kind: kindString, min: new(int64(6)), max: new(int64(20000)), pattern: mustPattern("[\\p{L}\\p{M}\\p{S}\\p{N}\\p{P}\\s*]*\\{####\\}[\\p{L}\\p{M}\\p{S}\\p{N}\\p{P}\\s*]*")}
+	shapeEmailMfaSettingsType                          = &inputShape{kind: kindStructure, members: []memberRule{{name: "Enabled", shape: shapeBooleanType}, {name: "PreferredMfa", shape: shapeBooleanType}}}
+	shapeEmailMfaSubjectType                           = &inputShape{kind: kindString, pattern: mustPattern("[\\p{L}\\p{M}\\p{S}\\p{N}\\p{P}\\s]+")}
+	shapeEmailSendingAccountType                       = &inputShape{kind: kindString, enum: []string{"COGNITO_DEFAULT", "DEVELOPER"}}
+	shapeEmailVerificationMessageByLinkType            = &inputShape{kind: kindString, min: new(int64(6)), max: new(int64(20000)), pattern: mustPattern("[\\p{L}\\p{M}\\p{S}\\p{N}\\p{P}\\s*]*\\{##[\\p{L}\\p{M}\\p{S}\\p{N}\\p{P}\\s*]*##\\}[\\p{L}\\p{M}\\p{S}\\p{N}\\p{P}\\s*]*")}
+	shapeEmailVerificationMessageType                  = &inputShape{kind: kindString, min: new(int64(6)), max: new(int64(20000)), pattern: mustPattern("[\\p{L}\\p{M}\\p{S}\\p{N}\\p{P}\\s*]*\\{####\\}[\\p{L}\\p{M}\\p{S}\\p{N}\\p{P}\\s*]*")}
+	shapeEmailVerificationSubjectByLinkType            = &inputShape{kind: kindString, min: new(int64(1)), max: new(int64(140)), pattern: mustPattern("[\\p{L}\\p{M}\\p{S}\\p{N}\\p{P}\\s]+")}
+	shapeEmailVerificationSubjectType                  = &inputShape{kind: kindString, min: new(int64(1)), max: new(int64(140)), pattern: mustPattern("[\\p{L}\\p{M}\\p{S}\\p{N}\\p{P}\\s]+")}
+	shapeEncryptionKeyArnType                          = &inputShape{kind: kindString, min: new(int64(20)), max: new(int64(2048)), pattern: mustPattern("arn:[\\w+=/,.@-]+:[\\w+=/,.@-]+:([\\w+=/,.@-]*)?:[0-9]+:[\\w+=/,.@-]+(:[\\w+=/,.@-]+)?(:[\\w+=/,.@-]+)?")}
+	shapeEncryptionKeyType                             = &inputShape{kind: kindString, enum: []string{"AWS_OWNED_KEY", "CUSTOMER_MANAGED_KEY"}}
+	shapeEumsSmsConfigurationType                      = &inputShape{kind: kindStructure, members: []memberRule{{name: "CallerArn", required: true, shape: shapeArnType}, {name: "ConfigurationSetName", shape: shapeStringType}, {name: "ExternalId", shape: shapeStringType}, {name: "InEntityId", shape: shapeStringType}, {name: "InTemplateId", shape: shapeStringType}, {name: "OriginationIdentity", shape: shapeStringType}, {name: "Region", shape: shapeRegionCodeType}}}
+	shapeExplicitAuthFlowsListType                     = &inputShape{kind: kindList, member: shapeExplicitAuthFlowsType}
+	shapeExplicitAuthFlowsType                         = &inputShape{kind: kindString, enum: []string{"ADMIN_NO_SRP_AUTH", "CUSTOM_AUTH_FLOW_ONLY", "USER_PASSWORD_AUTH", "ALLOW_ADMIN_USER_PASSWORD_AUTH", "ALLOW_CUSTOM_AUTH", "ALLOW_USER_PASSWORD_AUTH", "ALLOW_USER_SRP_AUTH", "ALLOW_REFRESH_TOKEN_AUTH", "ALLOW_USER_AUTH"}}
+	shapeFeatureType                                   = &inputShape{kind: kindString, enum: []string{"ENABLED", "DISABLED"}}
+	shapeForceAliasCreation                            = &inputShape{kind: kindBoolean}
+	shapeForgotPasswordRequest                         = &inputShape{kind: kindStructure, members: []memberRule{{name: "AnalyticsMetadata", shape: shapeAnalyticsMetadataType}, {name: "ClientId", required: true, shape: shapeClientIdType}, {name: "ClientMetadata", shape: shapeClientMetadataType}, {name: "SecretHash", shape: shapeSecretHashType}, {name: "UserContextData", shape: shapeUserContextDataType}, {name: "Username", required: true, shape: shapeUsernameType}}}
+	shapeGenerateSecret                                = &inputShape{kind: kindBoolean}
+	shapeGetGroupRequest                               = &inputShape{kind: kindStructure, members: []memberRule{{name: "GroupName", required: true, shape: shapeGroupNameType}, {name: "UserPoolId", required: true, shape: shapeUserPoolIdType}}}
+	shapeGetUserAttributeVerificationCodeRequest       = &inputShape{kind: kindStructure, members: []memberRule{{name: "AccessToken", required: true, shape: shapeTokenModelType}, {name: "AttributeName", required: true, shape: shapeAttributeNameType}, {name: "ClientMetadata", shape: shapeClientMetadataType}}}
+	shapeGetUserPoolMfaConfigRequest                   = &inputShape{kind: kindStructure, members: []memberRule{{name: "UserPoolId", required: true, shape: shapeUserPoolIdType}}}
+	shapeGetUserRequest                                = &inputShape{kind: kindStructure, members: []memberRule{{name: "AccessToken", required: true, shape: shapeTokenModelType}}}
+	shapeGlobalSignOutRequest                          = &inputShape{kind: kindStructure, members: []memberRule{{name: "AccessToken", required: true, shape: shapeTokenModelType}}}
+	shapeGroupNameType                                 = &inputShape{kind: kindString, min: new(int64(1)), max: new(int64(128)), pattern: mustPattern("[\\p{L}\\p{M}\\p{S}\\p{N}\\p{P}]+")}
+	shapeHexStringType                                 = &inputShape{kind: kindString, pattern: mustPattern("^[0-9a-fA-F]+$")}
+	shapeIdTokenValidityType                           = &inputShape{kind: kindInteger, min: new(int64(1)), max: new(int64(86400))}
+	shapeInboundFederationLambdaType                   = &inputShape{kind: kindStructure, members: []memberRule{{name: "LambdaArn", required: true, shape: shapeArnType}, {name: "LambdaVersion", required: true, shape: shapeInboundFederationLambdaVersionType}}}
+	shapeInboundFederationLambdaVersionType            = &inputShape{kind: kindString, enum: []string{"V1_0"}}
+	shapeInitiateAuthRequest                           = &inputShape{kind: kindStructure, members: []memberRule{{name: "AnalyticsMetadata", shape: shapeAnalyticsMetadataType}, {name: "AuthFlow", required: true, shape: shapeAuthFlowType}, {name: "AuthParameters", shape: shapeAuthParametersType}, {name: "ClientId", required: true, shape: shapeClientIdType}, {name: "ClientMetadata", shape: shapeClientMetadataType}, {name: "Session", shape: shapeSessionType}, {name: "UserContextData", shape: shapeUserContextDataType}}}
+	shapeIssuerConfigurationType                       = &inputShape{kind: kindStructure, members: []memberRule{{name: "Type", shape: shapeIssuerType}}}
+	shapeIssuerType                                    = &inputShape{kind: kindString, enum: []string{"ORIGINAL", "UPDATED"}}
+	shapeKeyConfigurationType                          = &inputShape{kind: kindStructure, members: []memberRule{{name: "KeyType", shape: shapeEncryptionKeyType}, {name: "KmsKeyArn", shape: shapeEncryptionKeyArnType}}}
+	shapeLambdaConfigType                              = &inputShape{kind: kindStructure, members: []memberRule{{name: "CreateAuthChallenge", shape: shapeArnType}, {name: "CustomEmailSender", shape: shapeCustomEmailLambdaVersionConfigType}, {name: "CustomMessage", shape: shapeArnType}, {name: "CustomSMSSender", shape: shapeCustomSMSLambdaVersionConfigType}, {name: "DefineAuthChallenge", shape: shapeArnType}, {name: "InboundFederation", shape: shapeInboundFederationLambdaType}, {name: "KMSKeyID", shape: shapeArnType}, {name: "PostAuthentication", shape: shapeArnType}, {name: "PostConfirmation", shape: shapeArnType}, {name: "PreAuthentication", shape: shapeArnType}, {name: "PreSignUp", shape: shapeArnType}, {name: "PreTokenGeneration", shape: shapeArnType}, {name: "PreTokenGenerationConfig", shape: shapePreTokenGenerationVersionConfigType}, {name: "UserMigration", shape: shapeArnType}, {name: "VerifyAuthChallengeResponse", shape: shapeArnType}}}
+	shapeListGroupsRequest                             = &inputShape{kind: kindStructure, members: []memberRule{{name: "Limit", shape: shapeQueryLimitType}, {name: "NextToken", shape: shapePaginationKey}, {name: "UserPoolId", required: true, shape: shapeUserPoolIdType}}}
+	shapeListTagsForResourceRequest                    = &inputShape{kind: kindStructure, members: []memberRule{{name: "ResourceArn", required: true, shape: shapeArnType}}}
+	shapeListUserPoolClientsRequest                    = &inputShape{kind: kindStructure, members: []memberRule{{name: "MaxResults", shape: shapeQueryLimit}, {name: "NextToken", shape: shapePaginationKey}, {name: "UserPoolId", required: true, shape: shapeUserPoolIdType}}}
+	shapeListUserPoolsRequest                          = &inputShape{kind: kindStructure, members: []memberRule{{name: "MaxResults", required: true, shape: shapePoolQueryLimitType}, {name: "NextToken", shape: shapePaginationKeyType}}}
+	shapeListUsersInGroupRequest                       = &inputShape{kind: kindStructure, members: []memberRule{{name: "GroupName", required: true, shape: shapeGroupNameType}, {name: "Limit", shape: shapeQueryLimitType}, {name: "NextToken", shape: shapePaginationKey}, {name: "UserPoolId", required: true, shape: shapeUserPoolIdType}}}
+	shapeListUsersRequest                              = &inputShape{kind: kindStructure, members: []memberRule{{name: "AttributesToGet", shape: shapeSearchedAttributeNamesListType}, {name: "Filter", shape: shapeUserFilterType}, {name: "Limit", shape: shapeQueryLimitType}, {name: "PaginationToken", shape: shapeSearchPaginationTokenType}, {name: "UserPoolId", required: true, shape: shapeUserPoolIdType}}}
+	shapeLogoutURLsListType                            = &inputShape{kind: kindList, member: shapeRedirectUrlType, min: new(int64(0)), max: new(int64(100))}
+	shapeMessageActionType                             = &inputShape{kind: kindString, enum: []string{"RESEND", "SUPPRESS"}}
+	shapeMessageTemplateType                           = &inputShape{kind: kindStructure, members: []memberRule{{name: "EmailMessage", shape: shapeEmailInviteMessageType}, {name: "EmailSubject", shape: shapeEmailVerificationSubjectType}, {name: "SMSMessage", shape: shapeSmsInviteMessageType}}}
+	shapeNumberAttributeConstraintsType                = &inputShape{kind: kindStructure, members: []memberRule{{name: "MaxValue", shape: shapeStringType}, {name: "MinValue", shape: shapeStringType}}}
+	shapeOAuthFlowType                                 = &inputShape{kind: kindString, enum: []string{"code", "implicit", "client_credentials"}}
+	shapeOAuthFlowsType                                = &inputShape{kind: kindList, member: shapeOAuthFlowType, min: new(int64(0)), max: new(int64(3))}
+	shapeOptionalArnType                               = &inputShape{kind: kindString, min: new(int64(0)), max: new(int64(2048)), pattern: mustPattern("(arn:[\\w+=/,.@-]+:[\\w+=/,.@-]+:([\\w+=/,.@-]*)?:[0-9]+:[\\w+=/,.@-]+(:[\\w+=/,.@-]+)?(:[\\w+=/,.@-]+)?)?")}
+	shapePaginationKey                                 = &inputShape{kind: kindString, min: new(int64(1)), max: new(int64(131072)), pattern: mustPattern("[\\S]+")}
+	shapePaginationKeyType                             = &inputShape{kind: kindString, min: new(int64(1)), pattern: mustPattern("[\\S]+")}
+	shapePasswordHistorySizeType                       = &inputShape{kind: kindInteger, min: new(int64(0)), max: new(int64(24))}
+	shapePasswordPolicyMinLengthType                   = &inputShape{kind: kindInteger, min: new(int64(6)), max: new(int64(99))}
+	shapePasswordPolicyType                            = &inputShape{kind: kindStructure, members: []memberRule{{name: "MinimumLength", shape: shapePasswordPolicyMinLengthType}, {name: "PasswordHistorySize", shape: shapePasswordHistorySizeType}, {name: "RequireLowercase", shape: shapeBooleanType}, {name: "RequireNumbers", shape: shapeBooleanType}, {name: "RequireSymbols", shape: shapeBooleanType}, {name: "RequireUppercase", shape: shapeBooleanType}, {name: "TemporaryPasswordValidityDays", shape: shapeTemporaryPasswordValidityDaysType}}}
+	shapePasswordType                                  = &inputShape{kind: kindString, sensitive: true, max: new(int64(256)), pattern: mustPattern("[\\S]+")}
+	shapePoolQueryLimitType                            = &inputShape{kind: kindInteger, min: new(int64(1)), max: new(int64(60))}
+	shapePreTokenGenerationLambdaVersionType           = &inputShape{kind: kindString, enum: []string{"V1_0", "V2_0", "V3_0"}}
+	shapePreTokenGenerationVersionConfigType           = &inputShape{kind: kindStructure, members: []memberRule{{name: "LambdaArn", required: true, shape: shapeArnType}, {name: "LambdaVersion", required: true, shape: shapePreTokenGenerationLambdaVersionType}}}
+	shapePrecedenceType                                = &inputShape{kind: kindInteger, min: new(int64(0))}
+	shapePreventUserExistenceErrorTypes                = &inputShape{kind: kindString, enum: []string{"LEGACY", "ENABLED"}}
+	shapePriorityType                                  = &inputShape{kind: kindInteger, min: new(int64(1)), max: new(int64(2))}
+	shapeProviderNameType                              = &inputShape{kind: kindString, min: new(int64(1)), max: new(int64(32)), pattern: mustPattern("[\\p{L}\\p{M}\\p{S}\\p{N}\\p{P}\\p{Z}]+")}
+	shapeQueryLimit                                    = &inputShape{kind: kindInteger, min: new(int64(1)), max: new(int64(60))}
+	shapeQueryLimitType                                = &inputShape{kind: kindInteger, min: new(int64(0)), max: new(int64(60))}
+	shapeRecoveryMechanismsType                        = &inputShape{kind: kindList, member: shapeRecoveryOptionType, min: new(int64(1)), max: new(int64(2))}
+	shapeRecoveryOptionNameType                        = &inputShape{kind: kindString, enum: []string{"verified_email", "verified_phone_number", "admin_only"}}
+	shapeRecoveryOptionType                            = &inputShape{kind: kindStructure, members: []memberRule{{name: "Name", required: true, shape: shapeRecoveryOptionNameType}, {name: "Priority", required: true, shape: shapePriorityType}}}
+	shapeRedirectUrlType                               = &inputShape{kind: kindString, min: new(int64(1)), max: new(int64(1024)), pattern: mustPattern("[\\p{L}\\p{M}\\p{S}\\p{N}\\p{P}]+")}
+	shapeRefreshTokenRotationType                      = &inputShape{kind: kindStructure, members: []memberRule{{name: "Feature", required: true, shape: shapeFeatureType}, {name: "RetryGracePeriodSeconds", shape: shapeRetryGracePeriodSecondsType}}}
+	shapeRefreshTokenValidityType                      = &inputShape{kind: kindInteger, min: new(int64(0)), max: new(int64(315360000))}
+	shapeRegionCodeType                                = &inputShape{kind: kindString, min: new(int64(5)), max: new(int64(32))}
+	shapeRelyingPartyIdType                            = &inputShape{kind: kindString, min: new(int64(1)), max: new(int64(127))}
+	shapeResendConfirmationCodeRequest                 = &inputShape{kind: kindStructure, members: []memberRule{{name: "AnalyticsMetadata", shape: shapeAnalyticsMetadataType}, {name: "ClientId", required: true, shape: shapeClientIdType}, {name: "ClientMetadata", shape: shapeClientMetadataType}, {name: "SecretHash", shape: shapeSecretHashType}, {name: "UserContextData", shape: shapeUserContextDataType}, {name: "Username", required: true, shape: shapeUsernameType}}}
+	shapeRespondToAuthChallengeRequest                 = &inputShape{kind: kindStructure, members: []memberRule{{name: "AnalyticsMetadata", shape: shapeAnalyticsMetadataType}, {name: "ChallengeName", required: true, shape: shapeChallengeNameType}, {name: "ChallengeResponses", shape: shapeChallengeResponsesType}, {name: "ClientId", required: true, shape: shapeClientIdType}, {name: "ClientMetadata", shape: shapeClientMetadataType}, {name: "Session", shape: shapeSessionType}, {name: "UserContextData", shape: shapeUserContextDataType}}}
+	shapeRetryGracePeriodSecondsType                   = &inputShape{kind: kindInteger, min: new(int64(0)), max: new(int64(60))}
+	shapeRevokeTokenRequest                            = &inputShape{kind: kindStructure, members: []memberRule{{name: "ClientId", required: true, shape: shapeClientIdType}, {name: "ClientSecret", shape: shapeClientSecretType}, {name: "Token", required: true, shape: shapeTokenModelType}}}
+	shapeSESConfigurationSet                           = &inputShape{kind: kindString, min: new(int64(1)), max: new(int64(64)), pattern: mustPattern("^[a-zA-Z0-9_-]+$")}
+	shapeSMSMfaSettingsType                            = &inputShape{kind: kindStructure, members: []memberRule{{name: "Enabled", shape: shapeBooleanType}, {name: "PreferredMfa", shape: shapeBooleanType}}}
+	shapeSchemaAttributeType                           = &inputShape{kind: kindStructure, members: []memberRule{{name: "AttributeDataType", shape: shapeAttributeDataType}, {name: "DeveloperOnlyAttribute", shape: shapeBooleanType}, {name: "Mutable", shape: shapeBooleanType}, {name: "Name", shape: shapeCustomAttributeNameType}, {name: "NumberAttributeConstraints", shape: shapeNumberAttributeConstraintsType}, {name: "Required", shape: shapeBooleanType}, {name: "StringAttributeConstraints", shape: shapeStringAttributeConstraintsType}}}
+	shapeSchemaAttributesListType                      = &inputShape{kind: kindList, member: shapeSchemaAttributeType, min: new(int64(1)), max: new(int64(50))}
+	shapeScopeListType                                 = &inputShape{kind: kindList, member: shapeScopeType, max: new(int64(50))}
+	shapeScopeType                                     = &inputShape{kind: kindString, min: new(int64(1)), max: new(int64(256)), pattern: mustPattern("[\\x21\\x23-\\x5B\\x5D-\\x7E]+")}
+	shapeSearchPaginationTokenType                     = &inputShape{kind: kindString, min: new(int64(1)), pattern: mustPattern("[\\S]+")}
+	shapeSearchedAttributeNamesListType                = &inputShape{kind: kindList, member: shapeAttributeNameType}
+	shapeSecretHashType                                = &inputShape{kind: kindString, sensitive: true, min: new(int64(1)), max: new(int64(128)), pattern: mustPattern("[\\w+=/]+")}
+	shapeSessionType                                   = &inputShape{kind: kindString, sensitive: true, min: new(int64(20)), max: new(int64(4096))}
+	shapeSetUserMFAPreferenceRequest                   = &inputShape{kind: kindStructure, members: []memberRule{{name: "AccessToken", required: true, shape: shapeTokenModelType}, {name: "EmailMfaSettings", shape: shapeEmailMfaSettingsType}, {name: "SMSMfaSettings", shape: shapeSMSMfaSettingsType}, {name: "SoftwareTokenMfaSettings", shape: shapeSoftwareTokenMfaSettingsType}, {name: "WebAuthnMfaSettings", shape: shapeWebAuthnMfaSettingsType}}}
+	shapeSetUserPoolMfaConfigRequest                   = &inputShape{kind: kindStructure, members: []memberRule{{name: "EmailMfaConfiguration", shape: shapeEmailMfaConfigType}, {name: "MfaConfiguration", shape: shapeUserPoolMfaType}, {name: "SmsMfaConfiguration", shape: shapeSmsMfaConfigType}, {name: "SoftwareTokenMfaConfiguration", shape: shapeSoftwareTokenMfaConfigType}, {name: "UserPoolId", required: true, shape: shapeUserPoolIdType}, {name: "WebAuthnConfiguration", shape: shapeWebAuthnConfigurationType}}}
+	shapeSignInPolicyType                              = &inputShape{kind: kindStructure, members: []memberRule{{name: "AllowedFirstAuthFactors", shape: shapeAllowedFirstAuthFactorsListType}}}
+	shapeSignUpRequest                                 = &inputShape{kind: kindStructure, members: []memberRule{{name: "AnalyticsMetadata", shape: shapeAnalyticsMetadataType}, {name: "ClientId", required: true, shape: shapeClientIdType}, {name: "ClientMetadata", shape: shapeClientMetadataType}, {name: "Password", shape: shapePasswordType}, {name: "SecretHash", shape: shapeSecretHashType}, {name: "UserAttributes", shape: shapeAttributeListType}, {name: "UserContextData", shape: shapeUserContextDataType}, {name: "Username", required: true, shape: shapeUsernameType}, {name: "ValidationData", shape: shapeAttributeListType}}}
+	shapeSmsConfigurationType                          = &inputShape{kind: kindStructure, members: []memberRule{{name: "EumsSms", shape: shapeEumsSmsConfigurationType}, {name: "ExternalId", shape: shapeStringType}, {name: "SnsCallerArn", shape: shapeOptionalArnType}, {name: "SnsRegion", shape: shapeRegionCodeType}}}
+	shapeSmsInviteMessageType                          = &inputShape{kind: kindString, min: new(int64(6)), max: new(int64(140)), pattern: mustPattern("(?s).*")}
+	shapeSmsMfaConfigType                              = &inputShape{kind: kindStructure, members: []memberRule{{name: "SmsAuthenticationMessage", shape: shapeSmsVerificationMessageType}, {name: "SmsConfiguration", shape: shapeSmsConfigurationType}}}
+	shapeSmsVerificationMessageType                    = &inputShape{kind: kindString, min: new(int64(6)), max: new(int64(140)), pattern: mustPattern(".*\\{####\\}.*")}
+	shapeSoftwareTokenMFAUserCodeType                  = &inputShape{kind: kindString, sensitive: true, min: new(int64(6)), max: new(int64(6)), pattern: mustPattern("[0-9]+")}
+	shapeSoftwareTokenMfaConfigType                    = &inputShape{kind: kindStructure, members: []memberRule{{name: "Enabled", shape: shapeBooleanType}}}
+	shapeSoftwareTokenMfaSettingsType                  = &inputShape{kind: kindStructure, members: []memberRule{{name: "Enabled", shape: shapeBooleanType}, {name: "PreferredMfa", shape: shapeBooleanType}}}
+	shapeStringAttributeConstraintsType                = &inputShape{kind: kindStructure, members: []memberRule{{name: "MaxLength", shape: shapeStringType}, {name: "MinLength", shape: shapeStringType}}}
+	shapeStringType                                    = &inputShape{kind: kindString, min: new(int64(0)), max: new(int64(131072))}
+	shapeSupportedIdentityProvidersListType            = &inputShape{kind: kindList, member: shapeProviderNameType}
+	shapeTagKeysType                                   = &inputShape{kind: kindString, min: new(int64(1)), max: new(int64(128))}
+	shapeTagResourceRequest                            = &inputShape{kind: kindStructure, members: []memberRule{{name: "ResourceArn", required: true, shape: shapeArnType}, {name: "Tags", required: true, shape: shapeUserPoolTagsType}}}
+	shapeTagValueType                                  = &inputShape{kind: kindString, min: new(int64(0)), max: new(int64(256))}
+	shapeTemporaryPasswordValidityDaysType             = &inputShape{kind: kindInteger, min: new(int64(0)), max: new(int64(365))}
+	shapeTimeUnitsType                                 = &inputShape{kind: kindString, enum: []string{"seconds", "minutes", "hours", "days"}}
+	shapeTokenModelType                                = &inputShape{kind: kindString, sensitive: true, pattern: mustPattern("[A-Za-z0-9-_=.]+")}
+	shapeTokenValidityUnitsType                        = &inputShape{kind: kindStructure, members: []memberRule{{name: "AccessToken", shape: shapeTimeUnitsType}, {name: "IdToken", shape: shapeTimeUnitsType}, {name: "RefreshToken", shape: shapeTimeUnitsType}}}
+	shapeUntagResourceRequest                          = &inputShape{kind: kindStructure, members: []memberRule{{name: "ResourceArn", required: true, shape: shapeArnType}, {name: "TagKeys", required: true, shape: shapeUserPoolTagsListType}}}
+	shapeUpdateGroupRequest                            = &inputShape{kind: kindStructure, members: []memberRule{{name: "Description", shape: shapeDescriptionType}, {name: "GroupName", required: true, shape: shapeGroupNameType}, {name: "Precedence", shape: shapePrecedenceType}, {name: "RoleArn", shape: shapeArnType}, {name: "UserPoolId", required: true, shape: shapeUserPoolIdType}}}
+	shapeUpdateUserAttributesRequest                   = &inputShape{kind: kindStructure, members: []memberRule{{name: "AccessToken", required: true, shape: shapeTokenModelType}, {name: "ClientMetadata", shape: shapeClientMetadataType}, {name: "UserAttributes", required: true, shape: shapeAttributeListType}}}
+	shapeUpdateUserPoolClientRequest                   = &inputShape{kind: kindStructure, members: []memberRule{{name: "AccessTokenValidity", shape: shapeAccessTokenValidityType}, {name: "AllowedOAuthFlows", shape: shapeOAuthFlowsType}, {name: "AllowedOAuthFlowsUserPoolClient", shape: shapeBooleanType}, {name: "AllowedOAuthScopes", shape: shapeScopeListType}, {name: "AnalyticsConfiguration", shape: shapeAnalyticsConfigurationType}, {name: "AuthSessionValidity", shape: shapeAuthSessionValidityType}, {name: "CallbackURLs", shape: shapeCallbackURLsListType}, {name: "ClientId", required: true, shape: shapeClientIdType}, {name: "ClientName", shape: shapeClientNameType}, {name: "DefaultRedirectURI", shape: shapeRedirectUrlType}, {name: "EnablePropagateAdditionalUserContextData", shape: shapeWrappedBooleanType}, {name: "EnableTokenRevocation", shape: shapeWrappedBooleanType}, {name: "ExplicitAuthFlows", shape: shapeExplicitAuthFlowsListType}, {name: "IdTokenValidity", shape: shapeIdTokenValidityType}, {name: "LogoutURLs", shape: shapeLogoutURLsListType}, {name: "PreventUserExistenceErrors", shape: shapePreventUserExistenceErrorTypes}, {name: "ReadAttributes", shape: shapeClientPermissionListType}, {name: "RefreshTokenRotation", shape: shapeRefreshTokenRotationType}, {name: "RefreshTokenValidity", shape: shapeRefreshTokenValidityType}, {name: "SupportedIdentityProviders", shape: shapeSupportedIdentityProvidersListType}, {name: "TokenValidityUnits", shape: shapeTokenValidityUnitsType}, {name: "UserPoolId", required: true, shape: shapeUserPoolIdType}, {name: "WriteAttributes", shape: shapeClientPermissionListType}}}
+	shapeUpdateUserPoolRequest                         = &inputShape{kind: kindStructure, members: []memberRule{{name: "AccountRecoverySetting", shape: shapeAccountRecoverySettingType}, {name: "AcrConfiguration", shape: shapeAcrConfigurationType}, {name: "AdminCreateUserConfig", shape: shapeAdminCreateUserConfigType}, {name: "AutoVerifiedAttributes", shape: shapeVerifiedAttributesListType}, {name: "DeletionProtection", shape: shapeDeletionProtectionType}, {name: "DeviceConfiguration", shape: shapeDeviceConfigurationType}, {name: "EmailConfiguration", shape: shapeEmailConfigurationType}, {name: "EmailVerificationMessage", shape: shapeEmailVerificationMessageType}, {name: "EmailVerificationSubject", shape: shapeEmailVerificationSubjectType}, {name: "IssuerConfiguration", shape: shapeIssuerConfigurationType}, {name: "KeyConfiguration", shape: shapeKeyConfigurationType}, {name: "LambdaConfig", shape: shapeLambdaConfigType}, {name: "MfaConfiguration", shape: shapeUserPoolMfaType}, {name: "Policies", shape: shapeUserPoolPolicyType}, {name: "PoolName", shape: shapeUserPoolNameType}, {name: "SmsAuthenticationMessage", shape: shapeSmsVerificationMessageType}, {name: "SmsConfiguration", shape: shapeSmsConfigurationType}, {name: "SmsVerificationMessage", shape: shapeSmsVerificationMessageType}, {name: "UserAttributeUpdateSettings", shape: shapeUserAttributeUpdateSettingsType}, {name: "UserPoolAddOns", shape: shapeUserPoolAddOnsType}, {name: "UserPoolId", required: true, shape: shapeUserPoolIdType}, {name: "UserPoolTags", shape: shapeUserPoolTagsType}, {name: "UserPoolTier", shape: shapeUserPoolTierType}, {name: "VerificationMessageTemplate", shape: shapeVerificationMessageTemplateType}}}
+	shapeUserAttributeUpdateSettingsType               = &inputShape{kind: kindStructure, members: []memberRule{{name: "AttributesRequireVerificationBeforeUpdate", shape: shapeAttributesRequireVerificationBeforeUpdateType}}}
+	shapeUserContextDataType                           = &inputShape{kind: kindStructure, members: []memberRule{{name: "EncodedData", shape: shapeStringType}, {name: "IpAddress", shape: shapeStringType}}, sensitive: true}
+	shapeUserFilterType                                = &inputShape{kind: kindString, max: new(int64(256))}
+	shapeUserPoolAddOnsType                            = &inputShape{kind: kindStructure, members: []memberRule{{name: "AdvancedSecurityAdditionalFlows", shape: shapeAdvancedSecurityAdditionalFlowsType}, {name: "AdvancedSecurityMode", required: true, shape: shapeAdvancedSecurityModeType}}}
+	shapeUserPoolIdType                                = &inputShape{kind: kindString, min: new(int64(1)), max: new(int64(55)), pattern: mustPattern("[\\w-]+_[0-9a-zA-Z]+")}
+	shapeUserPoolMfaType                               = &inputShape{kind: kindString, enum: []string{"OFF", "ON", "OPTIONAL"}}
+	shapeUserPoolNameType                              = &inputShape{kind: kindString, min: new(int64(1)), max: new(int64(128)), pattern: mustPattern("[\\w\\s+=,.@-]+")}
+	shapeUserPoolPolicyType                            = &inputShape{kind: kindStructure, members: []memberRule{{name: "PasswordPolicy", shape: shapePasswordPolicyType}, {name: "SignInPolicy", shape: shapeSignInPolicyType}}}
+	shapeUserPoolTagsListType                          = &inputShape{kind: kindList, member: shapeTagKeysType}
+	shapeUserPoolTagsType                              = &inputShape{kind: kindMap, key: shapeTagKeysType, value: shapeTagValueType}
+	shapeUserPoolTierType                              = &inputShape{kind: kindString, enum: []string{"LITE", "ESSENTIALS", "PLUS"}}
+	shapeUserVerificationType                          = &inputShape{kind: kindString, enum: []string{"required", "preferred"}}
+	shapeUsernameAttributeType                         = &inputShape{kind: kindString, enum: []string{"phone_number", "email"}}
+	shapeUsernameAttributesListType                    = &inputShape{kind: kindList, member: shapeUsernameAttributeType}
+	shapeUsernameConfigurationType                     = &inputShape{kind: kindStructure, members: []memberRule{{name: "CaseSensitive", required: true, shape: shapeWrappedBooleanType}}}
+	shapeUsernameType                                  = &inputShape{kind: kindString, sensitive: true, min: new(int64(1)), max: new(int64(128)), pattern: mustPattern("[\\p{L}\\p{M}\\p{S}\\p{N}\\p{P}]+")}
+	shapeVerificationMessageTemplateType               = &inputShape{kind: kindStructure, members: []memberRule{{name: "DefaultEmailOption", shape: shapeDefaultEmailOptionType}, {name: "EmailMessage", shape: shapeEmailVerificationMessageType}, {name: "EmailMessageByLink", shape: shapeEmailVerificationMessageByLinkType}, {name: "EmailSubject", shape: shapeEmailVerificationSubjectType}, {name: "EmailSubjectByLink", shape: shapeEmailVerificationSubjectByLinkType}, {name: "SmsMessage", shape: shapeSmsVerificationMessageType}}}
+	shapeVerifiedAttributeType                         = &inputShape{kind: kindString, enum: []string{"phone_number", "email"}}
+	shapeVerifiedAttributesListType                    = &inputShape{kind: kindList, member: shapeVerifiedAttributeType}
+	shapeVerifySoftwareTokenRequest                    = &inputShape{kind: kindStructure, members: []memberRule{{name: "AccessToken", shape: shapeTokenModelType}, {name: "FriendlyDeviceName", shape: shapeStringType}, {name: "Session", shape: shapeSessionType}, {name: "UserCode", required: true, shape: shapeSoftwareTokenMFAUserCodeType}}}
+	shapeVerifyUserAttributeRequest                    = &inputShape{kind: kindStructure, members: []memberRule{{name: "AccessToken", required: true, shape: shapeTokenModelType}, {name: "AttributeName", required: true, shape: shapeAttributeNameType}, {name: "Code", required: true, shape: shapeConfirmationCodeType}}}
+	shapeWebAuthnConfigurationType                     = &inputShape{kind: kindStructure, members: []memberRule{{name: "FactorConfiguration", shape: shapeWebAuthnFactorConfigurationType}, {name: "RelyingPartyId", shape: shapeRelyingPartyIdType}, {name: "UserVerification", shape: shapeUserVerificationType}}}
+	shapeWebAuthnFactorConfigurationType               = &inputShape{kind: kindString, enum: []string{"SINGLE_FACTOR", "MULTI_FACTOR_WITH_USER_VERIFICATION"}}
+	shapeWebAuthnMfaSettingsType                       = &inputShape{kind: kindStructure, members: []memberRule{{name: "Enabled", shape: shapeBooleanType}}}
+	shapeWrappedBooleanType                            = &inputShape{kind: kindBoolean}
 )
 
-// inputRules lists the constrained top-level input members of each operation.
-var inputRules = map[string][]memberRule{
-	"AdminAddUserToGroup": {
-		{name: "GroupName", required: true, shape: shapeGroupNameType},
-		{name: "UserPoolId", required: true, shape: shapeUserPoolIdType},
-		{name: "Username", required: true, shape: shapeUsernameType},
-	},
-	"AdminConfirmSignUp": {
-		{name: "UserPoolId", required: true, shape: shapeUserPoolIdType},
-		{name: "Username", required: true, shape: shapeUsernameType},
-	},
-	"AdminCreateUser": {
-		{name: "MessageAction", shape: shapeMessageActionType},
-		{name: "TemporaryPassword", shape: shapePasswordType},
-		{name: "UserPoolId", required: true, shape: shapeUserPoolIdType},
-		{name: "Username", required: true, shape: shapeUsernameType},
-	},
-	"AdminDeleteUser": {
-		{name: "UserPoolId", required: true, shape: shapeUserPoolIdType},
-		{name: "Username", required: true, shape: shapeUsernameType},
-	},
-	"AdminDisableUser": {
-		{name: "UserPoolId", required: true, shape: shapeUserPoolIdType},
-		{name: "Username", required: true, shape: shapeUsernameType},
-	},
-	"AdminEnableUser": {
-		{name: "UserPoolId", required: true, shape: shapeUserPoolIdType},
-		{name: "Username", required: true, shape: shapeUsernameType},
-	},
-	"AdminGetUser": {
-		{name: "UserPoolId", required: true, shape: shapeUserPoolIdType},
-		{name: "Username", required: true, shape: shapeUsernameType},
-	},
-	"AdminListGroupsForUser": {
-		{name: "Limit", shape: shapeQueryLimitType},
-		{name: "NextToken", shape: shapePaginationKey},
-		{name: "UserPoolId", required: true, shape: shapeUserPoolIdType},
-		{name: "Username", required: true, shape: shapeUsernameType},
-	},
-	"AdminRemoveUserFromGroup": {
-		{name: "GroupName", required: true, shape: shapeGroupNameType},
-		{name: "UserPoolId", required: true, shape: shapeUserPoolIdType},
-		{name: "Username", required: true, shape: shapeUsernameType},
-	},
-	"AdminSetUserPassword": {
-		{name: "Password", required: true, shape: shapePasswordType},
-		{name: "UserPoolId", required: true, shape: shapeUserPoolIdType},
-		{name: "Username", required: true, shape: shapeUsernameType},
-	},
-	"AdminUpdateUserAttributes": {
-		{name: "UserAttributes", required: true},
-		{name: "UserPoolId", required: true, shape: shapeUserPoolIdType},
-		{name: "Username", required: true, shape: shapeUsernameType},
-	},
-	"AssociateSoftwareToken": {
-		{name: "AccessToken", shape: shapeTokenModelType},
-		{name: "Session", shape: shapeSessionType},
-	},
-	"ChangePassword": {
-		{name: "AccessToken", required: true, shape: shapeTokenModelType},
-		{name: "PreviousPassword", shape: shapePasswordType},
-		{name: "ProposedPassword", required: true, shape: shapePasswordType},
-	},
-	"ConfirmForgotPassword": {
-		{name: "ClientId", required: true, shape: shapeClientIdType},
-		{name: "ConfirmationCode", required: true, shape: shapeConfirmationCodeType},
-		{name: "Password", required: true, shape: shapePasswordType},
-		{name: "SecretHash", shape: shapeSecretHashType},
-		{name: "Username", required: true, shape: shapeUsernameType},
-	},
-	"ConfirmSignUp": {
-		{name: "ClientId", required: true, shape: shapeClientIdType},
-		{name: "ConfirmationCode", required: true, shape: shapeConfirmationCodeType},
-		{name: "SecretHash", shape: shapeSecretHashType},
-		{name: "Session", shape: shapeSessionType},
-		{name: "Username", required: true, shape: shapeUsernameType},
-	},
-	"CreateGroup": {
-		{name: "Description", shape: shapeDescriptionType},
-		{name: "GroupName", required: true, shape: shapeGroupNameType},
-		{name: "Precedence", shape: shapePrecedenceType},
-		{name: "RoleArn", shape: shapeArnType},
-		{name: "UserPoolId", required: true, shape: shapeUserPoolIdType},
-	},
-	"CreateUserPool": {
-		{name: "DeletionProtection", shape: shapeDeletionProtectionType},
-		{name: "EmailVerificationMessage", shape: shapeEmailVerificationMessageType},
-		{name: "EmailVerificationSubject", shape: shapeEmailVerificationSubjectType},
-		{name: "MfaConfiguration", shape: shapeUserPoolMfaType},
-		{name: "PoolName", required: true, shape: shapeUserPoolNameType},
-		{name: "SmsAuthenticationMessage", shape: shapeSmsVerificationMessageType},
-		{name: "SmsVerificationMessage", shape: shapeSmsVerificationMessageType},
-		{name: "UserPoolTier", shape: shapeUserPoolTierType},
-	},
-	"CreateUserPoolClient": {
-		{name: "AccessTokenValidity", shape: shapeAccessTokenValidityType},
-		{name: "AuthSessionValidity", shape: shapeAuthSessionValidityType},
-		{name: "ClientName", required: true, shape: shapeClientNameType},
-		{name: "ClientSecret", shape: shapeClientSecretType},
-		{name: "DefaultRedirectURI", shape: shapeRedirectUrlType},
-		{name: "IdTokenValidity", shape: shapeIdTokenValidityType},
-		{name: "PreventUserExistenceErrors", shape: shapePreventUserExistenceErrorTypes},
-		{name: "RefreshTokenValidity", shape: shapeRefreshTokenValidityType},
-		{name: "UserPoolId", required: true, shape: shapeUserPoolIdType},
-	},
-	"DeleteGroup": {
-		{name: "GroupName", required: true, shape: shapeGroupNameType},
-		{name: "UserPoolId", required: true, shape: shapeUserPoolIdType},
-	},
-	"DeleteUser": {
-		{name: "AccessToken", required: true, shape: shapeTokenModelType},
-	},
-	"DeleteUserPool": {
-		{name: "UserPoolId", required: true, shape: shapeUserPoolIdType},
-	},
-	"DeleteUserPoolClient": {
-		{name: "ClientId", required: true, shape: shapeClientIdType},
-		{name: "UserPoolId", required: true, shape: shapeUserPoolIdType},
-	},
-	"DescribeUserPool": {
-		{name: "UserPoolId", required: true, shape: shapeUserPoolIdType},
-	},
-	"DescribeUserPoolClient": {
-		{name: "ClientId", required: true, shape: shapeClientIdType},
-		{name: "UserPoolId", required: true, shape: shapeUserPoolIdType},
-	},
-	"ForgotPassword": {
-		{name: "ClientId", required: true, shape: shapeClientIdType},
-		{name: "SecretHash", shape: shapeSecretHashType},
-		{name: "Username", required: true, shape: shapeUsernameType},
-	},
-	"GetGroup": {
-		{name: "GroupName", required: true, shape: shapeGroupNameType},
-		{name: "UserPoolId", required: true, shape: shapeUserPoolIdType},
-	},
-	"GetUser": {
-		{name: "AccessToken", required: true, shape: shapeTokenModelType},
-	},
-	"GetUserAttributeVerificationCode": {
-		{name: "AccessToken", required: true, shape: shapeTokenModelType},
-		{name: "AttributeName", required: true, shape: shapeAttributeNameType},
-	},
-	"GetUserPoolMfaConfig": {
-		{name: "UserPoolId", required: true, shape: shapeUserPoolIdType},
-	},
-	"GlobalSignOut": {
-		{name: "AccessToken", required: true, shape: shapeTokenModelType},
-	},
-	"InitiateAuth": {
-		{name: "AuthFlow", required: true, shape: shapeAuthFlowType},
-		{name: "ClientId", required: true, shape: shapeClientIdType},
-		{name: "Session", shape: shapeSessionType},
-	},
-	"ListGroups": {
-		{name: "Limit", shape: shapeQueryLimitType},
-		{name: "NextToken", shape: shapePaginationKey},
-		{name: "UserPoolId", required: true, shape: shapeUserPoolIdType},
-	},
-	"ListTagsForResource": {
-		{name: "ResourceArn", required: true, shape: shapeArnType},
-	},
-	"ListUserPoolClients": {
-		{name: "MaxResults", shape: shapeQueryLimit},
-		{name: "NextToken", shape: shapePaginationKey},
-		{name: "UserPoolId", required: true, shape: shapeUserPoolIdType},
-	},
-	"ListUserPools": {
-		{name: "MaxResults", required: true, shape: shapePoolQueryLimitType},
-		{name: "NextToken", shape: shapePaginationKeyType},
-	},
-	"ListUsers": {
-		{name: "Filter", shape: shapeUserFilterType},
-		{name: "Limit", shape: shapeQueryLimitType},
-		{name: "PaginationToken", shape: shapeSearchPaginationTokenType},
-		{name: "UserPoolId", required: true, shape: shapeUserPoolIdType},
-	},
-	"ListUsersInGroup": {
-		{name: "GroupName", required: true, shape: shapeGroupNameType},
-		{name: "Limit", shape: shapeQueryLimitType},
-		{name: "NextToken", shape: shapePaginationKey},
-		{name: "UserPoolId", required: true, shape: shapeUserPoolIdType},
-	},
-	"ResendConfirmationCode": {
-		{name: "ClientId", required: true, shape: shapeClientIdType},
-		{name: "SecretHash", shape: shapeSecretHashType},
-		{name: "Username", required: true, shape: shapeUsernameType},
-	},
-	"RespondToAuthChallenge": {
-		{name: "ChallengeName", required: true, shape: shapeChallengeNameType},
-		{name: "ClientId", required: true, shape: shapeClientIdType},
-		{name: "Session", shape: shapeSessionType},
-	},
-	"RevokeToken": {
-		{name: "ClientId", required: true, shape: shapeClientIdType},
-		{name: "ClientSecret", shape: shapeClientSecretType},
-		{name: "Token", required: true, shape: shapeTokenModelType},
-	},
-	"SetUserMFAPreference": {
-		{name: "AccessToken", required: true, shape: shapeTokenModelType},
-	},
-	"SetUserPoolMfaConfig": {
-		{name: "MfaConfiguration", shape: shapeUserPoolMfaType},
-		{name: "UserPoolId", required: true, shape: shapeUserPoolIdType},
-	},
-	"SignUp": {
-		{name: "ClientId", required: true, shape: shapeClientIdType},
-		{name: "Password", shape: shapePasswordType},
-		{name: "SecretHash", shape: shapeSecretHashType},
-		{name: "Username", required: true, shape: shapeUsernameType},
-	},
-	"TagResource": {
-		{name: "ResourceArn", required: true, shape: shapeArnType},
-		{name: "Tags", required: true},
-	},
-	"UntagResource": {
-		{name: "ResourceArn", required: true, shape: shapeArnType},
-		{name: "TagKeys", required: true},
-	},
-	"UpdateGroup": {
-		{name: "Description", shape: shapeDescriptionType},
-		{name: "GroupName", required: true, shape: shapeGroupNameType},
-		{name: "Precedence", shape: shapePrecedenceType},
-		{name: "RoleArn", shape: shapeArnType},
-		{name: "UserPoolId", required: true, shape: shapeUserPoolIdType},
-	},
-	"UpdateUserAttributes": {
-		{name: "AccessToken", required: true, shape: shapeTokenModelType},
-		{name: "UserAttributes", required: true},
-	},
-	"UpdateUserPool": {
-		{name: "DeletionProtection", shape: shapeDeletionProtectionType},
-		{name: "EmailVerificationMessage", shape: shapeEmailVerificationMessageType},
-		{name: "EmailVerificationSubject", shape: shapeEmailVerificationSubjectType},
-		{name: "MfaConfiguration", shape: shapeUserPoolMfaType},
-		{name: "PoolName", shape: shapeUserPoolNameType},
-		{name: "SmsAuthenticationMessage", shape: shapeSmsVerificationMessageType},
-		{name: "SmsVerificationMessage", shape: shapeSmsVerificationMessageType},
-		{name: "UserPoolId", required: true, shape: shapeUserPoolIdType},
-		{name: "UserPoolTier", shape: shapeUserPoolTierType},
-	},
-	"UpdateUserPoolClient": {
-		{name: "AccessTokenValidity", shape: shapeAccessTokenValidityType},
-		{name: "AuthSessionValidity", shape: shapeAuthSessionValidityType},
-		{name: "ClientId", required: true, shape: shapeClientIdType},
-		{name: "ClientName", shape: shapeClientNameType},
-		{name: "DefaultRedirectURI", shape: shapeRedirectUrlType},
-		{name: "IdTokenValidity", shape: shapeIdTokenValidityType},
-		{name: "PreventUserExistenceErrors", shape: shapePreventUserExistenceErrorTypes},
-		{name: "RefreshTokenValidity", shape: shapeRefreshTokenValidityType},
-		{name: "UserPoolId", required: true, shape: shapeUserPoolIdType},
-	},
-	"VerifySoftwareToken": {
-		{name: "AccessToken", shape: shapeTokenModelType},
-		{name: "FriendlyDeviceName", shape: shapeStringType},
-		{name: "Session", shape: shapeSessionType},
-		{name: "UserCode", required: true, shape: shapeSoftwareTokenMFAUserCodeType},
-	},
-	"VerifyUserAttribute": {
-		{name: "AccessToken", required: true, shape: shapeTokenModelType},
-		{name: "AttributeName", required: true, shape: shapeAttributeNameType},
-		{name: "Code", required: true, shape: shapeConfirmationCodeType},
-	},
+// inputRules maps each operation to its input structure.
+var inputRules = map[string]*inputShape{
+	"AdminAddUserToGroup":              shapeAdminAddUserToGroupRequest,
+	"AdminConfirmSignUp":               shapeAdminConfirmSignUpRequest,
+	"AdminCreateUser":                  shapeAdminCreateUserRequest,
+	"AdminDeleteUser":                  shapeAdminDeleteUserRequest,
+	"AdminDisableUser":                 shapeAdminDisableUserRequest,
+	"AdminEnableUser":                  shapeAdminEnableUserRequest,
+	"AdminGetUser":                     shapeAdminGetUserRequest,
+	"AdminListGroupsForUser":           shapeAdminListGroupsForUserRequest,
+	"AdminRemoveUserFromGroup":         shapeAdminRemoveUserFromGroupRequest,
+	"AdminSetUserPassword":             shapeAdminSetUserPasswordRequest,
+	"AdminUpdateUserAttributes":        shapeAdminUpdateUserAttributesRequest,
+	"AssociateSoftwareToken":           shapeAssociateSoftwareTokenRequest,
+	"ChangePassword":                   shapeChangePasswordRequest,
+	"ConfirmForgotPassword":            shapeConfirmForgotPasswordRequest,
+	"ConfirmSignUp":                    shapeConfirmSignUpRequest,
+	"CreateGroup":                      shapeCreateGroupRequest,
+	"CreateUserPool":                   shapeCreateUserPoolRequest,
+	"CreateUserPoolClient":             shapeCreateUserPoolClientRequest,
+	"DeleteGroup":                      shapeDeleteGroupRequest,
+	"DeleteUser":                       shapeDeleteUserRequest,
+	"DeleteUserPool":                   shapeDeleteUserPoolRequest,
+	"DeleteUserPoolClient":             shapeDeleteUserPoolClientRequest,
+	"DescribeUserPool":                 shapeDescribeUserPoolRequest,
+	"DescribeUserPoolClient":           shapeDescribeUserPoolClientRequest,
+	"ForgotPassword":                   shapeForgotPasswordRequest,
+	"GetGroup":                         shapeGetGroupRequest,
+	"GetUser":                          shapeGetUserRequest,
+	"GetUserAttributeVerificationCode": shapeGetUserAttributeVerificationCodeRequest,
+	"GetUserPoolMfaConfig":             shapeGetUserPoolMfaConfigRequest,
+	"GlobalSignOut":                    shapeGlobalSignOutRequest,
+	"InitiateAuth":                     shapeInitiateAuthRequest,
+	"ListGroups":                       shapeListGroupsRequest,
+	"ListTagsForResource":              shapeListTagsForResourceRequest,
+	"ListUserPoolClients":              shapeListUserPoolClientsRequest,
+	"ListUserPools":                    shapeListUserPoolsRequest,
+	"ListUsers":                        shapeListUsersRequest,
+	"ListUsersInGroup":                 shapeListUsersInGroupRequest,
+	"ResendConfirmationCode":           shapeResendConfirmationCodeRequest,
+	"RespondToAuthChallenge":           shapeRespondToAuthChallengeRequest,
+	"RevokeToken":                      shapeRevokeTokenRequest,
+	"SetUserMFAPreference":             shapeSetUserMFAPreferenceRequest,
+	"SetUserPoolMfaConfig":             shapeSetUserPoolMfaConfigRequest,
+	"SignUp":                           shapeSignUpRequest,
+	"TagResource":                      shapeTagResourceRequest,
+	"UntagResource":                    shapeUntagResourceRequest,
+	"UpdateGroup":                      shapeUpdateGroupRequest,
+	"UpdateUserAttributes":             shapeUpdateUserAttributesRequest,
+	"UpdateUserPool":                   shapeUpdateUserPoolRequest,
+	"UpdateUserPoolClient":             shapeUpdateUserPoolClientRequest,
+	"VerifySoftwareToken":              shapeVerifySoftwareTokenRequest,
+	"VerifyUserAttribute":              shapeVerifyUserAttributeRequest,
 }

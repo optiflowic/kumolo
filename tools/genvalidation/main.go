@@ -1,8 +1,9 @@
 //go:build ignore
 
-// genvalidation generates the input constraint table for one service from the botocore
-// model bundled with awscli2. The table covers the top-level input members of every
-// operation the router dispatches: required, length, pattern, enum and numeric range.
+// genvalidation generates the input shape graph for one service from the botocore model
+// bundled with awscli2. The graph covers every shape reachable from the input of each
+// operation the router dispatches: member names and types, and the required, length,
+// pattern, enum and numeric range constraints.
 //
 // Usage:
 //
@@ -40,6 +41,9 @@ type shape struct {
 	Type      string            `json:"type"`
 	Required  []string          `json:"required"`
 	Members   map[string]member `json:"members"`
+	Member    *member           `json:"member"`
+	Key       *member           `json:"key"`
+	Value     *member           `json:"value"`
 	Enum      []string          `json:"enum"`
 	Min       *float64          `json:"min"`
 	Max       *float64          `json:"max"`
@@ -83,39 +87,14 @@ func run(modelPath, routerPath, pkg, outPath string) error {
 	}
 
 	used := map[string]bool{}
-	var rules bytes.Buffer
+	var inputs bytes.Buffer
 	for _, op := range ops {
 		o, ok := m.Operations[op]
 		if !ok || o.Input == nil {
 			return fmt.Errorf("%s: no input shape in model", op)
 		}
-		in := m.Shapes[o.Input.Shape]
-		required := map[string]bool{}
-		for _, name := range in.Required {
-			required[name] = true
-		}
-		names := make([]string, 0, len(in.Members))
-		for name := range in.Members {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-
-		fmt.Fprintf(&rules, "%q: {\n", op)
-		for _, name := range names {
-			shapeName := in.Members[name].Shape
-			rule := fmt.Sprintf("name: %q", name)
-			if required[name] {
-				rule += ", required: true"
-			}
-			if constrained(m.Shapes[shapeName]) {
-				used[shapeName] = true
-				rule += ", shape: shape" + shapeName
-			} else if !required[name] {
-				continue
-			}
-			fmt.Fprintf(&rules, "{%s},\n", rule)
-		}
-		rules.WriteString("},\n")
+		markUsed(m.Shapes, o.Input.Shape, used)
+		fmt.Fprintf(&inputs, "%q: shape%s,\n", op, o.Input.Shape)
 	}
 
 	shapeNames := make([]string, 0, len(used))
@@ -140,11 +119,9 @@ func run(modelPath, routerPath, pkg, outPath string) error {
 		fmt.Fprintf(&out, "shape%s = &inputShape{%s}\n", name, lit)
 	}
 	out.WriteString(")\n\n")
-	out.WriteString(
-		"// inputRules lists the constrained top-level input members of each operation.\n",
-	)
-	out.WriteString("var inputRules = map[string][]memberRule{\n")
-	out.Write(rules.Bytes())
+	out.WriteString("// inputRules maps each operation to its input structure.\n")
+	out.WriteString("var inputRules = map[string]*inputShape{\n")
+	out.Write(inputs.Bytes())
 	out.WriteString("}\n")
 
 	src, err := format.Source(out.Bytes())
@@ -171,24 +148,54 @@ func implementedOps(routerPath string) ([]string, error) {
 	return ops, nil
 }
 
-// constrained reports whether the shape is a scalar with at least one constraint.
-func constrained(s shape) bool {
-	switch s.Type {
-	case "string":
-		return len(s.Enum) > 0 || s.Min != nil || s.Max != nil || s.Pattern != ""
-	case "integer", "long":
-		return s.Min != nil || s.Max != nil
+func markUsed(shapes map[string]shape, name string, used map[string]bool) {
+	if used[name] {
+		return
 	}
-	return false
+	used[name] = true
+	s := shapes[name]
+	for _, m := range s.Members {
+		markUsed(shapes, m.Shape, used)
+	}
+	for _, m := range []*member{s.Member, s.Key, s.Value} {
+		if m != nil {
+			markUsed(shapes, m.Shape, used)
+		}
+	}
 }
 
 func shapeLiteral(s shape) (string, error) {
 	var b bytes.Buffer
 	switch s.Type {
+	case "structure":
+		b.WriteString("kind: kindStructure, members: []memberRule{")
+		required := map[string]bool{}
+		for _, name := range s.Required {
+			required[name] = true
+		}
+		names := make([]string, 0, len(s.Members))
+		for name := range s.Members {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			fmt.Fprintf(&b, "{name: %q, ", name)
+			if required[name] {
+				b.WriteString("required: true, ")
+			}
+			fmt.Fprintf(&b, "shape: shape%s},", s.Members[name].Shape)
+		}
+		b.WriteString("}")
+	case "list":
+		fmt.Fprintf(&b, "kind: kindList, member: shape%s", s.Member.Shape)
+	case "map":
+		fmt.Fprintf(&b, "kind: kindMap, key: shape%s, value: shape%s", s.Key.Shape, s.Value.Shape)
 	case "string":
 		b.WriteString("kind: kindString")
-	case "integer", "long":
+	case "integer":
 		b.WriteString("kind: kindInteger")
+	case "boolean":
+		b.WriteString("kind: kindBoolean")
 	default:
 		return "", fmt.Errorf("unsupported shape type %q", s.Type)
 	}
