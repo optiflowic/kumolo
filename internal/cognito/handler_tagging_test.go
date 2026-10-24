@@ -114,6 +114,11 @@ func TestTagResource(t *testing.T) {
 		// One additional new key must fail
 		w := doOp(t, ro, "TagResource", fmt.Sprintf(`{"ResourceArn":%q,"Tags":{"extra":"v"}}`, arn))
 		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(
+			t,
+			w.Body.String(),
+			"The resultant tag set must not have more than 50 user tags.",
+		)
 		assertErrType(t, w, ErrTypeInvalidParameterException)
 
 		// Overwriting an existing key must still succeed
@@ -139,6 +144,11 @@ func TestTagResource(t *testing.T) {
 
 		w := doOp(t, ro, "TagResource", string(body))
 		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(
+			t,
+			w.Body.String(),
+			"The resultant tag set must not have more than 50 user tags.",
+		)
 		assertErrType(t, w, ErrTypeInvalidParameterException)
 	})
 
