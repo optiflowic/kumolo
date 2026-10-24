@@ -144,3 +144,8 @@ kumolo validates that:
   `A`) lives in the Session JWT instead. `TIMESTAMP` is not independently
   format/freshness-validated beyond the Session JWT's own expiry. See
   `docs/aws-spec/cognito/srp_protocol.md` for the full deviation list.
+- `UserNotConfirmedException`, `PasswordResetRequiredException`, `AliasExistsException` and
+  `SoftwareTokenMFANotFoundException` are not returned. Unconfirmed users never reach a
+  challenge (`InitiateAuth` rejects them first), `RESET_REQUIRED` and sign-in aliases are not
+  implemented, and a `SOFTWARE_TOKEN_MFA` response for a user with no registered TOTP secret
+  returns `NotAuthorizedException`.

@@ -58,3 +58,6 @@
   `EnableSoftwareTokenMFAException` is not returned.
 - In the AccessToken flow, an access token whose pool does not exist (no persisted signing keys)
   returns `NotAuthorizedException`, not `ResourceNotFoundException` (same as `get_user.md`).
+- `UserNotConfirmedException` and `PasswordResetRequiredException` are not returned: an
+  unconfirmed user cannot obtain an access token or a challenge Session, and `RESET_REQUIRED`
+  is not implemented.

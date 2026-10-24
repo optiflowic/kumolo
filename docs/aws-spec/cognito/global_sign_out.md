@@ -46,3 +46,5 @@ HTTP 200, empty body `{}`.
   valid access token for this operation.
 - An access token whose pool does not exist (no persisted signing keys) returns
   `NotAuthorizedException`, not `ResourceNotFoundException` (same as `get_user.md`).
+- `UserNotConfirmedException` and `PasswordResetRequiredException` are not returned: an
+  unconfirmed user cannot obtain an access token, and `RESET_REQUIRED` is not implemented.
