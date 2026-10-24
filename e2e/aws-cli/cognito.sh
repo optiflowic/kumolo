@@ -1006,6 +1006,15 @@ if [[ -n "${ACCESS_TOKEN:-}" && -n "${REFRESH_TOKEN:-}" ]]; then
     skip "RevokeToken — could not obtain fresh token pair"
   fi
 
+  REVOKE_UNKNOWN_JSON=$($AWS revoke-token \
+    --client-id "abcdefghijklmnopqrstuvwxyz" \
+    --token "abc.def.ghi" 2>&1) || true
+  if echo "$REVOKE_UNKNOWN_JSON" | grep -q 'UnauthorizedException'; then
+    ok "RevokeToken — unknown client rejected"
+  else
+    fail "RevokeToken — expected UnauthorizedException for unknown client"
+  fi
+
   # GlobalSignOut: obtain another fresh pair.
   GSO_AUTH_JSON=$($AWS initiate-auth \
     --client-id "$CLIENT_ID" \
