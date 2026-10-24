@@ -171,3 +171,4 @@ Presenting an expired token returns `NotAuthorizedException`.
   Tokens without `ExpiresAt` (legacy) are not expired.
 - Session token for challenges is a signed JWT (kumolo-specific encoding).
 - SecretHash, ClientMetadata, AnalyticsMetadata, UserContextData are accepted but ignored.
+- `PasswordResetRequiredException` is not returned — `RESET_REQUIRED` user status is not implemented.

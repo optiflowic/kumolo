@@ -76,3 +76,5 @@ HTTP 200:
   `UserNotConfirmedException`, `CodeMismatchException`, `ExpiredCodeException`
   (documented AWS errors) are not implemented — none apply to kumolo's
   synchronous, Lambda-free, always-delivered model in this operation.
+- An access token whose pool does not exist (no persisted signing keys) returns
+  `NotAuthorizedException`, not `ResourceNotFoundException` (same as `get_user.md`).

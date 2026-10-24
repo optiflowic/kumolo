@@ -104,7 +104,7 @@ Same as InitiateAuth success: `AuthenticationResult` with AccessToken, IdToken, 
 | InvalidParameterException | 400 | input violates a model constraint (see `input_validation.md`), missing `Session`, or a challenge kumolo does not support |
 | ResourceNotFoundException | 400 | ClientId not found |
 | UserNotFoundException | 400 | Username in ChallengeResponses not found |
-| NotAuthorizedException | 400 | Session is invalid or expired, (PASSWORD_VERIFIER) SRP signature verification failed, (SOFTWARE_TOKEN_MFA) MFA was disabled after the challenge was issued, or the user is disabled |
+| NotAuthorizedException | 400 | Session is invalid or expired, (PASSWORD_VERIFIER) SRP signature verification failed, (SOFTWARE_TOKEN_MFA) the user has no registered TOTP secret or MFA was disabled after the challenge was issued, or the user is disabled |
 | InvalidPasswordException | 400 | NEW_PASSWORD doesn't meet requirements |
 | CodeMismatchException | 400 | (SOFTWARE_TOKEN_MFA) SOFTWARE_TOKEN_MFA_CODE doesn't match |
 | InternalErrorException | 500 | Storage or token generation failure |
@@ -144,3 +144,8 @@ kumolo validates that:
   `A`) lives in the Session JWT instead. `TIMESTAMP` is not independently
   format/freshness-validated beyond the Session JWT's own expiry. See
   `docs/aws-spec/cognito/srp_protocol.md` for the full deviation list.
+- `UserNotConfirmedException`, `PasswordResetRequiredException`, `AliasExistsException` and
+  `SoftwareTokenMFANotFoundException` are not returned. Unconfirmed users never reach a
+  challenge (`InitiateAuth` rejects them first), `RESET_REQUIRED` and sign-in aliases are not
+  implemented, and a `SOFTWARE_TOKEN_MFA` response for a user with no registered TOTP secret
+  returns `NotAuthorizedException`.

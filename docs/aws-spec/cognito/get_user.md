@@ -61,5 +61,6 @@
 - `MFAOptions` is always `[]`, matching AWS's own deprecation of the field for SMS-only MFA,
   which kumolo doesn't implement — not a deviation from current AWS behavior.
 - `PasswordResetRequiredException` is never returned — `RESET_REQUIRED` user status is not implemented.
+- `UserNotConfirmedException` is never returned — an unconfirmed user cannot obtain an access token.
 - Unknown pool IDs (no persisted RSA keys) return `NotAuthorizedException` rather than `ResourceNotFoundException`.
 - `exp` is checked with `<=` (expired at the exact expiry second), matching standard JWT semantics.

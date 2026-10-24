@@ -49,3 +49,8 @@ HTTP 200 with empty body on success.
   contact attribute set, kumolo also sets `<attribute>_verified = "true"`.
   Matches AWS: pools that auto-verify email/phone consider the contact info
   confirmed once the user proves ownership via ConfirmSignUp.
+
+## kumolo Deviations
+
+- `AliasExistsException` is not returned — sign-in aliases are not implemented, so confirming a
+  user never conflicts with another user's email or phone number.
