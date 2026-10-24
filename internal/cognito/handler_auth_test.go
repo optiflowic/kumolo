@@ -2512,6 +2512,45 @@ func TestRevokeToken_UnknownClient(t *testing.T) {
 	assertErrType(t, w, ErrTypeUnauthorizedException)
 }
 
+func TestClientIDOperations_UpperCasedClientIDNotFound(t *testing.T) {
+	tests := []struct {
+		operation string
+		body      map[string]string
+		errType   string
+	}{
+		{"SignUp", map[string]string{"Username": "bob", "Password": "Password123!"},
+			ErrTypeResourceNotFoundException},
+		{"ConfirmSignUp", map[string]string{"Username": "alice", "ConfirmationCode": "123456"},
+			ErrTypeResourceNotFoundException},
+		{"InitiateAuth", map[string]string{"AuthFlow": "USER_PASSWORD_AUTH"},
+			ErrTypeResourceNotFoundException},
+		{"RespondToAuthChallenge", map[string]string{"ChallengeName": "SMS_MFA",
+			"Session": "abcdefghijklmnopqrstuvwxyz"}, ErrTypeResourceNotFoundException},
+		{"ResendConfirmationCode", map[string]string{"Username": "alice"},
+			ErrTypeResourceNotFoundException},
+		{"ForgotPassword", map[string]string{"Username": "alice"},
+			ErrTypeResourceNotFoundException},
+		{"ConfirmForgotPassword", map[string]string{"Username": "alice",
+			"ConfirmationCode": "123456", "Password": "Password123!"},
+			ErrTypeResourceNotFoundException},
+		{"RevokeToken", map[string]string{"Token": "abc.def.ghi"}, ErrTypeUnauthorizedException},
+	}
+	for _, tt := range tests {
+		t.Run(tt.operation, func(t *testing.T) {
+			ro := newTestRouter(t)
+			_, clientID := setupPool(t, ro)
+			signUpUser(t, ro, clientID, "alice", "Password123!")
+
+			tt.body["ClientId"] = strings.ToUpper(clientID)
+			body, err := json.Marshal(tt.body)
+			require.NoError(t, err)
+			w := doOp(t, ro, tt.operation, string(body))
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assertErrType(t, w, tt.errType)
+		})
+	}
+}
+
 func TestRevokeToken_InvalidJSON(t *testing.T) {
 	ro := newTestRouter(t)
 	w := doOp(t, ro, "RevokeToken", `{bad}`)

@@ -124,9 +124,9 @@ func TestDeleteRefreshToken_RemoveError(t *testing.T) {
 func TestWriteClientIndexLocked_Success(t *testing.T) {
 	s := newTestStorage(t)
 
-	require.NoError(t, s.writeClientIndexLocked("pool-id-1", "client-id-1"))
+	require.NoError(t, s.writeClientIndexLocked("pool-id-1", "clientidclientidclientid01"))
 
-	poolID, err := s.GetPoolIDForClient("client-id-1")
+	poolID, err := s.GetPoolIDForClient("clientidclientidclientid01")
 	require.NoError(t, err)
 	assert.Equal(t, "pool-id-1", poolID)
 }
@@ -137,17 +137,17 @@ func TestWriteClientIndexLocked_WriteError(t *testing.T) {
 	s.openFile = func(string, int, os.FileMode) (io.WriteCloser, error) {
 		return nil, errors.New("disk full")
 	}
-	err := s.writeClientIndexLocked("pool-id-2", "client-id-2")
+	err := s.writeClientIndexLocked("pool-id-2", "clientidclientidclientid02")
 	require.Error(t, err)
 }
 
 func TestDeleteClientIndexLocked_Success(t *testing.T) {
 	s := newTestStorage(t)
-	require.NoError(t, s.writeClientIndexLocked("pool-id-3", "client-id-3"))
+	require.NoError(t, s.writeClientIndexLocked("pool-id-3", "clientidclientidclientid03"))
 
-	require.NoError(t, s.deleteClientIndexLocked("client-id-3"))
+	require.NoError(t, s.deleteClientIndexLocked("clientidclientidclientid03"))
 
-	_, err := s.GetPoolIDForClient("client-id-3")
+	_, err := s.GetPoolIDForClient("clientidclientidclientid03")
 	require.ErrorIs(t, err, errUserPoolClientNotFound)
 }
 
@@ -159,12 +159,12 @@ func TestDeleteClientIndexLocked_NotFoundIsNoop(t *testing.T) {
 
 func TestDeleteClientIndexLocked_RemoveError(t *testing.T) {
 	s := newTestStorage(t)
-	require.NoError(t, s.writeClientIndexLocked("pool-id-4", "client-id-4"))
+	require.NoError(t, s.writeClientIndexLocked("pool-id-4", "clientidclientidclientid04"))
 
 	s.removeFile = func(string) error {
 		return errors.New("permission denied")
 	}
-	err := s.deleteClientIndexLocked("client-id-4")
+	err := s.deleteClientIndexLocked("clientidclientidclientid04")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "remove client index")
 }
@@ -172,20 +172,34 @@ func TestDeleteClientIndexLocked_RemoveError(t *testing.T) {
 // ── GetPoolIDForClient ────────────────────────────────────────────────────────
 
 func TestGetPoolIDForClient_NotFound(t *testing.T) {
-	s := newTestStorage(t)
+	const stored = "clientidclientidclientid06"
+	tests := []struct {
+		name     string
+		clientID string
+	}{
+		{"issued form, no client", "clientidclientidclientid07"},
+		{"not issued form", "no-such-client"},
+		{"stored ID upper-cased", strings.ToUpper(stored)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := newTestStorage(t)
+			require.NoError(t, s.writeClientIndexLocked("pool-id-6", stored))
 
-	_, err := s.GetPoolIDForClient("no-such-client")
-	require.ErrorIs(t, err, errUserPoolClientNotFound)
+			_, err := s.GetPoolIDForClient(tt.clientID)
+			require.ErrorIs(t, err, errUserPoolClientNotFound)
+		})
+	}
 }
 
 func TestGetPoolIDForClient_ReadError(t *testing.T) {
 	s := newTestStorage(t)
-	require.NoError(t, s.writeClientIndexLocked("pool-id-5", "client-id-5"))
+	require.NoError(t, s.writeClientIndexLocked("pool-id-5", "clientidclientidclientid05"))
 
 	s.readAll = func(io.Reader) ([]byte, error) {
 		return nil, errors.New("read error")
 	}
-	_, err := s.GetPoolIDForClient("client-id-5")
+	_, err := s.GetPoolIDForClient("clientidclientidclientid05")
 	require.Error(t, err)
 	assert.False(t, errors.Is(err, errUserPoolClientNotFound))
 }
