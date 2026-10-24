@@ -1122,6 +1122,18 @@ if [[ -n "${POOL_ARN:-}" ]]; then
     fail "list-tags-for-resource — expected owner=kumolo tag"
   fi
 
+  # TagResource — more than 50 tags → InvalidParameterException
+  TOO_MANY_TAGS=$(printf 'k%d=v,' $(seq 0 50))
+  if TAG_LIMIT_ERR=$($AWS tag-resource \
+    --resource-arn "$POOL_ARN" \
+    --tags "${TOO_MANY_TAGS%,}" 2>&1); then
+    fail "tag-resource (51 tags) — expected InvalidParameterException, got success"
+  elif echo "$TAG_LIMIT_ERR" | grep -q 'InvalidParameterException'; then
+    ok "tag-resource (51 tags → InvalidParameterException)"
+  else
+    fail "tag-resource (51 tags) — expected InvalidParameterException, got: $(echo "$TAG_LIMIT_ERR" | head -1)"
+  fi
+
   # UntagResource — remove the env key
   if UNTAG_JSON=$($AWS untag-resource \
     --resource-arn "$POOL_ARN" \

@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"math/big"
 	"net/http"
@@ -1812,6 +1813,50 @@ func TestCognitoIntegration_Tagging(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.Empty(t, out.Tags)
+	})
+
+	t.Run("TagResource_TooManyTags", func(t *testing.T) {
+		limitPool, err := c.CreateUserPool(ctx, &awscognito.CreateUserPoolInput{
+			PoolName: aws.String("tag-limit-pool"),
+		})
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_, _ = c.DeleteUserPool(ctx, &awscognito.DeleteUserPoolInput{
+				UserPoolId: limitPool.UserPool.Id,
+			})
+		})
+		limitARN := aws.String(aws.ToString(limitPool.UserPool.Arn))
+
+		tags := make(map[string]string, 51)
+		for i := range 51 {
+			tags[fmt.Sprintf("k%d", i)] = "v"
+		}
+		_, err = c.TagResource(ctx, &awscognito.TagResourceInput{
+			ResourceArn: limitARN,
+			Tags:        tags,
+		})
+		require.Error(t, err)
+		assert.Equal(t, "InvalidParameterException", apiErrorCode(err))
+
+		delete(tags, "k50")
+		_, err = c.TagResource(ctx, &awscognito.TagResourceInput{
+			ResourceArn: limitARN,
+			Tags:        tags,
+		})
+		require.NoError(t, err)
+
+		_, err = c.TagResource(ctx, &awscognito.TagResourceInput{
+			ResourceArn: limitARN,
+			Tags:        map[string]string{"k0": "updated"},
+		})
+		require.NoError(t, err)
+
+		_, err = c.TagResource(ctx, &awscognito.TagResourceInput{
+			ResourceArn: limitARN,
+			Tags:        map[string]string{"extra": "v"},
+		})
+		require.Error(t, err)
+		assert.Equal(t, "InvalidParameterException", apiErrorCode(err))
 	})
 
 	t.Run("TagResource_NotFound", func(t *testing.T) {
