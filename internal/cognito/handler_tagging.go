@@ -60,8 +60,8 @@ func writeStorageErr(w http.ResponseWriter, err error, internalMsg string) {
 			"User pool not found.",
 		)
 	case errors.Is(err, errTagLimitExceeded):
-		writeError(w, http.StatusBadRequest, ErrTypeLimitExceededException,
-			"Too many tags. User pool may not have more than 50 user-created tags.")
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			"The resultant tag set must not have more than 50 user tags.")
 	default:
 		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException, internalMsg)
 	}
