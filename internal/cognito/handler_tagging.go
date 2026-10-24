@@ -3,11 +3,14 @@ package cognito
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 )
 
 const maxUserPoolTags = 50
+
+const tagLimitExceededMessage = "The resultant tag set must not have more than %d user tags."
 
 var errTagLimitExceeded = errors.New("tag limit exceeded")
 
@@ -60,8 +63,8 @@ func writeStorageErr(w http.ResponseWriter, err error, internalMsg string) {
 			"User pool not found.",
 		)
 	case errors.Is(err, errTagLimitExceeded):
-		writeError(w, http.StatusBadRequest, ErrTypeLimitExceededException,
-			"Too many tags. User pool may not have more than 50 user-created tags.")
+		writeError(w, http.StatusBadRequest, ErrTypeInvalidParameterException,
+			fmt.Sprintf(tagLimitExceededMessage, maxUserPoolTags))
 	default:
 		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException, internalMsg)
 	}

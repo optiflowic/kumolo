@@ -114,6 +114,12 @@ func TestTagResource(t *testing.T) {
 		// One additional new key must fail
 		w := doOp(t, ro, "TagResource", fmt.Sprintf(`{"ResourceArn":%q,"Tags":{"extra":"v"}}`, arn))
 		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(
+			t,
+			w.Body.String(),
+			"The resultant tag set must not have more than 50 user tags.",
+		)
+		assertErrType(t, w, ErrTypeInvalidParameterException)
 
 		// Overwriting an existing key must still succeed
 		w = doOp(
@@ -123,6 +129,27 @@ func TestTagResource(t *testing.T) {
 			fmt.Sprintf(`{"ResourceArn":%q,"Tags":{"key0":"updated"}}`, arn),
 		)
 		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("more than 50 tags in one request", func(t *testing.T) {
+		ro := newTestRouter(t)
+		arn := poolARNFromID(createPool(t, ro, "tag-pool"))
+
+		tags := make(map[string]string, maxUserPoolTags+1)
+		for i := range maxUserPoolTags + 1 {
+			tags[fmt.Sprintf("key%d", i)] = "v"
+		}
+		body, err := json.Marshal(map[string]any{"ResourceArn": arn, "Tags": tags})
+		require.NoError(t, err)
+
+		w := doOp(t, ro, "TagResource", string(body))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(
+			t,
+			w.Body.String(),
+			"The resultant tag set must not have more than 50 user tags.",
+		)
+		assertErrType(t, w, ErrTypeInvalidParameterException)
 	})
 
 	// Common validation errors that require no pool setup.

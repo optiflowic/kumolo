@@ -18,8 +18,12 @@ All three operations act on a user pool identified by its ARN. Tags are key-valu
 - Target: `AWSCognitoIdentityProviderService.TagResource`
 - Request: `ResourceArn` (required, ARN pattern), `Tags` (required, map[string]string)
 - Response: HTTP 200, empty body `{}`
-- Errors: `ResourceNotFoundException` (404→400), `InvalidParameterException` (400), `LimitExceededException` (400, more than 50 tags), `InternalErrorException` (500)
+- Errors: `ResourceNotFoundException` (404→400), `InvalidParameterException` (400; also when the merged tag set would exceed 50 tags), `InternalErrorException` (500)
 - Behaviour: merges tags — existing keys are overwritten, unmentioned keys are preserved.
+- Tag limit: checked against the merged result, so 51 new keys in one request and one new key
+  on a pool with 50 tags both fail with `InvalidParameterException`
+  ("The resultant tag set must not have more than 50 user tags."). Overwriting an existing key on
+  a full pool succeeds. Verified on real AWS 2026-10-25.
 
 ## UntagResource
 
@@ -51,5 +55,3 @@ ResourceArn must resolve to an existing user pool. kumolo derives pool ID from t
 - `NotAuthorizedException` (IAM authorization) is not returned by any of the three operations:
   kumolo does not verify SigV4. `TooManyRequestsException` and `OperationNotEnabledException`
   are not returned either.
-- The model's TagResource error list has no `LimitExceededException`; kumolo returns it when a
-  request would leave more than 50 tags on the pool.
