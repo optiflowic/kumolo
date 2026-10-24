@@ -88,3 +88,5 @@ HTTP 200 with an empty body: `{}`.
   `LimitExceededException`, `OperationNotEnabledException`, `PasswordResetRequiredException`,
   `TooManyRequestsException`, `UnexpectedLambdaException`, `UserLambdaValidationException`,
   `UserNotConfirmedException` (documented AWS errors) are not implemented.
+- An access token whose pool does not exist (no persisted signing keys) returns
+  `NotAuthorizedException`, not `ResourceNotFoundException` (same as `get_user.md`).

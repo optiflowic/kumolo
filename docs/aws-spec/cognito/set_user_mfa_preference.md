@@ -58,3 +58,5 @@ Empty body, matching AWS.
   regression this deviation guards against.
 - `ForbiddenException`, `OperationNotEnabledException`, `PasswordResetRequiredException`,
   `UserNotConfirmedException` are not returned.
+- An access token whose pool does not exist (no persisted signing keys) returns
+  `NotAuthorizedException`, not `ResourceNotFoundException` (same as `get_user.md`).

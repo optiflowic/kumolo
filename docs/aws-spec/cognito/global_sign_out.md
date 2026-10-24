@@ -44,3 +44,5 @@ HTTP 200, empty body `{}`.
 - Does not clear a managed login / hosted-UI session cookie (not applicable).
 - Scope claim (`aws.cognito.signin.user.admin`) is NOT validated; kumolo accepts any
   valid access token for this operation.
+- An access token whose pool does not exist (no persisted signing keys) returns
+  `NotAuthorizedException`, not `ResourceNotFoundException` (same as `get_user.md`).

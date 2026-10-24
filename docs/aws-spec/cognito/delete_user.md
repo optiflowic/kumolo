@@ -43,3 +43,5 @@ HTTP 200 with an empty body: `{}`.
   `TooManyRequestsException`, `UserNotConfirmedException` (documented AWS errors) are
   not implemented — kumolo has no WAF, IAM, or password-reset-requirement modeling,
   and unconfirmed users can still call `DeleteUser` in kumolo.
+- An access token whose pool does not exist (no persisted signing keys) returns
+  `NotAuthorizedException`, not `ResourceNotFoundException` (same as `get_user.md`).

@@ -56,3 +56,5 @@
   `Status: "ERROR"` — consistent with how every other code-verification endpoint in kumolo
   (`ConfirmSignUp`, `VerifyUserAttribute`, `ConfirmForgotPassword`) reports mismatches.
   `EnableSoftwareTokenMFAException` is not returned.
+- In the AccessToken flow, an access token whose pool does not exist (no persisted signing keys)
+  returns `NotAuthorizedException`, not `ResourceNotFoundException` (same as `get_user.md`).

@@ -50,3 +50,5 @@ HTTP 200 with an empty body: `{}`.
   implemented.
 - Real AWS requires the access token's scope to include `aws.cognito.signin.user.admin`; kumolo
   doesn't model OAuth scopes on access tokens, so this is not checked.
+- An access token whose pool does not exist (no persisted signing keys) returns
+  `NotAuthorizedException`, not `ResourceNotFoundException` (same as `get_user.md`).
