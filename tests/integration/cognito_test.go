@@ -1825,7 +1825,7 @@ func TestCognitoIntegration_Tagging(t *testing.T) {
 				UserPoolId: limitPool.UserPool.Id,
 			})
 		})
-		limitARN := aws.String(aws.ToString(limitPool.UserPool.Arn))
+		limitARN := limitPool.UserPool.Arn
 
 		tags := make(map[string]string, 51)
 		for i := range 51 {
