@@ -2,7 +2,7 @@
 
 **URL**: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_RevokeToken.html  
 **SDK struct**: `cognitoidentityprovider.RevokeTokenInput`  
-**Last verified**: 2026-06-30
+**Last verified**: 2026-10-17
 
 ## Contract
 
@@ -30,7 +30,7 @@ return 200 without error.
 | Error type               | HTTP | Condition                              |
 |--------------------------|------|----------------------------------------|
 | InvalidParameterException | 400 | input violates a model constraint (see `input_validation.md`) |
-| ResourceNotFoundException | 400 | ClientId not found (unknown pool)      |
+| UnauthorizedException     | 400 | ClientId not found; message `Invalid client or secret` (checked before the token, so any token shape gets this) |
 | UnauthorizedException     | 400 | Token belongs to a different ClientId  |
 | InternalErrorException    | 500 | Storage failure                        |
 
@@ -41,3 +41,6 @@ return 200 without error.
   refresh token family (initial auth + subsequent `REFRESH_TOKEN_AUTH` calls) share the
   same `origin_jti`, which is stored in the refresh token record. `RevokeToken` marks
   that `origin_jti` as revoked so that any token in the family is rejected.
+- `ResourceNotFoundException` is in the model's error list but is never returned: real AWS
+  answers an unknown ClientId with `UnauthorizedException` (verified on 2026-10-17 in
+  ap-northeast-1 with JWT-shaped and non-JWT tokens).
