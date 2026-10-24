@@ -249,8 +249,14 @@ func (s *Storage) deleteClientIndexLocked(clientID string) error {
 	return nil
 }
 
-// GetPoolIDForClient looks up which pool a client belongs to.
+// GetPoolIDForClient looks up which pool a client belongs to. An ID not in the form kumolo
+// issues is not found without a lookup, so a differently cased ID cannot match an index file
+// on a case-insensitive filesystem.
 func (s *Storage) GetPoolIDForClient(clientID string) (string, error) {
+	if !reClientID.MatchString(clientID) {
+		return "", errUserPoolClientNotFound
+	}
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 

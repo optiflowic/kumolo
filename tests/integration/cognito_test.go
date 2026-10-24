@@ -619,6 +619,16 @@ func TestCognitoIntegration_AuthFlows(t *testing.T) {
 		assert.Equal(t, "UsernameExistsException", apiErrorCode(err))
 	})
 
+	t.Run("SignUp_UpperCasedClientId", func(t *testing.T) {
+		_, err := c.SignUp(ctx, &awscognito.SignUpInput{
+			ClientId: aws.String(strings.ToUpper(clientID)),
+			Username: aws.String("uppercased-client-user"),
+			Password: aws.String(password),
+		})
+		require.Error(t, err)
+		assert.Equal(t, "ResourceNotFoundException", apiErrorCode(err))
+	})
+
 	t.Run("ConfirmSignUp", func(t *testing.T) {
 		code := cap.get(username)
 		require.NotEmpty(t, code, "confirmation code should be captured from slog output")
