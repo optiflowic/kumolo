@@ -1653,6 +1653,15 @@ func TestCognitoIntegration_TokenRevocation(t *testing.T) {
 		require.NoError(t, err)
 	})
 
+	t.Run("RevokeToken_UnknownClient", func(t *testing.T) {
+		_, err := c.RevokeToken(ctx, &awscognito.RevokeTokenInput{
+			ClientId: aws.String("abcdefghijklmnopqrstuvwxyz"),
+			Token:    aws.String("abc.def.ghi"),
+		})
+		require.Error(t, err)
+		assert.Equal(t, "UnauthorizedException", apiErrorCode(err))
+	})
+
 	t.Run("GlobalSignOut_AccessTokenRevoked", func(t *testing.T) {
 		accessToken, _ := authenticate(t)
 

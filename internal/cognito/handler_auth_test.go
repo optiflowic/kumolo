@@ -2508,7 +2508,8 @@ func TestRevokeToken_UnknownClient(t *testing.T) {
 	body, _ := json.Marshal(map[string]string{"ClientId": "nosuchclient", "Token": "tok"})
 	w := doOp(t, ro, "RevokeToken", string(body))
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assertErrType(t, w, ErrTypeResourceNotFoundException)
+	assert.Contains(t, w.Body.String(), "Invalid client or secret")
+	assertErrType(t, w, ErrTypeUnauthorizedException)
 }
 
 func TestRevokeToken_InvalidJSON(t *testing.T) {

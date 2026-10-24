@@ -969,6 +969,15 @@ fi
 echo ""
 echo "--- Token revocation ---"
 
+REVOKE_UNKNOWN_JSON=$($AWS revoke-token \
+  --client-id "abcdefghijklmnopqrstuvwxyz" \
+  --token "abc.def.ghi" 2>&1) || true
+if echo "$REVOKE_UNKNOWN_JSON" | grep -q 'UnauthorizedException'; then
+  ok "RevokeToken — unknown client rejected"
+else
+  fail "RevokeToken — expected UnauthorizedException for unknown client"
+fi
+
 if [[ -n "${ACCESS_TOKEN:-}" && -n "${REFRESH_TOKEN:-}" ]]; then
   # Obtain a fresh token pair so revocation tests do not interfere with earlier steps.
   REVOKE_AUTH_JSON=$($AWS initiate-auth \
