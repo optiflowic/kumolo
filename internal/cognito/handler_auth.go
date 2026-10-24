@@ -989,8 +989,8 @@ func (ro *Router) handleRevokeToken(w http.ResponseWriter, body []byte) {
 	poolID, err := ro.storage.GetPoolIDForClient(req.ClientID)
 	if err != nil {
 		if errors.Is(err, errUserPoolClientNotFound) {
-			writeError(w, http.StatusBadRequest, ErrTypeResourceNotFoundException,
-				"User pool client not found.")
+			writeError(w, http.StatusBadRequest, ErrTypeUnauthorizedException,
+				"Invalid client or secret")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, ErrTypeInternalErrorException,
