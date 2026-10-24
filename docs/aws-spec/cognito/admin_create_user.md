@@ -3,7 +3,7 @@
 - **URL**: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_AdminCreateUser.html
 - **Target**: `AWSCognitoIdentityProviderService.AdminCreateUser`
 - **SDK**: `cognitoidentityprovider.AdminCreateUserInput` / `AdminCreateUserOutput`
-- **Last verified**: 2026-07-11
+- **Last verified**: 2026-10-25
 
 ## Request
 
@@ -54,6 +54,7 @@ HTTP 200 + `{"User": UserType}`
 |-----------------------------|------|---------|
 | ResourceNotFoundException   | 400  | pool not found |
 | UsernameExistsException     | 400  | username already taken |
+| UserNotFoundException       | 400  | `MessageAction=RESEND` for a user that does not exist |
 | InvalidPasswordException    | 400  | password fails pool's password policy |
 | InvalidParameterException   | 400  | input violates a model constraint (see `input_validation.md`) |
 | InternalErrorException      | 500  | storage failure |
@@ -63,6 +64,8 @@ HTTP 200 + `{"User": UserType}`
 - CodeDeliveryFailureException — no message delivery
 - InvalidLambdaResponseException / UnexpectedLambdaException / UserLambdaValidationException — no Lambda
 - InvalidSmsRole* — no SMS
+- UnsupportedUserStateException — `MessageAction=RESEND` does not check the user's status
+- PreconditionNotMetException — no alias or attribute precondition checks
 
 ## kumolo deviations
 
